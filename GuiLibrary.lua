@@ -47,7 +47,7 @@ local guilibrary = {
     NotificationsMode = "Built-in",
     TouchEnabled = false,
     SliderRightClick = false,
-    uiCornersRadius = 0,
+    uiCornersRadius = 8,
     SliderCanOverride = false,
     hoverText = {
         Enabled = true,
@@ -67,22 +67,47 @@ local guilibrary = {
 
 -- // todo here: make better names for colors instead of color1, 2.../primary color, secondary..
 local guipallet = {
-    ThemeMode = "Default",
-    Color1 = Color3.fromRGB(14, 14, 23),
-    Color2 = Color3.fromRGB(47, 48, 64),
-    Color3 = Color3.fromRGB(66, 68, 66),
-    Color4 = Color3.fromRGB(49, 51, 64),
-    Color5 = Color3.fromRGB(20, 20, 20),
-    Color6 = Color3.fromRGB(200, 200, 200),
-    ToggleColor = Color3.fromRGB(0, 0, 0),
-    ToggleColor2 = Color3.fromRGB(52, 235, 58),
-    TextColor = Color3.fromRGB(255, 255, 255),
-    PlaceholderColor = Color3.fromRGB(220, 220, 220),
-    PlaceholderColor2 = Color3.fromRGB(200, 200, 200),
-    InfoColor = Color3.fromRGB(180, 180, 180),
-    WarningColor = Color3.new(198, 205, 64), -- 250, 230, 50
-    ErrorColor = Color3.fromRGB(205, 64, 78),
-    Font = Enum.Font.Arial
+    ThemeMode = "ModernSoft",
+    
+    -- Основной фон: Мягкий темно-серый (Material Design / VS Code style)
+    Color1 = Color3.fromRGB(30, 32, 36), 
+    
+    -- Вторичный фон (хедеры, панели): Чуть светлее
+    Color2 = Color3.fromRGB(40, 42, 48), 
+    
+    -- Элементы при наведении / активные зоны
+    Color3 = Color3.fromRGB(50, 52, 60), 
+    
+    -- Рамки и разделители
+    Color4 = Color3.fromRGB(35, 37, 43), 
+    
+    -- Глубокий фон (тени, подложки)
+    Color5 = Color3.fromRGB(22, 24, 28), 
+    
+    -- Прогресс бары / Доп. акценты
+    Color6 = Color3.fromRGB(200, 200, 210),
+    
+    -- Цвет выключенного тумблера (нейтральный серый)
+    ToggleColor = Color3.fromRGB(65, 68, 75),
+    
+    -- Цвет ВКЛЮЧЕННОГО тумблера (Акцент: Мягкий "Blurple" - дружелюбный сине-фиолетовый)
+    ToggleColor2 = Color3.fromRGB(114, 137, 218), 
+    -- Альтернатива (Мятный): Color3.fromRGB(90, 200, 160)
+    
+    -- Текст: Не чисто белый, а "молочный" для снижения нагрузки на глаза
+    TextColor = Color3.fromRGB(235, 235, 240),
+    
+    -- Плейсхолдеры
+    PlaceholderColor = Color3.fromRGB(140, 145, 155),
+    PlaceholderColor2 = Color3.fromRGB(110, 115, 125),
+    
+    -- Информационные цвета (пастельные тона)
+    InfoColor = Color3.fromRGB(100, 180, 255),    -- Soft Blue
+    WarningColor = Color3.fromRGB(240, 200, 80),  -- Soft Yellow
+    ErrorColor = Color3.fromRGB(240, 100, 100),   -- Soft Red
+    
+    -- ИЗМЕНЕНО: Шрифт на современный без засечек
+    Font = Enum.Font.GothamMedium 
 }
 guilibrary.GuiPallet = guipallet
 

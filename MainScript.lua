@@ -44,6 +44,7 @@ local SliderScaleValue = 1
 local Functions = {}
 local LocalPlayerEvents = {}
 local Mana = {Connections = {}, Friends = {}}
+local ThemeAccent = Color3.fromRGB(114, 137, 218) 
 
 local httprequest = (request and http and http.request or http_request or fluxus and fluxus.request)
 local queueteleport = syn and syn.queue_on_teleport or queue_on_teleport or fluxus and fluxus.queue_on_teleport
@@ -164,69 +165,50 @@ Mana.Loaded = false
 
 GuiLibrary:CreateWindow()
 
+-- Определяем единый акцентный цвет для всего хаба (тот же, что и у активных тогглов)
+local ThemeAccent = Color3.fromRGB(114, 137, 218) 
+
 local Tabs = {
     Combat = GuiLibrary:CreateTab({
         Name = "Combat",
-        Color = Color3.fromRGB(83, 214, 110), --252, 60, 68
+        Color = ThemeAccent, -- Используем единую переменную
         TabIcon = "CombatTabIcon.png"
     }),
     Movement = GuiLibrary:CreateTab({
         Name = "Movement",
-        Color = Color3.fromRGB(83, 214, 110), --255, 148, 36
+        Color = ThemeAccent,
         TabIcon = "MovementTabIcon.png"
     }),
     Render = GuiLibrary:CreateTab({
         Name = "Render",
-        Color = Color3.fromRGB(83, 214, 110), --59, 170, 222
+        Color = ThemeAccent,
         TabIcon = "RenderTabIcon.png"
     }),
     Utility = GuiLibrary:CreateTab({
         Name = "Utility",
-        Color = Color3.fromRGB(83, 214, 110),
-        TabIcon = "MiscTabIcon.png" --"UtilityTabIcon",
+        Color = ThemeAccent,
+        TabIcon = "MiscTabIcon.png"
     }),
     World = GuiLibrary:CreateTab({
         Name = "World",
-        Color = Color3.fromRGB(83, 214, 110), --52, 28, 228
+        Color = ThemeAccent,
         TabIcon = "WorldTabIcon.png"
     }),
     Settings = GuiLibrary:CreateOptionsTab({
         Name = "Settings",
-        Color = Color3.fromRGB(83, 214, 110), --240, 157, 62
+        Color = ThemeAccent,
         TabIcon = "MiscTabIcon.png"
     }),
     Profiles = GuiLibrary:CreateOptionsTab({
         Name = "Profiles",
-        Color = Color3.fromRGB(83, 214, 110), --255, 255, 255
+        Color = ThemeAccent,
         TabIcon = "MiscTabIcon.png"
     }),
     Friends = GuiLibrary:CreateOptionsTab({
         Name = "Friends",
-        Color = Color3.fromRGB(83, 214, 110), --240, 157, 62
+        Color = ThemeAccent,
         TabIcon = "PlayerImage.png"
     }),
-    --[[
-    FE = GuiLibrary:CreateTab({
-        Name = "FE + Trolling",
-        Color = Color3.fromRGB(255, 0, 34),
-        Visible = true,
-        TabIcon = "Utility.png",
-        Callback = function() end
-    }),
-    Plugins = GuiLibrary:CreateTab({
-        Name = "Plugins",
-        Color = Color3.fromRGB(49, 204, 90),
-        Visible = true,
-        TabIcon = "MiscTabIcon.png",
-        Callback = function() end
-    }),
-    ]]
-    --[[
-    SessionInfo = GuiLibrary:CreateCustomTab({
-        Name = "Session info",
-        Color = Color3.fromRGB(240, 157, 62)
-    })
-    ]]
 }
 Mana.Tabs = Tabs
 
@@ -587,29 +569,36 @@ runFunction(function()
 end)
 ]]
 
--- // cool gui button
+-- // Modern GUI Button
 local Button = Instance.new("TextButton")
 local Corner = Instance.new("UICorner")
+local Shadow = Instance.new("UIStroke") -- Добавим обводку для красоты
+
 Button.Name = "GuiButton"
-Button.Position = UDim2.new(0.12, 0, 0, -41)
-Button.Text = "Mana"
-Button.BackgroundColor3 = Color3.fromRGB(26, 25, 26)
-Button.TextColor3 = Color3.new(1, 1, 1)
-Button.Size = UDim2.new(0, 32, 0, 32)
+Button.Position = UDim2.new(0.12, 0, 0, -45) -- Чуть выше
+Button.Text = "M" -- Минималистично, или иконку
+Button.Font = Enum.Font.GothamBold
+Button.TextSize = 18
+-- Цвет кнопки: Акцентный или темный
+Button.BackgroundColor3 = Color3.fromRGB(35, 37, 43) 
+Button.TextColor3 = Color3.fromRGB(114, 137, 218) -- Акцентный текст
+Button.Size = UDim2.new(0, 40, 0, 40) -- Чуть больше
 Button.BorderSizePixel = 0
-Button.BackgroundTransparency = 0.5
+Button.BackgroundTransparency = 0
+Button.AutoButtonColor = true
 Button.Parent = GuiLibrary.ScreenGui
+
 Corner.Parent = Button
-Corner.CornerRadius = UDim.new(0, 8)
+Corner.CornerRadius = UDim.new(0, 12) -- Сильное скругление
+
+-- Тонкая обводка
+Shadow.Parent = Button
+Shadow.Color = Color3.fromRGB(50, 52, 60)
+Shadow.Thickness = 2
+Shadow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
 Button.MouseButton1Click:Connect(function()
     GuiLibrary:Toggle()
-end)
-
-UserInputService.InputBegan:Connect(function(Input)
-    if Input.KeyCode == Enum.KeyCode.RightShift then
-        GuiLibrary:Toggle()
-    end
 end)
 
 print("[rbxmain/MainScript.lua]: Loaded in " .. tostring(tick() - startTick) .. ".")
