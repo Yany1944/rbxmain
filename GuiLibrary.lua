@@ -47,7 +47,7 @@ local guilibrary = {
     NotificationsMode = "Built-in",
     TouchEnabled = false,
     SliderRightClick = false,
-    uiCornersRadius = 8,
+    uiCornersRadius = 0,
     SliderCanOverride = false,
     hoverText = {
         Enabled = true,
@@ -67,47 +67,22 @@ local guilibrary = {
 
 -- // todo here: make better names for colors instead of color1, 2.../primary color, secondary..
 local guipallet = {
-    ThemeMode = "ModernSoft",
-    
-    -- Основной фон: Мягкий темно-серый (Material Design / VS Code style)
-    Color1 = Color3.fromRGB(30, 32, 36), 
-    
-    -- Вторичный фон (хедеры, панели): Чуть светлее
-    Color2 = Color3.fromRGB(40, 42, 48), 
-    
-    -- Элементы при наведении / активные зоны
-    Color3 = Color3.fromRGB(50, 52, 60), 
-    
-    -- Рамки и разделители
-    Color4 = Color3.fromRGB(35, 37, 43), 
-    
-    -- Глубокий фон (тени, подложки)
-    Color5 = Color3.fromRGB(22, 24, 28), 
-    
-    -- Прогресс бары / Доп. акценты
-    Color6 = Color3.fromRGB(200, 200, 210),
-    
-    -- Цвет выключенного тумблера (нейтральный серый)
-    ToggleColor = Color3.fromRGB(65, 68, 75),
-    
-    -- Цвет ВКЛЮЧЕННОГО тумблера (Акцент: Мягкий "Blurple" - дружелюбный сине-фиолетовый)
-    ToggleColor2 = Color3.fromRGB(114, 137, 218), 
-    -- Альтернатива (Мятный): Color3.fromRGB(90, 200, 160)
-    
-    -- Текст: Не чисто белый, а "молочный" для снижения нагрузки на глаза
-    TextColor = Color3.fromRGB(235, 235, 240),
-    
-    -- Плейсхолдеры
-    PlaceholderColor = Color3.fromRGB(140, 145, 155),
-    PlaceholderColor2 = Color3.fromRGB(110, 115, 125),
-    
-    -- Информационные цвета (пастельные тона)
-    InfoColor = Color3.fromRGB(100, 180, 255),    -- Soft Blue
-    WarningColor = Color3.fromRGB(240, 200, 80),  -- Soft Yellow
-    ErrorColor = Color3.fromRGB(240, 100, 100),   -- Soft Red
-    
-    -- ИЗМЕНЕНО: Шрифт на современный без засечек
-    Font = Enum.Font.GothamMedium 
+    ThemeMode = "Default",
+    Color1 = Color3.fromRGB(14, 14, 23),
+    Color2 = Color3.fromRGB(47, 48, 64),
+    Color3 = Color3.fromRGB(66, 68, 66),
+    Color4 = Color3.fromRGB(49, 51, 64),
+    Color5 = Color3.fromRGB(20, 20, 20),
+    Color6 = Color3.fromRGB(200, 200, 200),
+    ToggleColor = Color3.fromRGB(0, 0, 0),
+    ToggleColor2 = Color3.fromRGB(52, 235, 58),
+    TextColor = Color3.fromRGB(255, 255, 255),
+    PlaceholderColor = Color3.fromRGB(220, 220, 220),
+    PlaceholderColor2 = Color3.fromRGB(200, 200, 200),
+    InfoColor = Color3.fromRGB(180, 180, 180),
+    WarningColor = Color3.new(198, 205, 64), -- 250, 230, 50
+    ErrorColor = Color3.fromRGB(205, 64, 78),
+    Font = Enum.Font.Arial
 }
 guilibrary.GuiPallet = guipallet
 
@@ -127,14 +102,14 @@ local guiObjects = {
 guilibrary.GuiObjects = guiObjects
 
 local symbols = {
-    checkMark = "✓",
-    xMark = "✗",
-    arrow = "➤",
-    arrowUp = "↑",
-	arrowDown = "↓",
-	arrowLeft = "←",
-	arrowRight = "→",
-	arrowSpace = "⏎"
+    checkMark = "вњ“",
+    xMark = "вњ—",
+    arrow = "вћ¤",
+    arrowUp = "в†‘",
+	arrowDown = "в†“",
+	arrowLeft = "в†ђ",
+	arrowRight = "в†’",
+	arrowSpace = "вЏЋ"
 }
 guilibrary.Symbols = symbols
 
@@ -198,9 +173,6 @@ ScreenGui.Name = "Mana"
 ScreenGui.DisplayOrder = 999
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.OnTopOfCoreBlur = true -- so if you even get kicked or banned you'll still see gui :)
-local UIScale = Instance.new("UIScale")
-UIScale.Parent = ScreenGui
-guilibrary.UIScale = UIScale
 local ClickGui = Instance.new("Frame", ScreenGui)
 ClickGui.Name = "ClickGui"
 local notificationsGui = Instance.new("Folder", ScreenGui)
@@ -595,8 +567,8 @@ function guilibrary:SaveConfig()
                 List = obj.Table.List
             }
         else
-            warn("[rbxmain/Guilibrary.lua]: can't save config from unknown object: "..obj.Type.." (objtype).")
-            --warn("[rbxmain/Guilibrary.lua]: can't save config from unknown object: "..obj.Name or obj.Table.Name.."-"..obj.Type.." (name - obj).")
+            warn("[ManaV2ForRoblox/Guilibrary.lua]: can't save config from unknown object: "..obj.Type.." (objtype).")
+            --warn("[ManaV2ForRoblox/Guilibrary.lua]: can't save config from unknown object: "..obj.Name or obj.Table.Name.."-"..obj.Type.." (name - obj).")
         end
     end
     writefile("NewMana/Config/"..game.PlaceId..".json", httpService:JSONEncode(savedata))
@@ -791,12 +763,12 @@ function guilibrary:LoadConfig()
                         guilibrary.ObjectsThatCanBeSaved[objtable].Table:CreateListObject(v)
                     end
                 else
-                    warn("[rbxmain/Guilibrary.lua]: can't load config from unknown object: "..obj.Type.." (objtype).")
+                    warn("[ManaV2ForRoblox/Guilibrary.lua]: can't load config from unknown object: "..obj.Type.." (objtype).")
                 end
             end)
         end
     else
-        warn("[rbxmain/GuiLibrary.lua]: an error occured while loading config: "..result..". \nIf this keeps happening report it to @mankacoder on discord.")
+        warn("[ManaV2ForRoblox/GuiLibrary.lua]: an error occured while loading config: "..result..". \nIf this keeps happening report it to @mankacoder on discord.")
         guilibrary:CreateNotification("Profiles", "an error occured while loading config: "..result..".\nIf this keeps happening report it to @mankacoder on discord.", 15, false)
     end
 end
@@ -807,7 +779,7 @@ function guilibrary:switchProfile(profile)
     if isfile("NewMana/Config/"..game.PlaceId..profile..".json") then
         guilibrary.CurrentProfile = profile
     else
-        warn("[rbxmain/Guilibrary.lua]: Unable to load profile "..profile.." - not found, instead creating it.")
+        warn("[ManaV2ForRoblox/Guilibrary.lua]: Unable to load profile "..profile.." - not found, instead creating it.")
         guilibrary:CreateNotification("Profiles", "Unable to load profile "..profile.." - not found, instead creating it.", 5, true)
         guilibrary.CurrentProfile = profile
         writefile("NewMana/Config/"..game.PlaceId..guilibrary.CurrentProfile..".json", "{}")
@@ -3104,7 +3076,7 @@ function guilibrary:CreateWindow()
     searchIcon.Size = UDim2.new(0, 40, 0, 40)
     searchIcon.Position = UDim2.new(0, 0, 0, 0)
     searchIcon.Font = guipallet.Font
-    searchIcon.Text = "🔍"
+    searchIcon.Text = "рџ”Ќ"
     searchIcon.TextColor3 = guipallet.TextColor
     searchIcon.TextSize = 22
 
@@ -3855,7 +3827,7 @@ function guilibrary:CreateWindow()
         pinbutton.Position = UDim2.new(0, 150, 0, 4)
         pinbutton.Size = UDim2.new(0, 20, 0, 20)
         pinbutton.Font = guipallet.Font
-        pinbutton.Text = "📍"
+        pinbutton.Text = "рџ“Ќ"
         pinbutton.TextColor3 = guilibrary.TextColor
         pinbutton.TextTransparency = 0.4
         pinbutton.TextSize = 22

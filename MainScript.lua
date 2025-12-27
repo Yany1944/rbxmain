@@ -1,6 +1,6 @@
 --[[
     Credits to anyones code I used or looked at
-3213123
+
     Removed the key system permamently.
 ]]
 
@@ -44,7 +44,6 @@ local SliderScaleValue = 1
 local Functions = {}
 local LocalPlayerEvents = {}
 local Mana = {Connections = {}, Friends = {}}
-local ThemeAccent = Color3.fromRGB(114, 137, 218) 
 
 local httprequest = (request and http and http.request or http_request or fluxus and fluxus.request)
 local queueteleport = syn and syn.queue_on_teleport or queue_on_teleport or fluxus and fluxus.queue_on_teleport
@@ -147,10 +146,10 @@ do
 end
 
 shared.Mana = Mana
-local GuiLibrary = Functions:RunFile("GuiLibrary.lua")--loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/GuiLibrary.lua"))()
-local playersHandler = Functions:RunFile("Libraries/playersHandler.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraries/playersHandler.lua"))()
+local GuiLibrary = Functions:RunFile("GuiLibrary.lua")--loadstring(game:HttpGet("https://raw.githubusercontent.com/Maanaaaa/ManaV2ForRoblox/refs/heads/main/GuiLibrary.lua"))()
+local playersHandler = Functions:RunFile("Libraries/playersHandler.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/refs/heads/main/libraries/entity.lua"))()
 local toolHandler = Functions:RunFile("Libraries/toolHandler.lua")
-local espLibrary = Functions:RunFile("Libraries/espLibrary.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraries/espLibrary.lua"))()
+local espLibrary = Functions:RunFile("Libraries/espLibrary.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/Maanaaaa/ManaV2ForRoblox/main/Libraries/espLibrary.lua"))()
 --local whitelistHandler = Functions:RunFile("Libraries/whiltelistHandler.lua")
 Mana.GuiLibrary = GuiLibrary
 Mana.Functions = Functions
@@ -165,50 +164,69 @@ Mana.Loaded = false
 
 GuiLibrary:CreateWindow()
 
--- Определяем единый акцентный цвет для всего хаба (тот же, что и у активных тогглов)
-local ThemeAccent = Color3.fromRGB(114, 137, 218) 
-
 local Tabs = {
     Combat = GuiLibrary:CreateTab({
         Name = "Combat",
-        Color = ThemeAccent, -- Используем единую переменную
+        Color = Color3.fromRGB(83, 214, 110), --252, 60, 68
         TabIcon = "CombatTabIcon.png"
     }),
     Movement = GuiLibrary:CreateTab({
         Name = "Movement",
-        Color = ThemeAccent,
+        Color = Color3.fromRGB(83, 214, 110), --255, 148, 36
         TabIcon = "MovementTabIcon.png"
     }),
     Render = GuiLibrary:CreateTab({
         Name = "Render",
-        Color = ThemeAccent,
+        Color = Color3.fromRGB(83, 214, 110), --59, 170, 222
         TabIcon = "RenderTabIcon.png"
     }),
     Utility = GuiLibrary:CreateTab({
         Name = "Utility",
-        Color = ThemeAccent,
-        TabIcon = "MiscTabIcon.png"
+        Color = Color3.fromRGB(83, 214, 110),
+        TabIcon = "MiscTabIcon.png" --"UtilityTabIcon",
     }),
     World = GuiLibrary:CreateTab({
         Name = "World",
-        Color = ThemeAccent,
+        Color = Color3.fromRGB(83, 214, 110), --52, 28, 228
         TabIcon = "WorldTabIcon.png"
     }),
     Settings = GuiLibrary:CreateOptionsTab({
         Name = "Settings",
-        Color = ThemeAccent,
+        Color = Color3.fromRGB(83, 214, 110), --240, 157, 62
         TabIcon = "MiscTabIcon.png"
     }),
     Profiles = GuiLibrary:CreateOptionsTab({
         Name = "Profiles",
-        Color = ThemeAccent,
+        Color = Color3.fromRGB(83, 214, 110), --255, 255, 255
         TabIcon = "MiscTabIcon.png"
     }),
     Friends = GuiLibrary:CreateOptionsTab({
         Name = "Friends",
-        Color = ThemeAccent,
+        Color = Color3.fromRGB(83, 214, 110), --240, 157, 62
         TabIcon = "PlayerImage.png"
     }),
+    --[[
+    FE = GuiLibrary:CreateTab({
+        Name = "FE + Trolling",
+        Color = Color3.fromRGB(255, 0, 34),
+        Visible = true,
+        TabIcon = "Utility.png",
+        Callback = function() end
+    }),
+    Plugins = GuiLibrary:CreateTab({
+        Name = "Plugins",
+        Color = Color3.fromRGB(49, 204, 90),
+        Visible = true,
+        TabIcon = "MiscTabIcon.png",
+        Callback = function() end
+    }),
+    ]]
+    --[[
+    SessionInfo = GuiLibrary:CreateCustomTab({
+        Name = "Session info",
+        Color = Color3.fromRGB(240, 157, 62)
+    })
+    ]]
 }
 Mana.Tabs = Tabs
 
@@ -569,39 +587,32 @@ runFunction(function()
 end)
 ]]
 
--- // Modern GUI Button
+-- // cool gui button
 local Button = Instance.new("TextButton")
 local Corner = Instance.new("UICorner")
-local Shadow = Instance.new("UIStroke") -- Добавим обводку для красоты
-
 Button.Name = "GuiButton"
-Button.Position = UDim2.new(0.12, 0, 0, -45) -- Чуть выше
-Button.Text = "M" -- Минималистично, или иконку
-Button.Font = Enum.Font.GothamBold
-Button.TextSize = 18
--- Цвет кнопки: Акцентный или темный
-Button.BackgroundColor3 = Color3.fromRGB(35, 37, 43) 
-Button.TextColor3 = Color3.fromRGB(114, 137, 218) -- Акцентный текст
-Button.Size = UDim2.new(0, 40, 0, 40) -- Чуть больше
+Button.Position = UDim2.new(0.12, 0, 0, -41)
+Button.Text = "Mana"
+Button.BackgroundColor3 = Color3.fromRGB(26, 25, 26)
+Button.TextColor3 = Color3.new(1, 1, 1)
+Button.Size = UDim2.new(0, 32, 0, 32)
 Button.BorderSizePixel = 0
-Button.BackgroundTransparency = 0
-Button.AutoButtonColor = true
+Button.BackgroundTransparency = 0.5
 Button.Parent = GuiLibrary.ScreenGui
-
 Corner.Parent = Button
-Corner.CornerRadius = UDim.new(0, 12) -- Сильное скругление
-
--- Тонкая обводка
-Shadow.Parent = Button
-Shadow.Color = Color3.fromRGB(50, 52, 60)
-Shadow.Thickness = 2
-Shadow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+Corner.CornerRadius = UDim.new(0, 8)
 
 Button.MouseButton1Click:Connect(function()
     GuiLibrary:Toggle()
 end)
 
-print("[rbxmain/MainScript.lua]: Loaded in " .. tostring(tick() - startTick) .. ".")
+UserInputService.InputBegan:Connect(function(Input)
+    if Input.KeyCode == Enum.KeyCode.RightShift then
+        GuiLibrary:Toggle()
+    end
+end)
+
+print("[ManaV2ForRoblox/MainScript.lua]: Loaded in " .. tostring(tick() - startTick) .. ".")
 
 Functions:RunFile("Universal.lua")
 
@@ -610,7 +621,7 @@ local suc, res = pcall(function()
 end)
 
 if not suc then
-    warn("[rbxmain/MainScript.lua]: an error occured while attempting to load game script: " .. res)
+    warn("[ManaV2ForRoblox/MainScript.lua]: an error occured while attempting to load game script: " .. res)
     GuiLibrary.CanLoadConfig = true
 end
 
@@ -620,7 +631,7 @@ LocalPlayer.OnTeleport:Connect(function(State)
             if shared.ManaDeveloper then 
                 loadstring(readfile("NewMana/MainScript.lua"))()
             else 
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua"))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Maanaaaa/ManaV2ForRoblox/main/MainScript.lua"))()
             end
         ]]
         queueteleport(QueueTeleportFunction)
