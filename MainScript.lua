@@ -1,4 +1,4 @@
--- MM2_ESP_OPTIMIZED_FULL.lua — ESP + Animations + WalkSpeed/JumpPower/Camera
+
 
 if game.PlaceId ~= 142823291 then return end
 
