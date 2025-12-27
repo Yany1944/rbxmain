@@ -146,10 +146,10 @@ do
 end
 
 shared.Mana = Mana
-local GuiLibrary = Functions:RunFile("GuiLibrary.lua")--loadstring(game:HttpGet("https://raw.githubusercontent.com/Maanaaaa/ManaV2ForRoblox/refs/heads/main/GuiLibrary.lua"))()
-local playersHandler = Functions:RunFile("Libraries/playersHandler.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/refs/heads/main/libraries/entity.lua"))()
+local GuiLibrary = Functions:RunFile("GuiLibrary.lua")--loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/GuiLibrary.lua"))()
+local playersHandler = Functions:RunFile("Libraries/playersHandler.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraries/playersHandler.lua"))()
 local toolHandler = Functions:RunFile("Libraries/toolHandler.lua")
-local espLibrary = Functions:RunFile("Libraries/espLibrary.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/Maanaaaa/ManaV2ForRoblox/main/Libraries/espLibrary.lua"))()
+local espLibrary = Functions:RunFile("Libraries/espLibrary.lua") --loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraries/espLibrary.lua"))()
 --local whitelistHandler = Functions:RunFile("Libraries/whiltelistHandler.lua")
 Mana.GuiLibrary = GuiLibrary
 Mana.Functions = Functions
@@ -612,7 +612,7 @@ UserInputService.InputBegan:Connect(function(Input)
     end
 end)
 
-print("[ManaV2ForRoblox/MainScript.lua]: Loaded in " .. tostring(tick() - startTick) .. ".")
+print("[rbxmain/MainScript.lua]: Loaded in " .. tostring(tick() - startTick) .. ".")
 
 Functions:RunFile("Universal.lua")
 
@@ -621,7 +621,7 @@ local suc, res = pcall(function()
 end)
 
 if not suc then
-    warn("[ManaV2ForRoblox/MainScript.lua]: an error occured while attempting to load game script: " .. res)
+    warn("[rbxmain/MainScript.lua]: an error occured while attempting to load game script: " .. res)
     GuiLibrary.CanLoadConfig = true
 end
 
@@ -631,7 +631,7 @@ LocalPlayer.OnTeleport:Connect(function(State)
             if shared.ManaDeveloper then 
                 loadstring(readfile("NewMana/MainScript.lua"))()
             else 
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Maanaaaa/ManaV2ForRoblox/main/MainScript.lua"))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua"))()
             end
         ]]
         queueteleport(QueueTeleportFunction)
