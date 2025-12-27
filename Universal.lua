@@ -378,10 +378,10 @@ end
 
 -- check for CustomAnimations so if any param is missing CustomAnimations wont load, also it was made by ChatGPT (yeah)
 local function CheckForAllAnimateParams(Animate)
-    print("[ManaV2ForRoblox/Universal.lua]: Checking Animate parameters for CustomAnimations...")
+    print("[rbxmain/Universal.lua]: Checking Animate parameters for CustomAnimations...")
 
     if not Animate then
-        warn("[ManaV2ForRoblox/Universal.lua]: CustomAnimations can't be loaded, 'Animate' script is missing!")
+        warn("[rbxmain/Universal.lua]: CustomAnimations can't be loaded, 'Animate' script is missing!")
         return false
     end
 
@@ -400,14 +400,14 @@ local function CheckForAllAnimateParams(Animate)
         local current = Animate
         for _, step in ipairs(path) do
             if not current:FindFirstChild(step) then
-                warn("[ManaV2ForRoblox/Universal.lua]: CustomAnimations can't be loaded, missing: " .. table.concat(path, "."))
+                warn("[rbxmain/Universal.lua]: CustomAnimations can't be loaded, missing: " .. table.concat(path, "."))
                 return false
             end
             current = current[step]
         end
     end
 
-    print("[ManaV2ForRoblox/Universal.lua]: All Animate parameters are valid, CustomAnimations can be loaded.")
+    print("[rbxmain/Universal.lua]: All Animate parameters are valid, CustomAnimations can be loaded.")
     return true
 end
 
@@ -5033,7 +5033,7 @@ runFunction(function()
     })
 end)
 
-print("[ManaV2ForRoblox/Universal.lua]: Loaded in " .. tostring(tick() - startTick) .. ".")
+print("[rbxmain/Universal.lua]: Loaded in " .. tostring(tick() - startTick) .. ".")
 task.spawn(function()
     repeat task.wait() until GuiLibrary.ConfigLoaded
     GuiLibrary:CreateNotification("Universal", "Loaded successfully! Press "..GuiLibrary.GuiKeybind.." to open GUI.", 5, "Info", true)
