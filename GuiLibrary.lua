@@ -567,8 +567,8 @@ function guilibrary:SaveConfig()
                 List = obj.Table.List
             }
         else
-            warn("[ManaV2ForRoblox/Guilibrary.lua]: can't save config from unknown object: "..obj.Type.." (objtype).")
-            --warn("[ManaV2ForRoblox/Guilibrary.lua]: can't save config from unknown object: "..obj.Name or obj.Table.Name.."-"..obj.Type.." (name - obj).")
+            warn("[rbxmain/Guilibrary.lua]: can't save config from unknown object: "..obj.Type.." (objtype).")
+            --warn("[rbxmain/Guilibrary.lua]: can't save config from unknown object: "..obj.Name or obj.Table.Name.."-"..obj.Type.." (name - obj).")
         end
     end
     writefile("NewMana/Config/"..game.PlaceId..".json", httpService:JSONEncode(savedata))
@@ -763,12 +763,12 @@ function guilibrary:LoadConfig()
                         guilibrary.ObjectsThatCanBeSaved[objtable].Table:CreateListObject(v)
                     end
                 else
-                    warn("[ManaV2ForRoblox/Guilibrary.lua]: can't load config from unknown object: "..obj.Type.." (objtype).")
+                    warn("[rbxmain/Guilibrary.lua]: can't load config from unknown object: "..obj.Type.." (objtype).")
                 end
             end)
         end
     else
-        warn("[ManaV2ForRoblox/GuiLibrary.lua]: an error occured while loading config: "..result..". \nIf this keeps happening report it to @mankacoder on discord.")
+        warn("[rbxmain/GuiLibrary.lua]: an error occured while loading config: "..result..". \nIf this keeps happening report it to @mankacoder on discord.")
         guilibrary:CreateNotification("Profiles", "an error occured while loading config: "..result..".\nIf this keeps happening report it to @mankacoder on discord.", 15, false)
     end
 end
@@ -779,7 +779,7 @@ function guilibrary:switchProfile(profile)
     if isfile("NewMana/Config/"..game.PlaceId..profile..".json") then
         guilibrary.CurrentProfile = profile
     else
-        warn("[ManaV2ForRoblox/Guilibrary.lua]: Unable to load profile "..profile.." - not found, instead creating it.")
+        warn("[rbxmain/Guilibrary.lua]: Unable to load profile "..profile.." - not found, instead creating it.")
         guilibrary:CreateNotification("Profiles", "Unable to load profile "..profile.." - not found, instead creating it.", 5, true)
         guilibrary.CurrentProfile = profile
         writefile("NewMana/Config/"..game.PlaceId..guilibrary.CurrentProfile..".json", "{}")
