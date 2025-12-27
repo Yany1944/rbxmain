@@ -26,7 +26,7 @@ local function getCharacter(plr)
 end
 
 function handler:tryAgain()
-    warn("[ManaV2ForRoblox/toolHandler.lua]: local player is not alive or realcharacter is missing, trying again in 5 seconds.")
+    warn("[rbxmain/toolHandler.lua]: local player is not alive or realcharacter is missing, trying again in 5 seconds.")
     wait(5)
     handler:start()
 end
