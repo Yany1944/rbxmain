@@ -6,22 +6,16 @@ end
 
 task.wait(2)
 
--- ==============================================
--- ЗАЩИТА ОТ ДУБЛИКАТОВ
--- ==============================================
 if getgenv().MM2_ESP_Script then
     warn("[MM2] Скрипт уже запущен!")
     return
 end
 getgenv().MM2_ESP_Script = true
 
--- ==============================================
--- КОНФИГУРАЦИЯ
--- ==============================================
 local CONFIG = {
     HideKey = Enum.KeyCode.Q,
     DebugMode = true,
-
+    CheckInterval = 0.5,
     Colors = {
         Background = Color3.fromRGB(25, 25, 30),
         Section = Color3.fromRGB(35, 35, 40),
@@ -36,44 +30,36 @@ local CONFIG = {
         Sheriff = Color3.fromRGB(50, 150, 255),
         Gun = Color3.fromRGB(255, 200, 50),
         Innocent = Color3.fromRGB(85, 255, 120)
+    },
+    Notification = {
+        Duration = 2.5,
+        FadeTime = 0.4
     }
 }
 
--- ==============================================
--- СЕРВИСЫ
--- ==============================================
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
-
 local LocalPlayer = Players.LocalPlayer
 
--- ==============================================
--- LOGGER
--- ==============================================
 local function Log(category, message)
     if CONFIG.DebugMode then
         print(string.format("[MM2][%s] %s", category, message))
     end
 end
 
--- ==============================================
--- СОСТОЯНИЕ
--- ==============================================
 local State = {
     GunESP = false,
     MurderESP = false,
     SheriffESP = false,
     InnocentESP = false,
-
-    -- Character settings
+    NotificationsEnabled = false,
     WalkSpeed = 18,
     JumpPower = 50,
     MaxCameraZoom = 100,
-
     Keybinds = {
         Sit = Enum.KeyCode.Unknown,
         Dab = Enum.KeyCode.Unknown,
@@ -82,29 +68,26 @@ local State = {
         Floss = Enum.KeyCode.Unknown,
         ClickTP = Enum.KeyCode.Unknown
     },
-
-    -- Кэш игроков и их ролей
-    PlayerCache = {}, -- [userId] = {role = "Murder"/"Sheriff"/"Innocent", espData = {...}}
-    GunCache = {}, -- [gunInstance] = espData
-
+    prevMurd = nil,
+    prevSher = nil,
+    heroSent = false,
+    gunDropped = false,
+    roundStart = true,
+    PlayerHighlights = {},
+    GunCache = {},
     Connections = {},
-    PlayerConnections = {}, -- Отдельное хранение для подключений каждого игрока
     UIElements = {},
-
     ClickTPActive = false,
     ListeningForKeybind = nil,
-
-    UpdateLoop = nil -- Для хранения постоянного цикла обновления
+    RoleCheckLoop = nil,
+    NotificationQueue = {},
+    CurrentNotification = nil
 }
 
--- ==============================================
 -- CHARACTER MODIFIERS
--- ==============================================
-
 local function ApplyWalkSpeed(speed)
     local character = LocalPlayer.Character
     if not character then return end
-
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if humanoid then
         humanoid.WalkSpeed = speed
@@ -116,7 +99,6 @@ end
 local function ApplyJumpPower(power)
     local character = LocalPlayer.Character
     if not character then return end
-
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if humanoid then
         humanoid.JumpPower = power
@@ -131,64 +113,197 @@ local function ApplyMaxCameraZoom(distance)
     Log("Character", "MaxCameraZoom установлен: " .. distance)
 end
 
--- Применение настроек при респавне
 local function ApplyCharacterSettings()
     ApplyWalkSpeed(State.WalkSpeed)
     ApplyJumpPower(State.JumpPower)
     ApplyMaxCameraZoom(State.MaxCameraZoom)
 end
 
--- ==============================================
--- ESP UTILITIES
--- ==============================================
-
--- Определение роли игрока
-local function GetPlayerRole(player)
-    if player == LocalPlayer then return "LocalPlayer" end
-
-    local character = player.Character
-    if not character then return "Unknown" end
-
-    local backpack = player.Backpack
-
-    -- Проверка на убийцу (нож)
-    if character:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife")) then
-        return "Murder"
-    end
-
-    -- Проверка на шерифа (пистолет)
-    if character:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun")) then
-        return "Sheriff"
-    end
-
-    return "Innocent"
+-- NOTIFICATION SYSTEM
+local function CreateNotificationUI()
+    local notifGui = Instance.new("ScreenGui")
+    notifGui.Name = "MM2_Notifications"
+    notifGui.ResetOnSpawn = false
+    notifGui.DisplayOrder = 100
+    notifGui.Parent = CoreGui
+    State.UIElements.NotificationGui = notifGui
+    Log("Notification", "Notification GUI создан")
 end
 
--- Создание Highlight
+local function ShowNotification(text1, color1, text2, color2)
+    if not State.NotificationsEnabled then return end
+    
+    if State.CurrentNotification then
+        table.insert(State.NotificationQueue, {text1 = text1, color1 = color1, text2 = text2, color2 = color2})
+        return
+    end
+    
+    State.CurrentNotification = true
+    
+    local notifGui = State.UIElements.NotificationGui
+    if not notifGui then
+        CreateNotificationUI()
+        notifGui = State.UIElements.NotificationGui
+    end
+    
+    -- Простой контейнер БЕЗ фона
+    local notifFrame = Instance.new("Frame")
+    notifFrame.Name = "NotificationFrame"
+    notifFrame.BackgroundTransparency = 1
+    notifFrame.AnchorPoint = Vector2.new(0.5, 0)
+    notifFrame.Position = UDim2.new(0.5, 0, 0.25, 0)
+    notifFrame.Size = text2 and UDim2.new(0, 320, 0, 70) or UDim2.new(0, 320, 0, 40)
+    notifFrame.Parent = notifGui
+    
+    -- Белый текст
+    local textLabel1 = Instance.new("TextLabel")
+    textLabel1.Text = text1
+    textLabel1.Font = Enum.Font.GothamBold
+    textLabel1.TextSize = 18
+    textLabel1.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel1.BackgroundTransparency = 1
+    textLabel1.TextTransparency = 1
+    textLabel1.Size = UDim2.new(1, 0, 0, 35)
+    textLabel1.Position = text2 and UDim2.new(0, 0, 0, 0) or UDim2.new(0, 0, 0.5, -17)
+    textLabel1.TextXAlignment = Enum.TextXAlignment.Center
+    textLabel1.Parent = notifFrame
+    
+    local textLabel2
+    if text2 then
+        textLabel2 = Instance.new("TextLabel")
+        textLabel2.Text = text2
+        textLabel2.Font = Enum.Font.GothamBold
+        textLabel2.TextSize = 18
+        textLabel2.TextColor3 = Color3.fromRGB(255, 255, 255)
+        textLabel2.BackgroundTransparency = 1
+        textLabel2.TextTransparency = 1
+        textLabel2.Size = UDim2.new(1, 0, 0, 35)
+        textLabel2.Position = UDim2.new(0, 0, 0, 35)
+        textLabel2.TextXAlignment = Enum.TextXAlignment.Center
+        textLabel2.Parent = notifFrame
+    end
+    
+    -- Fade In
+    local textFadeIn1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
+    textFadeIn1:Play()
+    
+    if textLabel2 then
+        local textFadeIn2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
+        textFadeIn2:Play()
+    end
+    
+    task.wait(CONFIG.Notification.Duration)
+    
+    -- Fade Out
+    local textFadeOut1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
+    textFadeOut1:Play()
+    
+    if textLabel2 then
+        local textFadeOut2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
+        textFadeOut2:Play()
+    end
+    
+    textFadeOut1.Completed:Wait()
+    notifFrame:Destroy()
+    
+    State.CurrentNotification = nil
+    
+    if #State.NotificationQueue > 0 then
+        local next = table.remove(State.NotificationQueue, 1)
+        ShowNotification(next.text1, next.color1, next.text2, next.color2)
+    end
+    
+    Log("Notification", "Уведомление показано: " .. text1)
+end
+
+-- ESP UTILITIES
 local function CreateHighlight(adornee, color)
+    if not adornee or not adornee.Parent then return nil end
+
     local highlight = Instance.new("Highlight")
     highlight.Adornee = adornee
     highlight.FillColor = color
-    highlight.FillTransparency = 0.7
+    highlight.FillTransparency = 0.8
     highlight.OutlineColor = color
-    highlight.OutlineTransparency = 0.2
+    highlight.OutlineTransparency = 0.3
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Enabled = true
     highlight.Parent = adornee
     return highlight
 end
 
--- ==============================================
--- ESP ДЛЯ ОРУЖИЯ
--- ==============================================
+local function UpdatePlayerHighlight(player, role)
+    if player == LocalPlayer then return end
 
+    local character = player.Character
+    if not character or not character.Parent then 
+        if State.PlayerHighlights[player] then
+            pcall(function() State.PlayerHighlights[player]:Destroy() end)
+            State.PlayerHighlights[player] = nil
+        end
+        return 
+    end
+
+    local color, shouldShow
+    if role == "Murder" then
+        color = CONFIG.Colors.Murder
+        shouldShow = State.MurderESP
+    elseif role == "Sheriff" then
+        color = CONFIG.Colors.Sheriff
+        shouldShow = State.SheriffESP
+    elseif role == "Innocent" then
+        color = CONFIG.Colors.Innocent
+        shouldShow = State.InnocentESP
+    else
+        shouldShow = false
+    end
+
+    if State.PlayerHighlights[player] then
+        pcall(function() State.PlayerHighlights[player]:Destroy() end)
+        State.PlayerHighlights[player] = nil
+    end
+
+    local highlight = CreateHighlight(character, color)
+    if highlight then
+        highlight.Enabled = shouldShow
+        State.PlayerHighlights[player] = highlight
+    end
+end
+
+local function UpdateAllHighlightsVisibility()
+    for player, highlight in pairs(State.PlayerHighlights) do
+        if highlight and highlight.Parent then
+            local items = player.Backpack
+            local character = player.Character
+
+            local role = "Innocent"
+            if (items and items:FindFirstChild("Knife")) or (character and character:FindFirstChild("Knife")) then
+                role = "Murder"
+            elseif (items and items:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
+                role = "Sheriff"
+            end
+
+            local shouldShow = false
+            if role == "Murder" and State.MurderESP then
+                shouldShow = true
+            elseif role == "Sheriff" and State.SheriffESP then
+                shouldShow = true
+            elseif role == "Innocent" and State.InnocentESP then
+                shouldShow = true
+            end
+
+            highlight.Enabled = shouldShow
+        end
+    end
+end
+
+-- ESP ДЛЯ ОРУЖИЯ (ИЗ РАБОЧЕГО КОДА)
 local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
     if State.GunCache[gunPart] then return end
 
     local highlight = CreateHighlight(gunPart, CONFIG.Colors.Gun)
 
-    -- Создаём Billboard для оружия
     local billboard = Instance.new("BillboardGui")
     billboard.Adornee = gunPart
     billboard.Size = UDim2.new(0, 150, 0, 40)
@@ -236,252 +351,19 @@ local function UpdateGunESPVisibility()
     end
 end
 
--- ==============================================
--- ESP ДЛЯ ИГРОКОВ
--- ==============================================
-
-local function RemovePlayerESP(player)
-    local userId = player.UserId
-    local cache = State.PlayerCache[userId]
-
-    if not cache then return end
-
-    if cache.espData then
-        if cache.espData.highlight then 
-            pcall(function() cache.espData.highlight:Destroy() end)
-        end
-    end
-
-    State.PlayerCache[userId] = nil
-    Log("PlayerESP", string.format("Удалён ESP для %s", player.Name))
-end
-
-local function CreatePlayerESP(player, role)
-    if player == LocalPlayer then return end
-    if not player:IsDescendantOf(Players) then return end
-
-    local character = player.Character
-    if not character or not character.Parent then return end
-
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-
-    local userId = player.UserId
-
-    -- Определяем цвет на основе роли
-    local color, shouldShow
-    if role == "Murder" then
-        color = CONFIG.Colors.Murder
-        shouldShow = State.MurderESP
-    elseif role == "Sheriff" then
-        color = CONFIG.Colors.Sheriff
-        shouldShow = State.SheriffESP
-    elseif role == "Innocent" then
-        color = CONFIG.Colors.Innocent
-        shouldShow = State.InnocentESP
-    else
-        shouldShow = false
-    end
-
-    -- Удаляем старый ESP если он существует
-    local cache = State.PlayerCache[userId]
-    if cache and cache.espData and cache.espData.highlight then
-        pcall(function() cache.espData.highlight:Destroy() end)
-    end
-
-    -- Создаём новый ESP
-    local success, highlight = pcall(function()
-        return CreateHighlight(character, color)
-    end)
-
-    if not success or not highlight then
-        Log("PlayerESP", string.format("Ошибка создания Highlight для %s", player.Name))
-        return
-    end
-
-    highlight.Enabled = shouldShow
-
-    State.PlayerCache[userId] = {
-        player = player,
-        role = role,
-        espData = {
-            highlight = highlight
-        }
-    }
-
-    Log("PlayerESP", string.format("Создан ESP для %s (%s)", player.Name, role))
-end
-
-local function UpdatePlayerRole(player)
-    if not player or player == LocalPlayer then return end
-    if not player:IsDescendantOf(Players) then return end
-    if not player.Character or not player.Character.Parent then return end
-
-    local role = GetPlayerRole(player)
-    CreatePlayerESP(player, role)
-end
-
-local function UpdateAllPlayerESPVisibility()
-    for userId, cache in pairs(State.PlayerCache) do
-        if cache.espData and cache.role and cache.espData.highlight then
-            local shouldShow = false
-
-            if cache.role == "Murder" and State.MurderESP then
-                shouldShow = true
-            elseif cache.role == "Sheriff" and State.SheriffESP then
-                shouldShow = true
-            elseif cache.role == "Innocent" and State.InnocentESP then
-                shouldShow = true
-            end
-
-            pcall(function()
-                if cache.espData.highlight then
-                    cache.espData.highlight.Enabled = shouldShow
-                end
-            end)
-        end
-    end
-end
-
--- ==============================================
--- EVENT HANDLERS
--- ==============================================
-
-local function DisconnectPlayerConnections(userId)
-    if State.PlayerConnections[userId] then
-        for _, connection in ipairs(State.PlayerConnections[userId]) do
-            pcall(function() connection:Disconnect() end)
-        end
-        State.PlayerConnections[userId] = nil
-        Log("Connections", "Отключены подключения для userId: " .. userId)
-    end
-end
-
-local function SetupPlayerTracking(player)
-    if player == LocalPlayer then return end
-
-    local userId = player.UserId
-
-    -- Отключаем старые подключения для этого игрока
-    DisconnectPlayerConnections(userId)
-
-    -- ВАЖНО: Всегда инициализируем таблицу ПЕРЕД использованием
-    State.PlayerConnections[userId] = {}
-
-    -- Отслеживание персонажа
-    local function onCharacterAdded(character)
-        Log("PlayerTracking", string.format("%s получил персонажа", player.Name))
-
-        -- Удаляем старый ESP
-        RemovePlayerESP(player)
-
-        -- Ждём загрузки HumanoidRootPart
-        local hrp = character:WaitForChild("HumanoidRootPart", 10)
-        if not hrp then 
-            Log("PlayerTracking", string.format("HumanoidRootPart не найден для %s", player.Name))
-            return 
-        end
-
-        task.wait(0.5)
-
-        -- Создаём новый ESP
-        UpdatePlayerRole(player)
-
-        -- Проверяем что таблица всё ещё существует
-        if not State.PlayerConnections[userId] then
-            State.PlayerConnections[userId] = {}
-        end
-
-        -- Отслеживание добавления предметов в персонажа
-        local charConnection = character.ChildAdded:Connect(function(child)
-            if child.Name == "Knife" or child.Name == "Gun" then
-                task.wait(0.1)
-                UpdatePlayerRole(player)
-            end
-        end)
-
-        -- Отслеживание удаления предметов из персонажа
-        local charRemovedConnection = character.ChildRemoved:Connect(function(child)
-            if child.Name == "Knife" or child.Name == "Gun" then
-                task.wait(0.1)
-                UpdatePlayerRole(player)
-            end
-        end)
-
-        if State.PlayerConnections[userId] then
-            table.insert(State.PlayerConnections[userId], charConnection)
-            table.insert(State.PlayerConnections[userId], charRemovedConnection)
-        end
-    end
-
-    -- Проверяем что таблица существует перед добавлением
-    if not State.PlayerConnections[userId] then
-        State.PlayerConnections[userId] = {}
-    end
-
-    -- Отслеживание CharacterAdded
-    local charAddedConnection = player.CharacterAdded:Connect(onCharacterAdded)
-    if State.PlayerConnections[userId] then
-        table.insert(State.PlayerConnections[userId], charAddedConnection)
-    end
-
-    -- Отслеживание CharacterRemoving
-    local charRemovingConnection = player.CharacterRemoving:Connect(function(character)
-        Log("PlayerTracking", string.format("%s теряет персонажа", player.Name))
-        RemovePlayerESP(player)
-    end)
-    if State.PlayerConnections[userId] then
-        table.insert(State.PlayerConnections[userId], charRemovingConnection)
-    end
-
-    -- Если персонаж уже существует
-    if player.Character then
-        task.spawn(function()
-            onCharacterAdded(player.Character)
-        end)
-    end
-
-    -- Отслеживание рюкзака
-    local function setupBackpackTracking()
-        local backpack = player:WaitForChild("Backpack", 10)
-        if not backpack then return end
-
-        -- Проверяем что таблица существует
-        if not State.PlayerConnections[userId] then
-            State.PlayerConnections[userId] = {}
-        end
-
-        local backpackConnection = backpack.ChildAdded:Connect(function(child)
-            if child.Name == "Knife" or child.Name == "Gun" then
-                task.wait(0.1)
-                UpdatePlayerRole(player)
-            end
-        end)
-
-        local backpackRemovedConnection = backpack.ChildRemoved:Connect(function(child)
-            if child.Name == "Knife" or child.Name == "Gun" then
-                task.wait(0.1)
-                UpdatePlayerRole(player)
-            end
-        end)
-
-        if State.PlayerConnections[userId] then
-            table.insert(State.PlayerConnections[userId], backpackConnection)
-            table.insert(State.PlayerConnections[userId], backpackRemovedConnection)
-        end
-    end
-
-    task.spawn(setupBackpackTracking)
-end
-
+-- НАСТРОЙКА ОТСЛЕЖИВАНИЯ ОРУЖИЯ (ИЗ РАБОЧЕГО КОДА)
 local function SetupGunTracking()
-    -- Отслеживание появления оружия в Workspace
+    -- Отслеживание появления оружия в Workspace (DescendantAdded)
     local gunAddedConnection = Workspace.DescendantAdded:Connect(function(obj)
-        if not State.GunESP then return end
-
         if obj:IsA("BasePart") and obj.Name == "GunDrop" then
             task.wait(0.1)
             CreateGunESP(obj)
+            if State.NotificationsEnabled then
+                task.spawn(function()
+                    ShowNotification("Gun Dropped", CONFIG.Colors.Gun)
+                end)
+            end
+            Log("GunTracking", "GunDrop обнаружен через DescendantAdded")
         end
     end)
 
@@ -489,116 +371,115 @@ local function SetupGunTracking()
     local gunRemovedConnection = Workspace.DescendantRemoving:Connect(function(obj)
         if obj:IsA("BasePart") and obj.Name == "GunDrop" then
             RemoveGunESP(obj)
+            Log("GunTracking", "GunDrop удалён")
         end
     end)
 
     table.insert(State.Connections, gunAddedConnection)
     table.insert(State.Connections, gunRemovedConnection)
+
+    Log("GunTracking", "Настроено отслеживание оружия через DescendantAdded")
 end
 
--- Начальное сканирование
-local function InitialScan()
-    Log("Scan", "Начальное сканирование...")
-
-    -- Сканирование оружия
+-- Начальное сканирование оружия
+local function InitialGunScan()
     if State.GunESP then
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj:IsA("BasePart") and obj.Name == "GunDrop" then
                 CreateGunESP(obj)
             end
         end
+        Log("GunTracking", "Начальное сканирование оружия завершено")
     end
-
-    -- Сканирование игроков
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character.Parent then
-            UpdatePlayerRole(player)
-        end
-    end
-
-    Log("Scan", "Сканирование завершено")
 end
 
--- Очистка всего ESP
-local function ClearAllESP()
-    -- Очистка игроков
-    for userId, cache in pairs(State.PlayerCache) do
-        if cache.espData then
-            if cache.espData.highlight then 
-                pcall(function() cache.espData.highlight:Destroy() end)
-            end
-        end
-    end
-    State.PlayerCache = {}
-
-    -- Очистка оружия
-    for gunPart, espData in pairs(State.GunCache) do
-        if espData.highlight then pcall(function() espData.highlight:Destroy() end) end
-        if espData.billboard then pcall(function() espData.billboard:Destroy() end) end
-    end
-    State.GunCache = {}
-
-    Log("ESP", "Весь ESP очищен")
-end
-
--- ПОСТОЯННЫЙ ЦИКЛ ОБНОВЛЕНИЯ
-local function StartUpdateLoop()
-    if State.UpdateLoop then
-        State.UpdateLoop:Disconnect()
+-- ROLE CHECKER LOGIC
+local function StartRoleChecking()
+    if State.RoleCheckLoop then
+        State.RoleCheckLoop:Disconnect()
     end
 
-    State.UpdateLoop = RunService.Heartbeat:Connect(function()
-        -- Проверяем всех игроков каждый кадр
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player:IsDescendantOf(Players) then
-                local userId = player.UserId
-                local character = player.Character
-                
-                if character and character.Parent then
-                    local cache = State.PlayerCache[userId]
-                    
-                    -- Проверяем, существует ли ESP и привязан ли он к текущему персонажу
-                    local needsUpdate = false
-                    
-                    if not cache or not cache.espData or not cache.espData.highlight then
-                        needsUpdate = true
-                    else
-                        -- Проверяем валидность Highlight
-                        local validHighlight = pcall(function()
-                            return cache.espData.highlight.Parent == character
-                        end)
-                        
-                        if not validHighlight then
-                            needsUpdate = true
+    State.RoleCheckLoop = task.spawn(function()
+        while getgenv().MM2_ESP_Script do
+            local success, err = pcall(function()
+                for _, v in next, getconnections(LocalPlayer.Idled) do 
+                    v:Disable() 
+                end
+
+                local murder, sheriff = nil, nil
+
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer then
+                        local items = p.Backpack
+                        local character = p.Character
+
+                        if (items and items:FindFirstChild("Knife")) or (character and character:FindFirstChild("Knife")) then
+                            murder = p
+                            UpdatePlayerHighlight(p, "Murder")
+                        elseif (items and items:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
+                            sheriff = p
+                            UpdatePlayerHighlight(p, "Sheriff")
                         else
-                            -- Проверяем изменение роли
-                            local currentRole = GetPlayerRole(player)
-                            if cache.role ~= currentRole then
-                                needsUpdate = true
-                            end
+                            UpdatePlayerHighlight(p, "Innocent")
                         end
                     end
-                    
-                    if needsUpdate then
-                        UpdatePlayerRole(player)
-                    end
-                else
-                    -- У игрока нет персонажа - удаляем ESP
-                    if cache then
-                        RemovePlayerESP(player)
-                    end
                 end
+
+                -- УВЕДОМЛЕНИЯ О РОЛЯХ
+                if murder and sheriff and State.roundStart then
+                    if State.NotificationsEnabled then
+                        task.spawn(function()
+                            ShowNotification(
+                                "Murder: " .. murder.Name,
+                                CONFIG.Colors.Murder,
+                                "Sheriff: " .. sheriff.Name,
+                                CONFIG.Colors.Sheriff
+                            )
+                        end)
+                    end
+                    State.roundStart = false
+                    State.prevMurd = murder
+                    State.prevSher = sheriff
+                    State.heroSent = false
+                    Log("RoleChecker", "Начало раунда - Murder: " .. murder.Name .. ", Sheriff: " .. sheriff.Name)
+                end
+
+                if sheriff and sheriff ~= State.prevSher and murder == State.prevMurd then
+                    if State.NotificationsEnabled then
+                        task.spawn(function()
+                            ShowNotification("Sheriff: " .. sheriff.Name, CONFIG.Colors.Sheriff)
+                        end)
+                    end
+                    State.gunDropped = false
+                    State.heroSent = true
+                    State.prevSher = sheriff
+                    Log("RoleChecker", "Hero подобрал оружие: " .. sheriff.Name)
+                end
+
+                if murder and murder ~= State.prevMurd then
+                    State.prevMurd = murder
+                    State.roundStart = true
+                    Log("RoleChecker", "Новый Murder: " .. murder.Name)
+                end
+
+                if sheriff and sheriff ~= State.prevSher and not State.heroSent and not State.roundStart then
+                    State.prevSher = sheriff
+                    Log("RoleChecker", "Новый Sheriff: " .. sheriff.Name)
+                end
+            end)
+
+            if not success then
+                warn("[MM2] Role Checker error: " .. tostring(err))
             end
+
+            task.wait(CONFIG.CheckInterval)
         end
     end)
 
-    table.insert(State.Connections, State.UpdateLoop)
-    Log("UpdateLoop", "Запущен постоянный цикл обновления ESP")
+    Log("RoleChecker", "Запущен цикл проверки ролей")
 end
 
--- ==============================================
--- АНИМАЦИИ
--- ==============================================
+-- ANIMATIONS
 local function PlayEmote(emoteName)
     task.spawn(function()
         pcall(function()
@@ -626,9 +507,7 @@ local function PlayEmote(emoteName)
     end)
 end
 
--- ==============================================
--- CLICK TP
--- ==============================================
+-- CLICK TP (ИЗ РАБОЧЕГО КОДА)
 local function TeleportToMouse()
     local character = LocalPlayer.Character
     if not character then return end
@@ -645,10 +524,7 @@ local function TeleportToMouse()
     end
 end
 
--- ==============================================
 -- KEYBIND UTILITIES
--- ==============================================
-
 local function FindKeybindButton(keyCode)
     for bindName, boundKey in pairs(State.Keybinds) do
         if boundKey == keyCode then
@@ -679,9 +555,7 @@ local function SetKeybind(bindName, keyCode, button, allButtons)
     Log("Keybind", string.format("%s bound to %s", bindName, keyCode.Name))
 end
 
--- ==============================================
 -- UI UTILITIES
--- ==============================================
 local function Create(className, properties, children)
     local obj = Instance.new(className)
     for k, v in pairs(properties or {}) do
@@ -707,9 +581,7 @@ local function AddStroke(parent, thickness, color, transparency)
     })
 end
 
--- ==============================================
 -- UI CREATION
--- ==============================================
 local function CreateUI()
     Log("UI", "Создание интерфейса...")
 
@@ -745,7 +617,7 @@ local function CreateUI()
     })
 
     local titleLabel = Create("TextLabel", {
-        Text = "MM2 ESP + ANIMATIONS <font color=\"rgb(90,140,255)\">v4.2</font>",
+        Text = "MM2 ESP + ANIMATIONS <font color=\"rgb(90,140,255)\">v4.6 FINAL</font>",
         RichText = true,
         Font = Enum.Font.GothamBold,
         TextSize = 16,
@@ -772,7 +644,7 @@ local function CreateUI()
         BackgroundTransparency = 1,
         Position = UDim2.new(0, 15, 0, 55),
         Size = UDim2.new(1, -30, 1, -70),
-        CanvasSize = UDim2.new(0, 0, 0, 1000),
+        CanvasSize = UDim2.new(0, 0, 0, 0),
         ScrollBarThickness = 6,
         ScrollBarImageColor3 = CONFIG.Colors.Accent,
         BorderSizePixel = 0,
@@ -784,6 +656,12 @@ local function CreateUI()
         SortOrder = Enum.SortOrder.LayoutOrder,
         Parent = content
     })
+
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    content.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
+    end)
+    task.wait(0.1)
+    content.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
 
     local function CreateSection(title)
         local label = Create("TextLabel", {
@@ -981,17 +859,20 @@ local function CreateUI()
         ApplyMaxCameraZoom(value)
     end)
 
-    CreateSection("ESP OPTIONS")
+    CreateSection("NOTIFICATIONS")
+
+    CreateToggle("Enable Notifications", "Show role and gun notifications", function(state)
+        State.NotificationsEnabled = state
+        Log("Notifications", "Notifications: " .. tostring(state))
+    end)
+
+    CreateSection("ESP OPTIONS (Highlight)")
 
     CreateToggle("Gun ESP", "Highlight dropped guns", function(state)
         State.GunESP = state
         Log("ESP", "Gun ESP: " .. tostring(state))
         if state then
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and obj.Name == "GunDrop" then
-                    CreateGunESP(obj)
-                end
-            end
+            InitialGunScan()
         else
             UpdateGunESPVisibility()
         end
@@ -1000,19 +881,19 @@ local function CreateUI()
     CreateToggle("Murder ESP", "Highlight murderer", function(state)
         State.MurderESP = state
         Log("ESP", "Murder ESP: " .. tostring(state))
-        UpdateAllPlayerESPVisibility()
+        UpdateAllHighlightsVisibility()
     end)
 
     CreateToggle("Sheriff ESP", "Highlight sheriff", function(state)
         State.SheriffESP = state
         Log("ESP", "Sheriff ESP: " .. tostring(state))
-        UpdateAllPlayerESPVisibility()
+        UpdateAllHighlightsVisibility()
     end)
 
     CreateToggle("Innocent ESP", "Highlight innocent players", function(state)
         State.InnocentESP = state
         Log("ESP", "Innocent ESP: " .. tostring(state))
-        UpdateAllPlayerESPVisibility()
+        UpdateAllHighlightsVisibility()
     end)
 
     CreateSection("ANIMATION KEYBINDS")
@@ -1039,14 +920,23 @@ local function CreateUI()
     })
 
     closeButton.MouseButton1Click:Connect(function()
-        ClearAllESP()
+        for player, highlight in pairs(State.PlayerHighlights) do
+            pcall(function() highlight:Destroy() end)
+        end
+        for gunPart, espData in pairs(State.GunCache) do
+            if espData.highlight then pcall(function() espData.highlight:Destroy() end) end
+            if espData.billboard then pcall(function() espData.billboard:Destroy() end) end
+        end
+
         for _, connection in ipairs(State.Connections) do
             pcall(function() connection:Disconnect() end)
         end
-        for userId, connections in pairs(State.PlayerConnections) do
-            DisconnectPlayerConnections(userId)
-        end
+
         gui:Destroy()
+        if State.UIElements.NotificationGui then
+            State.UIElements.NotificationGui:Destroy()
+        end
+
         getgenv().MM2_ESP_Script = false
     end)
 
@@ -1101,10 +991,7 @@ local function CreateUI()
     Log("UI", "✅ UI создан!")
 end
 
--- ==============================================
--- INPUT HANDLING
--- ==============================================
-
+-- INPUT HANDLING (ИЗ РАБОЧЕГО КОДА)
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == State.Keybinds.ClickTP then
         State.ClickTPActive = false
@@ -1118,47 +1005,36 @@ mouse.Button1Down:Connect(function()
     end
 end)
 
--- ==============================================
 -- PLAYER EVENTS
--- ==============================================
-Players.PlayerAdded:Connect(function(player)
-    Log("PlayerEvents", string.format("Игрок присоединился: %s", player.Name))
-    SetupPlayerTracking(player)
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-    Log("PlayerEvents", string.format("Игрок вышел: %s", player.Name))
-    RemovePlayerESP(player)
-    DisconnectPlayerConnections(player.UserId)
-end)
-
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     Log("Main", "Респавн локального игрока")
     ApplyCharacterSettings()
-    -- Обновляем ESP всех игроков после нашего респавна
-    task.wait(1)
-    InitialScan()
+
+    State.prevMurd = nil
+    State.prevSher = nil
+    State.heroSent = false
+    State.gunDropped = false
+    State.roundStart = true
 end)
 
--- ==============================================
 -- ИНИЦИАЛИЗАЦИЯ
--- ==============================================
-Log("Main", "🚀 Инициализация MM2 ESP + Animations v4.2...")
+Log("Main", "🚀 Инициализация MM2 ESP + Animations v4.6 FINAL...")
 CreateUI()
-
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        SetupPlayerTracking(player)
-    end
-end
-
-SetupGunTracking()
+CreateNotificationUI()
 ApplyCharacterSettings()
-InitialScan()
 
--- ЗАПУСК ПОСТОЯННОГО ЦИКЛА ОБНОВЛЕНИЯ
-StartUpdateLoop()
+-- Запуск отслеживания оружия (ИЗ РАБОЧЕГО КОДА)
+SetupGunTracking()
+
+-- Начальное сканирование оружия
+InitialGunScan()
+
+-- Запуск Role Checker логики
+StartRoleChecking()
 
 Log("Main", "✅ Скрипт готов к использованию!")
-Log("Main", "✅ Постоянный мониторинг ESP активирован!")
+Log("Main", "✅ Role Checker интегрирован!")
+Log("Main", "✅ Система уведомлений активирована!")
+Log("Main", "✅ Gun ESP из рабочего кода интегрирован!")
+Log("Main", "✅ Click TP из рабочего кода интегрирован!")
