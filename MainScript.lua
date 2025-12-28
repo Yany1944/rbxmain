@@ -1,5 +1,3 @@
--- ПРИВЕТ ЛЮБИМАЯ
-
 if game.PlaceId ~= 142823291 then return end
 
 if not game:IsLoaded() then
@@ -51,16 +49,21 @@ local State = {
     SheriffESP = false,
     InnocentESP = false,
     NotificationsEnabled = false,
+    GodModeEnabled = false,      -- ДОБАВЬ
+    GodModeCache = {},           -- ДОБАВЬ
+    GodModeProcessing = false,   -- ДОБАВЬ
     WalkSpeed = 18,
     JumpPower = 50,
     MaxCameraZoom = 100,
+    
     Keybinds = {
         Sit = Enum.KeyCode.Unknown,
         Dab = Enum.KeyCode.Unknown,
         Zen = Enum.KeyCode.Unknown,
         Ninja = Enum.KeyCode.Unknown,
         Floss = Enum.KeyCode.Unknown,
-        ClickTP = Enum.KeyCode.Unknown
+        ClickTP = Enum.KeyCode.Unknown,
+        GodMode = Enum.KeyCode.Unknown
     },
     prevMurd = nil,
     prevSher = nil,
@@ -72,6 +75,11 @@ local State = {
     Connections = {},
     UIElements = {},
     ClickTPActive = false,
+    CoinFarmEnabled = false,
+    CoinFarmMode = "Teleport",
+    CoinFarmTweenTime = 1,
+    CoinFarmDelay = 0.5,
+    CoinFarmCollected = {},
     ListeningForKeybind = nil,
     RoleCheckLoop = nil,
     NotificationQueue = {},
@@ -104,11 +112,161 @@ local function ApplyMaxCameraZoom(distance)
     State.MaxCameraZoom = distance
 end
 
+
 local function ApplyCharacterSettings()
     ApplyWalkSpeed(State.WalkSpeed)
     ApplyJumpPower(State.JumpPower)
     ApplyMaxCameraZoom(State.MaxCameraZoom)
 end
+
+-- COIN FARM FUNCTIONS
+local function getMap()
+    for _, v in next, Workspace:GetChildren() do
+        if v:FindFirstChild("CoinContainer") then
+            return v
+        end
+    end
+    return nil
+end
+
+local function getNearestCoin(maxDistance)
+    local target
+    local closestDistance = maxDistance or math.huge
+    local map = getMap()
+    local humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+    if not map or not humanoidRootPart then return end
+
+    local coinContainer = map:FindFirstChild("CoinContainer")
+    if not coinContainer then return end
+
+    for _, coin in pairs(coinContainer:GetChildren()) do
+        if coin.Name == "Coin_Server" and not State.CoinFarmCollected[coin] then
+            local distance = (coin.Position - humanoidRootPart.Position).Magnitude
+            if distance < closestDistance then
+                closestDistance = distance
+                target = coin
+            end
+        end
+    end
+    return target
+end
+
+local function TweenToCoin(time, coin, humanoidRootPart)
+    local tweenInfo = TweenInfo.new(time, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = coin.CFrame})
+    tween:Play()
+    return tween
+end
+
+local function StartCoinFarm()
+    if not State.CoinFarmEnabled then return end
+
+    local coinFarmLoop = task.spawn(function()
+        while State.CoinFarmEnabled do
+            task.wait()
+
+            local character = LocalPlayer.Character
+            if not character then continue end
+
+            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+            if not humanoidRootPart then continue end
+
+            local coin = getNearestCoin()
+            if coin and not State.CoinFarmCollected[coin] then
+                if State.CoinFarmMode == "Tween" then
+                    local tween = TweenToCoin(State.CoinFarmTweenTime, coin, humanoidRootPart)
+                    tween.Completed:Wait()
+                    State.CoinFarmCollected[coin] = true
+                elseif State.CoinFarmMode == "Teleport" then
+                    humanoidRootPart.CFrame = coin.CFrame
+                    task.wait(State.CoinFarmDelay)
+                    State.CoinFarmCollected[coin] = true
+                end
+            end
+        end
+    end)
+
+    table.insert(State.Connections, {Disconnect = function() 
+        State.CoinFarmEnabled = false 
+    end})
+end
+
+-- GODMODE
+local lastGodModeApply = 0
+
+local function ApplyGodMode()
+    if not State.GodModeEnabled then return end
+    
+    -- Ограничение частоты (раз в 0.5 секунды)
+    local now = tick()
+    if now - lastGodModeApply < 0.5 then return end
+    lastGodModeApply = now
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or State.GodModeProcessing or State.GodModeCache[humanoid] then 
+        return 
+    end
+    
+    State.GodModeProcessing = true
+    
+    pcall(function()
+        humanoid.Name = "OldHumanoid"
+        
+        local newHumanoid = humanoid:Clone()
+        State.GodModeCache[newHumanoid] = true
+        newHumanoid.Parent = character
+        newHumanoid.Name = "Humanoid"
+        
+        humanoid:Destroy()
+        
+        -- Восстанавливаем камеру
+        if Workspace.Camera then
+            Workspace.Camera.CameraSubject = newHumanoid
+        end
+        
+        -- Перезапускаем анимации
+        local animate = character:FindFirstChild("Animate")
+        if animate then
+            animate.Disabled = true
+            task.wait(0.05)
+            animate.Disabled = false
+        end
+        
+        -- ВАЖНО: Сохраняем настройки скорости/прыжка
+        if State.WalkSpeed ~= 18 then
+            newHumanoid.WalkSpeed = State.WalkSpeed
+        end
+        if State.JumpPower ~= 50 then
+            newHumanoid.JumpPower = State.JumpPower
+        end
+    end)
+    
+    State.GodModeProcessing = false
+end
+
+
+local function ToggleGodMode()
+    State.GodModeEnabled = not State.GodModeEnabled
+    
+    if State.GodModeEnabled then
+        local godModeConnection = RunService.Heartbeat:Connect(function()
+            if State.GodModeEnabled and LocalPlayer.Character then
+                ApplyGodMode()
+            end
+        end)
+        table.insert(State.Connections, godModeConnection)
+        
+        print("GodMode: ENABLED")  -- Вместо ShowNotification
+    else
+        State.GodModeCache = {}
+        print("GodMode: DISABLED (reset to restore humanoid)")
+    end
+end
+
 
 -- NOTIFICATION SYSTEM
 local function CreateNotificationUI()
@@ -439,6 +597,25 @@ local function StartRoleChecking()
         end
     end)
 end
+-- ANTI-FLING (Always Active)
+task.spawn(function()
+    pcall(function()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/AntiFling.lua'))()
+    end)
+end)
+
+-- ANTI-AFK (Always Active)
+task.spawn(function()
+    while getgenv().MM2_ESP_Script do
+        pcall(function()
+            for _, connection in next, getconnections(LocalPlayer.Idled) do 
+                connection:Disable()
+            end
+        end)
+        task.wait(1) -- Проверка каждую секунду
+    end
+end)
+
 
 -- ANIMATIONS
 local function PlayEmote(emoteName)
@@ -572,7 +749,7 @@ local function CreateUI()
     })
 
     local titleLabel = Create("TextLabel", {
-        Text = "MM2 ESP + ANIMATIONS <font color=\"rgb(90,140,255)\">v4.6</font>",
+        Text = "MM2 ESP + ANIMATIONS <font color=\"rgb(90,140,255)\">v4.7</font>",
         RichText = true,
         Font = Enum.Font.GothamBold,
         TextSize = 16,
@@ -836,6 +1013,100 @@ local function CreateUI()
         UpdateAllHighlightsVisibility()
     end)
 
+    local function CreateDropdown(title, desc, options, defaultValue, callback)
+    local card = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Size = UDim2.new(1, 0, 0, 60),
+        Parent = content
+    })
+    AddCorner(card, 8)
+    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+    
+    local cardTitle = Create("TextLabel", {
+        Text = title,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 14,
+        TextColor3 = CONFIG.Colors.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 10),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+    
+    local cardDesc = Create("TextLabel", {
+        Text = desc,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextColor3 = CONFIG.Colors.TextDark,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 30),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+    
+    local dropdown = Create("TextButton", {
+        Text = defaultValue,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextColor3 = CONFIG.Colors.Text,
+        BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+        Position = UDim2.new(1, -110, 0.5, -12),
+        Size = UDim2.new(0, 95, 0, 24),
+        AutoButtonColor = false,
+        Parent = card
+    })
+    AddCorner(dropdown, 6)
+    AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
+    
+    -- ⬇️ ВАЖНО: Parent должен быть card, а не dropdown!
+    local dropdownList = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Position = UDim2.new(0, 325, 0, 10),  -- ⬅️ ИЗМЕНЕНО: позиция справа от карточки
+        Size = UDim2.new(0, 95, 0, #options * 25),
+        Visible = false,
+        ZIndex = 10,  -- ⬅️ ДОБАВЛЕНО: поверх других элементов
+        Parent = card  -- ⬅️ ИЗМЕНЕНО: было dropdown
+    })
+    AddCorner(dropdownList, 6)
+    AddStroke(dropdownList, 1, CONFIG.Colors.Accent, 0.6)
+    
+    for i, option in ipairs(options) do
+        local optionButton = Create("TextButton", {
+            Text = option,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.Text,
+            BackgroundColor3 = Color3.fromRGB(40, 40, 45),
+            Position = UDim2.new(0, 0, 0, (i-1) * 25),
+            Size = UDim2.new(1, 0, 0, 25),
+            AutoButtonColor = false,
+            ZIndex = 11,  -- ⬅️ ДОБАВЛЕНО
+            Parent = dropdownList
+        })
+        
+        optionButton.MouseButton1Click:Connect(function()
+            dropdown.Text = option
+            dropdownList.Visible = false
+            callback(option)
+        end)
+        
+        optionButton.MouseEnter:Connect(function()
+            TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+        end)
+        optionButton.MouseLeave:Connect(function()
+            TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(40, 40, 45)}):Play()
+        end)
+    end
+    
+    dropdown.MouseButton1Click:Connect(function()
+        dropdownList.Visible = not dropdownList.Visible
+    end)
+    
+    return dropdown
+end
+
     CreateToggle("Sheriff ESP", "Highlight sheriff", function(state)
         State.SheriffESP = state
         UpdateAllHighlightsVisibility()
@@ -857,6 +1128,32 @@ local function CreateUI()
     CreateSection("TELEPORT")
 
     CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+
+    CreateSection("COIN FARM")
+
+    CreateToggle("BeachBall Farm", "Automatically collects BeachBall coins", function(state)
+        State.CoinFarmEnabled = state
+        if state then
+            State.CoinFarmCollected = {}  -- Сброс кеша при включении
+            StartCoinFarm()
+        end
+    end)
+
+    CreateDropdown("Farm Mode", "Teleport or smooth tween", {"Teleport", "Tween"}, "Teleport", function(value)
+    State.CoinFarmMode = value
+end)
+
+CreateInputField("Tween Time", "Time for smooth movement (Tween mode)", State.CoinFarmTweenTime, function(value)
+    State.CoinFarmTweenTime = value
+end)
+
+CreateInputField("Teleport Delay", "Delay between teleports (Teleport mode)", State.CoinFarmDelay, function(value)
+    State.CoinFarmDelay = value
+end)
+
+    CreateSection("GODMODE")
+
+    CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
     local footer = Create("TextLabel", {
         Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
@@ -936,6 +1233,10 @@ local function CreateUI()
         if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
             State.ClickTPActive = true
         end
+        if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
+            ToggleGodMode()
+        end
+
     end)
 end
 
@@ -963,6 +1264,9 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.heroSent = false
     State.gunDropped = false
     State.roundStart = true
+    State.GodModeCache = {}
+    State.GodModeProcessing = false
+    State.CoinFarmCollected = {}
 end)
 
 -- ИНИЦИАЛИЗАЦИЯ
