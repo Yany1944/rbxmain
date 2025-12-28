@@ -1,3 +1,5 @@
+-- ПРИВЕТ ЛЮБИМАЯ
+
 if game.PlaceId ~= 142823291 then return end
 
 if not game:IsLoaded() then
