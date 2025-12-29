@@ -45,8 +45,8 @@ local LocalPlayer = Players.LocalPlayer
 local State = {
     -- Auto Farm (базовый)
     AutoFarmEnabled = false,
-    CoinFarmFlySpeed = 35,
-    CoinFarmDelay = 0.3,
+    CoinFarmFlySpeed = 27,
+    CoinFarmDelay = 2,
     CoinFarmCollected = {},
     CoinFarmThread = nil,
     
