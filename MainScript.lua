@@ -65,7 +65,8 @@ local State = {
         Floss = Enum.KeyCode.Unknown,
         ClickTP = Enum.KeyCode.Unknown,
         GodMode = Enum.KeyCode.Unknown,
-        FlingPlayer = Enum.KeyCode.Unknown
+        FlingPlayer = Enum.KeyCode.Unknown,
+        ThrowKnife = Enum.KeyCode.Unknown
     },
     prevMurd = nil,
     prevSher = nil,
@@ -893,6 +894,54 @@ local function AddStroke(parent, thickness, color, transparency)
         Parent = parent
     })
 end
+-- ===================================
+-- THROW KNIFE INSTANTLY
+-- ===================================
+
+local function knifeThrow(silent)
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    -- Ищем нож в персонаже или рюкзаке
+    local knife = character:FindFirstChild("Knife")
+    if not knife then
+        knife = LocalPlayer.Backpack:FindFirstChild("Knife")
+        if knife then
+            -- Экипируем нож
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid:EquipTool(knife)
+                task.wait(0.1)
+                knife = character:FindFirstChild("Knife")
+            end
+        end
+    end
+    
+    if not knife then
+        if not silent and State.NotificationsEnabled then
+            ShowNotification("No Knife", CONFIG.Colors.Red)
+        end
+        return
+    end
+    
+    -- Бросаем нож в направлении камеры
+    local camera = Workspace.CurrentCamera
+    if camera then
+        local throwPos = camera.CFrame.Position + camera.CFrame.LookVector * 100
+        
+        pcall(function()
+            knife.Throw:FireServer(
+                knife:GetPivot(),
+                throwPos
+            )
+        end)
+        
+        if not silent and State.NotificationsEnabled then
+            ShowNotification("Knife Thrown", CONFIG.Colors.Green)
+        end
+    end
+end
+
 
 local function CreateUI()
     for _, child in ipairs(CoreGui:GetChildren()) do
@@ -1267,9 +1316,10 @@ local function CreateUI()
     CreateSection("CAMERA")
 
 CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(value)
-    ApplyFOV(value)
+    pcall(function()
+        ApplyFOV(value)
+    end)
 end)
-
 
 
     CreateSection("NOTIFICATIONS")
@@ -1312,19 +1362,23 @@ end)
     CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
     CreateKeybindButton("Floss Animation", "floss", "Floss")
 
+
     CreateSection("TELEPORT")
 
     CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
 
-CreateSection("ANTI-FLING")
+    CreateSection("MURDERER TOOLS")
+    CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
 
-CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(state)
-    if state then
-        EnableAntiFling()
-    else
-        DisableAntiFling()
-    end
-end)
+    CreateSection("ANTI-FLING")
+
+    CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(state)
+        if state then
+            EnableAntiFling()
+        else
+            DisableAntiFling()
+        end
+    end)
     
     CreateSection("FLING PLAYER")
 
@@ -1564,6 +1618,14 @@ end)
             PlayEmote("floss")
         end
 
+        -- Throw Knife Keybind
+        if input.KeyCode == State.Keybinds.ThrowKnife and State.Keybinds.ThrowKnife ~= Enum.KeyCode.Unknown then
+            pcall(function()
+                knifeThrow(true)
+            end)
+        end
+
+
         if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
             State.ClickTPActive = true
         end
@@ -1571,21 +1633,15 @@ end)
             ToggleGodMode()
         end
         if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
-            if State.SelectedPlayerForFling then
-                local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
-                if targetPlayer and targetPlayer.Character then
+        if State.SelectedPlayerForFling then
+            local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
+            if targetPlayer and targetPlayer.Character then
+                pcall(function()
                     FlingPlayer(targetPlayer)
-                else
-                    if State.NotificationsEnabled then
-                        ShowNotification("Fling Error", CONFIG.Colors.Red, "Player not found or no character", CONFIG.Colors.TextDark)
-                    end
-                end
-            else
-                if State.NotificationsEnabled then
-                    ShowNotification("No Target Selected", CONFIG.Colors.Orange, "Select a player first", CONFIG.Colors.TextDark)
-                end
+                end)
             end
         end
+    end
 
     end)
 end
