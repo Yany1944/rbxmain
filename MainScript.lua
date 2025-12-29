@@ -48,14 +48,13 @@ local State = {
     MurderESP = false,
     SheriffESP = false,
     InnocentESP = false,
+    AllowReset = true,
     NotificationsEnabled = false,
-    GodModeEnabled = false,      -- ДОБАВЬ
-    GodModeCache = {},           -- ДОБАВЬ
-    GodModeProcessing = false,   -- ДОБАВЬ
+    GodModeEnabled = false,
     WalkSpeed = 18,
     JumpPower = 50,
     MaxCameraZoom = 100,
-    
+
     Keybinds = {
         Sit = Enum.KeyCode.Unknown,
         Dab = Enum.KeyCode.Unknown,
@@ -68,25 +67,25 @@ local State = {
     prevMurd = nil,
     prevSher = nil,
     heroSent = false,
-    gunDropped = false,
     roundStart = true,
+    roundActive = false,
     PlayerHighlights = {},
     GunCache = {},
     Connections = {},
     UIElements = {},
     ClickTPActive = false,
     CoinFarmEnabled = false,
-    CoinFarmMode = "Teleport",
-    CoinFarmTweenTime = 1,
-    CoinFarmDelay = 0.5,
+    CoinFarmFlySpeed = 35, 
+    CoinFarmDelay = 2,
     CoinFarmCollected = {},
+    CoinFarmThread = nil,
+    AllCoinsCollected = false,
     ListeningForKeybind = nil,
     RoleCheckLoop = nil,
     NotificationQueue = {},
     CurrentNotification = nil
 }
 
--- CHARACTER MODIFIERS
 local function ApplyWalkSpeed(speed)
     local character = LocalPlayer.Character
     if not character then return end
@@ -112,14 +111,12 @@ local function ApplyMaxCameraZoom(distance)
     State.MaxCameraZoom = distance
 end
 
-
 local function ApplyCharacterSettings()
     ApplyWalkSpeed(State.WalkSpeed)
     ApplyJumpPower(State.JumpPower)
     ApplyMaxCameraZoom(State.MaxCameraZoom)
 end
 
--- COIN FARM FUNCTIONS
 local function getMap()
     for _, v in next, Workspace:GetChildren() do
         if v:FindFirstChild("CoinContainer") then
@@ -127,6 +124,32 @@ local function getMap()
         end
     end
     return nil
+end
+
+local function GetCollectedCoinsCount()
+    local maxValue = 0
+
+    pcall(function()
+        for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
+            if gui:IsA("TextLabel") and gui.Name == "Coins" then
+                local parent = gui.Parent
+                if parent and parent.Name == "Icon" then
+                    local path = gui:GetFullName()
+                    -- Universal: check if path ends with .CurrencyFrame.Icon.Coins
+                    -- Works with Coin, SnowToken, Egg, Candy, BeachBall, any event!
+                    if string.match(path, "%.CurrencyFrame%.Icon%.Coins$") then
+                        local value = tonumber(gui.Text) or 0
+                        -- Take maximum from all counters
+                        if value > maxValue then
+                            maxValue = value
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    return maxValue
 end
 
 local function getNearestCoin(maxDistance)
@@ -152,19 +175,111 @@ local function getNearestCoin(maxDistance)
     return target
 end
 
-local function TweenToCoin(time, coin, humanoidRootPart)
-    local tweenInfo = TweenInfo.new(time, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = coin.CFrame})
-    tween:Play()
-    return tween
+local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
+    speed = speed or State.CoinFarmFlySpeed or 35
+
+    local startPos = humanoidRootPart.Position
+    local targetPos = coin.Position + Vector3.new(0, 2, 0)
+    local distance = (targetPos - startPos).Magnitude
+    local duration = distance / speed
+
+    local startTime = tick()
+
+    while tick() - startTime < duration do
+        if not State.CoinFarmEnabled then break end
+
+        local character = LocalPlayer.Character
+        if not character or not humanoidRootPart.Parent then break end
+
+        local elapsed = tick() - startTime
+        local alpha = math.min(elapsed / duration, 1)
+
+        local currentPos = startPos:Lerp(targetPos, alpha)
+        humanoidRootPart.CFrame = CFrame.new(currentPos)
+
+        RunService.Heartbeat:Wait()
+    end
+
+    if State.CoinFarmEnabled and humanoidRootPart.Parent then
+        humanoidRootPart.CFrame = CFrame.new(targetPos)
+    end
+end 
+
+local function EnableNoClip(character)
+    if not character then return end
+
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
+        end
+    end
+end
+
+local function DisableNoClip(character)
+    if not character then return end
+
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            part.CanCollide = true
+        end
+    end
+end
+
+local function ResetAndClearCoinFarm()
+    if not State.AllowReset then return end
+
+    State.AllowReset = false
+
+    State.CoinFarmEnabled = false
+    if State.CoinFarmThread then
+        task.cancel(State.CoinFarmThread)
+        State.CoinFarmThread = nil
+    end
+
+    State.CoinFarmCollected = {}
+    State.AllCoinsCollected = false
+
+    local character = LocalPlayer.Character
+    if character then
+        DisableNoClip(character)
+
+        pcall(function()
+            character:BreakJoints()
+        end)
+
+        task.wait(6)
+        State.AllowReset = true
+    else
+        task.wait(1)
+        State.AllowReset = true
+    end
 end
 
 local function StartCoinFarm()
+    if State.CoinFarmThread then
+        task.cancel(State.CoinFarmThread)
+        State.CoinFarmThread = nil
+    end
+
     if not State.CoinFarmEnabled then return end
 
-    local coinFarmLoop = task.spawn(function()
+    State.CoinFarmThread = task.spawn(function()
+        local lastCoinCount = 0
+        local noChangeCounter = 0
+
         while State.CoinFarmEnabled do
-            task.wait()
+            task.wait(0.1)
+
+            if not State.roundActive then
+                task.wait(1)
+                continue
+            end
+
+            local map = getMap()
+            if not map then
+                task.wait(1)
+                continue
+            end
 
             local character = LocalPlayer.Character
             if not character then continue end
@@ -172,71 +287,110 @@ local function StartCoinFarm()
             local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
             if not humanoidRootPart then continue end
 
-            local coin = getNearestCoin()
-            if coin and not State.CoinFarmCollected[coin] then
-                if State.CoinFarmMode == "Tween" then
-                    local tween = TweenToCoin(State.CoinFarmTweenTime, coin, humanoidRootPart)
-                    tween.Completed:Wait()
-                    State.CoinFarmCollected[coin] = true
-                elseif State.CoinFarmMode == "Teleport" then
-                    humanoidRootPart.CFrame = coin.CFrame
-                    task.wait(State.CoinFarmDelay)
-                    State.CoinFarmCollected[coin] = true
-                end
-            end
-        end
-    end)
+            local currentCoins = GetCollectedCoinsCount()
 
-    table.insert(State.Connections, {Disconnect = function() 
-        State.CoinFarmEnabled = false 
-    end})
+            if currentCoins == lastCoinCount then
+                noChangeCounter = noChangeCounter + 1
+
+                if noChangeCounter >= 50 and State.roundActive and currentCoins > 0 and not State.AllCoinsCollected then
+                    State.AllCoinsCollected = true
+
+                    if State.NotificationsEnabled then
+                        task.spawn(function()
+                            ShowNotification(
+                                "All coins collected!",
+                                CONFIG.Colors.Green,
+                                "Total: " .. currentCoins,
+                                CONFIG.Colors.Accent
+                            )
+                        end)
+                    end
+
+                    task.spawn(function()
+                        task.wait(1)
+                        ResetAndClearCoinFarm()
+                    end)
+                end
+            else
+                lastCoinCount = currentCoins
+                noChangeCounter = 0
+            end
+
+            local coin = getNearestCoin()
+            if not coin then
+                task.wait(1)
+                continue
+            end
+
+            if State.CoinFarmCollected[coin] then
+                continue
+            end
+
+            pcall(function()
+                local currentCoins = GetCollectedCoinsCount()
+
+                if currentCoins < 3 then
+                    local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
+
+                    if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
+                        humanoidRootPart.CFrame = targetCFrame
+                        task.wait(State.CoinFarmDelay)
+                        State.CoinFarmCollected[coin] = true
+                    end
+                else
+                    EnableNoClip(character)
+                    SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                    task.wait(0.2)
+                    State.CoinFarmCollected[coin] = true
+                    DisableNoClip(character)
+                end
+            end)
+        end
+
+        local character = LocalPlayer.Character
+        if character then
+            DisableNoClip(character)
+        end
+
+        State.CoinFarmThread = nil
+    end)
 end
 
--- GODMODE
 local lastGodModeApply = 0
 
 local function ApplyGodMode()
     if not State.GodModeEnabled then return end
-    
-    -- Ограничение частоты (раз в 0.5 секунды)
+
     local now = tick()
     if now - lastGodModeApply < 0.5 then return end
     lastGodModeApply = now
-    
+
     local character = LocalPlayer.Character
     if not character then return end
-    
+
     local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid or State.GodModeProcessing or State.GodModeCache[humanoid] then 
-        return 
-    end
-    
-    State.GodModeProcessing = true
-    
+    if not humanoid then return end
+
     pcall(function()
         humanoid.Name = "OldHumanoid"
-        
+
         local newHumanoid = humanoid:Clone()
-        State.GodModeCache[newHumanoid] = true
         newHumanoid.Parent = character
         newHumanoid.Name = "Humanoid"
-        
+
         humanoid:Destroy()
-        
-        -- Восстанавливаем камеру
+
         if Workspace.Camera then
             Workspace.Camera.CameraSubject = newHumanoid
         end
-        
-        -- Перезапускаем анимации
+
         local animate = character:FindFirstChild("Animate")
         if animate then
             animate.Disabled = true
             task.wait(0.05)
             animate.Disabled = false
         end
-        
-        -- ВАЖНО: Сохраняем настройки скорости/прыжка
+
         if State.WalkSpeed ~= 18 then
             newHumanoid.WalkSpeed = State.WalkSpeed
         end
@@ -244,14 +398,11 @@ local function ApplyGodMode()
             newHumanoid.JumpPower = State.JumpPower
         end
     end)
-    
-    State.GodModeProcessing = false
 end
-
 
 local function ToggleGodMode()
     State.GodModeEnabled = not State.GodModeEnabled
-    
+
     if State.GodModeEnabled then
         local godModeConnection = RunService.Heartbeat:Connect(function()
             if State.GodModeEnabled and LocalPlayer.Character then
@@ -259,16 +410,9 @@ local function ToggleGodMode()
             end
         end)
         table.insert(State.Connections, godModeConnection)
-        
-        print("GodMode: ENABLED")  -- Вместо ShowNotification
-    else
-        State.GodModeCache = {}
-        print("GodMode: DISABLED (reset to restore humanoid)")
     end
 end
 
-
--- NOTIFICATION SYSTEM
 local function CreateNotificationUI()
     local notifGui = Instance.new("ScreenGui")
     notifGui.Name = "MM2_Notifications"
@@ -358,7 +502,6 @@ local function ShowNotification(text1, color1, text2, color2)
     end
 end
 
--- ESP UTILITIES
 local function CreateHighlight(adornee, color)
     if not adornee or not adornee.Parent then return nil end
 
@@ -439,7 +582,6 @@ local function UpdateAllHighlightsVisibility()
     end
 end
 
--- ESP ДЛЯ ОРУЖИЯ
 local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
     if State.GunCache[gunPart] then return end
@@ -489,7 +631,6 @@ local function UpdateGunESPVisibility()
     end
 end
 
--- НАСТРОЙКА ОТСЛЕЖИВАНИЯ ОРУЖИЯ
 local function SetupGunTracking()
     local gunAddedConnection = Workspace.DescendantAdded:Connect(function(obj)
         if obj:IsA("BasePart") and obj.Name == "GunDrop" then
@@ -523,7 +664,6 @@ local function InitialGunScan()
     end
 end
 
--- ROLE CHECKER
 local function StartRoleChecking()
     if State.RoleCheckLoop then
         State.RoleCheckLoop:Disconnect()
@@ -532,10 +672,6 @@ local function StartRoleChecking()
     State.RoleCheckLoop = task.spawn(function()
         while getgenv().MM2_ESP_Script do
             pcall(function()
-                for _, v in next, getconnections(LocalPlayer.Idled) do 
-                    v:Disable() 
-                end
-
                 local murder, sheriff = nil, nil
 
                 for _, p in pairs(Players:GetPlayers()) do
@@ -555,7 +691,41 @@ local function StartRoleChecking()
                     end
                 end
 
+                if not murder and State.roundActive then
+                    State.roundActive = false
+                    State.roundStart = true
+
+                    if State.CoinFarmEnabled then
+                        State.CoinFarmEnabled = false
+                        if State.CoinFarmThread then
+                            task.cancel(State.CoinFarmThread)
+                            State.CoinFarmThread = nil
+                        end
+
+                        local character = LocalPlayer.Character
+                        if character then
+                            DisableNoClip(character)
+                        end
+                    end
+
+                    State.CoinFarmCollected = {}
+                    State.AllCoinsCollected = false
+
+                    State.prevMurd = nil
+                    State.prevSher = nil
+                    State.heroSent = false
+
+                    if State.NotificationsEnabled then
+                        task.spawn(function()
+                            ShowNotification("Round Ended", CONFIG.Colors.TextDark)
+                        end)
+                    end
+                end
+
                 if murder and sheriff and State.roundStart then
+                    State.roundActive = true
+                    State.AllowReset = true
+
                     if State.NotificationsEnabled then
                         task.spawn(function()
                             ShowNotification(
@@ -570,6 +740,16 @@ local function StartRoleChecking()
                     State.prevMurd = murder
                     State.prevSher = sheriff
                     State.heroSent = false
+
+                    State.CoinFarmCollected = {}
+                    State.AllCoinsCollected = false
+
+                    local coinFarmToggle = State.UIElements.CoinFarmToggle
+                    if coinFarmToggle and coinFarmToggle.BackgroundColor3 == CONFIG.Colors.Accent then
+                        task.wait(2)
+                        State.CoinFarmEnabled = true
+                        StartCoinFarm()
+                    end
                 end
 
                 if sheriff and sheriff ~= State.prevSher and murder == State.prevMurd then
@@ -578,7 +758,6 @@ local function StartRoleChecking()
                             ShowNotification("Sheriff: " .. sheriff.Name, CONFIG.Colors.Sheriff)
                         end)
                     end
-                    State.gunDropped = false
                     State.heroSent = true
                     State.prevSher = sheriff
                 end
@@ -597,14 +776,13 @@ local function StartRoleChecking()
         end
     end)
 end
--- ANTI-FLING (Always Active)
+
 task.spawn(function()
     pcall(function()
         loadstring(game:HttpGet('https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/AntiFling.lua'))()
     end)
 end)
 
--- ANTI-AFK (Always Active)
 task.spawn(function()
     while getgenv().MM2_ESP_Script do
         pcall(function()
@@ -612,12 +790,10 @@ task.spawn(function()
                 connection:Disable()
             end
         end)
-        task.wait(1) -- Проверка каждую секунду
+        task.wait(1)
     end
 end)
 
-
--- ANIMATIONS
 local function PlayEmote(emoteName)
     task.spawn(function()
         pcall(function()
@@ -645,7 +821,6 @@ local function PlayEmote(emoteName)
     end)
 end
 
--- CLICK TP
 local function TeleportToMouse()
     local character = LocalPlayer.Character
     if not character then return end
@@ -661,7 +836,6 @@ local function TeleportToMouse()
     end
 end
 
--- KEYBIND UTILITIES
 local function FindKeybindButton(keyCode)
     for bindName, boundKey in pairs(State.Keybinds) do
         if boundKey == keyCode then
@@ -689,7 +863,6 @@ local function SetKeybind(bindName, keyCode, button, allButtons)
     button.Text = keyCode.Name
 end
 
--- UI UTILITIES
 local function Create(className, properties, children)
     local obj = Instance.new(className)
     for k, v in pairs(properties or {}) do
@@ -715,7 +888,6 @@ local function AddStroke(parent, thickness, color, transparency)
     })
 end
 
--- UI CREATION
 local function CreateUI()
     for _, child in ipairs(CoreGui:GetChildren()) do
         if child.Name == "MM2_ESP_UI" then child:Destroy() end
@@ -749,7 +921,7 @@ local function CreateUI()
     })
 
     local titleLabel = Create("TextLabel", {
-        Text = "MM2 ESP + ANIMATIONS <font color=\"rgb(90,140,255)\">v4.7</font>",
+        Text = "MM2 ESP + ANIMATIONS <font color=\"rgb(90,140,255)\">v5.2</font>",
         RichText = true,
         Font = Enum.Font.GothamBold,
         TextSize = 16,
@@ -762,7 +934,7 @@ local function CreateUI()
     })
 
     local closeButton = Create("TextButton", {
-        Text = "×",
+        Text = "Ã—",
         Font = Enum.Font.GothamMedium,
         TextSize = 24,
         TextColor3 = CONFIG.Colors.TextDark,
@@ -870,6 +1042,8 @@ local function CreateUI()
 
             callback(state)
         end)
+
+        return toggleBg
     end
 
     local function CreateInputField(title, desc, defaultValue, callback)
@@ -977,6 +1151,99 @@ local function CreateUI()
         return bindButton
     end
 
+    local function CreateDropdown(title, desc, options, defaultValue, callback)
+        local card = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Size = UDim2.new(1, 0, 0, 60),
+            Parent = content
+        })
+        AddCorner(card, 8)
+        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+        local cardTitle = Create("TextLabel", {
+            Text = title,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 14,
+            TextColor3 = CONFIG.Colors.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 10),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        local cardDesc = Create("TextLabel", {
+            Text = desc,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 30),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        local dropdown = Create("TextButton", {
+            Text = defaultValue,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 12,
+            TextColor3 = CONFIG.Colors.Text,
+            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+            Position = UDim2.new(1, -110, 0.5, -12),
+            Size = UDim2.new(0, 95, 0, 24),
+            AutoButtonColor = false,
+            Parent = card
+        })
+        AddCorner(dropdown, 6)
+        AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
+
+        local dropdownList = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Position = UDim2.new(0, 325, 0, 10),
+            Size = UDim2.new(0, 95, 0, #options * 25),
+            Visible = false,
+            ZIndex = 10,
+            Parent = card
+        })
+        AddCorner(dropdownList, 6)
+        AddStroke(dropdownList, 1, CONFIG.Colors.Accent, 0.6)
+
+        for i, option in ipairs(options) do
+            local optionButton = Create("TextButton", {
+                Text = option,
+                Font = Enum.Font.Gotham,
+                TextSize = 11,
+                TextColor3 = CONFIG.Colors.Text,
+                BackgroundColor3 = Color3.fromRGB(40, 40, 45),
+                Position = UDim2.new(0, 0, 0, (i-1) * 25),
+                Size = UDim2.new(1, 0, 0, 25),
+                AutoButtonColor = false,
+                ZIndex = 11,
+                Parent = dropdownList
+            })
+
+            optionButton.MouseButton1Click:Connect(function()
+                dropdown.Text = option
+                dropdownList.Visible = false
+                callback(option)
+            end)
+
+            optionButton.MouseEnter:Connect(function()
+                TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+            end)
+            optionButton.MouseLeave:Connect(function()
+                TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(40, 40, 45)}):Play()
+            end)
+        end
+
+        dropdown.MouseButton1Click:Connect(function()
+            dropdownList.Visible = not dropdownList.Visible
+        end)
+
+        return dropdown
+    end
+
     CreateSection("CHARACTER SETTINGS")
 
     CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, function(value)
@@ -1013,100 +1280,6 @@ local function CreateUI()
         UpdateAllHighlightsVisibility()
     end)
 
-    local function CreateDropdown(title, desc, options, defaultValue, callback)
-    local card = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Size = UDim2.new(1, 0, 0, 60),
-        Parent = content
-    })
-    AddCorner(card, 8)
-    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-    
-    local cardTitle = Create("TextLabel", {
-        Text = title,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 14,
-        TextColor3 = CONFIG.Colors.Text,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 10),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-    
-    local cardDesc = Create("TextLabel", {
-        Text = desc,
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        TextColor3 = CONFIG.Colors.TextDark,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 30),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-    
-    local dropdown = Create("TextButton", {
-        Text = defaultValue,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 12,
-        TextColor3 = CONFIG.Colors.Text,
-        BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-        Position = UDim2.new(1, -110, 0.5, -12),
-        Size = UDim2.new(0, 95, 0, 24),
-        AutoButtonColor = false,
-        Parent = card
-    })
-    AddCorner(dropdown, 6)
-    AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
-    
-    -- ⬇️ ВАЖНО: Parent должен быть card, а не dropdown!
-    local dropdownList = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Position = UDim2.new(0, 325, 0, 10),  -- ⬅️ ИЗМЕНЕНО: позиция справа от карточки
-        Size = UDim2.new(0, 95, 0, #options * 25),
-        Visible = false,
-        ZIndex = 10,  -- ⬅️ ДОБАВЛЕНО: поверх других элементов
-        Parent = card  -- ⬅️ ИЗМЕНЕНО: было dropdown
-    })
-    AddCorner(dropdownList, 6)
-    AddStroke(dropdownList, 1, CONFIG.Colors.Accent, 0.6)
-    
-    for i, option in ipairs(options) do
-        local optionButton = Create("TextButton", {
-            Text = option,
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.Text,
-            BackgroundColor3 = Color3.fromRGB(40, 40, 45),
-            Position = UDim2.new(0, 0, 0, (i-1) * 25),
-            Size = UDim2.new(1, 0, 0, 25),
-            AutoButtonColor = false,
-            ZIndex = 11,  -- ⬅️ ДОБАВЛЕНО
-            Parent = dropdownList
-        })
-        
-        optionButton.MouseButton1Click:Connect(function()
-            dropdown.Text = option
-            dropdownList.Visible = false
-            callback(option)
-        end)
-        
-        optionButton.MouseEnter:Connect(function()
-            TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
-        end)
-        optionButton.MouseLeave:Connect(function()
-            TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(40, 40, 45)}):Play()
-        end)
-    end
-    
-    dropdown.MouseButton1Click:Connect(function()
-        dropdownList.Visible = not dropdownList.Visible
-    end)
-    
-    return dropdown
-end
-
     CreateToggle("Sheriff ESP", "Highlight sheriff", function(state)
         State.SheriffESP = state
         UpdateAllHighlightsVisibility()
@@ -1131,25 +1304,33 @@ end
 
     CreateSection("COIN FARM")
 
-    CreateToggle("BeachBall Farm", "Automatically collects BeachBall coins", function(state)
+    State.UIElements.CoinFarmToggle = CreateToggle("Coin Farm", "Automatically collects coins", function(state)
         State.CoinFarmEnabled = state
         if state then
-            State.CoinFarmCollected = {}  -- Сброс кеша при включении
+            State.CoinFarmCollected = {}
             StartCoinFarm()
+        else
+            if State.CoinFarmThread then
+                task.cancel(State.CoinFarmThread)
+                State.CoinFarmThread = nil
+            end
+
+            local character = LocalPlayer.Character
+            if character then
+                DisableNoClip(character)
+            end
         end
     end)
 
-    CreateDropdown("Farm Mode", "Teleport or smooth tween", {"Teleport", "Tween"}, "Teleport", function(value)
-    State.CoinFarmMode = value
-end)
+CreateInputField("Fly Speed", "Flight speed in Tween mode (studs/sec)", State.CoinFarmFlySpeed, function(value)
+        if value >= 10 and value <= 100 then
+            State.CoinFarmFlySpeed = value
+        end
+    end)
 
-CreateInputField("Tween Time", "Time for smooth movement (Tween mode)", State.CoinFarmTweenTime, function(value)
-    State.CoinFarmTweenTime = value
-end)
-
-CreateInputField("Teleport Delay", "Delay between teleports (Teleport mode)", State.CoinFarmDelay, function(value)
-    State.CoinFarmDelay = value
-end)
+    CreateInputField("Teleport Delay", "Delay between teleports (Teleport mode)", State.CoinFarmDelay, function(value)
+        State.CoinFarmDelay = value
+    end)
 
     CreateSection("GODMODE")
 
@@ -1236,11 +1417,9 @@ end)
         if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
             ToggleGodMode()
         end
-
     end)
 end
 
--- INPUT HANDLING
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == State.Keybinds.ClickTP then
         State.ClickTPActive = false
@@ -1254,7 +1433,6 @@ mouse.Button1Down:Connect(function()
     end
 end)
 
--- PLAYER EVENTS
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     ApplyCharacterSettings()
@@ -1262,14 +1440,18 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.prevMurd = nil
     State.prevSher = nil
     State.heroSent = false
-    State.gunDropped = false
     State.roundStart = true
-    State.GodModeCache = {}
-    State.GodModeProcessing = false
+    State.roundActive = false
+    State.AllowReset = true
     State.CoinFarmCollected = {}
+    State.AllCoinsCollected = false
+
+    local character = LocalPlayer.Character
+    if character then
+        DisableNoClip(character)
+    end
 end)
 
--- ИНИЦИАЛИЗАЦИЯ
 CreateUI()
 CreateNotificationUI()
 ApplyCharacterSettings()
