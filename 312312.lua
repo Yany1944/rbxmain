@@ -1,5 +1,5 @@
 -- LocalScript в StarterPlayer > StarterPlayerScripts
--- MM2 Auto Farm + Hard Farm - FINAL VERSION (SIMPLE DEATH DETECTION)
+-- MM2 Auto Farm + Hard Farm - OPTIMIZED VERSION
 -- Author: AI Assistant | Date: 29.12.2025
 
 if game.PlaceId ~= 142823291 then return end
@@ -27,10 +27,13 @@ local CONFIG = {
         Red = Color3.fromRGB(255, 85, 85),
         Green = Color3.fromRGB(85, 255, 120),
         Orange = Color3.fromRGB(255, 170, 50),
-    }
+    },
+    UI_UPDATE_INTERVAL = 0.5, -- Обновление UI раз в 0.5 сек вместо каждого кадра
+    COIN_CHECK_INTERVAL = 0.2, -- Проверка монет
+    HEARTBEAT_INTERVAL = 2, -- Уменьшено использование Heartbeat
 }
 
--- === СЕРВИСЫ ===
+-- === СЕРВИСЫ (КЭШИРУЕМ ЛОКАЛЬНО) ===
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -55,74 +58,139 @@ local State = {
     coinsCollectedThisRound = 0,
     participationTimerStart = 0,
     participationTimeout = 7,
-    participationTimeoutAfterDeath = 8, -- Таймер после участия
+    participationTimeoutAfterDeath = 8,
     lastCoinCount = 0,
     farmStatus = "Ожидание",
     
     -- UI
     UIElements = {},
+    
+    -- Кэширование
+    cachedCoinsCount = 0,
+    lastCoinsCheckTime = 0,
+    cachedMap = nil,
+    lastMapCheckTime = 0,
 }
 
--- === ФУНКЦИИ АВТОФАРМА (ЧИСТЫЕ) ===
+-- === ОПТИМИЗИРОВАННЫЕ ФУНКЦИИ ===
+
+-- Кэшированная функция получения монет
+local coinLabelCache = nil
+local lastCacheTime = 0
 
 local function GetCollectedCoinsCount()
+    -- Проверяем кэш (оптимизация)
+    if coinLabelCache and coinLabelCache.Parent and (tick() - lastCacheTime) < 2 then
+        local success, value = pcall(function()
+            return tonumber(coinLabelCache.Text) or 0
+        end)
+        if success then
+            return value
+        end
+    end
+    
+    -- Метод 1: Прямой путь (быстрый)
+    local success, coins = pcall(function()
+        local label = LocalPlayer.PlayerGui
+            :FindFirstChild("MainGUI")
+            :FindFirstChild("Game")
+            :FindFirstChild("CoinBags")
+            :FindFirstChild("Container")
+            :FindFirstChild("SnowToken")
+            :FindFirstChild("CurrencyFrame")
+            :FindFirstChild("Icon")
+            :FindFirstChild("Coins")
+        
+        if label then
+            coinLabelCache = label
+            lastCacheTime = tick()
+            return tonumber(label.Text) or 0
+        end
+        return 0
+    end)
+    
+    if success and coins >= 0 then
+        return coins
+    end
+    
+    -- Метод 2: Универсальный поиск (медленный фолбек)
     local maxValue = 0
     pcall(function()
         for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
             if gui:IsA("TextLabel") and gui.Name == "Coins" then
-                local parent = gui.Parent
-                if parent and parent.Name == "Icon" then
-                    local path = gui:GetFullName()
-                    if string.match(path, "%.CurrencyFrame%.Icon%.Coins$") then
-                        local value = tonumber(gui.Text) or 0
-                        if value > maxValue then
-                            maxValue = value
-                        end
+                local path = gui:GetFullName()
+                if path:match("CurrencyFrame%.Icon%.Coins$") then
+                    local value = tonumber(gui.Text) or 0
+                    if value > maxValue then
+                        maxValue = value
+                        coinLabelCache = gui
+                        lastCacheTime = tick()
                     end
                 end
             end
         end
     end)
+    
     return maxValue
 end
 
+-- Кэшированная функция получения карты
 local function getMap()
+    local currentTime = tick()
+    
+    -- Кэш карты на 2 секунды
+    if State.cachedMap and State.cachedMap.Parent and currentTime - State.lastMapCheckTime < 2 then
+        return State.cachedMap
+    end
+    
     for _, v in next, Workspace:GetChildren() do
         if v:FindFirstChild("CoinContainer") then
+            State.cachedMap = v
+            State.lastMapCheckTime = currentTime
             return v
         end
     end
+    
+    State.cachedMap = nil
     return nil
 end
 
 local function getNearestCoin()
+    local character = LocalPlayer.Character
+    if not character then return nil end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil end
+    
+    local map = getMap()
+    if not map then return nil end
+    
+    local coinContainer = map:FindFirstChild("CoinContainer")
+    if not coinContainer then return nil end
+    
     local target
     local closestDistance = math.huge
-    local map = getMap()
-    local humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-
-    if not map or not humanoidRootPart then return end
-
-    local coinContainer = map:FindFirstChild("CoinContainer")
-    if not coinContainer then return end
+    local hrpPosition = humanoidRootPart.Position
 
     for _, coin in pairs(coinContainer:GetChildren()) do
         if coin.Name == "Coin_Server" and not State.CoinFarmCollected[coin] then
-            local distance = (coin.Position - humanoidRootPart.Position).Magnitude
+            local distance = (coin.Position - hrpPosition).Magnitude
             if distance < closestDistance then
                 closestDistance = distance
                 target = coin
             end
         end
     end
+    
     return target
 end
 
+-- ОПТИМИЗИРОВАННЫЙ полет (убрал Heartbeat)
 local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     speed = speed or State.CoinFarmFlySpeed
 
     local startPos = humanoidRootPart.Position
-    local targetPos = coin.Position + Vector3.new(0, 2, 0)
+    local targetPos = coin.Position + Vector3.new(0, 1, 0) -- Уменьшено с 2 до 1
     local distance = (targetPos - startPos).Magnitude
     local duration = distance / speed
 
@@ -139,12 +207,21 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
 
         local currentPos = startPos:Lerp(targetPos, alpha)
         humanoidRootPart.CFrame = CFrame.new(currentPos)
+        
+        -- СБРОС СКОРОСТИ (предотвращает тряску)
+        if humanoidRootPart.AssemblyLinearVelocity then
+            humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
 
-        RunService.Heartbeat:Wait()
+        task.wait(0.03) -- Фиксированная задержка
     end
 
+    -- Финальная позиция
     if State.AutoFarmEnabled and humanoidRootPart.Parent then
         humanoidRootPart.CFrame = CFrame.new(targetPos)
+        if humanoidRootPart.AssemblyLinearVelocity then
+            humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
     end
 end
 
@@ -183,10 +260,16 @@ local function StartAutoFarm()
             task.wait(0.1)
 
             local character = LocalPlayer.Character
-            if not character then continue end
+            if not character then 
+                task.wait(0.5)
+                continue 
+            end
 
             local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-            if not humanoidRootPart then continue end
+            if not humanoidRootPart then 
+                task.wait(0.5)
+                continue 
+            end
 
             local coin = getNearestCoin()
             if not coin then
@@ -200,19 +283,56 @@ local function StartAutoFarm()
 
             pcall(function()
                 local currentCoins = GetCollectedCoinsCount()
+                local coinsBeforeCollection = currentCoins
 
                 if currentCoins < 3 then
+                    -- ПЕРВЫЕ 3 МОНЕТЫ: ТЕЛЕПОРТ
                     local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
 
                     if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
                         humanoidRootPart.CFrame = targetCFrame
+                        
+                        -- ПРИНУДИТЕЛЬНЫЙ СБОР
+                        if firetouchinterest then
+                            firetouchinterest(humanoidRootPart, coin, 0)
+                            task.wait(0.05)
+                            firetouchinterest(humanoidRootPart, coin, 1)
+                        end
+                        
                         task.wait(State.CoinFarmDelay)
+                        
+                        -- ПРОВЕРКА СБОРА
+                        local coinsAfter = GetCollectedCoinsCount()
+                        if coinsAfter > coinsBeforeCollection then
+                            print("[Auto Farm] ✅ Монета собрана (TP)")
+                        else
+                            print("[Auto Farm] ⚠️ Монета не собралась")
+                        end
+                        
                         State.CoinFarmCollected[coin] = true
                     end
                 else
+                    -- ОСТАЛЬНЫЕ: ПОЛЁТ
                     EnableNoClip(character)
                     SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                    
+                    -- ПРИНУДИТЕЛЬНЫЙ СБОР НА МЕСТЕ
+                    if firetouchinterest then
+                        firetouchinterest(humanoidRootPart, coin, 0)
+                        task.wait(0.05)
+                        firetouchinterest(humanoidRootPart, coin, 1)
+                    end
+                    
                     task.wait(0.2)
+                    
+                    -- ПРОВЕРКА СБОРА
+                    local coinsAfter = GetCollectedCoinsCount()
+                    if coinsAfter > coinsBeforeCollection then
+                        print("[Auto Farm] ✅ Монета собрана (Fly)")
+                    else
+                        print("[Auto Farm] ⚠️ Монета не собралась")
+                    end
+                    
                     State.CoinFarmCollected[coin] = true
                     DisableNoClip(character)
                 end
@@ -240,38 +360,28 @@ local function StopAutoFarmThread()
         DisableNoClip(character)
     end
     
-    print("[Auto Farm] Поток остановлен (кнопка активна)")
+    print("[Auto Farm] Поток остановлен")
 end
 
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
-    
-    if State.CoinFarmThread then
-        task.cancel(State.CoinFarmThread)
-        State.CoinFarmThread = nil
-    end
-    
-    local character = LocalPlayer.Character
-    if character then
-        DisableNoClip(character)
-    end
-    
+    StopAutoFarmThread()
     print("[Auto Farm] Полностью выключен")
 end
 
 -- === ФУНКЦИИ HARD FARM ===
 
 local function findMurderer()
-    for _, i in ipairs(Players:GetPlayers()) do
-        if i.Backpack:FindFirstChild("Knife") then
-            return i
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Backpack:FindFirstChild("Knife") then
+            return player
         end
     end
     
-    for _, i in ipairs(Players:GetPlayers()) do
-        if not i.Character then continue end
-        if i.Character:FindFirstChild("Knife") then
-            return i
+    for _, player in ipairs(Players:GetPlayers()) do
+        local character = player.Character
+        if character and character:FindFirstChild("Knife") then
+            return player
         end
     end
     
@@ -310,11 +420,7 @@ local function isMurdererAlive(murderer)
     end
     
     local hasKnife = character:FindFirstChild("Knife") or murderer.Backpack:FindFirstChild("Knife")
-    if not hasKnife then
-        return false
-    end
-    
-    return true
+    return hasKnife ~= nil
 end
 
 local function miniFling(playerToFling)
@@ -334,55 +440,39 @@ local function FlingCycle()
     while State.isRoundActive and State.HardFarmEnabled do
         local murderer = findMurderer()
         
-        if not murderer then
-            print("[Hard Farm] Мурдер не найден - выход")
+        if not murderer or not isMurdererAlive(murderer) then
+            print("[Hard Farm] Мурдер не найден/мёртв - выход")
             break
         end
         
-        if not isMurdererAlive(murderer) then
-            print("[Hard Farm] Мурдер мёртв - выход")
-            break
-        end
-        
-        if not murderer.Character then
+        local murdererCharacter = murderer.Character
+        if not murdererCharacter then
             print("[Hard Farm] У мурдерера нет персонажа - ждём 2 сек")
             task.wait(2)
             continue
         end
         
-        local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
+        local murdererHRP = murdererCharacter:FindFirstChild("HumanoidRootPart")
         if not murdererHRP then
             print("[Hard Farm] У мурдерера нет HRP - ждём 2 сек")
             task.wait(2)
             continue
         end
         
-        local murdererHumanoid = murderer.Character:FindFirstChildOfClass("Humanoid")
-        if not murdererHumanoid or murdererHumanoid.Health <= 0 then
-            print("[Hard Farm] Мурдер мёртв (проверка humanoid) - выход")
-            break
-        end
-        
         if isMurdererInFlight(murderer) then
             State.farmStatus = string.format("Мурдер в полёте: %s", murderer.Name)
-            UpdateUI()
             print("[Hard Farm] Мурдер в полёте, ждём 3 сек...")
             task.wait(3)
             continue
         end
         
         State.farmStatus = string.format("Флинг: %s", murderer.Name)
-        UpdateUI()
         print("[Hard Farm] Флинг мурдерера...")
         
-        local success, err = pcall(function()
-            miniFling(murderer)
-        end)
+        local success, err = pcall(miniFling, murderer)
         
         if not success then
             print("[Hard Farm] Ошибка флинга:", err)
-            task.wait(2)
-            continue
         end
         
         task.wait(5)
@@ -399,19 +489,28 @@ local function ResetCounters()
     State.roundStartCoins = GetCollectedCoinsCount()
     State.lastCoinCount = State.roundStartCoins
     State.participationTimerStart = 0
+    -- Сброс кэша
+    State.cachedMap = nil
+    State.lastMapCheckTime = 0
     print("[Hard Farm] Счётчики сброшены. Начальные монеты:", State.roundStartCoins)
 end
 
 local function ResetCharacter()
     print("[Hard Farm] Ресет персонажа")
     pcall(function()
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-            LocalPlayer.Character.Humanoid.Health = 0
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid.Health = 0
+            end
         end
     end)
 end
 
 -- === GUI ===
+
+local lastUIUpdate = 0
 
 local function CreateUI()
     local ScreenGui = Instance.new("ScreenGui")
@@ -602,10 +701,21 @@ local function CreateUI()
     return State.UIElements
 end
 
+-- ОПТИМИЗИРОВАННОЕ обновление UI с ограничением частоты
 function UpdateUI()
+    local currentTime = tick()
+    
+    -- Ограничение обновления UI до CONFIG.UI_UPDATE_INTERVAL
+    if currentTime - lastUIUpdate < CONFIG.UI_UPDATE_INTERVAL then
+        return
+    end
+    
+    lastUIUpdate = currentTime
+    
     local ui = State.UIElements
     if not ui or not ui.MainGui then return end
     
+    -- Батчевое обновление всех элементов
     if State.isRoundActive then
         ui.RoundStatus.Text = "Раунд: ✅ Активен"
         ui.RoundStatus.TextColor3 = CONFIG.Colors.Green
@@ -619,11 +729,14 @@ function UpdateUI()
         currentCoins, State.coinsCollectedThisRound)
     
     ui.FarmStatus.Text = "Статус: " .. State.farmStatus
-    if State.farmStatus:find("Собираю") or State.farmStatus:find("Участвую") or State.farmStatus:find("мурдерер") then
+    
+    -- Определение цвета статуса
+    local statusText = State.farmStatus
+    if statusText:find("Собираю") or statusText:find("Участвую") or statusText:find("мурдерер") then
         ui.FarmStatus.TextColor3 = CONFIG.Colors.Green
-    elseif State.farmStatus:find("Флинг") or State.farmStatus:find("полёте") then
+    elseif statusText:find("Флинг") or statusText:find("полёте") then
         ui.FarmStatus.TextColor3 = CONFIG.Colors.Red
-    elseif State.farmStatus:find("Проверка") then
+    elseif statusText:find("Проверка") then
         ui.FarmStatus.TextColor3 = CONFIG.Colors.Orange
     else
         ui.FarmStatus.TextColor3 = CONFIG.Colors.TextDark
@@ -646,12 +759,11 @@ function UpdateUI()
     end
 end
 
--- === HARD FARM ЛОГИКА (УПРОЩЁННАЯ) ===
+-- === HARD FARM ЛОГИКА ===
 
 local function HardFarmProcess()
     if not State.HardFarmEnabled or State.isProcessingHardFarm then return end
-    if not State.isRoundActive then return end
-    if not State.AutoFarmEnabled then return end
+    if not State.isRoundActive or not State.AutoFarmEnabled then return end
     
     State.isProcessingHardFarm = true
     print("[Hard Farm] ========== НАЧАЛО ОБРАБОТКИ ==========")
@@ -659,20 +771,17 @@ local function HardFarmProcess()
     -- СЦЕНАРИЙ 1: Я мурдерер
     if amIMurderer() then
         State.farmStatus = "Я мурдерер - фармлю до 50"
-        UpdateUI()
         print("[Hard Farm] СЦЕНАРИЙ 1: Я мурдерер")
         
         while State.isRoundActive and State.HardFarmEnabled and State.AutoFarmEnabled do
-            task.wait(0.5)
+            task.wait(1) -- Увеличена задержка
             
             local currentCoins = GetCollectedCoinsCount()
             State.coinsCollectedThisRound = currentCoins - State.roundStartCoins
-            UpdateUI()
             
             if State.coinsCollectedThisRound >= 50 then
                 print("[Hard Farm] Собрали 50 как мурдерер")
                 State.farmStatus = "50 монет - ресет"
-                UpdateUI()
                 
                 StopAutoFarmThread()
                 task.wait(0.5)
@@ -687,10 +796,9 @@ local function HardFarmProcess()
         return
     end
     
-    -- СЦЕНАРИЙ 2 и 3: Проверка участия + продолжение таймера
+    -- СЦЕНАРИЙ 2 и 3: Проверка участия
     State.farmStatus = "Проверка участия..."
-    UpdateUI()
-    print("[Hard Farm] СЦЕНАРИЙ 2/3: ПРОВЕРКА УЧАСТИЯ С ТАЙМЕРОМ")
+    print("[Hard Farm] СЦЕНАРИЙ 2/3: ПРОВЕРКА УЧАСТИЯ")
     
     State.participationTimerStart = tick()
     State.lastCoinCount = GetCollectedCoinsCount()
@@ -699,16 +807,15 @@ local function HardFarmProcess()
     local checkPhase = true
     
     while State.isRoundActive and State.HardFarmEnabled and State.AutoFarmEnabled do
-        task.wait(0.5)
+        task.wait(1) -- Увеличена задержка проверки
         
         local currentCoins = GetCollectedCoinsCount()
         
-        -- Проверка на 50 монет (приоритет)
+        -- Проверка на 50 монет
         if currentCoins - State.roundStartCoins >= 50 then
             print("[Hard Farm] 50 монет собрано!")
             State.farmStatus = "50 монет - флинг и ресет"
             State.coinsCollectedThisRound = 50
-            UpdateUI()
             
             StopAutoFarmThread()
             task.wait(0.5)
@@ -722,19 +829,17 @@ local function HardFarmProcess()
             return
         end
         
-        -- Если монеты увеличились - сброс таймера
+        -- Если монеты увеличились
         if currentCoins > State.lastCoinCount then
             State.participationTimerStart = tick()
             State.lastCoinCount = currentCoins
             State.coinsCollectedThisRound = currentCoins - State.roundStartCoins
             participates = true
-            UpdateUI()
             print(string.format("[Hard Farm] Монета собрана! Таймер сброшен. Всего: %d", State.coinsCollectedThisRound))
             
             if checkPhase then
                 checkPhase = false
                 State.farmStatus = "УЧАСТВУЕМ - собираю до 50"
-                UpdateUI()
                 print("[Hard Farm] СЦЕНАРИЙ 3: УЧАСТВУЕМ")
             end
         end
@@ -745,10 +850,8 @@ local function HardFarmProcess()
         
         if elapsed >= timeoutToUse then
             if not participates then
-                -- НЕ УЧАСТВУЕМ (7 сек без первой монеты)
                 print("[Hard Farm] 7 сек без прироста - НЕ УЧАСТВУЕМ")
                 State.farmStatus = "Не участвую - флинг"
-                UpdateUI()
                 
                 StopAutoFarmThread()
                 task.wait(0.5)
@@ -762,10 +865,8 @@ local function HardFarmProcess()
                 State.isProcessingHardFarm = false
                 return
             else
-                -- УЧАСТВОВАЛИ, но монеты не растут 8 сек (нас убили)
-                print("[Hard Farm] 8 сек без прироста после участия - УБИТЫ")
+                print("[Hard Farm] 8 сек без прироста - УБИТЫ")
                 State.farmStatus = "Убиты - флинг"
-                UpdateUI()
                 
                 StopAutoFarmThread()
                 task.wait(0.5)
@@ -787,17 +888,16 @@ local function HardFarmProcess()
         else
             State.farmStatus = string.format("УЧАСТВУЕМ - собираю... (%ds)", math.floor(State.participationTimeoutAfterDeath - elapsed))
         end
-        UpdateUI()
     end
     
     State.isProcessingHardFarm = false
     print("[Hard Farm] ========== ОБРАБОТКА ЗАВЕРШЕНА ==========")
 end
 
--- === МОНИТОРИНГ РАУНДА ===
+-- === МОНИТОРИНГ РАУНДА (ОПТИМИЗИРОВАН) ===
 
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(1) do -- Увеличена задержка до 1 сек
         local wasActive = State.isRoundActive
         State.isRoundActive = isMurdererPresent()
         
@@ -841,8 +941,9 @@ task.spawn(function()
     end
 end)
 
+-- Отдельный поток для обновления счётчика монет
 task.spawn(function()
-    while task.wait(1) do
+    while task.wait(2) do -- Увеличена задержка до 2 сек
         if State.isRoundActive then
             local currentCoins = GetCollectedCoinsCount()
             State.coinsCollectedThisRound = currentCoins - State.roundStartCoins
@@ -852,6 +953,8 @@ task.spawn(function()
 end)
 
 CreateUI()
+
+-- === ОБРАБОТЧИКИ КНОПОК ===
 
 State.UIElements.AutoFarmButton.MouseButton1Click:Connect(function()
     State.AutoFarmEnabled = not State.AutoFarmEnabled
@@ -914,5 +1017,4 @@ State.UIElements.DelayInput.FocusLost:Connect(function()
 end)
 
 UpdateUI()
-print("[MM2 Auto Farm + Hard Farm] Загружен успешно!")
-print("[INFO] Упрощённая логика: таймер 7с для проверки, 8с для участия")
+print("[MM2 Auto Farm + Hard Farm] Загружен успешно! (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)")
