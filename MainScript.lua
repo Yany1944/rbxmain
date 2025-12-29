@@ -54,6 +54,8 @@ local State = {
     WalkSpeed = 18,
     JumpPower = 50,
     MaxCameraZoom = 100,
+    CameraFOV = 70,
+    AntiFlingEnabled = false,
 
     Keybinds = {
         Sit = Enum.KeyCode.Unknown,
@@ -62,7 +64,8 @@ local State = {
         Ninja = Enum.KeyCode.Unknown,
         Floss = Enum.KeyCode.Unknown,
         ClickTP = Enum.KeyCode.Unknown,
-        GodMode = Enum.KeyCode.Unknown
+        GodMode = Enum.KeyCode.Unknown,
+        FlingPlayer = Enum.KeyCode.Unknown
     },
     prevMurd = nil,
     prevSher = nil,
@@ -74,16 +77,13 @@ local State = {
     Connections = {},
     UIElements = {},
     ClickTPActive = false,
-    CoinFarmEnabled = false,
-    CoinFarmFlySpeed = 35, 
-    CoinFarmDelay = 2,
-    CoinFarmCollected = {},
-    CoinFarmThread = nil,
-    AllCoinsCollected = false,
     ListeningForKeybind = nil,
     RoleCheckLoop = nil,
     NotificationQueue = {},
-    CurrentNotification = nil
+    CurrentNotification = nil,
+    SelectedPlayerForFling = nil,
+    OldPos = nil,
+    FPDH = workspace.FallenPartsDestroyHeight
 }
 
 local function ApplyWalkSpeed(speed)
@@ -116,245 +116,280 @@ local function ApplyCharacterSettings()
     ApplyJumpPower(State.JumpPower)
     ApplyMaxCameraZoom(State.MaxCameraZoom)
 end
+-- ===================================
+-- FOV CHANGER
+-- ===================================
 
-local function getMap()
-    for _, v in next, Workspace:GetChildren() do
-        if v:FindFirstChild("CoinContainer") then
-            return v
-        end
+local function ApplyFOV(fov)
+    local camera = Workspace.CurrentCamera
+    if camera then
+        TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            FieldOfView = fov
+        }):Play()
+        State.CameraFOV = fov
     end
-    return nil
 end
 
-local function GetCollectedCoinsCount()
-    local maxValue = 0
+-- ===================================
+-- ANTI-FLING
+-- ===================================
 
-    pcall(function()
-        for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
-            if gui:IsA("TextLabel") and gui.Name == "Coins" then
-                local parent = gui.Parent
-                if parent and parent.Name == "Icon" then
-                    local path = gui:GetFullName()
-                    -- Universal: check if path ends with .CurrencyFrame.Icon.Coins
-                    -- Works with Coin, SnowToken, Egg, Candy, BeachBall, any event!
-                    if string.match(path, "%.CurrencyFrame%.Icon%.Coins$") then
-                        local value = tonumber(gui.Text) or 0
-                        -- Take maximum from all counters
-                        if value > maxValue then
-                            maxValue = value
+local AntiFlingEnabled = false
+local AntiFlingLastPos = Vector3.zero
+local FlingDetectionConnection = nil
+local FlingNeutralizerConnection = nil
+local DetectedFlingers = {}
+
+local function EnableAntiFling()
+    AntiFlingEnabled = true
+    
+    -- Детектор флинга других игроков
+    FlingDetectionConnection = RunService.Heartbeat:Connect(function()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
+                local primaryPart = player.Character.PrimaryPart
+                if primaryPart then
+                    if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
+                        if not DetectedFlingers[player.Name] then
+                            if State.NotificationsEnabled then
+                                ShowNotification("Flinger Detected", CONFIG.Colors.Orange, player.Name, CONFIG.Colors.Red)
+                            end
+                            DetectedFlingers[player.Name] = true
+                        end
+                        
+                        -- Нейтрализуем флинг других игроков
+                        for _, part in ipairs(player.Character:GetDescendants()) do
+                            if part:IsA("BasePart") then
+                                pcall(function()
+                                    part.CanCollide = false
+                                    part.AssemblyAngularVelocity = Vector3.zero
+                                    part.AssemblyLinearVelocity = Vector3.zero
+                                    part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
+                                end)
+                            end
                         end
                     end
                 end
             end
         end
     end)
-
-    return maxValue
-end
-
-local function getNearestCoin(maxDistance)
-    local target
-    local closestDistance = maxDistance or math.huge
-    local map = getMap()
-    local humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-
-    if not map or not humanoidRootPart then return end
-
-    local coinContainer = map:FindFirstChild("CoinContainer")
-    if not coinContainer then return end
-
-    for _, coin in pairs(coinContainer:GetChildren()) do
-        if coin.Name == "Coin_Server" and not State.CoinFarmCollected[coin] then
-            local distance = (coin.Position - humanoidRootPart.Position).Magnitude
-            if distance < closestDistance then
-                closestDistance = distance
-                target = coin
-            end
-        end
-    end
-    return target
-end
-
-local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
-    speed = speed or State.CoinFarmFlySpeed or 35
-
-    local startPos = humanoidRootPart.Position
-    local targetPos = coin.Position + Vector3.new(0, 2, 0)
-    local distance = (targetPos - startPos).Magnitude
-    local duration = distance / speed
-
-    local startTime = tick()
-
-    while tick() - startTime < duration do
-        if not State.CoinFarmEnabled then break end
-
+    
+    -- Защита себя от флинга
+    FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
-        if not character or not humanoidRootPart.Parent then break end
-
-        local elapsed = tick() - startTime
-        local alpha = math.min(elapsed / duration, 1)
-
-        local currentPos = startPos:Lerp(targetPos, alpha)
-        humanoidRootPart.CFrame = CFrame.new(currentPos)
-
-        RunService.Heartbeat:Wait()
-    end
-
-    if State.CoinFarmEnabled and humanoidRootPart.Parent then
-        humanoidRootPart.CFrame = CFrame.new(targetPos)
-    end
-end 
-
-local function EnableNoClip(character)
-    if not character then return end
-
-    for _, part in pairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.CanCollide = false
-        end
-    end
-end
-
-local function DisableNoClip(character)
-    if not character then return end
-
-    for _, part in pairs(character:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-            part.CanCollide = true
-        end
-    end
-end
-
-local function ResetAndClearCoinFarm()
-    if not State.AllowReset then return end
-
-    State.AllowReset = false
-
-    State.CoinFarmEnabled = false
-    if State.CoinFarmThread then
-        task.cancel(State.CoinFarmThread)
-        State.CoinFarmThread = nil
-    end
-
-    State.CoinFarmCollected = {}
-    State.AllCoinsCollected = false
-
-    local character = LocalPlayer.Character
-    if character then
-        DisableNoClip(character)
-
-        pcall(function()
-            character:BreakJoints()
-        end)
-
-        task.wait(6)
-        State.AllowReset = true
-    else
-        task.wait(1)
-        State.AllowReset = true
-    end
-end
-
-local function StartCoinFarm()
-    if State.CoinFarmThread then
-        task.cancel(State.CoinFarmThread)
-        State.CoinFarmThread = nil
-    end
-
-    if not State.CoinFarmEnabled then return end
-
-    State.CoinFarmThread = task.spawn(function()
-        local lastCoinCount = 0
-        local noChangeCounter = 0
-
-        while State.CoinFarmEnabled do
-            task.wait(0.1)
-
-            if not State.roundActive then
-                task.wait(1)
-                continue
-            end
-
-            local map = getMap()
-            if not map then
-                task.wait(1)
-                continue
-            end
-
-            local character = LocalPlayer.Character
-            if not character then continue end
-
-            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-            if not humanoidRootPart then continue end
-
-            local currentCoins = GetCollectedCoinsCount()
-
-            if currentCoins == lastCoinCount then
-                noChangeCounter = noChangeCounter + 1
-
-                if noChangeCounter >= 50 and State.roundActive and currentCoins > 0 and not State.AllCoinsCollected then
-                    State.AllCoinsCollected = true
-
-                    if State.NotificationsEnabled then
-                        task.spawn(function()
-                            ShowNotification(
-                                "All coins collected!",
-                                CONFIG.Colors.Green,
-                                "Total: " .. currentCoins,
-                                CONFIG.Colors.Accent
-                            )
-                        end)
-                    end
-
-                    task.spawn(function()
-                        task.wait(1)
-                        ResetAndClearCoinFarm()
-                    end)
+        if character and character.PrimaryPart then
+            local primaryPart = character.PrimaryPart
+            
+            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
+                if State.NotificationsEnabled then
+                    ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
+                end
+                
+                primaryPart.AssemblyLinearVelocity = Vector3.zero
+                primaryPart.AssemblyAngularVelocity = Vector3.zero
+                
+                -- Возврат на последнюю позицию
+                if AntiFlingLastPos ~= Vector3.zero then
+                    primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
                 end
             else
-                lastCoinCount = currentCoins
-                noChangeCounter = 0
+                -- Сохраняем текущую позицию
+                AntiFlingLastPos = primaryPart.Position
             end
-
-            local coin = getNearestCoin()
-            if not coin then
-                task.wait(1)
-                continue
-            end
-
-            if State.CoinFarmCollected[coin] then
-                continue
-            end
-
-            pcall(function()
-                local currentCoins = GetCollectedCoinsCount()
-
-                if currentCoins < 3 then
-                    local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
-
-                    if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
-                        humanoidRootPart.CFrame = targetCFrame
-                        task.wait(State.CoinFarmDelay)
-                        State.CoinFarmCollected[coin] = true
-                    end
-                else
-                    EnableNoClip(character)
-                    SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
-                    task.wait(0.2)
-                    State.CoinFarmCollected[coin] = true
-                    DisableNoClip(character)
-                end
-            end)
         end
-
-        local character = LocalPlayer.Character
-        if character then
-            DisableNoClip(character)
-        end
-
-        State.CoinFarmThread = nil
     end)
+    
+    table.insert(State.Connections, FlingDetectionConnection)
+    table.insert(State.Connections, FlingNeutralizerConnection)
 end
+
+local function DisableAntiFling()
+    AntiFlingEnabled = false
+    DetectedFlingers = {}
+    
+    if FlingDetectionConnection then
+        FlingDetectionConnection:Disconnect()
+        FlingDetectionConnection = nil
+    end
+    
+    if FlingNeutralizerConnection then
+        FlingNeutralizerConnection:Disconnect()
+        FlingNeutralizerConnection = nil
+    end
+end
+
+-- ===================================
+-- FLING PLAYER FUNCTIONS
+-- ===================================
+
+local function getAllPlayers()
+    local playerList = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerList, player.Name)
+        end
+    end
+    return playerList
+end
+
+local function getPlayerByName(playerName)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name == playerName or player.DisplayName == playerName then
+            return player
+        end
+    end
+    return nil
+end
+
+local function FlingPlayer(playerToFling)
+    if not playerToFling or not playerToFling.Character then 
+        if State.NotificationsEnabled then
+            ShowNotification("Fling Failed", CONFIG.Colors.Red, "Invalid target", CONFIG.Colors.TextDark)
+        end
+        return 
+    end
+
+    local Character = LocalPlayer.Character
+    if not Character then return end
+    
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Humanoid and Humanoid.RootPart
+    
+    if not RootPart then return end
+
+    local TCharacter = playerToFling.Character
+    local THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
+    local TRootPart = THumanoid and THumanoid.RootPart
+    local THead = TCharacter:FindFirstChild("Head")
+    local Accessory = TCharacter:FindFirstChildOfClass("Accessory")
+    local Handle = Accessory and Accessory:FindFirstChild("Handle")
+
+    if not TRootPart and not THead and not Handle then
+        if State.NotificationsEnabled then
+            ShowNotification("Fling Failed", CONFIG.Colors.Red, "Target has no valid parts", CONFIG.Colors.TextDark)
+        end
+        return
+    end
+
+    if RootPart.Velocity.Magnitude < 50 then
+        State.OldPos = RootPart.CFrame
+    end
+
+    local targetPart = TRootPart or THead or Handle
+    
+    if targetPart.Velocity.Magnitude > 500 then
+        if State.NotificationsEnabled then
+            ShowNotification("Already Flung", CONFIG.Colors.Orange, playerToFling.Name .. " is already flung", CONFIG.Colors.TextDark)
+        end
+        return
+    end
+
+    workspace.CurrentCamera.CameraSubject = targetPart
+    workspace.FallenPartsDestroyHeight = 0/0
+
+    local BV = Instance.new("BodyVelocity")
+    BV.Name = "EpixVel"
+    BV.Parent = RootPart
+    BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
+    BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+
+    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+
+    local function FPos(BasePart, Pos, Ang)
+        RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
+        Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+        RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
+        RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
+    end
+
+    local function SFBasePart(BasePart)
+        local TimeToWait = 2
+        local Time = tick()
+        local Angle = 0
+        
+        repeat
+            if RootPart and THumanoid then
+                if BasePart.Velocity.Magnitude < 50 then
+                    Angle = Angle + 100
+
+                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+                else
+                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                    task.wait()
+                end
+            else
+                break
+            end
+        until BasePart.Velocity.Magnitude > 500 or 
+              BasePart.Parent ~= playerToFling.Character or 
+              playerToFling.Parent ~= Players or 
+              playerToFling.Character ~= TCharacter or 
+              THumanoid.Sit or 
+              Humanoid.Health <= 0 or 
+              tick() > Time + TimeToWait
+    end
+
+    if TRootPart and THead then
+        if (TRootPart.CFrame.p - THead.CFrame.p).Magnitude > 5 then
+            SFBasePart(THead)
+        else
+            SFBasePart(TRootPart)
+        end
+    elseif TRootPart and not THead then
+        SFBasePart(TRootPart)
+    elseif not TRootPart and THead then
+        SFBasePart(THead)
+    elseif not TRootPart and not THead and Accessory and Handle then
+        SFBasePart(Handle)
+    end
+
+    BV:Destroy()
+    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+    workspace.CurrentCamera.CameraSubject = Humanoid
+
+    if State.OldPos then
+        repeat
+            RootPart.CFrame = State.OldPos * CFrame.new(0, 0.5, 0)
+            Character:SetPrimaryPartCFrame(State.OldPos * CFrame.new(0, 0.5, 0))
+            Humanoid:ChangeState("GettingUp")
+
+            for _, part in pairs(Character:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.Velocity = Vector3.new()
+                    part.RotVelocity = Vector3.new()
+                end
+            end
+
+            task.wait()
+        until (RootPart.Position - State.OldPos.p).Magnitude < 25
+    end
+
+    workspace.FallenPartsDestroyHeight = State.FPDH
+
+    if State.NotificationsEnabled then
+        ShowNotification("Player Flung!", CONFIG.Colors.Green, playerToFling.Name, CONFIG.Colors.Accent)
+    end
+end
+
 
 local lastGodModeApply = 0
 
@@ -695,22 +730,6 @@ local function StartRoleChecking()
                     State.roundActive = false
                     State.roundStart = true
 
-                    if State.CoinFarmEnabled then
-                        State.CoinFarmEnabled = false
-                        if State.CoinFarmThread then
-                            task.cancel(State.CoinFarmThread)
-                            State.CoinFarmThread = nil
-                        end
-
-                        local character = LocalPlayer.Character
-                        if character then
-                            DisableNoClip(character)
-                        end
-                    end
-
-                    State.CoinFarmCollected = {}
-                    State.AllCoinsCollected = false
-
                     State.prevMurd = nil
                     State.prevSher = nil
                     State.heroSent = false
@@ -721,6 +740,7 @@ local function StartRoleChecking()
                         end)
                     end
                 end
+
 
                 if murder and sheriff and State.roundStart then
                     State.roundActive = true
@@ -739,18 +759,8 @@ local function StartRoleChecking()
                     State.roundStart = false
                     State.prevMurd = murder
                     State.prevSher = sheriff
-                    State.heroSent = false
-
-                    State.CoinFarmCollected = {}
-                    State.AllCoinsCollected = false
-
-                    local coinFarmToggle = State.UIElements.CoinFarmToggle
-                    if coinFarmToggle and coinFarmToggle.BackgroundColor3 == CONFIG.Colors.Accent then
-                        task.wait(2)
-                        State.CoinFarmEnabled = true
-                        StartCoinFarm()
+                    State.heroSent = false                
                     end
-                end
 
                 if sheriff and sheriff ~= State.prevSher and murder == State.prevMurd then
                     if State.NotificationsEnabled then
@@ -777,11 +787,7 @@ local function StartRoleChecking()
     end)
 end
 
-task.spawn(function()
-    pcall(function()
-        loadstring(game:HttpGet('https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/AntiFling.lua'))()
-    end)
-end)
+
 
 task.spawn(function()
     while getgenv().MM2_ESP_Script do
@@ -934,7 +940,7 @@ local function CreateUI()
     })
 
     local closeButton = Create("TextButton", {
-        Text = "Ã—",
+        Text = "X",
         Font = Enum.Font.GothamMedium,
         TextSize = 24,
         TextColor3 = CONFIG.Colors.TextDark,
@@ -1245,6 +1251,7 @@ local function CreateUI()
     end
 
     CreateSection("CHARACTER SETTINGS")
+    
 
     CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, function(value)
         ApplyWalkSpeed(value)
@@ -1257,6 +1264,13 @@ local function CreateUI()
     CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, function(value)
         ApplyMaxCameraZoom(value)
     end)
+    CreateSection("CAMERA")
+
+CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(value)
+    ApplyFOV(value)
+end)
+
+
 
     CreateSection("NOTIFICATIONS")
 
@@ -1302,35 +1316,174 @@ local function CreateUI()
 
     CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
 
-    CreateSection("COIN FARM")
+CreateSection("ANTI-FLING")
 
-    State.UIElements.CoinFarmToggle = CreateToggle("Coin Farm", "Automatically collects coins", function(state)
-        State.CoinFarmEnabled = state
-        if state then
-            State.CoinFarmCollected = {}
-            StartCoinFarm()
-        else
-            if State.CoinFarmThread then
-                task.cancel(State.CoinFarmThread)
-                State.CoinFarmThread = nil
+CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(state)
+    if state then
+        EnableAntiFling()
+    else
+        DisableAntiFling()
+    end
+end)
+    
+    CreateSection("FLING PLAYER")
+
+    local function CreatePlayerDropdown(title, desc)
+        local card = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Size = UDim2.new(1, 0, 0, 60),
+            Parent = content
+        })
+        AddCorner(card, 8)
+        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+        local cardTitle = Create("TextLabel", {
+            Text = title,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 14,
+            TextColor3 = CONFIG.Colors.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 10),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        local cardDesc = Create("TextLabel", {
+            Text = desc,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 30),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        local dropdown = Create("TextButton", {
+            Text = "Select Player ▼",
+            Font = Enum.Font.GothamMedium,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.Text,
+            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+            Position = UDim2.new(1, -110, 0.5, -12),
+            Size = UDim2.new(0, 95, 0, 24),
+            AutoButtonColor = false,
+            Parent = card
+        })
+        AddCorner(dropdown, 6)
+        AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
+
+        local dropdownFrame = Create("ScrollingFrame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Position = UDim2.new(1, -110, 1, 5),
+            Size = UDim2.new(0, 95, 0, 0),
+            Visible = false,
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            ScrollBarThickness = 4,
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ClipsDescendants = true,
+            ZIndex = 100,
+            Parent = card
+        })
+        AddCorner(dropdownFrame, 6)
+        AddStroke(dropdownFrame, 1, CONFIG.Colors.Accent, 0.6)
+
+        local listLayout = Create("UIListLayout", {
+            Padding = UDim.new(0, 2),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Parent = dropdownFrame
+        })
+
+        local function updatePlayerList()
+            for _, child in ipairs(dropdownFrame:GetChildren()) do
+                if child:IsA("TextButton") then
+                    child:Destroy()
+                end
             end
 
-            local character = LocalPlayer.Character
-            if character then
-                DisableNoClip(character)
+            local players = getAllPlayers()
+
+            if #players == 0 then
+                local noPlayers = Create("TextLabel", {
+                    Text = "No players",
+                    Font = Enum.Font.Gotham,
+                    TextSize = 11,
+                    TextColor3 = CONFIG.Colors.TextDark,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 25),
+                    Parent = dropdownFrame
+                })
+                return
+            end
+
+            for _, playerName in ipairs(players) do
+                local playerButton = Create("TextButton", {
+                    Text = playerName,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 10,
+                    TextColor3 = CONFIG.Colors.Text,
+                    BackgroundColor3 = Color3.fromRGB(50, 50, 55),
+                    Size = UDim2.new(1, 0, 0, 25),
+                    AutoButtonColor = false,
+                    ZIndex = 101,
+                    Parent = dropdownFrame
+                })
+                AddCorner(playerButton, 4)
+
+                playerButton.MouseButton1Click:Connect(function()
+                    State.SelectedPlayerForFling = playerName
+                    dropdown.Text = playerName:sub(1, 8) .. " ✓"
+                    dropdownFrame:TweenSize(UDim2.new(0, 95, 0, 0), "Out", "Quad", 0.2, true)
+                    task.wait(0.2)
+                    dropdownFrame.Visible = false
+                end)
+
+                playerButton.MouseEnter:Connect(function()
+                    TweenService:Create(playerButton, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+                end)
+
+                playerButton.MouseLeave:Connect(function()
+                    TweenService:Create(playerButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 55)}):Play()
+                end)
             end
         end
-    end)
 
-CreateInputField("Fly Speed", "Flight speed in Tween mode (studs/sec)", State.CoinFarmFlySpeed, function(value)
-        if value >= 10 and value <= 100 then
-            State.CoinFarmFlySpeed = value
-        end
-    end)
+        dropdown.MouseButton1Click:Connect(function()
+            dropdownFrame.Visible = not dropdownFrame.Visible
 
-    CreateInputField("Teleport Delay", "Delay between teleports (Teleport mode)", State.CoinFarmDelay, function(value)
-        State.CoinFarmDelay = value
-    end)
+            if dropdownFrame.Visible then
+                updatePlayerList()
+                local playerCount = #getAllPlayers()
+                local maxHeight = 120
+                local calculatedHeight = math.min(maxHeight, playerCount * 27)
+                dropdownFrame:TweenSize(UDim2.new(0, 95, 0, calculatedHeight), "Out", "Quad", 0.2, true)
+            else
+                dropdownFrame:TweenSize(UDim2.new(0, 95, 0, 0), "Out", "Quad", 0.2, true)
+                task.wait(0.2)
+                dropdownFrame.Visible = false
+            end
+        end)
+
+        Players.PlayerAdded:Connect(function()
+            if dropdownFrame.Visible then
+                updatePlayerList()
+            end
+        end)
+
+        Players.PlayerRemoving:Connect(function()
+            if dropdownFrame.Visible then
+                updatePlayerList()
+            end
+        end)
+
+        return dropdown
+    end
+
+    CreatePlayerDropdown("Select Target", "Choose player to fling")
+
+    CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
     CreateSection("GODMODE")
 
@@ -1417,6 +1570,23 @@ CreateInputField("Fly Speed", "Flight speed in Tween mode (studs/sec)", State.Co
         if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
             ToggleGodMode()
         end
+        if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
+            if State.SelectedPlayerForFling then
+                local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
+                if targetPlayer and targetPlayer.Character then
+                    FlingPlayer(targetPlayer)
+                else
+                    if State.NotificationsEnabled then
+                        ShowNotification("Fling Error", CONFIG.Colors.Red, "Player not found or no character", CONFIG.Colors.TextDark)
+                    end
+                end
+            else
+                if State.NotificationsEnabled then
+                    ShowNotification("No Target Selected", CONFIG.Colors.Orange, "Select a player first", CONFIG.Colors.TextDark)
+                end
+            end
+        end
+
     end)
 end
 
@@ -1443,14 +1613,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.roundStart = true
     State.roundActive = false
     State.AllowReset = true
-    State.CoinFarmCollected = {}
-    State.AllCoinsCollected = false
-
-    local character = LocalPlayer.Character
-    if character then
-        DisableNoClip(character)
-    end
-end)
+    end)
 
 CreateUI()
 CreateNotificationUI()
