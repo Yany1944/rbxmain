@@ -144,7 +144,7 @@ local DetectedFlingers = {}
 local function EnableAntiFling()
     AntiFlingEnabled = true
     
-    -- Детектор флинга других игроков
+    -- Р”РµС‚РµРєС‚РѕСЂ С„Р»РёРЅРіР° РґСЂСѓРіРёС… РёРіСЂРѕРєРѕРІ
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
@@ -158,7 +158,7 @@ local function EnableAntiFling()
                             DetectedFlingers[player.Name] = true
                         end
                         
-                        -- Нейтрализуем флинг других игроков
+                        -- РќРµР№С‚СЂР°Р»РёР·СѓРµРј С„Р»РёРЅРі РґСЂСѓРіРёС… РёРіСЂРѕРєРѕРІ
                         for _, part in ipairs(player.Character:GetDescendants()) do
                             if part:IsA("BasePart") then
                                 pcall(function()
@@ -175,7 +175,7 @@ local function EnableAntiFling()
         end
     end)
     
-    -- Защита себя от флинга
+    -- Р—Р°С‰РёС‚Р° СЃРµР±СЏ РѕС‚ С„Р»РёРЅРіР°
     FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
@@ -189,12 +189,12 @@ local function EnableAntiFling()
                 primaryPart.AssemblyLinearVelocity = Vector3.zero
                 primaryPart.AssemblyAngularVelocity = Vector3.zero
                 
-                -- Возврат на последнюю позицию
+                -- Р’РѕР·РІСЂР°С‚ РЅР° РїРѕСЃР»РµРґРЅСЋСЋ РїРѕР·РёС†РёСЋ
                 if AntiFlingLastPos ~= Vector3.zero then
                     primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
                 end
             else
-                -- Сохраняем текущую позицию
+                -- РЎРѕС…СЂР°РЅСЏРµРј С‚РµРєСѓС‰СѓСЋ РїРѕР·РёС†РёСЋ
                 AntiFlingLastPos = primaryPart.Position
             end
         end
@@ -899,46 +899,24 @@ end
 -- ===================================
 
 local function knifeThrow(silent)
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    -- Ищем нож в персонаже или рюкзаке
-    local knife = character:FindFirstChild("Knife")
+    local knife = LocalPlayer.Character:FindFirstChild("Knife")
     if not knife then
+        -- Р­РєРёРїРёСЂСѓРµРј РµСЃР»Рё РІ СЂСЋРєР·Р°РєРµ
         knife = LocalPlayer.Backpack:FindFirstChild("Knife")
         if knife then
-            -- Экипируем нож
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid:EquipTool(knife)
-                task.wait(0.1)
-                knife = character:FindFirstChild("Knife")
-            end
+            LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):EquipTool(knife)
+            task.wait(0.05)
+            knife = LocalPlayer.Character:FindFirstChild("Knife")
         end
     end
     
-    if not knife then
-        if not silent and State.NotificationsEnabled then
-            ShowNotification("No Knife", CONFIG.Colors.Red)
-        end
-        return
-    end
-    
-    -- Бросаем нож в направлении камеры
-    local camera = Workspace.CurrentCamera
-    if camera then
-        local throwPos = camera.CFrame.Position + camera.CFrame.LookVector * 100
-        
-        pcall(function()
-            knife.Throw:FireServer(
-                knife:GetPivot(),
-                throwPos
-            )
-        end)
-        
-        if not silent and State.NotificationsEnabled then
-            ShowNotification("Knife Thrown", CONFIG.Colors.Green)
-        end
+    if knife then
+        -- Р‘СЂРѕСЃР°РµРј РІ РЅР°РїСЂР°РІР»РµРЅРёРё РєР°РјРµСЂС‹
+        local camera = Workspace.CurrentCamera
+        knife.Throw:FireServer(
+            knife:GetPivot(),
+            camera.CFrame.Position + camera.CFrame.LookVector * 100
+        )
     end
 end
 
@@ -1416,7 +1394,7 @@ end)
         })
 
         local dropdown = Create("TextButton", {
-            Text = "Select Player ▼",
+            Text = "Select Player в–ј",
             Font = Enum.Font.GothamMedium,
             TextSize = 11,
             TextColor3 = CONFIG.Colors.Text,
@@ -1488,7 +1466,7 @@ end)
 
                 playerButton.MouseButton1Click:Connect(function()
                     State.SelectedPlayerForFling = playerName
-                    dropdown.Text = playerName:sub(1, 8) .. " ✓"
+                    dropdown.Text = playerName:sub(1, 8) .. " вњ“"
                     dropdownFrame:TweenSize(UDim2.new(0, 95, 0, 0), "Out", "Quad", 0.2, true)
                     task.wait(0.2)
                     dropdownFrame.Visible = false
