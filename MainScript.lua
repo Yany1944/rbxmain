@@ -43,12 +43,12 @@ local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
+
 local State = {
     GunESP = false,
     MurderESP = false,
     SheriffESP = false,
     InnocentESP = false,
-    AllowReset = true,
     NotificationsEnabled = true,  -- ✅ ИСПРАВЛЕНО: Включено по умолчанию
     GodModeEnabled = false,
     WalkSpeed = 18,
@@ -87,6 +87,47 @@ local State = {
     IsFlingInProgress = false,
     FPDH = workspace.FallenPartsDestroyHeight
 }
+
+
+
+local function findMurderer()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character and player.Character:FindFirstChild("Knife") then
+            return player
+        end
+        if player.Backpack and player.Backpack:FindFirstChild("Knife") then
+            return player
+        end
+    end
+    return nil
+end
+
+local function findNearestPlayer()
+    local nearestPlayer = nil
+    local shortestDistance = math.huge
+    local localChar = LocalPlayer.Character
+    
+    if not localChar or not localChar:FindFirstChild("HumanoidRootPart") then
+        return nil
+    end
+    
+    local localHRP = localChar.HumanoidRootPart
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local otherHRP = player.Character:FindFirstChild("HumanoidRootPart")
+            if otherHRP then
+                local distance = (localHRP.Position - otherHRP.Position).Magnitude
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    nearestPlayer = player
+                end
+            end
+        end
+    end
+    
+    return nearestPlayer
+end
 
 local function ApplyWalkSpeed(speed)
     local character = LocalPlayer.Character
@@ -207,9 +248,6 @@ local function ShowNotification(text1, color1, text2, color2)
         ShowNotification(next.text1, next.color1, next.text2, next.color2)
     end
 end
--- ===================================
--- FOV CHANGER
--- ===================================
 
 local function ApplyFOV(fov)
     local camera = Workspace.CurrentCamera
@@ -221,9 +259,6 @@ local function ApplyFOV(fov)
     end
 end
 
--- ===================================
--- ANTI-FLING
--- ===================================
 
 local AntiFlingEnabled = false
 local AntiFlingLastPos = Vector3.zero
@@ -251,16 +286,20 @@ local function EnableAntiFling()
                         end
                         
                         -- Нейтрализуем флинг других игроков
-                        for _, part in ipairs(player.Character:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                pcall(function()
-                                    part.CanCollide = false
-                                    part.AssemblyAngularVelocity = Vector3.zero
-                                    part.AssemblyLinearVelocity = Vector3.zero
-                                    part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
-                                end)
+                        pcall(function()
+                            if player.Character then  -- ← ДОБАВЬТЕ ЭТУ ПРОВЕРКУ!
+                                for _, part in ipairs(player.Character:GetDescendants()) do
+                                    if part:IsA("BasePart") then
+                                        pcall(function()
+                                            part.CanCollide = false
+                                            part.AssemblyAngularVelocity = Vector3.zero
+                                            part.AssemblyLinearVelocity = Vector3.zero
+                                            part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
+                                        end)
+                                    end
+                                end
                             end
-                        end
+                        end)
                     end
                 end
             end
@@ -320,9 +359,6 @@ local function DisableAntiFling()
     end
 end
 
--- ===================================
--- FLING PLAYER FUNCTIONS
--- ===================================
 
 local function getAllPlayers()
     local playerList = {}
@@ -773,7 +809,6 @@ local function StartRoleChecking()
 
                 if murder and sheriff and State.roundStart then
                     State.roundActive = true
-                    State.AllowReset = true
 
                     if State.NotificationsEnabled then
                         task.spawn(function()
@@ -922,50 +957,80 @@ local function AddStroke(parent, thickness, color, transparency)
         Parent = parent
     })
 end
--- ===================================
--- THROW KNIFE INSTANTLY
--- ===================================
 
 local function knifeThrow(silent)
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    -- Ищем нож в персонаже или рюкзаке
-    local knife = character:FindFirstChild("Knife")
-    if not knife then
-        knife = LocalPlayer.Backpack:FindFirstChild("Knife")
-        if knife then
-            -- Экипируем нож
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid:EquipTool(knife)
-                task.wait(0.1)
-                knife = character:FindFirstChild("Knife")
+    -- Проверка: игрок убийца?
+    local murderer = findMurderer()
+    if murderer ~= LocalPlayer then 
+        if not silent then
+            ShowNotification("You're not murderer.", CONFIG.Colors.Red)
+        end
+        return 
+    end
+
+    -- Проверка: нож экипирован?
+    if not LocalPlayer.Character:FindFirstChild("Knife") then
+        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if LocalPlayer.Backpack:FindFirstChild("Knife") then
+            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
+            task.wait(0.3)
+        else
+            if not silent then
+                ShowNotification("You don't have the knife..?", CONFIG.Colors.Red)
             end
+            return
         end
     end
-    
+
+    -- Дополнительная проверка после ожидания
+    task.wait(0.1)
+    local knife = LocalPlayer.Character:FindFirstChild("Knife")
     if not knife then
-        if not silent and State.NotificationsEnabled then
-            ShowNotification("No Knife", CONFIG.Colors.Red)
+        if not silent then
+            ShowNotification("Knife not equipped!", CONFIG.Colors.Red)
         end
         return
     end
+
+    -- Проверка что у персонажа есть RightHand
+    if not LocalPlayer.Character:FindFirstChild("RightHand") then
+        if not silent then
+            ShowNotification("Can't find RightHand!", CONFIG.Colors.Red)
+        end
+        return
+    end
+
+    -- ✅ ПОЛУЧАЕМ ПОЗИЦИЮ КУРСОРА (НЕ БЛИЖАЙШЕГО ИГРОКА!)
+    local mouse = LocalPlayer:GetMouse()
+    local targetPosition = mouse.Hit.Position
     
-    -- Бросаем нож в направлении камеры
-    local camera = Workspace.CurrentCamera
-    if camera then
-        local throwPos = camera.CFrame.Position + camera.CFrame.LookVector * 100
-        
-        pcall(function()
-            knife.Throw:FireServer(
-                knife:GetPivot(),
-                throwPos
-            )
-        end)
-        
-        if not silent and State.NotificationsEnabled then
-            ShowNotification("Knife Thrown", CONFIG.Colors.Green)
+    if not targetPosition then
+        if not silent then
+            ShowNotification("Can't get mouse position!", CONFIG.Colors.Red)
+        end
+        return
+    end
+
+    -- ✅ ПРАВИЛЬНЫЕ АРГУМЕНТЫ ДЛЯ БРОСКА
+    -- Arg 1: CFrame позиции правой руки
+    -- Arg 2: CFrame позиции КУРСОРА (не игрока!)
+    local argsThrowRemote = {
+        [1] = CFrame.new(LocalPlayer.Character.RightHand.Position),
+        [2] = CFrame.new(targetPosition)  -- Позиция мыши!
+    }
+
+    -- Бросаем нож через Events.KnifeThrown
+    local success, err = pcall(function()
+        LocalPlayer.Character.Knife.Events.KnifeThrown:FireServer(unpack(argsThrowRemote))
+    end)
+    
+    if success then
+        if not silent then
+            ShowNotification("Knife thrown!", CONFIG.Colors.Green)
+        end
+    else
+        if not silent then
+            ShowNotification("Failed to throw: " .. tostring(err), CONFIG.Colors.Red)
         end
     end
 end
@@ -978,7 +1043,6 @@ local function CreateUI()
 
     local gui = Create("ScreenGui", {
         Name = "MM2_ESP_UI",
-        ResetOnSpawn = false,
         Parent = CoreGui
     })
     State.UIElements.MainGui = gui
@@ -1696,7 +1760,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.heroSent = false
     State.roundStart = true
     State.roundActive = false
-    State.AllowReset = true
     end)
 
 CreateUI()
