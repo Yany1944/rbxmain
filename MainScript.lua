@@ -49,13 +49,18 @@ local State = {
     MurderESP = false,
     SheriffESP = false,
     InnocentESP = false,
-    NotificationsEnabled = true,  -- ✅ ИСПРАВЛЕНО: Включено по умолчанию
+    NotificationsEnabled = false,  -- ✅ ИСПРАВЛЕНО: Включено по умолчанию
     GodModeEnabled = false,
     WalkSpeed = 18,
     JumpPower = 50,
     MaxCameraZoom = 100,
     CameraFOV = 70,
     AntiFlingEnabled = false,
+    NoclipEnabled = false,
+    NoclipMode = "Standard",
+    NoclipConnection = nil,
+    NoclipRespawnConnection = nil,
+
 
     Keybinds = {
         Sit = Enum.KeyCode.Unknown,
@@ -66,7 +71,9 @@ local State = {
         ClickTP = Enum.KeyCode.Unknown,
         GodMode = Enum.KeyCode.Unknown,
         FlingPlayer = Enum.KeyCode.Unknown,
-        ThrowKnife = Enum.KeyCode.Unknown
+        ThrowKnife = Enum.KeyCode.Unknown,
+        Noclip = Enum.KeyCode.Unknown
+
     },
     prevMurd = nil,
     prevSher = nil,
@@ -542,6 +549,182 @@ local function FlingPlayer(playerToFling)
     end
 end
 
+-- ╔═══════════════════════════════════════════════════════════════╗
+-- ║                    🚫 NOCLIP ФУНКЦИИ                          ║
+-- ╚═══════════════════════════════════════════════════════════════╝
+
+local function EnableNoclip()
+    if State.NoclipEnabled then return end
+    State.NoclipEnabled = true
+    
+    local mode = State.NoclipMode
+    
+    if mode == "Standard" then
+        local NoclipObjects = {}
+        local char = LocalPlayer.Character
+        if not char then return end
+        
+        for _, obj in ipairs(char:GetChildren()) do
+            if obj:IsA("BasePart") then
+                table.insert(NoclipObjects, obj)
+            end
+        end
+        
+        State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
+            task.wait(0.15)
+            table.clear(NoclipObjects)
+            for _, obj in ipairs(newChar:GetChildren()) do
+                if obj:IsA("BasePart") then
+                    table.insert(NoclipObjects, obj)
+                end
+            end
+        end)
+        
+        State.NoclipConnection = RunService.Stepped:Connect(function()
+            for _, part in ipairs(NoclipObjects) do
+                pcall(function()
+                    part.CanCollide = false
+                end)
+            end
+        end)
+    end
+        
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Noclip Enabled", CONFIG.Colors.Green, "Mode: " .. mode, CONFIG.Colors.Accent)
+    end
+end
+
+local function DisableNoclip()
+    if not State.NoclipEnabled then return end
+    State.NoclipEnabled = false
+    
+    if State.NoclipConnection then
+        State.NoclipConnection:Disconnect()
+        State.NoclipConnection = nil
+    end
+    
+    if State.NoclipRespawnConnection then
+        State.NoclipRespawnConnection:Disconnect()
+        State.NoclipRespawnConnection = nil
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Noclip Disabled", CONFIG.Colors.Red)
+    end
+end
+
+local function ToggleNoclip()
+    if State.NoclipEnabled then
+        DisableNoclip()
+    else
+        EnableNoclip()
+    end
+end
+
+
+-- ╔═══════════════════════════════════════════════════════════════╗
+-- ║                    ⏰ ANTI-AFK (РАБОЧИЙ)                      ║
+-- ╚═══════════════════════════════════════════════════════════════╝
+
+local function SetupAntiAFK()
+    local VirtualUser = game:GetService("VirtualUser")
+    LocalPlayer.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+    
+    task.spawn(function()
+        while getgenv.MM2ESPScript do
+            pcall(function()
+                if getconnections then
+                    for _, connection in next, getconnections(LocalPlayer.Idled) do
+                        if connection.Disable then
+                            connection:Disable()
+                        end
+                    end
+                end
+            end)
+            task.wait(60)
+        end
+    end)
+end
+
+
+-- ╔═══════════════════════════════════════════════════════════════╗
+-- ║                    🔄 REJOIN / SERVER HOP                     ║
+-- ╚═══════════════════════════════════════════════════════════════╝
+
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+
+local function Rejoin()
+    if State.NotificationsEnabled then
+        ShowNotification("Rejoining...", CONFIG.Colors.Orange)
+    end
+    
+    task.wait(0.5)
+    
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end)
+    
+    task.wait(2)
+    pcall(function()
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    end)
+end
+
+local function ServerHop()
+    if State.NotificationsEnabled then
+        ShowNotification("Finding Server...", CONFIG.Colors.Orange, "Please wait", CONFIG.Colors.TextDark)
+    end
+    
+    local success = pcall(function()
+        local servers = {}
+        local cursor = ""
+        
+        repeat
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
+                game.PlaceId,
+                cursor
+            )
+            
+            local response = game:HttpGet(url)
+            local data = HttpService:JSONDecode(response)
+            
+            for _, server in ipairs(data.data) do
+                if server.id ~= game.JobId and server.playing < server.maxPlayers then
+                    table.insert(servers, server)
+                end
+            end
+            
+            cursor = data.nextPageCursor or ""
+        until cursor == ""
+        
+        table.sort(servers, function(a, b)
+            return a.playing < b.playing
+        end)
+        
+        if #servers > 0 then
+            local targetServer = servers[1]
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetServer.id, LocalPlayer)
+        else
+            if State.NotificationsEnabled then
+                ShowNotification("Server Hop Failed", CONFIG.Colors.Red, "No servers found", CONFIG.Colors.TextDark)
+            end
+        end
+    end)
+    
+    if not success then
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        end)
+    end
+end
+
+
 
 local lastGodModeApply = 0
 
@@ -687,12 +870,14 @@ local function CreateGunESP(gunPart)
     if State.GunCache[gunPart] then return end
 
     local highlight = CreateHighlight(gunPart, CONFIG.Colors.Gun)
+    highlight.Enabled = State.GunESP  -- ← ДОБАВЬ ЭТУ СТРОКУ
 
     local billboard = Instance.new("BillboardGui")
     billboard.Adornee = gunPart
     billboard.Size = UDim2.new(0, 150, 0, 40)
     billboard.StudsOffset = Vector3.new(0, 2, 0)
     billboard.AlwaysOnTop = true
+    billboard.Enabled = State.GunESP  -- ← ДОБАВЬ ЭТУ СТРОКУ
     billboard.Parent = gunPart
 
     local textLabel = Instance.new("TextLabel")
@@ -710,6 +895,7 @@ local function CreateGunESP(gunPart)
         textLabel = textLabel
     }
 end
+
 
 local function RemoveGunESP(gunPart)
     local espData = State.GunCache[gunPart]
@@ -853,16 +1039,6 @@ end
 
 
 
-task.spawn(function()
-    while getgenv().MM2_ESP_Script do
-        pcall(function()
-            for _, connection in next, getconnections(LocalPlayer.Idled) do 
-                connection:Disable()
-            end
-        end)
-        task.wait(1)
-    end
-end)
 
 local function PlayEmote(emoteName)
     task.spawn(function()
@@ -1407,11 +1583,11 @@ local function CreateUI()
     end)
     CreateSection("CAMERA")
 
-CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(value)
-    pcall(function()
-        ApplyFOV(value)
+    CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(value)
+        pcall(function()
+            ApplyFOV(value)
+        end)
     end)
-end)
 
 
     CreateSection("NOTIFICATIONS")
@@ -1631,6 +1807,91 @@ end)
 
     CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
+        -- NOCLIP СЕКЦИЯ
+    CreateSection("NOCLIP")
+
+    CreateKeybindButton("Toggle Noclip", "noclip", "Noclip")
+    
+    -- UTILITY СЕКЦИЯ
+    CreateSection("UTILITY")
+    
+    -- Rejoin кнопка
+    local rejoinCard = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Size = UDim2.new(1, 0, 0, 50),
+        Parent = content
+    })
+    AddCorner(rejoinCard, 8)
+    AddStroke(rejoinCard, 1, CONFIG.Colors.Stroke, 0.7)
+    
+    local rejoinButton = Create("TextButton", {
+        Text = "🔄 Rejoin Server",
+        Font = Enum.Font.GothamMedium,
+        TextSize = 13,
+        TextColor3 = CONFIG.Colors.Text,
+        BackgroundColor3 = CONFIG.Colors.Accent,
+        Position = UDim2.new(0, 15, 0.5, -15),
+        Size = UDim2.new(1, -30, 0, 30),
+        AutoButtonColor = false,
+        Parent = rejoinCard
+    })
+    AddCorner(rejoinButton, 6)
+    
+    rejoinButton.MouseButton1Click:Connect(function()
+        Rejoin()
+    end)
+    
+    rejoinButton.MouseEnter:Connect(function()
+        TweenService:Create(rejoinButton, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(100, 160, 255)
+        }):Play()
+    end)
+    
+    rejoinButton.MouseLeave:Connect(function()
+        TweenService:Create(rejoinButton, TweenInfo.new(0.2), {
+            BackgroundColor3 = CONFIG.Colors.Accent
+        }):Play()
+    end)
+    
+    -- Server Hop кнопка
+    local serverHopCard = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Size = UDim2.new(1, 0, 0, 50),
+        Parent = content
+    })
+    AddCorner(serverHopCard, 8)
+    AddStroke(serverHopCard, 1, CONFIG.Colors.Stroke, 0.7)
+    
+    local serverHopButton = Create("TextButton", {
+        Text = "🌐 Server Hop",
+        Font = Enum.Font.GothamMedium,
+        TextSize = 13,
+        TextColor3 = CONFIG.Colors.Text,
+        BackgroundColor3 = Color3.fromRGB(100, 200, 100),
+        Position = UDim2.new(0, 15, 0.5, -15),
+        Size = UDim2.new(1, -30, 0, 30),
+        AutoButtonColor = false,
+        Parent = serverHopCard
+    })
+    AddCorner(serverHopButton, 6)
+    
+    serverHopButton.MouseButton1Click:Connect(function()
+        ServerHop()
+    end)
+    
+    serverHopButton.MouseEnter:Connect(function()
+        TweenService:Create(serverHopButton, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(120, 220, 120)
+        }):Play()
+    end)
+    
+    serverHopButton.MouseLeave:Connect(function()
+        TweenService:Create(serverHopButton, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+        }):Play()
+    end)
+
+
     CreateSection("GODMODE")
 
     CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
@@ -1724,7 +1985,7 @@ end)
         if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
             ToggleGodMode()
         end
-        if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
+            if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
         if State.SelectedPlayerForFling then
             local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
             if targetPlayer and targetPlayer.Character then
@@ -1733,6 +1994,10 @@ end)
                 end)
             end
         end
+    end
+        -- Noclip Keybind
+    if input.KeyCode == State.Keybinds.Noclip and State.Keybinds.Noclip ~= Enum.KeyCode.Unknown then
+        ToggleNoclip()
     end
 
     end)
@@ -1768,3 +2033,10 @@ ApplyCharacterSettings()
 SetupGunTracking()
 InitialGunScan()
 StartRoleChecking()
+SetupAntiAFK()
+
+-- Инфо сообщение
+if State.NotificationsEnabled then
+    task.wait(1)
+    ShowNotification("MM2 ESP v5.2 Loaded", CONFIG.Colors.Green, "Noclip, Rejoin, ServerHop added!", CONFIG.Colors.Accent)
+end
