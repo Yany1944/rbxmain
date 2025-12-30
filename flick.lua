@@ -1,6 +1,3 @@
---[[
-	WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk!
-]]
 
 if game.PlaceId == 17625359962 then
 local PlayerGui = game.CoreGui
