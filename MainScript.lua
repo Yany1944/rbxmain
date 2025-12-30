@@ -49,7 +49,7 @@ local State = {
     SheriffESP = false,
     InnocentESP = false,
     AllowReset = true,
-    NotificationsEnabled = false,
+    NotificationsEnabled = true,  -- ✅ ИСПРАВЛЕНО: Включено по умолчанию
     GodModeEnabled = false,
     WalkSpeed = 18,
     JumpPower = 50,
@@ -84,6 +84,7 @@ local State = {
     CurrentNotification = nil,
     SelectedPlayerForFling = nil,
     OldPos = nil,
+    IsFlingInProgress = false,
     FPDH = workspace.FallenPartsDestroyHeight
 }
 
@@ -117,6 +118,95 @@ local function ApplyCharacterSettings()
     ApplyJumpPower(State.JumpPower)
     ApplyMaxCameraZoom(State.MaxCameraZoom)
 end
+
+local function CreateNotificationUI()
+    local notifGui = Instance.new("ScreenGui")
+    notifGui.Name = "MM2_Notifications"
+    notifGui.ResetOnSpawn = false
+    notifGui.DisplayOrder = 100
+    notifGui.Parent = CoreGui
+    State.UIElements.NotificationGui = notifGui
+end
+
+local function ShowNotification(text1, color1, text2, color2)
+    if not State.NotificationsEnabled then return end
+
+    if State.CurrentNotification then
+        table.insert(State.NotificationQueue, {text1 = text1, color1 = color1, text2 = text2, color2 = color2})
+        return
+    end
+
+    State.CurrentNotification = true
+
+    local notifGui = State.UIElements.NotificationGui
+    if not notifGui then
+        CreateNotificationUI()
+        notifGui = State.UIElements.NotificationGui
+    end
+
+    local notifFrame = Instance.new("Frame")
+    notifFrame.Name = "NotificationFrame"
+    notifFrame.BackgroundTransparency = 1
+    notifFrame.AnchorPoint = Vector2.new(0.5, 0)
+    notifFrame.Position = UDim2.new(0.5, 0, 0.25, 0)
+    notifFrame.Size = text2 and UDim2.new(0, 320, 0, 70) or UDim2.new(0, 320, 0, 40)
+    notifFrame.Parent = notifGui
+
+    local textLabel1 = Instance.new("TextLabel")
+    textLabel1.Text = text1
+    textLabel1.Font = Enum.Font.GothamBold
+    textLabel1.TextSize = 18
+    textLabel1.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel1.BackgroundTransparency = 1
+    textLabel1.TextTransparency = 1
+    textLabel1.Size = UDim2.new(1, 0, 0, 35)
+    textLabel1.Position = text2 and UDim2.new(0, 0, 0, 0) or UDim2.new(0, 0, 0.5, -17)
+    textLabel1.TextXAlignment = Enum.TextXAlignment.Center
+    textLabel1.Parent = notifFrame
+
+    local textLabel2
+    if text2 then
+        textLabel2 = Instance.new("TextLabel")
+        textLabel2.Text = text2
+        textLabel2.Font = Enum.Font.GothamBold
+        textLabel2.TextSize = 18
+        textLabel2.TextColor3 = Color3.fromRGB(255, 255, 255)
+        textLabel2.BackgroundTransparency = 1
+        textLabel2.TextTransparency = 1
+        textLabel2.Size = UDim2.new(1, 0, 0, 35)
+        textLabel2.Position = UDim2.new(0, 0, 0, 35)
+        textLabel2.TextXAlignment = Enum.TextXAlignment.Center
+        textLabel2.Parent = notifFrame
+    end
+
+    local textFadeIn1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
+    textFadeIn1:Play()
+
+    if textLabel2 then
+        local textFadeIn2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
+        textFadeIn2:Play()
+    end
+
+    task.wait(CONFIG.Notification.Duration)
+
+    local textFadeOut1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
+    textFadeOut1:Play()
+
+    if textLabel2 then
+        local textFadeOut2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
+        textFadeOut2:Play()
+    end
+
+    textFadeOut1.Completed:Wait()
+    notifFrame:Destroy()
+
+    State.CurrentNotification = nil
+
+    if #State.NotificationQueue > 0 then
+        local next = table.remove(State.NotificationQueue, 1)
+        ShowNotification(next.text1, next.color1, next.text2, next.color2)
+    end
+end
 -- ===================================
 -- FOV CHANGER
 -- ===================================
@@ -140,11 +230,13 @@ local AntiFlingLastPos = Vector3.zero
 local FlingDetectionConnection = nil
 local FlingNeutralizerConnection = nil
 local DetectedFlingers = {}
+local FlingBlockedNotified = false
+
 
 local function EnableAntiFling()
     AntiFlingEnabled = true
     
-    -- Р”РµС‚РµРєС‚РѕСЂ С„Р»РёРЅРіР° РґСЂСѓРіРёС… РёРіСЂРѕРєРѕРІ
+    -- Детектор флинга других игроков
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
@@ -158,7 +250,7 @@ local function EnableAntiFling()
                             DetectedFlingers[player.Name] = true
                         end
                         
-                        -- РќРµР№С‚СЂР°Р»РёР·СѓРµРј С„Р»РёРЅРі РґСЂСѓРіРёС… РёРіСЂРѕРєРѕРІ
+                        -- Нейтрализуем флинг других игроков
                         for _, part in ipairs(player.Character:GetDescendants()) do
                             if part:IsA("BasePart") then
                                 pcall(function()
@@ -175,26 +267,35 @@ local function EnableAntiFling()
         end
     end)
     
-    -- Р—Р°С‰РёС‚Р° СЃРµР±СЏ РѕС‚ С„Р»РёРЅРіР°
+    -- Защита себя от флинга
     FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
             
-            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
-                if State.NotificationsEnabled then
-                    ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
-                end
+                -- ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Пропускаем если мы сами флингаем
+            if State.IsFlingInProgress then
+                -- Сохраняем позицию но не блокируем velocity во время флинга
+                AntiFlingLastPos = primaryPart.Position
+            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 250 or primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
+                    if State.NotificationsEnabled and not FlingBlockedNotified then
+                        ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
+                        FlingBlockedNotified = true
+                        task.delay(3, function()
+                            FlingBlockedNotified = false
+                        end)
+                    end
+
                 
                 primaryPart.AssemblyLinearVelocity = Vector3.zero
                 primaryPart.AssemblyAngularVelocity = Vector3.zero
                 
-                -- Р’РѕР·РІСЂР°С‚ РЅР° РїРѕСЃР»РµРґРЅСЋСЋ РїРѕР·РёС†РёСЋ
+                -- Возврат на последнюю позицию
                 if AntiFlingLastPos ~= Vector3.zero then
                     primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
                 end
             else
-                -- РЎРѕС…СЂР°РЅСЏРµРј С‚РµРєСѓС‰СѓСЋ РїРѕР·РёС†РёСЋ
+                -- Сохраняем текущую позицию
                 AntiFlingLastPos = primaryPart.Position
             end
         end
@@ -255,8 +356,14 @@ local function FlingPlayer(playerToFling)
     
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
     local RootPart = Humanoid and Humanoid.RootPart
-    
     if not RootPart then return end
+    -- Временно отключаем anti-fling
+    local antiFlingWasEnabled = State.AntiFlingEnabled
+    if antiFlingWasEnabled then
+        DisableAntiFling()
+    end
+    State.IsFlingInProgress = true
+
 
     local TCharacter = playerToFling.Character
     local THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
@@ -385,6 +492,14 @@ local function FlingPlayer(playerToFling)
     end
 
     workspace.FallenPartsDestroyHeight = State.FPDH
+    -- Включаем anti-fling обратно
+    State.IsFlingInProgress = false
+    if antiFlingWasEnabled then
+        task.delay(1, function()
+            EnableAntiFling()
+        end)
+    end
+
 
     if State.NotificationsEnabled then
         ShowNotification("Player Flung!", CONFIG.Colors.Green, playerToFling.Name, CONFIG.Colors.Accent)
@@ -449,94 +564,7 @@ local function ToggleGodMode()
     end
 end
 
-local function CreateNotificationUI()
-    local notifGui = Instance.new("ScreenGui")
-    notifGui.Name = "MM2_Notifications"
-    notifGui.ResetOnSpawn = false
-    notifGui.DisplayOrder = 100
-    notifGui.Parent = CoreGui
-    State.UIElements.NotificationGui = notifGui
-end
 
-local function ShowNotification(text1, color1, text2, color2)
-    if not State.NotificationsEnabled then return end
-
-    if State.CurrentNotification then
-        table.insert(State.NotificationQueue, {text1 = text1, color1 = color1, text2 = text2, color2 = color2})
-        return
-    end
-
-    State.CurrentNotification = true
-
-    local notifGui = State.UIElements.NotificationGui
-    if not notifGui then
-        CreateNotificationUI()
-        notifGui = State.UIElements.NotificationGui
-    end
-
-    local notifFrame = Instance.new("Frame")
-    notifFrame.Name = "NotificationFrame"
-    notifFrame.BackgroundTransparency = 1
-    notifFrame.AnchorPoint = Vector2.new(0.5, 0)
-    notifFrame.Position = UDim2.new(0.5, 0, 0.25, 0)
-    notifFrame.Size = text2 and UDim2.new(0, 320, 0, 70) or UDim2.new(0, 320, 0, 40)
-    notifFrame.Parent = notifGui
-
-    local textLabel1 = Instance.new("TextLabel")
-    textLabel1.Text = text1
-    textLabel1.Font = Enum.Font.GothamBold
-    textLabel1.TextSize = 18
-    textLabel1.TextColor3 = Color3.fromRGB(255, 255, 255)
-    textLabel1.BackgroundTransparency = 1
-    textLabel1.TextTransparency = 1
-    textLabel1.Size = UDim2.new(1, 0, 0, 35)
-    textLabel1.Position = text2 and UDim2.new(0, 0, 0, 0) or UDim2.new(0, 0, 0.5, -17)
-    textLabel1.TextXAlignment = Enum.TextXAlignment.Center
-    textLabel1.Parent = notifFrame
-
-    local textLabel2
-    if text2 then
-        textLabel2 = Instance.new("TextLabel")
-        textLabel2.Text = text2
-        textLabel2.Font = Enum.Font.GothamBold
-        textLabel2.TextSize = 18
-        textLabel2.TextColor3 = Color3.fromRGB(255, 255, 255)
-        textLabel2.BackgroundTransparency = 1
-        textLabel2.TextTransparency = 1
-        textLabel2.Size = UDim2.new(1, 0, 0, 35)
-        textLabel2.Position = UDim2.new(0, 0, 0, 35)
-        textLabel2.TextXAlignment = Enum.TextXAlignment.Center
-        textLabel2.Parent = notifFrame
-    end
-
-    local textFadeIn1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
-    textFadeIn1:Play()
-
-    if textLabel2 then
-        local textFadeIn2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
-        textFadeIn2:Play()
-    end
-
-    task.wait(CONFIG.Notification.Duration)
-
-    local textFadeOut1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
-    textFadeOut1:Play()
-
-    if textLabel2 then
-        local textFadeOut2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
-        textFadeOut2:Play()
-    end
-
-    textFadeOut1.Completed:Wait()
-    notifFrame:Destroy()
-
-    State.CurrentNotification = nil
-
-    if #State.NotificationQueue > 0 then
-        local next = table.remove(State.NotificationQueue, 1)
-        ShowNotification(next.text1, next.color1, next.text2, next.color2)
-    end
-end
 
 local function CreateHighlight(adornee, color)
     if not adornee or not adornee.Parent then return nil end
@@ -899,24 +927,46 @@ end
 -- ===================================
 
 local function knifeThrow(silent)
-    local knife = LocalPlayer.Character:FindFirstChild("Knife")
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    -- Ищем нож в персонаже или рюкзаке
+    local knife = character:FindFirstChild("Knife")
     if not knife then
-        -- Р­РєРёРїРёСЂСѓРµРј РµСЃР»Рё РІ СЂСЋРєР·Р°РєРµ
         knife = LocalPlayer.Backpack:FindFirstChild("Knife")
         if knife then
-            LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):EquipTool(knife)
-            task.wait(0.05)
-            knife = LocalPlayer.Character:FindFirstChild("Knife")
+            -- Экипируем нож
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid:EquipTool(knife)
+                task.wait(0.1)
+                knife = character:FindFirstChild("Knife")
+            end
         end
     end
     
-    if knife then
-        -- Р‘СЂРѕСЃР°РµРј РІ РЅР°РїСЂР°РІР»РµРЅРёРё РєР°РјРµСЂС‹
-        local camera = Workspace.CurrentCamera
-        knife.Throw:FireServer(
-            knife:GetPivot(),
-            camera.CFrame.Position + camera.CFrame.LookVector * 100
-        )
+    if not knife then
+        if not silent and State.NotificationsEnabled then
+            ShowNotification("No Knife", CONFIG.Colors.Red)
+        end
+        return
+    end
+    
+    -- Бросаем нож в направлении камеры
+    local camera = Workspace.CurrentCamera
+    if camera then
+        local throwPos = camera.CFrame.Position + camera.CFrame.LookVector * 100
+        
+        pcall(function()
+            knife.Throw:FireServer(
+                knife:GetPivot(),
+                throwPos
+            )
+        end)
+        
+        if not silent and State.NotificationsEnabled then
+            ShowNotification("Knife Thrown", CONFIG.Colors.Green)
+        end
     end
 end
 
@@ -1394,7 +1444,7 @@ end)
         })
 
         local dropdown = Create("TextButton", {
-            Text = "Select Player в–ј",
+            Text = "Select Player ▼",
             Font = Enum.Font.GothamMedium,
             TextSize = 11,
             TextColor3 = CONFIG.Colors.Text,
@@ -1466,7 +1516,7 @@ end)
 
                 playerButton.MouseButton1Click:Connect(function()
                     State.SelectedPlayerForFling = playerName
-                    dropdown.Text = playerName:sub(1, 8) .. " вњ“"
+                    dropdown.Text = playerName:sub(1, 8) .. " ✓"
                     dropdownFrame:TweenSize(UDim2.new(0, 95, 0, 0), "Out", "Quad", 0.2, true)
                     task.wait(0.2)
                     dropdownFrame.Visible = false
