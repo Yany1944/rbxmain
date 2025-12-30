@@ -49,12 +49,13 @@ local State = {
     MurderESP = false,
     SheriffESP = false,
     InnocentESP = false,
-    NotificationsEnabled = false,  -- ✅ ИСПРАВЛЕНО: Включено по умолчанию
+    NotificationsEnabled = false,
     GodModeEnabled = false,
     WalkSpeed = 18,
     JumpPower = 50,
     MaxCameraZoom = 100,
     CameraFOV = 70,
+    ShootPrediction = 0.2,
     AntiFlingEnabled = false,
     NoclipEnabled = false,
     NoclipMode = "Standard",
@@ -73,7 +74,8 @@ local State = {
         FlingPlayer = Enum.KeyCode.Unknown,
         ThrowKnife = Enum.KeyCode.Unknown,
         Noclip = Enum.KeyCode.Unknown,
-        ShootMurderer = Enum.KeyCode.Unknown
+        ShootMurderer = Enum.KeyCode.Unknown,
+        PickupGun = Enum.KeyCode.Unknown
 
     },
     prevMurd = nil,
@@ -681,47 +683,94 @@ local function ServerHop()
         ShowNotification("Finding Server...", CONFIG.Colors.Orange, "Please wait", CONFIG.Colors.TextDark)
     end
     
-    local success = pcall(function()
-        local servers = {}
+    local success, result = pcall(function()
+        local serverlist = {}
         local cursor = ""
+        local foundServers = 0
         
-        repeat
+        -- Собираем сервера (максимум 3 запроса)
+        for i = 1, 3 do
             local url = string.format(
-                "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
                 game.PlaceId,
                 cursor
             )
             
-            local response = game:HttpGet(url)
+            local success2, response = pcall(function()
+                return game:HttpGet(url)
+            end)
+            
+            if not success2 then
+                warn("Failed to fetch servers:", response)
+                break
+            end
+            
             local data = HttpService:JSONDecode(response)
             
+            -- Фильтруем сервера
             for _, server in ipairs(data.data) do
-                if server.id ~= game.JobId and server.playing < server.maxPlayers then
-                    table.insert(servers, server)
+                if server.id ~= game.JobId and 
+                   server.playing < server.maxPlayers and
+                   server.playing > 0 then  -- Исключаем пустые сервера
+                    table.insert(serverlist, server)
+                    foundServers = foundServers + 1
                 end
             end
             
-            cursor = data.nextPageCursor or ""
-        until cursor == ""
+            cursor = data.nextPageCursor
+            if not cursor or cursor == "" then
+                break
+            end
+            
+            -- Если нашли достаточно серверов, прерываем
+            if foundServers >= 10 then
+                break
+            end
+        end
         
-        table.sort(servers, function(a, b)
+        if #serverlist == 0 then
+            if State.NotificationsEnabled then
+                ShowNotification("No servers found", CONFIG.Colors.Red, "Rejoining instead", CONFIG.Colors.TextDark)
+            end
+            task.wait(1)
+            return Rejoin()
+        end
+        
+        -- Сортируем: сначала с меньшим количеством игроков
+        table.sort(serverlist, function(a, b)
             return a.playing < b.playing
         end)
         
-        if #servers > 0 then
-            local targetServer = servers[1]
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetServer.id, LocalPlayer)
-        else
-            if State.NotificationsEnabled then
-                ShowNotification("Server Hop Failed", CONFIG.Colors.Red, "No servers found", CONFIG.Colors.TextDark)
-            end
+        -- Выбираем случайный сервер из топ-5 (чтобы не всегда попадать на один и тот же)
+        local targetIndex = math.random(1, math.min(5, #serverlist))
+        local targetServer = serverlist[targetIndex]
+        
+        if State.NotificationsEnabled then
+            ShowNotification(
+                "Found server!", 
+                CONFIG.Colors.Green, 
+                string.format("%d/%d players", targetServer.playing, targetServer.maxPlayers),
+                CONFIG.Colors.Accent
+            )
         end
+        
+        task.wait(1)
+        
+        -- Телепортируемся
+        TeleportService:TeleportToPlaceInstance(
+            game.PlaceId, 
+            targetServer.id, 
+            LocalPlayer
+        )
     end)
     
     if not success then
-        pcall(function()
-            TeleportService:Teleport(game.PlaceId, LocalPlayer)
-        end)
+        warn("ServerHop error:", result)
+        if State.NotificationsEnabled then
+            ShowNotification("Server Hop Failed", CONFIG.Colors.Red, "Rejoining instead", CONFIG.Colors.TextDark)
+        end
+        task.wait(1)
+        Rejoin()
     end
 end
 
@@ -1253,10 +1302,35 @@ local function shootMurderer()
         return
     end
 
-    -- ✅ INSTAKILL аргументы (стреляем ИЗ позиции мурдерера В позицию мурдерера)
+    -- ✅ ПРЕДСКАЗАНИЕ ПОЗИЦИИ с учетом скорости и прыжков
+    local velocity = murdererHRP.AssemblyLinearVelocity
+    local currentPos = murdererHRP.Position
+    
+    local predictionTime = State.ShootPrediction
+    local predictedPos = currentPos + (velocity * predictionTime)
+    
+    -- Проверяем высоту (если прыгает, целимся выше)
+    local murdererHumanoid = murderer.Character:FindFirstChildOfClass("Humanoid")
+    if murdererHumanoid then
+        local jumpOffset = Vector3.new(0, 0, 0)
+        
+        -- Если мурдерер в воздухе (прыгает/падает)
+        if murdererHumanoid:GetState() == Enum.HumanoidStateType.Freefall or 
+           murdererHumanoid:GetState() == Enum.HumanoidStateType.Jumping then
+            -- Целимся в центр тела (выше)
+            jumpOffset = Vector3.new(0, 1.5, 0)
+        else
+            -- Обычная цель - голова/грудь
+            jumpOffset = Vector3.new(0, 1, 0)
+        end
+        
+        predictedPos = predictedPos + jumpOffset
+    end
+
+    -- ✅ INSTAKILL аргументы с предсказанием
     local args = {
-        [1] = CFrame.new(murdererHRP.Position + Vector3.new(0, 1, 0)), -- Откуда (чуть выше мурдерера)
-        [2] = CFrame.new(murdererHRP.Position) -- Куда (прямо в мурдерера)
+        [1] = CFrame.new(predictedPos + Vector3.new(0, 1, 0)), -- Откуда (чуть выше предсказанной позиции)
+        [2] = CFrame.new(predictedPos) -- Куда (предсказанная позиция)
     }
 
     local success, err = pcall(function()
@@ -1269,6 +1343,38 @@ local function shootMurderer()
         ShowNotification("Shoot failed: " .. tostring(err), CONFIG.Colors.Red)
     end
 end
+
+local function pickupGun()
+    -- Проверяем что пистолет существует на карте
+    local gun = Workspace:FindFirstChild("GunDrop", true) -- true = recursive search
+    
+    if not gun then
+        ShowNotification("No gun on map", CONFIG.Colors.Red)
+        return
+    end
+    
+    -- Сохраняем текущую позицию
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local previousPosition = hrp.CFrame
+    
+    -- Телепортируемся к пистолету
+    hrp.CFrame = gun.CFrame + Vector3.new(0, 3, 0)
+    
+    -- Ждём пока подберём
+    task.wait(0.3)
+    
+    -- Возвращаемся назад
+    hrp.CFrame = previousPosition
+    
+    ShowNotification("Gun picked up!", CONFIG.Colors.Green)
+end
+
+
 
 
 local function CreateUI()
@@ -1625,6 +1731,128 @@ local function CreateUI()
 
         return dropdown
     end
+    local function CreateSlider(title, desc, min, max, default, callback)
+    local card = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Size = UDim2.new(1, 0, 0, 70),
+        Parent = content
+    })
+    AddCorner(card, 8)
+    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+    local cardTitle = Create("TextLabel", {
+        Text = title,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 14,
+        TextColor3 = CONFIG.Colors.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 10),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+
+    local cardDesc = Create("TextLabel", {
+        Text = desc,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextColor3 = CONFIG.Colors.TextDark,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 30),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+
+    -- Контейнер для слайдера
+    local sliderContainer = Create("Frame", {
+        BackgroundColor3 = Color3.fromRGB(40, 40, 45),
+        Position = UDim2.new(0, 15, 0, 50),
+        Size = UDim2.new(1, -30, 0, 6),
+        Parent = card
+    })
+    AddCorner(sliderContainer, 3)
+
+    -- Заполненная часть слайдера
+    local sliderFill = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Accent,
+        Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
+        Parent = sliderContainer
+    })
+    AddCorner(sliderFill, 3)
+
+    -- Кнопка-ползунок
+    local sliderButton = Create("TextButton", {
+        Text = "",
+        BackgroundColor3 = CONFIG.Colors.Text,
+        Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8),
+        Size = UDim2.new(0, 16, 0, 16),
+        AutoButtonColor = false,
+        Parent = sliderContainer
+    })
+    AddCorner(sliderButton, 16)
+
+    -- Текст со значением
+    local valueLabel = Create("TextLabel", {
+        Text = string.format("%.2f", default),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        TextColor3 = CONFIG.Colors.Accent,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -60, 0, 8),
+        Size = UDim2.new(0, 55, 0, 20),
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Parent = card
+    })
+
+    local dragging = false
+    local currentValue = default
+
+    local function updateSlider(input)
+        local containerPos = sliderContainer.AbsolutePosition.X
+        local containerSize = sliderContainer.AbsoluteSize.X
+        local mousePos = input.Position.X
+        
+        local relativePos = math.clamp((mousePos - containerPos) / containerSize, 0, 1)
+        local value = min + (relativePos * (max - min))
+        
+        -- Округление до 2 знаков
+        value = math.floor(value * 100 + 0.5) / 100
+        currentValue = value
+        
+        sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
+        sliderButton.Position = UDim2.new(relativePos, -8, 0.5, -8)
+        valueLabel.Text = string.format("%.2f", value)
+        
+        callback(value)
+    end
+
+    sliderButton.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            updateSlider(input)
+        end
+    end)
+
+    sliderContainer.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            updateSlider(input)
+        end
+    end)
+
+    return sliderButton
+end
+
 
     CreateSection("CHARACTER SETTINGS")
     
@@ -1699,7 +1927,17 @@ local function CreateUI()
 
     CreateSection("SHERIFF TOOLS")
     CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-
+    CreateSlider(
+        "Prediction Time", 
+        "Adjust for moving/jumping targets", 
+        0.05,  -- Минимум
+        0.5,   -- Максимум
+        0.2,   -- По умолчанию
+        function(value)
+            State.ShootPrediction = value
+        end
+    )
+    CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
     CreateSection("ANTI-FLING")
 
     CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(state)
@@ -2042,6 +2280,11 @@ local function CreateUI()
         if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
             pcall(function()
                 shootMurderer()
+            end)
+        end
+        if input.KeyCode == State.Keybinds.PickupGun and State.Keybinds.PickupGun ~= Enum.KeyCode.Unknown then
+            pcall(function()
+                pickupGun()
             end)
         end
 
