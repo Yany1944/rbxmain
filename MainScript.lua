@@ -72,7 +72,8 @@ local State = {
         GodMode = Enum.KeyCode.Unknown,
         FlingPlayer = Enum.KeyCode.Unknown,
         ThrowKnife = Enum.KeyCode.Unknown,
-        Noclip = Enum.KeyCode.Unknown
+        Noclip = Enum.KeyCode.Unknown,
+        ShootMurderer = Enum.KeyCode.Unknown
 
     },
     prevMurd = nil,
@@ -635,7 +636,7 @@ local function SetupAntiAFK()
     end)
     
     task.spawn(function()
-        while getgenv.MM2ESPScript do
+        while getgenv().MM2_ESP_Script do
             pcall(function()
                 if getconnections then
                     for _, connection in next, getconnections(LocalPlayer.Idled) do
@@ -1210,6 +1211,64 @@ local function knifeThrow(silent)
         end
     end
 end
+local function shootMurderer()
+    -- Проверка: ты шериф/герой?
+    local sheriff = nil
+    for _, p in pairs(Players:GetPlayers()) do
+        local items = p.Backpack
+        local character = p.Character
+        if (items and items:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
+            sheriff = p
+            break
+        end
+    end
+    
+    if sheriff ~= LocalPlayer then
+        ShowNotification("Not Sheriff/Hero", CONFIG.Colors.Red)
+        return
+    end
+
+    -- Найти убийцу
+    local murderer = findMurderer()
+    if not murderer then
+        ShowNotification("No murderer found", CONFIG.Colors.Red)
+        return
+    end
+
+    -- Экипировать пистолет
+    if not LocalPlayer.Character:FindFirstChild("Gun") then
+        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if LocalPlayer.Backpack:FindFirstChild("Gun") then
+            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
+            task.wait(0.3)
+        else
+            ShowNotification("No gun found", CONFIG.Colors.Red)
+            return
+        end
+    end
+
+    local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
+    if not murdererHRP then
+        ShowNotification("Can't find murderer HRP", CONFIG.Colors.Red)
+        return
+    end
+
+    -- ✅ INSTAKILL аргументы (стреляем ИЗ позиции мурдерера В позицию мурдерера)
+    local args = {
+        [1] = CFrame.new(murdererHRP.Position + Vector3.new(0, 1, 0)), -- Откуда (чуть выше мурдерера)
+        [2] = CFrame.new(murdererHRP.Position) -- Куда (прямо в мурдерера)
+    }
+
+    local success, err = pcall(function()
+        LocalPlayer.Character:WaitForChild("Gun"):WaitForChild("Shoot"):FireServer(unpack(args))
+    end)
+
+    if success then
+        ShowNotification("Shot fired!", CONFIG.Colors.Green, murderer.Name, CONFIG.Colors.Murder)
+    else
+        ShowNotification("Shoot failed: " .. tostring(err), CONFIG.Colors.Red)
+    end
+end
 
 
 local function CreateUI()
@@ -1638,6 +1697,9 @@ local function CreateUI()
     CreateSection("MURDERER TOOLS")
     CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
 
+    CreateSection("SHERIFF TOOLS")
+    CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
+
     CreateSection("ANTI-FLING")
 
     CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(state)
@@ -1977,7 +2039,11 @@ local function CreateUI()
                 knifeThrow(true)
             end)
         end
-
+        if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
+            pcall(function()
+                shootMurderer()
+            end)
+        end
 
         if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
             State.ClickTPActive = true
