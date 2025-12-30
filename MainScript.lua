@@ -56,6 +56,10 @@ local State = {
     MaxCameraZoom = 100,
     CameraFOV = 70,
     ShootPrediction = 0.2,
+    ExtendedHitboxSize = 5,  -- ✅ Добавь эту строку
+    ExtendedHitboxEnabled = false,  -- ✅ Добавь эту строку
+    ExtendedHitboxConnection = nil,  -- ✅ Добавь эту строку
+    ViewClipEnabled = false,
     AntiFlingEnabled = false,
     NoclipEnabled = false,
     NoclipMode = "Standard",
@@ -1031,6 +1035,10 @@ local function StartRoleChecking()
                     State.roundActive = false
                     State.roundStart = true
 
+                        if State.ExtendedHitboxEnabled then
+                            DisableExtendedHitbox()
+                        end
+
                     State.prevMurd = nil
                     State.prevSher = nil
                     State.heroSent = false
@@ -1375,6 +1383,113 @@ local function pickupGun()
 end
 
 
+
+local HitboxConnection = nil
+local OriginalSizes = {}
+
+local function EnableExtendedHitbox()
+    if State.ExtendedHitboxEnabled then return end
+    State.ExtendedHitboxEnabled = true
+    
+    HitboxConnection = RunService.Heartbeat:Connect(function()
+        local size = Vector3.new(
+            State.ExtendedHitboxSize, 
+            State.ExtendedHitboxSize, 
+            State.ExtendedHitboxSize
+        )
+        
+        for _, player in ipairs(Players:GetPlayers()) do
+            -- ✅ Убрал проверку команды - применяем ко всем (кроме себя)
+            if player ~= LocalPlayer then
+                local character = player.Character
+                if character then
+                    local hrp = character:FindFirstChild("HumanoidRootPart")
+                    if hrp and hrp:IsA("BasePart") then
+                        -- Сохраняем оригинал
+                        if not OriginalSizes[player] then
+                            OriginalSizes[player] = {
+                                Size = hrp.Size,
+                                Transparency = hrp.Transparency,
+                                Material = hrp.Material,
+                                Color = hrp.Color,
+                                CanCollide = hrp.CanCollide
+                            }
+                        end
+                        
+                        -- ✅ Применяем изменения (с визуализацией)
+                        hrp.Size = size
+                        hrp.Transparency = 0.5  -- Более видимый
+                        hrp.Material = Enum.Material.ForceField  -- Визуальный эффект
+                        hrp.Color = Color3.fromRGB(255, 0, 0)  -- Красный
+                        -- НЕ меняем CanCollide!
+                    end
+                end
+            end
+        end
+    end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Extended Hitbox ON", CONFIG.Colors.Green, "Size: " .. State.ExtendedHitboxSize, CONFIG.Colors.Accent)
+    end
+end
+
+local function DisableExtendedHitbox()
+    if not State.ExtendedHitboxEnabled then return end
+    State.ExtendedHitboxEnabled = false
+    
+    if HitboxConnection then
+        HitboxConnection:Disconnect()
+        HitboxConnection = nil
+    end
+    
+    -- Восстанавливаем всё
+    for player, original in pairs(OriginalSizes) do
+        if player.Character then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.Size = original.Size
+                hrp.Transparency = original.Transparency
+                hrp.Material = original.Material
+                hrp.Color = original.Color
+                hrp.CanCollide = original.CanCollide
+            end
+        end
+    end
+    
+    OriginalSizes = {}
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Extended Hitbox OFF", CONFIG.Colors.Red)
+    end
+end
+
+local function UpdateHitboxSize(newSize)
+    State.ExtendedHitboxSize = newSize
+end
+
+local function EnableViewClip()
+    if State.ViewClipEnabled then return end
+    State.ViewClipEnabled = true
+    
+    -- ✅ Изменяем режим камеры (из сурса)
+    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+    
+    if State.NotificationsEnabled then
+        ShowNotification("ViewClip ON", CONFIG.Colors.Green, "Camera clips through walls", CONFIG.Colors.Accent)
+    end
+end
+
+local function DisableViewClip()
+    if not State.ViewClipEnabled then return end
+    State.ViewClipEnabled = false
+    
+    -- ✅ Возвращаем обычный режим камеры
+    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+    
+    if State.NotificationsEnabled then
+        ShowNotification("ViewClip OFF", CONFIG.Colors.Red)
+    end
+end
 
 
 local function CreateUI()
@@ -1876,6 +1991,18 @@ end
         end)
     end)
 
+    CreateToggle(
+    "ViewClip",
+    "Camera clips through walls",
+        function(state)
+            if state then
+                EnableViewClip()
+            else
+                DisableViewClip()
+            end
+        end
+    )
+
 
     CreateSection("NOTIFICATIONS")
 
@@ -1921,6 +2048,31 @@ end
     CreateSection("TELEPORT")
 
     CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+
+    CreateSection("EXTENDED HITBOX")
+
+CreateToggle(
+    "Enable Extended Hitbox",
+    "Makes all players easier to hit",
+    function(state)
+        if state then
+            EnableExtendedHitbox()
+        else
+            DisableExtendedHitbox()
+        end
+    end
+)
+
+CreateSlider(
+    "Hitbox Size", 
+    "Larger = easier to hit (2-20)", 
+    2,    -- Минимум
+    20,   -- Максимум
+    5,    -- По умолчанию
+    function(value)
+        UpdateHitboxSize(value)
+    end
+)
 
     CreateSection("MURDERER TOOLS")
     CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
