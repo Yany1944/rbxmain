@@ -11,6 +11,42 @@ if getgenv().MM2_ESP_Script then
 end
 getgenv().MM2_ESP_Script = true
 
+pcall(function()
+    local mt = getrawmetatable(game)
+    local oldNamecall = mt.__namecall
+    
+    setreadonly(mt, false)
+    
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        -- Блокируем детектирование через Workspace
+        if method == "FindFirstChild" or method == "WaitForChild" then
+            if tostring(self) == "Workspace" and (args[1] == "Workshop" or args[1] == "Footsteps") then
+                return nil
+            end
+        end
+        
+        -- Блокируем footstep детекты
+        if method == "FireServer" and tostring(self):find("Footstep") then
+            return
+        end
+        
+        return oldNamecall(self, ...)
+    end)
+    
+    setreadonly(mt, true)
+end)
+
+pcall(function()
+    for i,v in pairs(getconnections(game.Players.LocalPlayer.Kicked)) do
+        v:Disable()
+    end
+end)
+
+task.wait(0.5)
+
 local CONFIG = {
     HideKey = Enum.KeyCode.Q,
     CheckInterval = 0.5,
@@ -55,10 +91,20 @@ local State = {
     JumpPower = 50,
     MaxCameraZoom = 100,
     CameraFOV = 70,
-    ShootPrediction = 0.2,
+    ShootPrediction = 0.3,
     ExtendedHitboxSize = 5,  -- ✅ Добавь эту строку
     ExtendedHitboxEnabled = false,  -- ✅ Добавь эту строку
     ExtendedHitboxConnection = nil,  -- ✅ Добавь эту строку
+	AutoFarmEnabled = false,
+	CoinFarmThread = nil,
+	CoinFarmFlySpeed = 24,
+	CoinFarmDelay = 2,
+	UndergroundMode = true,
+	UndergroundOffset = 2.5,
+	CoinBlacklist = {},
+	StartSessionCoins = 0,
+	NoClipConnection = nil,
+	ClipEnabled = true,
     ViewClipEnabled = false,
     AntiFlingEnabled = false,
     NoclipEnabled = false,
@@ -562,41 +608,39 @@ end
 -- ║                    🚫 NOCLIP ФУНКЦИИ                          ║
 -- ╚═══════════════════════════════════════════════════════════════╝
 
+-- === NOCLIP (УНИВЕРСАЛЬНЫЙ) ===
+
 local function EnableNoclip()
     if State.NoclipEnabled then return end
     State.NoclipEnabled = true
 
-    local mode = State.NoclipMode
+    local NoclipObjects = {}
+    local char = LocalPlayer.Character
+    if not char then return end
 
-    if mode == "Standard" then
-        local NoclipObjects = {}
-        local char = LocalPlayer.Character
-        if not char then return end
+    for _, obj in ipairs(char:GetChildren()) do
+        if obj:IsA("BasePart") then
+            table.insert(NoclipObjects, obj)
+        end
+    end
 
-        for _, obj in ipairs(char:GetChildren()) do
+    State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
+        task.wait(0.15)
+        table.clear(NoclipObjects)
+        for _, obj in ipairs(newChar:GetChildren()) do
             if obj:IsA("BasePart") then
                 table.insert(NoclipObjects, obj)
             end
         end
+    end)
 
-        State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
-            task.wait(0.15)
-            table.clear(NoclipObjects)
-            for _, obj in ipairs(newChar:GetChildren()) do
-                if obj:IsA("BasePart") then
-                    table.insert(NoclipObjects, obj)
-                end
-            end
-        end)
-
-        State.NoclipConnection = RunService.Stepped:Connect(function()
-            for _, part in ipairs(NoclipObjects) do
-                pcall(function()
-                    part.CanCollide = false
-                end)
-            end
-        end)
-    end
+    State.NoclipConnection = RunService.Stepped:Connect(function()
+        for _, part in ipairs(NoclipObjects) do
+            pcall(function()
+                part.CanCollide = false
+            end)
+        end
+    end)
 end
 
 local function DisableNoclip()
@@ -612,8 +656,409 @@ local function DisableNoclip()
         State.NoclipRespawnConnection:Disconnect()
         State.NoclipRespawnConnection = nil
     end
+    
+    -- Восстанавливаем коллизию
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetChildren()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                part.CanCollide = true
+            end
+        end
+    end
 end
 
+local coinLabelCache = nil
+local lastCacheTime = 0
+
+local function GetCollectedCoinsCount()
+    if coinLabelCache and coinLabelCache.Parent and (tick() - lastCacheTime) < 2 then
+        local success, value = pcall(function()
+            return tonumber(coinLabelCache.Text) or 0
+        end)
+        if success then
+            return value
+        end
+    end
+    
+    local success, coins = pcall(function()
+        local label = LocalPlayer.PlayerGui
+            :FindFirstChild("MainGUI")
+            :FindFirstChild("Game")
+            :FindFirstChild("CoinBags")
+            :FindFirstChild("Container")
+            :FindFirstChild("SnowToken")
+            :FindFirstChild("CurrencyFrame")
+            :FindFirstChild("Icon")
+            :FindFirstChild("Coins")
+        
+        if label then
+            coinLabelCache = label
+            lastCacheTime = tick()
+            return tonumber(label.Text) or 0
+        end
+        return 0
+    end)
+    
+    if success and coins >= 0 then
+        return coins
+    end
+    
+    local maxValue = 0
+    pcall(function()
+        for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
+            if gui:IsA("TextLabel") and gui.Name == "Coins" then
+                local path = gui:GetFullName()
+                if path:match("CurrencyFrame%.Icon%.Coins$") then
+                    local value = tonumber(gui.Text) or 0
+                    if value > maxValue then
+                        maxValue = value
+                        coinLabelCache = gui
+                        lastCacheTime = tick()
+                    end
+                end
+            end
+        end
+    end)
+    
+    return maxValue
+end
+
+local function ResetCharacter()
+    print("[Auto Farm] 💀 Ресет персонажа")
+    pcall(function()
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid.Health = 0
+            end
+        end
+    end)
+end
+
+local function GetMurdererName()
+    local success, murdererName = pcall(function()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character then
+                local knife = player.Character:FindFirstChild("Knife")
+                if knife then
+                    return player.Name
+                end
+                
+                if player.Backpack then
+                    local knifeInBackpack = player.Backpack:FindFirstChild("Knife")
+                    if knifeInBackpack then
+                        return player.Name
+                    end
+                end
+                
+                for _, tool in ipairs(player.Character:GetChildren()) do
+                    if tool:IsA("Tool") and (tool.Name:lower():match("knife") or tool.Name:lower():match("murder")) then
+                        return player.Name
+                    end
+                end
+                
+                if player.Backpack then
+                    for _, tool in ipairs(player.Backpack:GetChildren()) do
+                        if tool:IsA("Tool") and (tool.Name:lower():match("knife") or tool.Name:lower():match("murder")) then
+                            return player.Name
+                        end
+                    end
+                end
+            end
+        end
+        
+        return nil
+    end)
+    
+    return success and murdererName or nil
+end
+
+local function FindNearestCoin()
+    local character = LocalPlayer.Character
+    if not character then return nil end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil end
+    
+    local closestCoin = nil
+    local closestDistance = math.huge
+    local hrpPosition = humanoidRootPart.Position
+    
+    for _, coin in ipairs(Workspace:GetDescendants()) do
+        if coin:IsA("BasePart") 
+           and coin.Name == "Coin_Server" 
+           and coin:FindFirstChildWhichIsA("TouchTransmitter") 
+           and not State.CoinBlacklist[coin] then
+            
+            local coinVisual = coin:FindFirstChild("CoinVisual")
+            if coinVisual and coinVisual.Transparency == 0 then
+                local distance = (coin.Position - hrpPosition).Magnitude
+                
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestCoin = coin
+                end
+            end
+        end
+    end
+    
+    return closestCoin
+end
+
+-- === NOCLIP ДЛЯ АВТОФАРМА ===
+
+local function EnableNoClip()
+    if State.NoClipConnection then return end
+
+    State.ClipEnabled = false
+    State.NoClipConnection = RunService.Stepped:Connect(function()
+        if not State.ClipEnabled then
+            local character = LocalPlayer.Character
+            if character then
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide == true then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function DisableNoClip()
+    if State.NoClipConnection then
+        State.NoClipConnection:Disconnect()
+        State.NoClipConnection = nil
+    end
+
+    State.ClipEnabled = true
+
+    local character = LocalPlayer.Character
+    if character then
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                part.CanCollide = true
+            end
+        end
+    end
+end
+
+-- === ПЛАВНЫЙ ПОЛЁТ ===
+
+local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
+    speed = speed or State.CoinFarmFlySpeed
+
+    local startPos = humanoidRootPart.Position
+    
+    local targetPos
+    if State.UndergroundMode then
+        targetPos = coin.Position - Vector3.new(0, State.UndergroundOffset, 0)
+    else
+        targetPos = coin.Position + Vector3.new(0, 1, 0)
+    end
+    
+    local distance = (targetPos - startPos).Magnitude
+    local duration = distance / speed
+
+    local startTime = tick()
+    local collectionAttempted = false
+
+    while tick() - startTime < duration do
+        if not State.AutoFarmEnabled then break end
+
+        local character = LocalPlayer.Character
+        if not character or not humanoidRootPart.Parent then break end
+
+        local elapsed = tick() - startTime
+        local alpha = math.min(elapsed / duration, 1)
+
+        local currentPos = startPos:Lerp(targetPos, alpha)
+        
+        local cframe
+        if State.UndergroundMode then
+            cframe = CFrame.new(currentPos) * CFrame.Angles(math.rad(90), 0, 0)
+        else
+            cframe = CFrame.new(currentPos)
+        end
+        
+        humanoidRootPart.CFrame = cframe
+        
+        if humanoidRootPart.AssemblyLinearVelocity then
+            humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end
+        if humanoidRootPart.AssemblyAngularVelocity then
+            humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end
+
+        if alpha >= 0.5 and not collectionAttempted then
+            collectionAttempted = true
+            if firetouchinterest then
+                task.spawn(function()
+                    firetouchinterest(humanoidRootPart, coin, 0)
+                    task.wait(0.05)
+                    firetouchinterest(humanoidRootPart, coin, 1)
+                end)
+            end
+        end
+
+        task.wait()
+    end
+end
+
+local function StartAutoFarm()
+    if State.CoinFarmThread then
+        task.cancel(State.CoinFarmThread)
+        State.CoinFarmThread = nil
+    end
+
+    if not State.AutoFarmEnabled then return end
+    
+    State.CoinBlacklist = {}
+
+    State.CoinFarmThread = task.spawn(function()
+        print("[Auto Farm] 🚀 Запущен")
+        if State.UndergroundMode then
+            print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
+        end
+        
+        local noCoinsAttempts = 0
+        local maxNoCoinsAttempts = 4
+        local lastTeleportTime = 0
+        
+        while State.AutoFarmEnabled do
+            local character = LocalPlayer.Character
+            if not character then 
+                task.wait(0.5)
+                continue 
+            end
+
+            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+            if not humanoidRootPart then 
+                task.wait(0.5)
+                continue 
+            end
+
+            local murdererExists = GetMurdererName() ~= nil
+            
+            if not murdererExists then
+                print("[Auto Farm] ⏳ Жду начала раунда...")
+                State.CoinBlacklist = {}
+                noCoinsAttempts = 0
+                task.wait(2)
+                continue
+            end
+
+            local coin = FindNearestCoin()
+            if not coin then
+                noCoinsAttempts = noCoinsAttempts + 1
+                print("[Auto Farm] 🔍 Монет не найдено (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
+                
+                if noCoinsAttempts >= maxNoCoinsAttempts then
+                    print("[Auto Farm] ✅ Все монеты собраны! Делаю ресет и жду нового раунда...")
+                    ResetCharacter()
+                    State.CoinBlacklist = {}
+                    noCoinsAttempts = 0
+                    
+                    -- ✅ ИСПРАВЛЕНО: Ждём респавна
+                    task.wait(3)
+                    
+                    -- ✅ ИСПРАВЛЕНО: Ждём пока убийца исчезнет (конец раунда)
+                    print("[Auto Farm] ⏳ Жду окончания раунда...")
+                    repeat
+                        task.wait(1)
+                    until GetMurdererName() == nil or not State.AutoFarmEnabled
+                    
+                    -- ✅ ИСПРАВЛЕНО: Теперь ждём НАЧАЛА нового раунда
+                    print("[Auto Farm] ⏳ Жду начала нового раунда...")
+                    repeat
+                        task.wait(1)
+                    until GetMurdererName() ~= nil or not State.AutoFarmEnabled
+                    
+                    print("[Auto Farm] ✅ Новый раунд начался! Продолжаю фарм...")
+                else
+                    task.wait(1)
+                end
+                continue
+            end
+
+            noCoinsAttempts = 0
+
+            pcall(function()
+                local currentCoins = GetCollectedCoinsCount()
+
+                if currentCoins < 1 then
+                    local currentTime = tick()
+                    local timeSinceLastTP = currentTime - lastTeleportTime
+                    
+                    if timeSinceLastTP < 0.5 and lastTeleportTime > 0 then
+                        local waitTime = 0.5 - timeSinceLastTP
+                        task.wait(waitTime)
+                    end
+                    
+                    print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
+                    
+                    local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
+
+                    if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
+                        humanoidRootPart.CFrame = targetCFrame
+                        lastTeleportTime = tick()
+                        
+                        if firetouchinterest then
+                            firetouchinterest(humanoidRootPart, coin, 0)
+                            task.wait(0.05)
+                            firetouchinterest(humanoidRootPart, coin, 1)
+                        end
+                        
+                        task.wait(State.CoinFarmDelay)
+                        
+                        local coinsAfter = GetCollectedCoinsCount()
+                        if coinsAfter > currentCoins then
+                            print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
+                        end
+                        
+                        State.CoinBlacklist[coin] = true
+                    end
+                else
+                    if State.UndergroundMode then
+                        print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                    else
+                        print("[Auto Farm] ✈️ Полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                    end
+                    
+                    EnableNoClip()
+                    SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                    DisableNoClip()
+                    
+                    local coinsAfter = GetCollectedCoinsCount()
+                    if coinsAfter > currentCoins then
+                        print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
+                    end
+                    
+                    State.CoinBlacklist[coin] = true
+                end
+            end)
+        end
+
+        DisableNoClip()
+        State.CoinFarmThread = nil
+        print("[Auto Farm] 🛑 Остановлен")
+    end)
+end
+
+
+local function StopAutoFarm()
+    State.AutoFarmEnabled = false
+    
+    if State.CoinFarmThread then
+        task.cancel(State.CoinFarmThread)
+        State.CoinFarmThread = nil
+    end
+    
+    DisableNoClip()
+    print("[Auto Farm] Полностью выключен")
+end
 
 -- ╔═══════════════════════════════════════════════════════════════╗
 -- ║                    ⏰ ANTI-AFK (РАБОЧИЙ)                      ║
@@ -1807,131 +2252,139 @@ local function CreateUI()
 
         return dropdown
     end
-    local function CreateSlider(title, desc, min, max, default, callback)
-    local card = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Size = UDim2.new(1, 0, 0, 70),
-        Parent = content
-    })
-    AddCorner(card, 8)
-    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
 
-    local cardTitle = Create("TextLabel", {
-        Text = title,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 14,
-        TextColor3 = CONFIG.Colors.Text,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 10),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-
-    local cardDesc = Create("TextLabel", {
-        Text = desc,
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        TextColor3 = CONFIG.Colors.TextDark,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 30),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-
-    -- Контейнер для слайдера
-    local sliderContainer = Create("Frame", {
-        BackgroundColor3 = Color3.fromRGB(40, 40, 45),
-        Position = UDim2.new(0, 15, 0, 50),
-        Size = UDim2.new(1, -30, 0, 6),
-        Parent = card
-    })
-    AddCorner(sliderContainer, 3)
-
-    -- Заполненная часть слайдера
-    local sliderFill = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Accent,
-        Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
-        Parent = sliderContainer
-    })
-    AddCorner(sliderFill, 3)
-
-    -- Кнопка-ползунок
-    local sliderButton = Create("TextButton", {
-        Text = "",
-        BackgroundColor3 = CONFIG.Colors.Text,
-        Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8),
-        Size = UDim2.new(0, 16, 0, 16),
-        AutoButtonColor = false,
-        Parent = sliderContainer
-    })
-    AddCorner(sliderButton, 16)
-
-    -- Текст со значением
-    local valueLabel = Create("TextLabel", {
-        Text = string.format("%.2f", default),
-        Font = Enum.Font.GothamBold,
-        TextSize = 12,
-        TextColor3 = CONFIG.Colors.Accent,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(1, -60, 0, 8),
-        Size = UDim2.new(0, 55, 0, 20),
-        TextXAlignment = Enum.TextXAlignment.Right,
-        Parent = card
-    })
-
-    local dragging = false
-    local currentValue = default
-
-    local function updateSlider(input)
-        local containerPos = sliderContainer.AbsolutePosition.X
-        local containerSize = sliderContainer.AbsoluteSize.X
-        local mousePos = input.Position.X
+    -- ✅ ИСПРАВЛЕННЫЙ CreateSlider С ПОДДЕРЖКОЙ ШАГА
+    local function CreateSlider(title, description, min, max, default, callback, step)
+        step = step or 1
         
-        local relativePos = math.clamp((mousePos - containerPos) / containerSize, 0, 1)
-        local value = min + (relativePos * (max - min))
-        
-        -- Округление до 2 знаков
-        value = math.floor(value * 100 + 0.5) / 100
-        currentValue = value
-        
-        sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
-        sliderButton.Position = UDim2.new(relativePos, -8, 0.5, -8)
-        valueLabel.Text = string.format("%.2f", value)
-        
-        callback(value)
+        local card = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Size = UDim2.new(1, 0, 0, 70),
+            Parent = content
+        })
+        AddCorner(card, 8)
+        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+        Create("TextLabel", {
+            Text = title,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 14,
+            TextColor3 = CONFIG.Colors.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 10),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        Create("TextLabel", {
+            Text = description,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 30),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        local sliderBg = Create("Frame", {
+            BackgroundColor3 = Color3.fromRGB(40, 40, 45),
+            Position = UDim2.new(0, 15, 0, 50),
+            Size = UDim2.new(1, -95, 0, 6),
+            Parent = card
+        })
+        AddCorner(sliderBg, 3)
+
+        local sliderFill = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Accent,
+            Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
+            Parent = sliderBg
+        })
+        AddCorner(sliderFill, 3)
+
+        local sliderButton = Create("TextButton", {
+            Text = "",
+            BackgroundColor3 = CONFIG.Colors.Text,
+            Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8),
+            Size = UDim2.new(0, 16, 0, 16),
+            AutoButtonColor = false,
+            Parent = sliderBg
+        })
+        AddCorner(sliderButton, 16)
+
+        local valueLabel = Create("TextLabel", {
+            Text = step >= 1 and string.format("%d", default) or string.format("%.2f", default),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            TextColor3 = CONFIG.Colors.Accent,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(1, -65, 0, 8),
+            Size = UDim2.new(0, 50, 0, 20),
+            TextXAlignment = Enum.TextXAlignment.Right,
+            Parent = card
+        })
+
+        local dragging = false
+
+        local function updateSlider(input)
+            local pos = sliderBg.AbsolutePosition.X
+            local size = sliderBg.AbsoluteSize.X
+            local mouseX = input.Position.X
+            
+            local alpha = math.clamp((mouseX - pos) / size, 0, 1)
+            local value = min + (alpha * (max - min))
+            
+            -- ✅ Округление до шага
+            value = math.floor(value / step + 0.5) * step
+            value = math.clamp(value, min, max)
+            
+            local normalizedValue = (value - min) / (max - min)
+            sliderFill.Size = UDim2.new(normalizedValue, 0, 1, 0)
+            sliderButton.Position = UDim2.new(normalizedValue, -8, 0.5, -8)
+            
+            -- ✅ Форматирование
+            if step >= 1 then
+                valueLabel.Text = string.format("%d", value)
+            else
+                valueLabel.Text = string.format("%.2f", value)
+            end
+            
+            callback(value)
+        end
+
+        sliderButton.MouseButton1Down:Connect(function()
+            dragging = true
+        end)
+
+        sliderBg.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                updateSlider(input)
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                updateSlider(input)
+            end
+        end)
+
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+
+        return card
     end
 
-    sliderButton.MouseButton1Down:Connect(function()
-        dragging = true
-    end)
-
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            updateSlider(input)
-        end
-    end)
-
-    sliderContainer.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            updateSlider(input)
-        end
-    end)
-
-    return sliderButton
-end
-
+    -- ========================================
+    -- UI КОНТЕНТ НАЧИНАЕТСЯ ЗДЕСЬ
+    -- ========================================
 
     CreateSection("CHARACTER SETTINGS")
-    
 
     CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, function(value)
         ApplyWalkSpeed(value)
@@ -1944,6 +2397,7 @@ end
     CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, function(value)
         ApplyMaxCameraZoom(value)
     end)
+
     CreateSection("CAMERA")
 
     CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(value)
@@ -1953,8 +2407,8 @@ end
     end)
 
     CreateToggle(
-    "ViewClip",
-    "Camera clips through walls",
+        "ViewClip",
+        "Camera clips through walls",
         function(state)
             if state then
                 EnableViewClip()
@@ -1963,7 +2417,6 @@ end
             end
         end
     )
-
 
     CreateSection("NOTIFICATIONS")
 
@@ -1997,6 +2450,45 @@ end
         UpdateAllHighlightsVisibility()
     end)
 
+    CreateSection("AUTO FARM")
+
+    CreateToggle("Auto Farm Coins", "Automatic coin collection", function(state)
+        State.AutoFarmEnabled = state
+        if state then
+            State.CoinBlacklist = {}
+            State.StartSessionCoins = GetCollectedCoinsCount()
+            ShowNotification("Auto Farm Started", CONFIG.Colors.Green)
+            StartAutoFarm()
+        else
+            StopAutoFarm()
+            ShowNotification("Auto Farm Stopped", CONFIG.Colors.Red)
+        end
+    end)
+
+    CreateToggle("Underground Mode", "Fly under the map (safer)", function(state)
+        State.UndergroundMode = state
+    end)
+
+    CreateSlider(
+        "Fly Speed", 
+        "Flying speed (10-30)", 
+        10, 30, 23,
+        function(value)
+            State.CoinFarmFlySpeed = value
+        end,
+        1
+    )
+
+    CreateSlider(
+        "TP Delay", 
+        "Delay between TPs (0.5-5.0)", 
+        0.5, 5.0, 2.0,
+        function(value)
+            State.CoinFarmDelay = value
+        end,
+        0.5
+    )
+
     CreateSection("ANIMATION KEYBINDS")
 
     CreateKeybindButton("Sit Animation", "sit", "Sit")
@@ -2005,52 +2497,55 @@ end
     CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
     CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-
     CreateSection("TELEPORT")
 
     CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
 
     CreateSection("EXTENDED HITBOX")
 
-CreateToggle(
-    "Enable Extended Hitbox",
-    "Makes all players easier to hit",
-    function(state)
-        if state then
-            EnableExtendedHitbox()
-        else
-            DisableExtendedHitbox()
+    CreateToggle(
+        "Enable Extended Hitbox",
+        "Makes all players easier to hit",
+        function(state)
+            if state then
+                EnableExtendedHitbox()
+            else
+                DisableExtendedHitbox()
+            end
         end
-    end
-)
+    )
 
-CreateSlider(
-    "Hitbox Size", 
-    "Larger = easier to hit (2-20)", 
-    2,    -- Минимум
-    20,   -- Максимум
-    5,    -- По умолчанию
-    function(value)
-        UpdateHitboxSize(value)
-    end
-)
+    CreateSlider(
+        "Hitbox Size", 
+        "Larger = easier to hit (2-20)", 
+        2, 20, 5,
+        function(value)
+            State.ExtendedHitboxSize = value
+            if State.ExtendedHitboxEnabled then
+                UpdateHitboxSize(value)
+            end
+        end,
+        1
+    )
 
     CreateSection("MURDERER TOOLS")
     CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
 
     CreateSection("SHERIFF TOOLS")
     CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
+    
     CreateSlider(
         "Prediction Time", 
-        "Adjust for moving/jumping targets", 
-        0.05,  -- Минимум
-        0.5,   -- Максимум
-        0.2,   -- По умолчанию
+        "Adjust for moving targets (0.05-0.50)", 
+        0.05, 0.50, 0.20,
         function(value)
             State.ShootPrediction = value
-        end
+        end,
+        0.05
     )
+    
     CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+
     CreateSection("ANTI-FLING")
 
     CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(state)
@@ -2060,7 +2555,7 @@ CreateSlider(
             DisableAntiFling()
         end
     end)
-    
+
     CreateSection("FLING PLAYER")
 
     local function CreatePlayerDropdown(title, desc)
@@ -2220,15 +2715,12 @@ CreateSlider(
 
     CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-        -- NOCLIP СЕКЦИЯ
     CreateSection("NOCLIP")
 
     CreateKeybindButton("Toggle Noclip", "noclip", "Noclip")
-    
-    -- UTILITY СЕКЦИЯ
+
     CreateSection("UTILITY")
-    
-    -- Rejoin кнопка
+
     local rejoinCard = Create("Frame", {
         BackgroundColor3 = CONFIG.Colors.Section,
         Size = UDim2.new(1, 0, 0, 50),
@@ -2236,7 +2728,7 @@ CreateSlider(
     })
     AddCorner(rejoinCard, 8)
     AddStroke(rejoinCard, 1, CONFIG.Colors.Stroke, 0.7)
-    
+
     local rejoinButton = Create("TextButton", {
         Text = "🔄 Rejoin Server",
         Font = Enum.Font.GothamMedium,
@@ -2249,24 +2741,23 @@ CreateSlider(
         Parent = rejoinCard
     })
     AddCorner(rejoinButton, 6)
-    
+
     rejoinButton.MouseButton1Click:Connect(function()
         Rejoin()
     end)
-    
+
     rejoinButton.MouseEnter:Connect(function()
         TweenService:Create(rejoinButton, TweenInfo.new(0.2), {
             BackgroundColor3 = Color3.fromRGB(100, 160, 255)
         }):Play()
     end)
-    
+
     rejoinButton.MouseLeave:Connect(function()
         TweenService:Create(rejoinButton, TweenInfo.new(0.2), {
             BackgroundColor3 = CONFIG.Colors.Accent
         }):Play()
     end)
-    
-    -- Server Hop кнопка
+
     local serverHopCard = Create("Frame", {
         BackgroundColor3 = CONFIG.Colors.Section,
         Size = UDim2.new(1, 0, 0, 50),
@@ -2274,7 +2765,7 @@ CreateSlider(
     })
     AddCorner(serverHopCard, 8)
     AddStroke(serverHopCard, 1, CONFIG.Colors.Stroke, 0.7)
-    
+
     local serverHopButton = Create("TextButton", {
         Text = "🌐 Server Hop",
         Font = Enum.Font.GothamMedium,
@@ -2287,23 +2778,22 @@ CreateSlider(
         Parent = serverHopCard
     })
     AddCorner(serverHopButton, 6)
-    
+
     serverHopButton.MouseButton1Click:Connect(function()
         ServerHop()
     end)
-    
+
     serverHopButton.MouseEnter:Connect(function()
         TweenService:Create(serverHopButton, TweenInfo.new(0.2), {
             BackgroundColor3 = Color3.fromRGB(120, 220, 120)
         }):Play()
     end)
-    
+
     serverHopButton.MouseLeave:Connect(function()
         TweenService:Create(serverHopButton, TweenInfo.new(0.2), {
             BackgroundColor3 = Color3.fromRGB(100, 200, 100)
         }):Play()
     end)
-
 
     CreateSection("GODMODE")
 
@@ -2384,17 +2874,18 @@ CreateSlider(
             PlayEmote("floss")
         end
 
-        -- Throw Knife Keybind
         if input.KeyCode == State.Keybinds.ThrowKnife and State.Keybinds.ThrowKnife ~= Enum.KeyCode.Unknown then
             pcall(function()
                 knifeThrow(true)
             end)
         end
+        
         if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
             pcall(function()
                 shootMurderer()
             end)
         end
+        
         if input.KeyCode == State.Keybinds.PickupGun and State.Keybinds.PickupGun ~= Enum.KeyCode.Unknown then
             pcall(function()
                 pickupGun()
@@ -2404,27 +2895,34 @@ CreateSlider(
         if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
             State.ClickTPActive = true
         end
+        
         if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
             ToggleGodMode()
         end
-            if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
-        if State.SelectedPlayerForFling then
-            local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
-            if targetPlayer and targetPlayer.Character then
-                pcall(function()
-                    FlingPlayer(targetPlayer)
-                end)
+        
+        if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
+            if State.SelectedPlayerForFling then
+                local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
+                if targetPlayer and targetPlayer.Character then
+                    pcall(function()
+                        FlingPlayer(targetPlayer)
+                    end)
+                end
             end
         end
-    end
-        -- Noclip Keybind
-    if input.KeyCode == State.Keybinds.Noclip and State.Keybinds.Noclip ~= Enum.KeyCode.Unknown then
-        ToggleNoclip()
-    end
-
+        
+        -- ✅ ИСПРАВЛЕНО: Noclip кейбинд
+        if input.KeyCode == State.Keybinds.Noclip and State.Keybinds.Noclip ~= Enum.KeyCode.Unknown then
+            if State.NoclipEnabled then
+                DisableNoclip()
+            else
+                EnableNoclip()
+            end
+        end
     end)
 end
 
+------------------------------
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == State.Keybinds.ClickTP then
         State.ClickTPActive = false
