@@ -641,10 +641,6 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     end
 end
 
--- === ОСНОВНОЙ ЦИКЛ ФАРМА ===
-
--- === ОСНОВНОЙ ЦИКЛ ФАРМА (УПРОЩЁННЫЙ) ===
-
 local function StartAutoFarm()
     if State.CoinFarmThread then
         task.cancel(State.CoinFarmThread)
@@ -678,7 +674,6 @@ local function StartAutoFarm()
                 continue 
             end
 
-            -- ✅ ПРОСТАЯ ЛОГИКА: Есть убийца = раунд активен
             local murdererExists = GetMurdererName() ~= nil
             
             if not murdererExists then
@@ -689,18 +684,33 @@ local function StartAutoFarm()
                 continue
             end
 
-            -- ✅ Раунд активен - фармим
             local coin = FindNearestCoin()
             if not coin then
                 noCoinsAttempts = noCoinsAttempts + 1
                 print("[Auto Farm] 🔍 Монет не найдено (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
                 
                 if noCoinsAttempts >= maxNoCoinsAttempts then
-                    print("[Auto Farm] ✅ Все монеты собраны! Жду нового раунда...")
+                    print("[Auto Farm] ✅ Все монеты собраны! Делаю ресет и жду нового раунда...")
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
-                    task.wait(5)
+                    
+                    -- ✅ ИСПРАВЛЕНО: Ждём респавна
+                    task.wait(3)
+                    
+                    -- ✅ ИСПРАВЛЕНО: Ждём пока убийца исчезнет (конец раунда)
+                    print("[Auto Farm] ⏳ Жду окончания раунда...")
+                    repeat
+                        task.wait(1)
+                    until GetMurdererName() == nil or not State.AutoFarmEnabled
+                    
+                    -- ✅ ИСПРАВЛЕНО: Теперь ждём НАЧАЛА нового раунда
+                    print("[Auto Farm] ⏳ Жду начала нового раунда...")
+                    repeat
+                        task.wait(1)
+                    until GetMurdererName() ~= nil or not State.AutoFarmEnabled
+                    
+                    print("[Auto Farm] ✅ Новый раунд начался! Продолжаю фарм...")
                 else
                     task.wait(1)
                 end
@@ -713,7 +723,6 @@ local function StartAutoFarm()
                 local currentCoins = GetCollectedCoinsCount()
 
                 if currentCoins < 1 then
-                    -- ТП к первой монете
                     local currentTime = tick()
                     local timeSinceLastTP = currentTime - lastTeleportTime
                     
@@ -746,7 +755,6 @@ local function StartAutoFarm()
                         State.CoinBlacklist[coin] = true
                     end
                 else
-                    -- Полёт к остальным монетам
                     if State.UndergroundMode then
                         print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
                     else
@@ -772,7 +780,6 @@ local function StartAutoFarm()
         print("[Auto Farm] 🛑 Остановлен")
     end)
 end
-
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
     
