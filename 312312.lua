@@ -32,11 +32,11 @@ local State = {
     CoinFarmThread = nil,
     
     -- Настройки
-    CoinFarmFlySpeed = 25,
+    CoinFarmFlySpeed = 23,
     CoinFarmDelay = 2,
     UndergroundMode = true,
     UndergroundOffset = 3,
-    NoclipMode = "Standard",  -- ✅ ДОБАВЛЕНО
+    NoclipMode = "Standard",
     
     -- Отслеживание монет
     CoinBlacklist = {},
@@ -46,8 +46,6 @@ local State = {
     AllowReset = false,
     FailedCollects = 0,
     MaxFailedCollects = 3,
-    LastMapName = nil,
-    LastMurdererName = nil,
     
     -- Noclip
     NoclipEnabled = false,
@@ -164,37 +162,6 @@ local function GetMurdererName()
     return success and murdererName or nil
 end
 
--- === ПРОВЕРКА СМЕНЫ РАУНДА ===
-
-local function HasRoundChanged()
-    local currentMap = GetCurrentMap()
-    local currentMurderer = GetMurdererName()
-    
-    if State.LastMapName == nil and State.LastMurdererName == nil then
-        State.LastMapName = currentMap
-        State.LastMurdererName = currentMurderer
-        return false
-    end
-    
-    local mapChanged = currentMap ~= State.LastMapName
-    local murdererChanged = currentMurderer ~= State.LastMurdererName
-    
-    if mapChanged or murdererChanged then
-        print("[Round Check] Раунд изменился!")
-        if mapChanged then
-            print("[Round Check] Карта: " .. tostring(State.LastMapName) .. " → " .. tostring(currentMap))
-        end
-        if murdererChanged then
-            print("[Round Check] Убийца: " .. tostring(State.LastMurdererName) .. " → " .. tostring(currentMurderer))
-        end
-        
-        State.LastMapName = currentMap
-        State.LastMurdererName = currentMurderer
-        return true
-    end
-    
-    return false
-end
 
 -- === СЧЁТЧИК МОНЕТ ===
 
@@ -396,21 +363,20 @@ local function EnableAntiFling()
             if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
                 local primaryPart = player.Character.PrimaryPart
                 if primaryPart then
-                    if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
+                    -- ✅ ИСПРАВЛЕНО: Увеличен порог для детекции флинга
+                    if primaryPart.AssemblyAngularVelocity.Magnitude > 100 or primaryPart.AssemblyLinearVelocity.Magnitude > 200 then
                         if not DetectedFlingers[player.Name] then
                             DetectedFlingers[player.Name] = true
                             print("[Anti-Fling] 🛡️ Обнаружен флингер:", player.Name)
                         end
 
+                        -- ✅ ИСПРАВЛЕНО: Только отключаем коллизию, не меняем физику
                         pcall(function()
                             if player.Character then
                                 for _, part in ipairs(player.Character:GetDescendants()) do
                                     if part:IsA("BasePart") then
                                         pcall(function()
                                             part.CanCollide = false
-                                            part.AssemblyAngularVelocity = Vector3.zero
-                                            part.AssemblyLinearVelocity = Vector3.zero
-                                            part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
                                         end)
                                     end
                                 end
@@ -427,7 +393,8 @@ local function EnableAntiFling()
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
 
-            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
+            -- ✅ ИСПРАВЛЕНО: Увеличен порог
+            if primaryPart.AssemblyLinearVelocity.Magnitude > 300 or primaryPart.AssemblyAngularVelocity.Magnitude > 300 then
                 primaryPart.AssemblyLinearVelocity = Vector3.zero
                 primaryPart.AssemblyAngularVelocity = Vector3.zero
 
@@ -444,6 +411,24 @@ local function EnableAntiFling()
     table.insert(State.Connections, FlingNeutralizerConnection)
     
     print("[Anti-Fling] ✅ Включен")
+end
+
+local function DisableAntiFling()
+    if not State.AntiFlingEnabled then return end
+    State.AntiFlingEnabled = false
+    DetectedFlingers = {}
+
+    if FlingDetectionConnection then
+        FlingDetectionConnection:Disconnect()
+        FlingDetectionConnection = nil
+    end
+
+    if FlingNeutralizerConnection then
+        FlingNeutralizerConnection:Disconnect()
+        FlingNeutralizerConnection = nil
+    end
+    
+    print("[Anti-Fling] ❌ Выключен")
 end
 
 local function DisableAntiFling()
@@ -658,6 +643,8 @@ end
 
 -- === ОСНОВНОЙ ЦИКЛ ФАРМА ===
 
+-- === ОСНОВНОЙ ЦИКЛ ФАРМА (УПРОЩЁННЫЙ) ===
+
 local function StartAutoFarm()
     if State.CoinFarmThread then
         task.cancel(State.CoinFarmThread)
@@ -666,15 +653,12 @@ local function StartAutoFarm()
 
     if not State.AutoFarmEnabled then return end
     
-    State.AllowReset = false
-    State.FailedCollects = 0
-    State.LastMapName = nil
-    State.LastMurdererName = nil
+    State.CoinBlacklist = {}
 
     State.CoinFarmThread = task.spawn(function()
         print("[Auto Farm] 🚀 Запущен")
         if State.UndergroundMode then
-            print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ (только для полёта)")
+            print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
         end
         
         local noCoinsAttempts = 0
@@ -694,40 +678,29 @@ local function StartAutoFarm()
                 continue 
             end
 
+            -- ✅ ПРОСТАЯ ЛОГИКА: Есть убийца = раунд активен
             local murdererExists = GetMurdererName() ~= nil
             
             if not murdererExists then
-                print("[Auto Farm] ⏳ Ожидаю появления убийцы...")
+                print("[Auto Farm] ⏳ Жду начала раунда...")
+                State.CoinBlacklist = {}
                 noCoinsAttempts = 0
-                lastTeleportTime = 0
                 task.wait(2)
                 continue
             end
 
+            -- ✅ Раунд активен - фармим
             local coin = FindNearestCoin()
             if not coin then
                 noCoinsAttempts = noCoinsAttempts + 1
                 print("[Auto Farm] 🔍 Монет не найдено (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
                 
                 if noCoinsAttempts >= maxNoCoinsAttempts then
-                    print("[Auto Farm] 🎯 Все монеты собраны! Делаю ресет...")
+                    print("[Auto Farm] ✅ Все монеты собраны! Жду нового раунда...")
                     ResetCharacter()
+                    State.CoinBlacklist = {}
                     noCoinsAttempts = 0
-                    lastTeleportTime = 0
-                    
-                    task.wait(3)
-                    
-                    print("[Auto Farm] ⏳ Ожидаю смены раунда...")
-                    local waitingForRound = true
-                    while State.AutoFarmEnabled and waitingForRound do
-                        if HasRoundChanged() then
-                            print("[Auto Farm] ✅ Новый раунд начался, возобновляем фарм!")
-                            State.CoinBlacklist = {}
-                            waitingForRound = false
-                            break
-                        end
-                        task.wait(2)
-                    end
+                    task.wait(5)
                 else
                     task.wait(1)
                 end
@@ -740,12 +713,12 @@ local function StartAutoFarm()
                 local currentCoins = GetCollectedCoinsCount()
 
                 if currentCoins < 1 then
+                    -- ТП к первой монете
                     local currentTime = tick()
                     local timeSinceLastTP = currentTime - lastTeleportTime
                     
                     if timeSinceLastTP < 0.5 and lastTeleportTime > 0 then
                         local waitTime = 0.5 - timeSinceLastTP
-                        print("[Auto Farm] ⏱️ Защита от кика: жду " .. string.format("%.2f", waitTime) .. " сек...")
                         task.wait(waitTime)
                     end
                     
@@ -773,10 +746,11 @@ local function StartAutoFarm()
                         State.CoinBlacklist[coin] = true
                     end
                 else
+                    -- Полёт к остальным монетам
                     if State.UndergroundMode then
                         print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
                     else
-                        print("[Auto Farm] ✈️ Непрерывный полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                        print("[Auto Farm] ✈️ Полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
                     end
                     
                     EnableNoClip()
