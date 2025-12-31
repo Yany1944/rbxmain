@@ -5,9 +5,11 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")  -- ✅ ДОБАВЛЕНО
+local HttpService = game:GetService("HttpService")  -- ✅ ДОБАВЛЕНО
 local LocalPlayer = Players.LocalPlayer
 
--- === КОНФИГ (ИЗ НОВОГО СКРИПТА) ===
+-- === КОНФИГ ===
 local CONFIG = {
     HideKey = Enum.KeyCode.Q,
     Colors = {
@@ -34,6 +36,7 @@ local State = {
     CoinFarmDelay = 2,
     UndergroundMode = true,
     UndergroundOffset = 3,
+    NoclipMode = "Standard",  -- ✅ ДОБАВЛЕНО
     
     -- Отслеживание монет
     CoinBlacklist = {},
@@ -50,6 +53,8 @@ local State = {
     NoclipEnabled = false,
     NoclipConnection = nil,
     NoclipRespawnConnection = nil,
+    NoClipConnection = nil,  -- ✅ ДОБАВЛЕНО
+    ClipEnabled = true,  -- ✅ ДОБАВЛЕНО
     
     -- Anti-Fling
     AntiFlingEnabled = false,
@@ -64,7 +69,13 @@ local State = {
     Connections = {},
 }
 
--- === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ UI (ИЗ НОВОГО СКРИПТА) ===
+-- ✅ ДОБАВЛЕНО: Глобальные переменные для Anti-Fling
+local AntiFlingLastPos = Vector3.zero
+local FlingDetectionConnection = nil
+local FlingNeutralizerConnection = nil
+local DetectedFlingers = {}
+
+-- === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ UI ===
 
 local function Create(className, properties)
     local obj = Instance.new(className)
@@ -92,13 +103,11 @@ end
 
 local function GetCurrentMap()
     local success, mapName = pcall(function()
-        -- Проверяем workspace на наличие карты
         local map = Workspace:FindFirstChild("Map") or Workspace:FindFirstChild("CurrentMap")
         if map then
             return map.Name
         end
         
-        -- Альтернативный способ через ReplicatedStorage
         local replicatedStorage = game:GetService("ReplicatedStorage")
         local mapFolder = replicatedStorage:FindFirstChild("Maps") or replicatedStorage:FindFirstChild("Map")
         if mapFolder then
@@ -115,20 +124,17 @@ local function GetCurrentMap()
     return success and mapName or nil
 end
 
--- === ПОЛУЧЕНИЕ НИКА УБИЙЦЫ (ДЛЯ ВСЕХ ИГРОКОВ) ===
+-- === ПОЛУЧЕНИЕ НИКА УБИЙЦЫ ===
 
 local function GetMurdererName()
     local success, murdererName = pcall(function()
-        -- Ищем убийцу среди ВСЕХ игроков
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character then
-                -- Проверяем наличие ножа в персонаже
                 local knife = player.Character:FindFirstChild("Knife")
                 if knife then
                     return player.Name
                 end
                 
-                -- Проверяем в рюкзаке
                 if player.Backpack then
                     local knifeInBackpack = player.Backpack:FindFirstChild("Knife")
                     if knifeInBackpack then
@@ -136,7 +142,6 @@ local function GetMurdererName()
                     end
                 end
                 
-                -- Дополнительная проверка через все инструменты
                 for _, tool in ipairs(player.Character:GetChildren()) do
                     if tool:IsA("Tool") and (tool.Name:lower():match("knife") or tool.Name:lower():match("murder")) then
                         return player.Name
@@ -159,21 +164,18 @@ local function GetMurdererName()
     return success and murdererName or nil
 end
 
-
 -- === ПРОВЕРКА СМЕНЫ РАУНДА ===
 
 local function HasRoundChanged()
     local currentMap = GetCurrentMap()
     local currentMurderer = GetMurdererName()
     
-    -- Если это первый запуск, сохраняем текущие значения
     if State.LastMapName == nil and State.LastMurdererName == nil then
         State.LastMapName = currentMap
         State.LastMurdererName = currentMurderer
         return false
     end
     
-    -- Проверяем, изменилась ли карта или убийца
     local mapChanged = currentMap ~= State.LastMapName
     local murdererChanged = currentMurderer ~= State.LastMurdererName
     
@@ -194,7 +196,7 @@ local function HasRoundChanged()
     return false
 end
 
--- === СЧЁТЧИК МОНЕТ С КЭШИРОВАНИЕМ ===
+-- === СЧЁТЧИК МОНЕТ ===
 
 local coinLabelCache = nil
 local lastCacheTime = 0
@@ -265,7 +267,7 @@ local function ResetCharacter()
     end)
 end
 
--- === ANTI-AFK (ВСЕГДА АКТИВЕН) ===
+-- === ANTI-AFK ===
 
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
@@ -391,7 +393,7 @@ local function EnableAntiFling()
 
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character and player.Character:IsDescendantOf(workspace) and player ~= LocalPlayer then
+            if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
                 local primaryPart = player.Character.PrimaryPart
                 if primaryPart then
                     if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
@@ -592,15 +594,13 @@ local function FindNearestCoin()
     return closestCoin
 end
 
--- === ПЛАВНЫЙ НЕПРЕРЫВНЫЙ ПОЛЁТ ===
-
+-- === ПЛАВНЫЙ ПОЛЁТ ===
 
 local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     speed = speed or State.CoinFarmFlySpeed
 
     local startPos = humanoidRootPart.Position
     
-    -- Целевая позиция: ТОЛЬКО для полёта используем режим под землёй
     local targetPos
     if State.UndergroundMode then
         targetPos = coin.Position - Vector3.new(0, State.UndergroundOffset, 0)
@@ -625,7 +625,6 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
 
         local currentPos = startPos:Lerp(targetPos, alpha)
         
-        -- Ориентация: если под землёй - поворачиваем персонажа лёжа
         local cframe
         if State.UndergroundMode then
             cframe = CFrame.new(currentPos) * CFrame.Angles(math.rad(90), 0, 0)
@@ -642,7 +641,6 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
 
-        -- Пытаемся собрать монету на полпути
         if alpha >= 0.5 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
@@ -742,10 +740,6 @@ local function StartAutoFarm()
                 local currentCoins = GetCollectedCoinsCount()
 
                 if currentCoins < 1 then
-                    ----------------------------------------------------------------
-                    -- ПЕРВЫЕ 3 МОНЕТЫ: ТП (ВСЕГДА НАВЕРХУ)
-                    ----------------------------------------------------------------
-                    
                     local currentTime = tick()
                     local timeSinceLastTP = currentTime - lastTeleportTime
                     
@@ -757,7 +751,6 @@ local function StartAutoFarm()
                     
                     print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
                     
-                    -- ТП ВСЕГДА наверху (не под землёй)
                     local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
 
                     if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
@@ -780,9 +773,6 @@ local function StartAutoFarm()
                         State.CoinBlacklist[coin] = true
                     end
                 else
-                    ----------------------------------------------------------------
-                    -- ОСТАЛЬНЫЕ МОНЕТЫ: ПОЛЁТ (С РЕЖИМОМ ПОД ЗЕМЛЁЙ)
-                    ----------------------------------------------------------------
                     if State.UndergroundMode then
                         print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
                     else
@@ -808,7 +798,6 @@ local function StartAutoFarm()
         print("[Auto Farm] 🛑 Остановлен")
     end)
 end
-
 
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
@@ -1182,4 +1171,5 @@ end
 -- === ИНИЦИАЛИЗАЦИЯ ===
 
 CreateUI()
+SetupAntiAFK() 
 print("[Auto Farm] UI загружен! Нажми", CONFIG.HideKey.Name, "для открытия")
