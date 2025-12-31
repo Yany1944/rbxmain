@@ -1,83 +1,83 @@
-if game.PlaceId ~= 142823291 then return end
+    if game.PlaceId ~= 142823291 then return end
 
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
-
-task.wait(2)
-
-if getgenv().MM2_ESP_Script then
-    return
-end
-getgenv().MM2_ESP_Script = true
-
-pcall(function()
-    local mt = getrawmetatable(game)
-    local oldNamecall = mt.__namecall
-    
-    setreadonly(mt, false)
-    
-    mt.__namecall = newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-        local args = {...}
-        
-        -- Блокируем детектирование через Workspace
-        if method == "FindFirstChild" or method == "WaitForChild" then
-            if tostring(self) == "Workspace" and (args[1] == "Workshop" or args[1] == "Footsteps") then
-                return nil
-            end
-        end
-        
-        -- Блокируем footstep детекты
-        if method == "FireServer" and tostring(self):find("Footstep") then
-            return
-        end
-        
-        return oldNamecall(self, ...)
-    end)
-    
-    setreadonly(mt, true)
-end)
-
-pcall(function()
-    for i,v in pairs(getconnections(game.Players.LocalPlayer.Kicked)) do
-        v:Disable()
+    if not game:IsLoaded() then
+        game.Loaded:Wait()
     end
-end)
 
-task.wait(0.5)
+    task.wait(2)
 
-local CONFIG = {
-    HideKey = Enum.KeyCode.Q,
-    CheckInterval = 0.5,
-    Colors = {
-        Background = Color3.fromRGB(25, 25, 30),
-        Section = Color3.fromRGB(35, 35, 40),
-        Text = Color3.fromRGB(230, 230, 230),
-        TextDark = Color3.fromRGB(150, 150, 150),
-        Accent = Color3.fromRGB(90, 140, 255),
-        Red = Color3.fromRGB(255, 85, 85),
-        Green = Color3.fromRGB(85, 255, 120),
-        Orange = Color3.fromRGB(255, 170, 50),
-        Stroke = Color3.fromRGB(50, 50, 55),
-        Murder = Color3.fromRGB(255, 50, 50),
-        Sheriff = Color3.fromRGB(50, 150, 255),
-        Gun = Color3.fromRGB(255, 200, 50),
-        Innocent = Color3.fromRGB(85, 255, 120)
-    },
-    Notification = {
-        Duration = 2.5,
-        FadeTime = 0.4
+    if getgenv().MM2_ESP_Script then
+        return
+    end
+    getgenv().MM2_ESP_Script = true
+
+    pcall(function()
+        local mt = getrawmetatable(game)
+        local oldNamecall = mt.__namecall
+        
+        setreadonly(mt, false)
+        
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            
+            -- Блокируем детектирование через Workspace
+            if method == "FindFirstChild" or method == "WaitForChild" then
+                if tostring(self) == "Workspace" and (args[1] == "Workshop" or args[1] == "Footsteps") then
+                    return nil
+                end
+            end
+            
+            -- Блокируем footstep детекты
+            if method == "FireServer" and tostring(self):find("Footstep") then
+                return
+            end
+            
+            return oldNamecall(self, ...)
+        end)
+        
+        setreadonly(mt, true)
+    end)
+
+    pcall(function()
+        for i,v in pairs(getconnections(game.Players.LocalPlayer.Kicked)) do
+            v:Disable()
+        end
+    end)
+
+    task.wait(0.5)
+
+    local CONFIG = {
+        HideKey = Enum.KeyCode.Q,
+        CheckInterval = 0.5,
+        Colors = {
+            Background = Color3.fromRGB(25, 25, 30),
+            Section = Color3.fromRGB(35, 35, 40),
+            Text = Color3.fromRGB(230, 230, 230),
+            TextDark = Color3.fromRGB(150, 150, 150),
+            Accent = Color3.fromRGB(90, 140, 255),
+            Red = Color3.fromRGB(255, 85, 85),
+            Green = Color3.fromRGB(85, 255, 120),
+            Orange = Color3.fromRGB(255, 170, 50),
+            Stroke = Color3.fromRGB(50, 50, 55),
+            Murder = Color3.fromRGB(255, 50, 50),
+            Sheriff = Color3.fromRGB(50, 150, 255),
+            Gun = Color3.fromRGB(255, 200, 50),
+            Innocent = Color3.fromRGB(85, 255, 120)
+        },
+        Notification = {
+            Duration = 2.5,
+            FadeTime = 0.4
+        }
     }
-}
 
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
-local TweenService = game:GetService("TweenService")
-local LocalPlayer = Players.LocalPlayer
+    local Players = game:GetService("Players")
+    local Workspace = game:GetService("Workspace")
+    local RunService = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
+    local CoreGui = game:GetService("CoreGui")
+    local TweenService = game:GetService("TweenService")
+    local LocalPlayer = Players.LocalPlayer
 
 
 local State = {
