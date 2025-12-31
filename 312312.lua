@@ -1,14 +1,29 @@
--- === ГИБРИДНЫЙ АВТОФАРМ С ПОЛНЫМ ФУНКЦИОНАЛОМ ===
-
+-- === СЕРВИСЫ ===
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
--- === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
+-- === КОНФИГ (ИЗ НОВОГО СКРИПТА) ===
+local CONFIG = {
+    HideKey = Enum.KeyCode.Q,
+    Colors = {
+        Background = Color3.fromRGB(25, 25, 30),
+        Section = Color3.fromRGB(35, 35, 40),
+        Text = Color3.fromRGB(230, 230, 230),
+        TextDark = Color3.fromRGB(150, 150, 150),
+        Accent = Color3.fromRGB(90, 140, 255),
+        Red = Color3.fromRGB(255, 85, 85),
+        Green = Color3.fromRGB(85, 255, 120),
+        Orange = Color3.fromRGB(255, 170, 50),
+        Stroke = Color3.fromRGB(50, 50, 55),
+    }
+}
 
+-- === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
 local State = {
     -- Управление фармом
     AutoFarmEnabled = false,
@@ -17,12 +32,14 @@ local State = {
     -- Настройки
     CoinFarmFlySpeed = 25,
     CoinFarmDelay = 2,
+    UndergroundMode = true,
+    UndergroundOffset = 3,
     
     -- Отслеживание монет
     CoinBlacklist = {},
     StartSessionCoins = 0,
 
-    -- Reset‑логика
+    -- Reset-логика
     AllowReset = false,
     FailedCollects = 0,
     MaxFailedCollects = 3,
@@ -31,25 +48,45 @@ local State = {
     
     -- Noclip
     NoclipEnabled = false,
-    NoclipMode = "Standard",
     NoclipConnection = nil,
     NoclipRespawnConnection = nil,
-    NoClipConnection = nil,
-    ClipEnabled = true,
     
     -- Anti-Fling
     AntiFlingEnabled = false,
+    AntiFlingLastPos = Vector3.zero,
+    FlingDetectionConnection = nil,
+    FlingNeutralizerConnection = nil,
+    DetectedFlingers = {},
+    IsFlingInProgress = false,
     
     -- UI
     UIElements = {},
     Connections = {},
 }
 
--- Anti-Fling переменные
-local AntiFlingLastPos = Vector3.zero
-local FlingDetectionConnection = nil
-local FlingNeutralizerConnection = nil
-local DetectedFlingers = {}
+-- === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ UI (ИЗ НОВОГО СКРИПТА) ===
+
+local function Create(className, properties)
+    local obj = Instance.new(className)
+    for k, v in pairs(properties or {}) do
+        obj[k] = v
+    end
+    return obj
+end
+
+local function AddCorner(parent, radius)
+    return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
+end
+
+local function AddStroke(parent, thickness, color, transparency)
+    return Create("UIStroke", {
+        Thickness = thickness or 1,
+        Color = color or CONFIG.Colors.Stroke,
+        Transparency = transparency or 0.5,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Parent = parent
+    })
+end
 
 -- === ПОЛУЧЕНИЕ ТЕКУЩЕЙ КАРТЫ ===
 
@@ -77,8 +114,6 @@ local function GetCurrentMap()
     
     return success and mapName or nil
 end
-
--- === ПОЛУЧЕНИЕ НИКА УБИЙЦЫ ===
 
 -- === ПОЛУЧЕНИЕ НИКА УБИЙЦЫ (ДЛЯ ВСЕХ ИГРОКОВ) ===
 
@@ -564,7 +599,15 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     speed = speed or State.CoinFarmFlySpeed
 
     local startPos = humanoidRootPart.Position
-    local targetPos = coin.Position + Vector3.new(0, 1, 0)
+    
+    -- Целевая позиция: ТОЛЬКО для полёта используем режим под землёй
+    local targetPos
+    if State.UndergroundMode then
+        targetPos = coin.Position - Vector3.new(0, State.UndergroundOffset, 0)
+    else
+        targetPos = coin.Position + Vector3.new(0, 1, 0)
+    end
+    
     local distance = (targetPos - startPos).Magnitude
     local duration = distance / speed
 
@@ -581,9 +624,17 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
         local alpha = math.min(elapsed / duration, 1)
 
         local currentPos = startPos:Lerp(targetPos, alpha)
-        humanoidRootPart.CFrame = CFrame.new(currentPos)
         
-        -- Убираем любые остановки - непрерывное движение
+        -- Ориентация: если под землёй - поворачиваем персонажа лёжа
+        local cframe
+        if State.UndergroundMode then
+            cframe = CFrame.new(currentPos) * CFrame.Angles(math.rad(90), 0, 0)
+        else
+            cframe = CFrame.new(currentPos)
+        end
+        
+        humanoidRootPart.CFrame = cframe
+        
         if humanoidRootPart.AssemblyLinearVelocity then
             humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
         end
@@ -591,7 +642,7 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
 
-        -- Пытаемся собрать монету на полпути (не останавливаясь)
+        -- Пытаемся собрать монету на полпути
         if alpha >= 0.5 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
@@ -603,11 +654,11 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             end
         end
 
-        task.wait()  -- Максимальная плавность
+        task.wait()
     end
 end
 
--- === ОСНОВНОЙ ЦИКЛ ФАРМА (БЕЗ ЗАДЕРЖЕК И ПРОВЕРОК) ===
+-- === ОСНОВНОЙ ЦИКЛ ФАРМА ===
 
 local function StartAutoFarm()
     if State.CoinFarmThread then
@@ -624,9 +675,13 @@ local function StartAutoFarm()
 
     State.CoinFarmThread = task.spawn(function()
         print("[Auto Farm] 🚀 Запущен")
+        if State.UndergroundMode then
+            print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ (только для полёта)")
+        end
         
         local noCoinsAttempts = 0
-        local maxNoCoinsAttempts = 5
+        local maxNoCoinsAttempts = 4
+        local lastTeleportTime = 0
         
         while State.AutoFarmEnabled do
             local character = LocalPlayer.Character
@@ -641,14 +696,12 @@ local function StartAutoFarm()
                 continue 
             end
 
-            -- ═══════════════════════════════════════════════════
-            -- ПРОВЕРКА НАЛИЧИЯ УБИЙЦЫ
-            -- ═══════════════════════════════════════════════════
             local murdererExists = GetMurdererName() ~= nil
             
             if not murdererExists then
                 print("[Auto Farm] ⏳ Ожидаю появления убийцы...")
                 noCoinsAttempts = 0
+                lastTeleportTime = 0
                 task.wait(2)
                 continue
             end
@@ -662,6 +715,7 @@ local function StartAutoFarm()
                     print("[Auto Farm] 🎯 Все монеты собраны! Делаю ресет...")
                     ResetCharacter()
                     noCoinsAttempts = 0
+                    lastTeleportTime = 0
                     
                     task.wait(3)
                     
@@ -682,22 +736,33 @@ local function StartAutoFarm()
                 continue
             end
 
-            -- Нашли монету — сбрасываем счётчик попыток
             noCoinsAttempts = 0
 
             pcall(function()
                 local currentCoins = GetCollectedCoinsCount()
 
-                if currentCoins < 3 then
+                if currentCoins < 1 then
                     ----------------------------------------------------------------
-                    -- ПЕРВЫЕ 3 МОНЕТЫ: ТП
+                    -- ПЕРВЫЕ 3 МОНЕТЫ: ТП (ВСЕГДА НАВЕРХУ)
                     ----------------------------------------------------------------
+                    
+                    local currentTime = tick()
+                    local timeSinceLastTP = currentTime - lastTeleportTime
+                    
+                    if timeSinceLastTP < 0.5 and lastTeleportTime > 0 then
+                        local waitTime = 0.5 - timeSinceLastTP
+                        print("[Auto Farm] ⏱️ Защита от кика: жду " .. string.format("%.2f", waitTime) .. " сек...")
+                        task.wait(waitTime)
+                    end
+                    
                     print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
                     
+                    -- ТП ВСЕГДА наверху (не под землёй)
                     local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
 
                     if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
                         humanoidRootPart.CFrame = targetCFrame
+                        lastTeleportTime = tick()
                         
                         if firetouchinterest then
                             firetouchinterest(humanoidRootPart, coin, 0)
@@ -712,31 +777,30 @@ local function StartAutoFarm()
                             print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
                         end
                         
-                        -- Всегда добавляем в чёрный список
                         State.CoinBlacklist[coin] = true
                     end
                 else
                     ----------------------------------------------------------------
-                    -- ОСТАЛЬНЫЕ МОНЕТЫ: НЕПРЕРЫВНЫЙ ПОЛЁТ БЕЗ ОСТАНОВОК
+                    -- ОСТАЛЬНЫЕ МОНЕТЫ: ПОЛЁТ (С РЕЖИМОМ ПОД ЗЕМЛЁЙ)
                     ----------------------------------------------------------------
-                    print("[Auto Farm] ✈️ Непрерывный полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                    if State.UndergroundMode then
+                        print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                    else
+                        print("[Auto Farm] ✈️ Непрерывный полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                    end
                     
                     EnableNoClip()
                     SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
                     DisableNoClip()
                     
-                    -- Проверяем результат БЕЗ ЗАДЕРЖКИ
                     local coinsAfter = GetCollectedCoinsCount()
                     if coinsAfter > currentCoins then
                         print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
                     end
                     
-                    -- Всегда добавляем в чёрный список
                     State.CoinBlacklist[coin] = true
                 end
             end)
-            
-            -- НЕТ task.wait здесь - сразу ищем следующую монету!
         end
 
         DisableNoClip()
@@ -758,363 +822,364 @@ local function StopAutoFarm()
     print("[Auto Farm] Полностью выключен")
 end
 
--- === GUI ===
-
 local function CreateUI()
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "MM2_Farm_GUI"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-    
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Size = UDim2.new(0, 360, 0, 450)
-    MainFrame.Position = UDim2.new(0, 10, 0, 10)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    MainFrame.BorderSizePixel = 2
-    MainFrame.BorderColor3 = Color3.fromRGB(90, 140, 255)
-    MainFrame.Parent = ScreenGui
-    
-    local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0, 12)
-    UICorner.Parent = MainFrame
-    
-    local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, 0, 0, 40)
-    Title.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    Title.Text = "MM2 Hybrid Auto Farm"
-    Title.TextColor3 = Color3.fromRGB(230, 230, 230)
-    Title.TextSize = 16
-    Title.Font = Enum.Font.GothamBold
-    Title.Parent = MainFrame
-    
-    local TitleCorner = Instance.new("UICorner")
-    TitleCorner.CornerRadius = UDim.new(0, 12)
-    TitleCorner.Parent = Title
-    
-    local CoinStatus = Instance.new("TextLabel")
-    CoinStatus.Name = "CoinStatus"
-    CoinStatus.Size = UDim2.new(1, -20, 0, 20)
-    CoinStatus.Position = UDim2.new(0, 10, 0, 50)
-    CoinStatus.BackgroundTransparency = 1
-    CoinStatus.Text = "Монеты: 0 (+0 за сессию)"
-    CoinStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
-    CoinStatus.TextSize = 13
-    CoinStatus.Font = Enum.Font.Gotham
-    CoinStatus.TextXAlignment = Enum.TextXAlignment.Left
-    CoinStatus.Parent = MainFrame
-    
-    local StatusLabel = Instance.new("TextLabel")
-    StatusLabel.Name = "StatusLabel"
-    StatusLabel.Size = UDim2.new(1, -20, 0, 20)
-    StatusLabel.Position = UDim2.new(0, 10, 0, 75)
-    StatusLabel.BackgroundTransparency = 1
-    StatusLabel.Text = "Статус: Выключен"
-    StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-    StatusLabel.TextSize = 13
-    StatusLabel.Font = Enum.Font.Gotham
-    StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    StatusLabel.Parent = MainFrame
-    
-    -- === КНОПКИ ===
-    
-    local AutoFarmButton = Instance.new("TextButton")
-    AutoFarmButton.Name = "AutoFarmButton"
-    AutoFarmButton.Size = UDim2.new(1, -20, 0, 32)
-    AutoFarmButton.Position = UDim2.new(0, 10, 0, 110)
-    AutoFarmButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    AutoFarmButton.Text = "Auto Farm: OFF"
-    AutoFarmButton.TextColor3 = Color3.fromRGB(230, 230, 230)
-    AutoFarmButton.TextSize = 13
-    AutoFarmButton.Font = Enum.Font.GothamBold
-    AutoFarmButton.Parent = MainFrame
-    
-    Instance.new("UICorner", AutoFarmButton).CornerRadius = UDim.new(0, 8)
-    
-    local NoclipButton = Instance.new("TextButton")
-    NoclipButton.Name = "NoclipButton"
-    NoclipButton.Size = UDim2.new(0, 165, 0, 32)
-    NoclipButton.Position = UDim2.new(0, 10, 0, 150)
-    NoclipButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    NoclipButton.Text = "Noclip: OFF"
-    NoclipButton.TextColor3 = Color3.fromRGB(230, 230, 230)
-    NoclipButton.TextSize = 13
-    NoclipButton.Font = Enum.Font.GothamBold
-    NoclipButton.Parent = MainFrame
-    
-    Instance.new("UICorner", NoclipButton).CornerRadius = UDim.new(0, 8)
-    
-    local AntiFlingButton = Instance.new("TextButton")
-    AntiFlingButton.Name = "AntiFlingButton"
-    AntiFlingButton.Size = UDim2.new(0, 165, 0, 32)
-    AntiFlingButton.Position = UDim2.new(1, -175, 0, 150)
-    AntiFlingButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    AntiFlingButton.Text = "Anti-Fling: OFF"
-    AntiFlingButton.TextColor3 = Color3.fromRGB(230, 230, 230)
-    AntiFlingButton.TextSize = 13
-    AntiFlingButton.Font = Enum.Font.GothamBold
-    AntiFlingButton.Parent = MainFrame
-    
-    Instance.new("UICorner", AntiFlingButton).CornerRadius = UDim.new(0, 8)
-    
-    local RejoinButton = Instance.new("TextButton")
-    RejoinButton.Name = "RejoinButton"
-    RejoinButton.Size = UDim2.new(0, 165, 0, 32)
-    RejoinButton.Position = UDim2.new(0, 10, 0, 190)
-    RejoinButton.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
-    RejoinButton.Text = "Rejoin"
-    RejoinButton.TextColor3 = Color3.fromRGB(230, 230, 230)
-    RejoinButton.TextSize = 13
-    RejoinButton.Font = Enum.Font.GothamBold
-    RejoinButton.Parent = MainFrame
-    
-    Instance.new("UICorner", RejoinButton).CornerRadius = UDim.new(0, 8)
-    
-    local ServerHopButton = Instance.new("TextButton")
-    ServerHopButton.Name = "ServerHopButton"
-    ServerHopButton.Size = UDim2.new(0, 165, 0, 32)
-    ServerHopButton.Position = UDim2.new(1, -175, 0, 190)
-    ServerHopButton.BackgroundColor3 = Color3.fromRGB(255, 170, 50)
-    ServerHopButton.Text = "Server Hop"
-    ServerHopButton.TextColor3 = Color3.fromRGB(230, 230, 230)
-    ServerHopButton.TextSize = 13
-    ServerHopButton.Font = Enum.Font.GothamBold
-    ServerHopButton.Parent = MainFrame
-    
-    Instance.new("UICorner", ServerHopButton).CornerRadius = UDim.new(0, 8)
-    
-    -- === НАСТРОЙКИ ===
-    
-    local SettingsLabel = Instance.new("TextLabel")
-    SettingsLabel.Size = UDim2.new(1, -20, 0, 18)
-    SettingsLabel.Position = UDim2.new(0, 10, 0, 235)
-    SettingsLabel.BackgroundTransparency = 1
-    SettingsLabel.Text = "НАСТРОЙКИ"
-    SettingsLabel.TextColor3 = Color3.fromRGB(90, 140, 255)
-    SettingsLabel.TextSize = 12
-    SettingsLabel.Font = Enum.Font.GothamBold
-    SettingsLabel.TextXAlignment = Enum.TextXAlignment.Left
-    SettingsLabel.Parent = MainFrame
-    
-    local SpeedLabel = Instance.new("TextLabel")
-    SpeedLabel.Size = UDim2.new(0, 100, 0, 20)
-    SpeedLabel.Position = UDim2.new(0, 10, 0, 260)
-    SpeedLabel.BackgroundTransparency = 1
-    SpeedLabel.Text = "Скорость полёта:"
-    SpeedLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
-    SpeedLabel.TextSize = 11
-    SpeedLabel.Font = Enum.Font.Gotham
-    SpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
-    SpeedLabel.Parent = MainFrame
-    
-    local SpeedInput = Instance.new("TextBox")
-    SpeedInput.Name = "SpeedInput"
-    SpeedInput.Size = UDim2.new(0, 60, 0, 24)
-    SpeedInput.Position = UDim2.new(0, 140, 0, 258)
-    SpeedInput.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    SpeedInput.Text = "25"
-    SpeedInput.TextColor3 = Color3.fromRGB(230, 230, 230)
-    SpeedInput.TextSize = 12
-    SpeedInput.Font = Enum.Font.Gotham
-    SpeedInput.PlaceholderText = "25"
-    SpeedInput.Parent = MainFrame
-    
-    Instance.new("UICorner", SpeedInput).CornerRadius = UDim.new(0, 6)
-    
-    local DelayLabel = Instance.new("TextLabel")
-    DelayLabel.Size = UDim2.new(0, 100, 0, 20)
-    DelayLabel.Position = UDim2.new(0, 10, 0, 290)
-    DelayLabel.BackgroundTransparency = 1
-    DelayLabel.Text = "Задержка TP:"
-    DelayLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
-    DelayLabel.TextSize = 11
-    DelayLabel.Font = Enum.Font.Gotham
-    DelayLabel.TextXAlignment = Enum.TextXAlignment.Left
-    DelayLabel.Parent = MainFrame
-    
-    local DelayInput = Instance.new("TextBox")
-    DelayInput.Name = "DelayInput"
-    DelayInput.Size = UDim2.new(0, 60, 0, 24)
-    DelayInput.Position = UDim2.new(0, 140, 0, 288)
-    DelayInput.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    DelayInput.Text = "2"
-    DelayInput.TextColor3 = Color3.fromRGB(230, 230, 230)
-    DelayInput.TextSize = 12
-    DelayInput.Font = Enum.Font.Gotham
-    DelayInput.PlaceholderText = "2"
-    DelayInput.Parent = MainFrame
-    
-    Instance.new("UICorner", DelayInput).CornerRadius = UDim.new(0, 6)
-    
-    local InfoLabel = Instance.new("TextLabel")
-    InfoLabel.Size = UDim2.new(1, -20, 0, 130)
-    InfoLabel.Position = UDim2.new(0, 10, 0, 320)
-    InfoLabel.BackgroundTransparency = 1
-    InfoLabel.Text = [[Первые 3 монеты: ТП
-Остальные: Полёт (настраиваемая скорость)
-
-Умный ресет: По карте/убийце
-3 неудачи → ждёт смены раунда
-Anti-AFK: Всегда активен
-Noclip: Отключает столкновения
-Anti-Fling: Защита от флингеров]]
-    InfoLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-    InfoLabel.TextSize = 9
-    InfoLabel.Font = Enum.Font.Gotham
-    InfoLabel.TextWrapped = true
-    InfoLabel.TextXAlignment = Enum.TextXAlignment.Left
-    InfoLabel.TextYAlignment = Enum.TextYAlignment.Top
-    InfoLabel.Parent = MainFrame
-    
-    State.UIElements = {
-        MainGui = ScreenGui,
-        CoinStatus = CoinStatus,
-        StatusLabel = StatusLabel,
-        AutoFarmButton = AutoFarmButton,
-        NoclipButton = NoclipButton,
-        AntiFlingButton = AntiFlingButton,
-        RejoinButton = RejoinButton,
-        ServerHopButton = ServerHopButton,
-        SpeedInput = SpeedInput,
-        DelayInput = DelayInput,
-    }
-    
-    return State.UIElements
-end
-
--- === ОБНОВЛЕНИЕ UI ===
-
-local lastUIUpdate = 0
-
-local function UpdateUI()
-    local currentTime = tick()
-    
-    if currentTime - lastUIUpdate < 0.5 then
-        return
+    for _, child in ipairs(CoreGui:GetChildren()) do
+        if child.Name == "MM2_Farm_UI" then child:Destroy() end
     end
-    
-    lastUIUpdate = currentTime
-    
-    local ui = State.UIElements
-    if not ui or not ui.MainGui then return end
-    
-    local currentCoins = GetCollectedCoinsCount()
-    local sessionCoins = currentCoins - State.StartSessionCoins
-    
-    ui.CoinStatus.Text = string.format("Монеты: %d (+%d за сессию)", 
-        currentCoins, sessionCoins)
-    
-    if State.AutoFarmEnabled then
-        if State.FailedCollects >= State.MaxFailedCollects then
-            ui.StatusLabel.Text = "Статус: Жду смены раунда..."
-            ui.StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 85)
+
+    local gui = Create("ScreenGui", {
+        Name = "MM2_Farm_UI",
+        Parent = CoreGui,
+        ResetOnSpawn = false
+    })
+    State.UIElements.MainGui = gui
+
+    local mainFrame = Create("Frame", {
+        Name = "MainFrame",
+        BackgroundColor3 = CONFIG.Colors.Background,
+        Position = UDim2.new(0.5, -225, 0.5, -275),
+        Size = UDim2.new(0, 450, 0, 550),
+        ClipsDescendants = true,
+        Active = true,
+        Draggable = true,
+        Parent = gui
+    })
+    AddCorner(mainFrame, 12)
+    AddStroke(mainFrame, 2, CONFIG.Colors.Accent, 0.8)
+
+    local header = Create("Frame", {
+        Name = "Header",
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Size = UDim2.new(1, 0, 0, 40),
+        Parent = mainFrame
+    })
+
+    local titleLabel = Create("TextLabel", {
+        Text = "MM2 Hybrid Auto Farm <font color=\"rgb(90,140,255)\">v2.0</font>",
+        RichText = true,
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextColor3 = CONFIG.Colors.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 0),
+        Size = UDim2.new(0.8, 0, 1, 0),
+        Parent = header
+    })
+
+    local closeButton = Create("TextButton", {
+        Text = "X",
+        Font = Enum.Font.GothamMedium,
+        TextSize = 24,
+        TextColor3 = CONFIG.Colors.TextDark,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -35, 0, 0),
+        Size = UDim2.new(0, 35, 0, 40),
+        Parent = header
+    })
+
+    local content = Create("ScrollingFrame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 55),
+        Size = UDim2.new(1, -30, 1, -70),
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ScrollBarThickness = 6,
+        ScrollBarImageColor3 = CONFIG.Colors.Accent,
+        BorderSizePixel = 0,
+        Parent = mainFrame
+    })
+
+    local layout = Create("UIListLayout", {
+        Padding = UDim.new(0, 12),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = content
+    })
+
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        content.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
+    end)
+
+    -- === ФУНКЦИИ СОЗДАНИЯ ЭЛЕМЕНТОВ ===
+
+    local function CreateSection(title)
+        Create("TextLabel", {
+            Text = title,
+            Font = Enum.Font.GothamBold,
+            TextSize = 13,
+            TextColor3 = CONFIG.Colors.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 22),
+            Parent = content
+        })
+    end
+
+    local function CreateToggle(title, desc, defaultState, callback)
+        local card = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Size = UDim2.new(1, 0, 0, 60),
+            Parent = content
+        })
+        AddCorner(card, 8)
+        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+        Create("TextLabel", {
+            Text = title,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 14,
+            TextColor3 = CONFIG.Colors.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 10),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        Create("TextLabel", {
+            Text = desc,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 30),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        local toggleBg = Create("TextButton", {
+            Text = "",
+            BackgroundColor3 = defaultState and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55),
+            Position = UDim2.new(1, -60, 0.5, -12),
+            Size = UDim2.new(0, 44, 0, 24),
+            AutoButtonColor = false,
+            Parent = card
+        })
+        AddCorner(toggleBg, 24)
+
+        local toggleCircle = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Text,
+            Position = defaultState and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10),
+            Size = UDim2.new(0, 20, 0, 20),
+            Parent = toggleBg
+        })
+        AddCorner(toggleCircle, 20)
+
+        local state = defaultState or false
+        toggleBg.MouseButton1Click:Connect(function()
+            state = not state
+            local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
+            local targetPos = state and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
+
+            TweenService:Create(toggleBg, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
+            TweenService:Create(toggleCircle, TweenInfo.new(0.2), {Position = targetPos}):Play()
+
+            callback(state)
+        end)
+
+        return toggleBg
+    end
+
+    local function CreateInputField(title, desc, defaultValue, callback)
+        local card = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Size = UDim2.new(1, 0, 0, 60),
+            Parent = content
+        })
+        AddCorner(card, 8)
+        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+        Create("TextLabel", {
+            Text = title,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 14,
+            TextColor3 = CONFIG.Colors.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 10),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        Create("TextLabel", {
+            Text = desc,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 15, 0, 30),
+            Size = UDim2.new(0, 250, 0, 20),
+            Parent = card
+        })
+
+        local inputBox = Create("TextBox", {
+            Text = tostring(defaultValue),
+            Font = Enum.Font.GothamMedium,
+            TextSize = 13,
+            TextColor3 = CONFIG.Colors.Text,
+            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+            Position = UDim2.new(1, -80, 0.5, -12),
+            Size = UDim2.new(0, 65, 0, 24),
+            PlaceholderText = "Value",
+            ClearTextOnFocus = false,
+            Parent = card
+        })
+        AddCorner(inputBox, 6)
+        AddStroke(inputBox, 1, CONFIG.Colors.Accent, 0.6)
+
+        inputBox.FocusLost:Connect(function()
+            local value = tonumber(inputBox.Text)
+            if value then
+                callback(value)
+            else
+                inputBox.Text = tostring(defaultValue)
+            end
+        end)
+    end
+
+    local function CreateButton(title, color, callback)
+        local card = Create("Frame", {
+            BackgroundColor3 = CONFIG.Colors.Section,
+            Size = UDim2.new(1, 0, 0, 50),
+            Parent = content
+        })
+        AddCorner(card, 8)
+        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+        local button = Create("TextButton", {
+            Text = title,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 13,
+            TextColor3 = CONFIG.Colors.Text,
+            BackgroundColor3 = color,
+            Position = UDim2.new(0, 15, 0.5, -15),
+            Size = UDim2.new(1, -30, 0, 30),
+            AutoButtonColor = false,
+            Parent = card
+        })
+        AddCorner(button, 6)
+
+        button.MouseButton1Click:Connect(callback)
+
+        button.MouseEnter:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.new(
+                    math.min(color.R + 0.1, 1),
+                    math.min(color.G + 0.1, 1),
+                    math.min(color.B + 0.1, 1)
+                )
+            }):Play()
+        end)
+
+        button.MouseLeave:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = color}):Play()
+        end)
+    end
+
+    -- === СОЗДАНИЕ ЭЛЕМЕНТОВ ИНТЕРФЕЙСА ===
+
+    CreateSection("AUTO FARM")
+
+    CreateToggle("Auto Farm", "Автоматический сбор монет", false, function(state)
+        State.AutoFarmEnabled = state
+        if state then
+            State.CoinBlacklist = {}
+            State.StartSessionCoins = GetCollectedCoinsCount()
+            print("[Auto Farm] Стартовые монеты: " .. State.StartSessionCoins)
+            StartAutoFarm()
         else
-            ui.StatusLabel.Text = "Статус: Фармлю монеты..."
-            ui.StatusLabel.TextColor3 = Color3.fromRGB(85, 255, 120)
+            StopAutoFarm()
         end
-        ui.AutoFarmButton.Text = "Auto Farm: ON"
-        ui.AutoFarmButton.BackgroundColor3 = Color3.fromRGB(85, 255, 120)
-    else
-        ui.StatusLabel.Text = "Статус: Выключен"
-        ui.StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-        ui.AutoFarmButton.Text = "Auto Farm: OFF"
-        ui.AutoFarmButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    end
-    
-    -- Noclip Button
-    if State.NoclipEnabled then
-        ui.NoclipButton.Text = "Noclip: ON"
-        ui.NoclipButton.BackgroundColor3 = Color3.fromRGB(85, 255, 120)
-    else
-        ui.NoclipButton.Text = "Noclip: OFF"
-        ui.NoclipButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    end
-    
-    -- Anti-Fling Button
-    if State.AntiFlingEnabled then
-        ui.AntiFlingButton.Text = "Anti-Fling: ON"
-        ui.AntiFlingButton.BackgroundColor3 = Color3.fromRGB(85, 255, 120)
-    else
-        ui.AntiFlingButton.Text = "Anti-Fling: OFF"
-        ui.AntiFlingButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    end
+    end)
+
+    CreateToggle("Underground Mode", "Полёт под картой (только для флая)", State.UndergroundMode, function(state)
+        State.UndergroundMode = state
+        print("[Underground Mode]", state and "ON" or "OFF")
+    end)
+
+    CreateSection("MOVEMENT")
+
+    CreateToggle("Noclip", "Отключить столкновения", false, function(state)
+        if state then
+            EnableNoclip()
+        else
+            DisableNoclip()
+        end
+    end)
+
+    CreateToggle("Anti-Fling", "Защита от флингеров", false, function(state)
+        if state then
+            EnableAntiFling()
+        else
+            DisableAntiFling()
+        end
+    end)
+
+    CreateSection("SETTINGS")
+
+    CreateInputField("Скорость полёта", "Скорость для полёта (10-100)", State.CoinFarmFlySpeed, function(value)
+        if value >= 10 and value <= 100 then
+            State.CoinFarmFlySpeed = value
+            print("[Settings] Скорость полёта:", value)
+        end
+    end)
+
+    CreateInputField("Задержка TP", "Задержка между ТП (0.1-5)", State.CoinFarmDelay, function(value)
+        if value >= 0.1 and value <= 5 then
+            State.CoinFarmDelay = value
+            print("[Settings] Задержка TP:", value)
+        end
+    end)
+
+    CreateSection("UTILITY")
+
+    CreateButton("🔄 Rejoin Server", CONFIG.Colors.Accent, function()
+        Rejoin()
+    end)
+
+    CreateButton("🌐 Server Hop", CONFIG.Colors.Green, function()
+        ServerHop()
+    end)
+
+    -- === FOOTER ===
+
+    local footer = Create("TextLabel", {
+        Text = "Toggle Menu: " .. CONFIG.HideKey.Name,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextColor3 = CONFIG.Colors.TextDark,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0.5, -100, 1, -25),
+        Size = UDim2.new(0, 200, 0, 20),
+        Parent = mainFrame
+    })
+
+    -- === ОБРАБОТЧИКИ ===
+
+    closeButton.MouseButton1Click:Connect(function()
+        gui:Destroy()
+    end)
+
+    closeButton.MouseEnter:Connect(function()
+        TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.Red}):Play()
+    end)
+
+    closeButton.MouseLeave:Connect(function()
+        TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
+    end)
+
+    UserInputService.InputBegan:Connect(function(input, processed)
+        if not processed and input.KeyCode == CONFIG.HideKey then
+            mainFrame.Visible = not mainFrame.Visible
+        end
+    end)
+
+    task.wait(0.1)
+    content.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
 end
-
--- === ОБРАБОТЧИКИ КНОПОК ===
-
-CreateUI()
-
-State.UIElements.AutoFarmButton.MouseButton1Click:Connect(function()
-    State.AutoFarmEnabled = not State.AutoFarmEnabled
-    print("[Auto Farm]", State.AutoFarmEnabled and "ON" or "OFF")
-    
-    if State.AutoFarmEnabled then
-        State.CoinBlacklist = {}
-        State.StartSessionCoins = GetCollectedCoinsCount()
-        print("[Auto Farm] Стартовые монеты: " .. State.StartSessionCoins)
-        StartAutoFarm()
-    else
-        StopAutoFarm()
-    end
-    
-    UpdateUI()
-end)
-
-State.UIElements.NoclipButton.MouseButton1Click:Connect(function()
-    if State.NoclipEnabled then
-        DisableNoclip()
-    else
-        EnableNoclip()
-    end
-    UpdateUI()
-end)
-
-State.UIElements.AntiFlingButton.MouseButton1Click:Connect(function()
-    if State.AntiFlingEnabled then
-        DisableAntiFling()
-    else
-        EnableAntiFling()
-    end
-    UpdateUI()
-end)
-
-State.UIElements.RejoinButton.MouseButton1Click:Connect(function()
-    Rejoin()
-end)
-
-State.UIElements.ServerHopButton.MouseButton1Click:Connect(function()
-    ServerHop()
-end)
-
-State.UIElements.SpeedInput.FocusLost:Connect(function()
-    local value = tonumber(State.UIElements.SpeedInput.Text)
-    if value and value >= 10 and value <= 100 then
-        State.CoinFarmFlySpeed = value
-        print("[Settings] Скорость полёта:", value)
-    else
-        State.UIElements.SpeedInput.Text = tostring(State.CoinFarmFlySpeed)
-    end
-end)
-
-State.UIElements.DelayInput.FocusLost:Connect(function()
-    local value = tonumber(State.UIElements.DelayInput.Text)
-    if value and value >= 0.1 and value <= 5 then
-        State.CoinFarmDelay = value
-        print("[Settings] Задержка TP:", value)
-    else
-        State.UIElements.DelayInput.Text = tostring(State.CoinFarmDelay)
-    end
-end)
 
 -- === ИНИЦИАЛИЗАЦИЯ ===
 
-SetupAntiAFK()
-
-task.spawn(function()
-    while task.wait(0.5) do
-        UpdateUI()
-    end
-end)
-
-UpdateUI()
-print("[MM2 Hybrid Auto Farm] ✅ Загружен успешно!")
-print("[Anti-AFK] ✅ Всегда активен")
+CreateUI()
+print("[Auto Farm] UI загружен! Нажми", CONFIG.HideKey.Name, "для открытия")
