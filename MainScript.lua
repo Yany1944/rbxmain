@@ -308,7 +308,7 @@ local function EnableAntiFling()
                                             part.CanCollide = false
                                             part.AssemblyAngularVelocity = Vector3.zero
                                             part.AssemblyLinearVelocity = Vector3.zero
-                                            part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
+                                            -- спрятал part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
                                         end)
                                     end
                                 end
@@ -359,18 +359,20 @@ local function EnableAntiFling()
 end
 
 local function DisableAntiFling()
-    AntiFlingEnabled = false
+    if not State.AntiFlingEnabled then return end
+    State.AntiFlingEnabled = false
     DetectedFlingers = {}
-    
+
     if FlingDetectionConnection then
         FlingDetectionConnection:Disconnect()
         FlingDetectionConnection = nil
     end
-    
+
     if FlingNeutralizerConnection then
         FlingNeutralizerConnection:Disconnect()
         FlingNeutralizerConnection = nil
     end
+    
 end
 
 
@@ -563,20 +565,20 @@ end
 local function EnableNoclip()
     if State.NoclipEnabled then return end
     State.NoclipEnabled = true
-    
+
     local mode = State.NoclipMode
-    
+
     if mode == "Standard" then
         local NoclipObjects = {}
         local char = LocalPlayer.Character
         if not char then return end
-        
+
         for _, obj in ipairs(char:GetChildren()) do
             if obj:IsA("BasePart") then
                 table.insert(NoclipObjects, obj)
             end
         end
-        
+
         State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
             task.wait(0.15)
             table.clear(NoclipObjects)
@@ -586,7 +588,7 @@ local function EnableNoclip()
                 end
             end
         end)
-        
+
         State.NoclipConnection = RunService.Stepped:Connect(function()
             for _, part in ipairs(NoclipObjects) do
                 pcall(function()
@@ -595,37 +597,20 @@ local function EnableNoclip()
             end
         end)
     end
-        
-    
-    if State.NotificationsEnabled then
-        ShowNotification("Noclip Enabled", CONFIG.Colors.Green, "Mode: " .. mode, CONFIG.Colors.Accent)
-    end
 end
 
 local function DisableNoclip()
     if not State.NoclipEnabled then return end
     State.NoclipEnabled = false
-    
+
     if State.NoclipConnection then
         State.NoclipConnection:Disconnect()
         State.NoclipConnection = nil
     end
-    
+
     if State.NoclipRespawnConnection then
         State.NoclipRespawnConnection:Disconnect()
         State.NoclipRespawnConnection = nil
-    end
-    
-    if State.NotificationsEnabled then
-        ShowNotification("Noclip Disabled", CONFIG.Colors.Red)
-    end
-end
-
-local function ToggleNoclip()
-    if State.NoclipEnabled then
-        DisableNoclip()
-    else
-        EnableNoclip()
     end
 end
 
@@ -666,16 +651,13 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 
 local function Rejoin()
-    if State.NotificationsEnabled then
-        ShowNotification("Rejoining...", CONFIG.Colors.Orange)
-    end
-    
+    print("[Rejoin] Переподключение...")
     task.wait(0.5)
-    
+
     pcall(function()
         TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
     end)
-    
+
     task.wait(2)
     pcall(function()
         TeleportService:Teleport(game.PlaceId, LocalPlayer)
@@ -683,96 +665,75 @@ local function Rejoin()
 end
 
 local function ServerHop()
-    if State.NotificationsEnabled then
-        ShowNotification("Finding Server...", CONFIG.Colors.Orange, "Please wait", CONFIG.Colors.TextDark)
-    end
+    print("[Server Hop] Поиск нового сервера...")
     
     local success, result = pcall(function()
         local serverlist = {}
         local cursor = ""
         local foundServers = 0
-        
-        -- Собираем сервера (максимум 3 запроса)
+
         for i = 1, 3 do
             local url = string.format(
                 "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
                 game.PlaceId,
                 cursor
             )
-            
+
             local success2, response = pcall(function()
                 return game:HttpGet(url)
             end)
-            
+
             if not success2 then
-                warn("Failed to fetch servers:", response)
+                warn("[Server Hop] Ошибка получения списка серверов:", response)
                 break
             end
-            
+
             local data = HttpService:JSONDecode(response)
-            
-            -- Фильтруем сервера
+
             for _, server in ipairs(data.data) do
                 if server.id ~= game.JobId and 
                    server.playing < server.maxPlayers and
-                   server.playing > 0 then  -- Исключаем пустые сервера
+                   server.playing > 0 then
                     table.insert(serverlist, server)
                     foundServers = foundServers + 1
                 end
             end
-            
+
             cursor = data.nextPageCursor
             if not cursor or cursor == "" then
                 break
             end
-            
-            -- Если нашли достаточно серверов, прерываем
+
             if foundServers >= 10 then
                 break
             end
         end
-        
+
         if #serverlist == 0 then
-            if State.NotificationsEnabled then
-                ShowNotification("No servers found", CONFIG.Colors.Red, "Rejoining instead", CONFIG.Colors.TextDark)
-            end
+            print("[Server Hop] Нет доступных серверов, используем Rejoin")
             task.wait(1)
             return Rejoin()
         end
-        
-        -- Сортируем: сначала с меньшим количеством игроков
+
         table.sort(serverlist, function(a, b)
             return a.playing < b.playing
         end)
-        
-        -- Выбираем случайный сервер из топ-5 (чтобы не всегда попадать на один и тот же)
+
         local targetIndex = math.random(1, math.min(5, #serverlist))
         local targetServer = serverlist[targetIndex]
-        
-        if State.NotificationsEnabled then
-            ShowNotification(
-                "Found server!", 
-                CONFIG.Colors.Green, 
-                string.format("%d/%d players", targetServer.playing, targetServer.maxPlayers),
-                CONFIG.Colors.Accent
-            )
-        end
-        
+
+        print("[Server Hop] Телепорт на сервер с " .. targetServer.playing .. " игроками")
         task.wait(1)
-        
-        -- Телепортируемся
+
         TeleportService:TeleportToPlaceInstance(
             game.PlaceId, 
             targetServer.id, 
             LocalPlayer
         )
     end)
-    
+
     if not success then
-        warn("ServerHop error:", result)
-        if State.NotificationsEnabled then
-            ShowNotification("Server Hop Failed", CONFIG.Colors.Red, "Rejoining instead", CONFIG.Colors.TextDark)
-        end
+        warn("[Server Hop] Ошибка:", result)
         task.wait(1)
         Rejoin()
     end
