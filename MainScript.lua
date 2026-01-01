@@ -1901,11 +1901,13 @@ local function CreateUI()
         if child.Name == "MM2_ESP_UI" then child:Destroy() end
     end
 
+
     local gui = Create("ScreenGui", {
         Name = "MM2_ESP_UI",
         Parent = CoreGui
     })
     State.UIElements.MainGui = gui
+
 
     local mainFrame = Create("Frame", {
         Name = "MainFrame",
@@ -1920,6 +1922,7 @@ local function CreateUI()
     AddCorner(mainFrame, 12)
     AddStroke(mainFrame, 2, CONFIG.Colors.Accent, 0.8)
 
+
     local header = Create("Frame", {
         Name = "Header",
         BackgroundColor3 = CONFIG.Colors.Section,
@@ -1927,8 +1930,9 @@ local function CreateUI()
         Parent = mainFrame
     })
 
+
     local titleLabel = Create("TextLabel", {
-        Text = "MM2 ESP + ANIMATIONS <font color=\"rgb(90,140,255)\">v5.2</font>",
+        Text = "MM2 ESP <font color=\"rgb(90,140,255)\">v6.0 Tabs</font>",
         RichText = true,
         Font = Enum.Font.GothamBold,
         TextSize = 16,
@@ -1939,6 +1943,7 @@ local function CreateUI()
         Size = UDim2.new(0.8, 0, 1, 0),
         Parent = header
     })
+
 
     local closeButton = Create("TextButton", {
         Text = "X",
@@ -1951,508 +1956,709 @@ local function CreateUI()
         Parent = header
     })
 
-    local content = Create("ScrollingFrame", {
+
+    local tabContainer = Create("ScrollingFrame", {
+        Name = "TabContainer",
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 55),
-        Size = UDim2.new(1, -30, 1, -70),
+        Position = UDim2.new(0, 10, 0, 45),
+        Size = UDim2.new(1, -20, 0, 35),
         CanvasSize = UDim2.new(0, 0, 0, 0),
-        ScrollBarThickness = 6,
-        ScrollBarImageColor3 = CONFIG.Colors.Accent,
-        BorderSizePixel = 0,
+        ScrollBarThickness = 0,
+        Parent = mainFrame
+    })
+   
+    local tabLayout = Create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, 5),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = tabContainer
+    })
+
+
+    tabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        tabContainer.CanvasSize = UDim2.new(0, tabLayout.AbsoluteContentSize.X + 10, 0, 0)
+    end)
+
+
+    local pagesContainer = Create("Frame", {
+        Name = "PagesContainer",
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 90),
+        Size = UDim2.new(1, -30, 1, -115),
         Parent = mainFrame
     })
 
-    local layout = Create("UIListLayout", {
-        Padding = UDim.new(0, 12),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Parent = content
-    })
 
-    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        content.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
-    end)
-    task.wait(0.1)
-    content.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
+    local Tabs = {}
+    local currentTab = nil
 
-    local function CreateSection(title)
-        local label = Create("TextLabel", {
-            Text = title,
+
+    local function CreateTab(name)
+        local tabBtn = Create("TextButton", {
+            Text = name,
             Font = Enum.Font.GothamBold,
             TextSize = 13,
             TextColor3 = CONFIG.Colors.TextDark,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 22),
-            Parent = content
-        })
-    end
-
-    local function CreateToggle(title, desc, callback)
-        local card = Create("Frame", {
             BackgroundColor3 = CONFIG.Colors.Section,
-            Size = UDim2.new(1, 0, 0, 60),
-            Parent = content
-        })
-        AddCorner(card, 8)
-        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
-        local cardTitle = Create("TextLabel", {
-            Text = title,
-            Font = Enum.Font.GothamMedium,
-            TextSize = 14,
-            TextColor3 = CONFIG.Colors.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 10),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local cardDesc = Create("TextLabel", {
-            Text = desc,
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.TextDark,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 30),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local toggleBg = Create("TextButton", {
-            Text = "",
-            BackgroundColor3 = Color3.fromRGB(50, 50, 55),
-            Position = UDim2.new(1, -60, 0.5, -12),
-            Size = UDim2.new(0, 44, 0, 24),
+            Size = UDim2.new(0, 0, 1, 0),
             AutoButtonColor = false,
-            Parent = card
+            Parent = tabContainer
         })
-        AddCorner(toggleBg, 24)
+        AddCorner(tabBtn, 6)
+       
+        local textWidth = game:GetService("TextService"):GetTextSize(name, 13, Enum.Font.GothamBold, Vector2.new(999, 35)).X
+        tabBtn.Size = UDim2.new(0, textWidth + 20, 1, 0)
 
-        local toggleCircle = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Text,
-            Position = UDim2.new(0, 2, 0.5, -10),
-            Size = UDim2.new(0, 20, 0, 20),
-            Parent = toggleBg
-        })
-        AddCorner(toggleCircle, 20)
 
-        local state = false
-        toggleBg.MouseButton1Click:Connect(function()
-            state = not state
-            local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
-            local targetPos = state and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
-
-            TweenService:Create(toggleBg, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
-            TweenService:Create(toggleCircle, TweenInfo.new(0.2), {Position = targetPos}):Play()
-
-            callback(state)
-        end)
-
-        return toggleBg
-    end
-
-    local function CreateInputField(title, desc, defaultValue, callback)
-        local card = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Size = UDim2.new(1, 0, 0, 60),
-            Parent = content
-        })
-        AddCorner(card, 8)
-        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
-        local cardTitle = Create("TextLabel", {
-            Text = title,
-            Font = Enum.Font.GothamMedium,
-            TextSize = 14,
-            TextColor3 = CONFIG.Colors.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
+        local page = Create("ScrollingFrame", {
+            Name = name .. "Page",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 10),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local cardDesc = Create("TextLabel", {
-            Text = desc,
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.TextDark,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 30),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local inputBox = Create("TextBox", {
-            Text = tostring(defaultValue),
-            Font = Enum.Font.GothamMedium,
-            TextSize = 13,
-            TextColor3 = CONFIG.Colors.Text,
-            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-            Position = UDim2.new(1, -80, 0.5, -12),
-            Size = UDim2.new(0, 65, 0, 24),
-            PlaceholderText = "Value",
-            ClearTextOnFocus = false,
-            Parent = card
-        })
-        AddCorner(inputBox, 6)
-        AddStroke(inputBox, 1, CONFIG.Colors.Accent, 0.6)
-
-        inputBox.FocusLost:Connect(function(enterPressed)
-            local value = tonumber(inputBox.Text)
-            if value then
-                callback(value)
-            else
-                inputBox.Text = tostring(defaultValue)
-            end
-        end)
-    end
-
-    local keybindButtons = {}
-
-    local function CreateKeybindButton(title, emoteId, keybindKey)
-        local card = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Size = UDim2.new(1, 0, 0, 50),
-            Parent = content
-        })
-        AddCorner(card, 8)
-        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
-        local cardTitle = Create("TextLabel", {
-            Text = title,
-            Font = Enum.Font.GothamMedium,
-            TextSize = 14,
-            TextColor3 = CONFIG.Colors.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 0),
-            Size = UDim2.new(0, 200, 1, 0),
-            Parent = card
-        })
-
-        local bindButton = Create("TextButton", {
-            Text = State.Keybinds[keybindKey] ~= Enum.KeyCode.Unknown and State.Keybinds[keybindKey].Name or "Not Bound",
-            Font = Enum.Font.GothamMedium,
-            TextSize = 12,
-            TextColor3 = CONFIG.Colors.Text,
-            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-            Position = UDim2.new(1, -110, 0.5, -15),
-            Size = UDim2.new(0, 95, 0, 30),
-            AutoButtonColor = false,
-            Parent = card
-        })
-        AddCorner(bindButton, 6)
-        AddStroke(bindButton, 1, CONFIG.Colors.Accent, 0.6)
-
-        keybindButtons[keybindKey] = bindButton
-
-        bindButton.MouseButton1Click:Connect(function()
-            bindButton.Text = "Press Key..."
-            State.ListeningForKeybind = {key = keybindKey, button = bindButton}
-        end)
-
-        return bindButton
-    end
-
-    local function CreateDropdown(title, desc, options, defaultValue, callback)
-        local card = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Size = UDim2.new(1, 0, 0, 60),
-            Parent = content
-        })
-        AddCorner(card, 8)
-        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
-        local cardTitle = Create("TextLabel", {
-            Text = title,
-            Font = Enum.Font.GothamMedium,
-            TextSize = 14,
-            TextColor3 = CONFIG.Colors.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 10),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local cardDesc = Create("TextLabel", {
-            Text = desc,
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.TextDark,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 30),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local dropdown = Create("TextButton", {
-            Text = defaultValue,
-            Font = Enum.Font.GothamMedium,
-            TextSize = 12,
-            TextColor3 = CONFIG.Colors.Text,
-            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-            Position = UDim2.new(1, -110, 0.5, -12),
-            Size = UDim2.new(0, 95, 0, 24),
-            AutoButtonColor = false,
-            Parent = card
-        })
-        AddCorner(dropdown, 6)
-        AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
-
-        local dropdownList = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Position = UDim2.new(0, 325, 0, 10),
-            Size = UDim2.new(0, 95, 0, #options * 25),
+            Size = UDim2.new(1, 0, 1, 0),
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            ScrollBarThickness = 6,
+            ScrollBarImageColor3 = CONFIG.Colors.Accent,
             Visible = false,
-            ZIndex = 10,
-            Parent = card
+            Parent = pagesContainer
         })
-        AddCorner(dropdownList, 6)
-        AddStroke(dropdownList, 1, CONFIG.Colors.Accent, 0.6)
 
-        for i, option in ipairs(options) do
-            local optionButton = Create("TextButton", {
-                Text = option,
+
+        local pageLayout = Create("UIListLayout", {
+            Padding = UDim.new(0, 12),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Parent = page
+        })
+
+
+        pageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            page.CanvasSize = UDim2.new(0, 0, 0, pageLayout.AbsoluteContentSize.Y + 20)
+        end)
+
+
+        local function Activate()
+            if currentTab then
+                TweenService:Create(currentTab.Btn, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Section, TextColor3 = CONFIG.Colors.TextDark}):Play()
+                currentTab.Page.Visible = false
+            end
+            currentTab = {Btn = tabBtn, Page = page}
+            TweenService:Create(tabBtn, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Accent, TextColor3 = CONFIG.Colors.Text}):Play()
+            page.Visible = true
+        end
+
+
+        tabBtn.MouseButton1Click:Connect(Activate)
+
+
+        if #Tabs == 0 then
+            Activate()
+        end
+        table.insert(Tabs, {Btn = tabBtn, Page = page})
+
+
+        local TabFunctions = {}
+
+
+        function TabFunctions:CreateSection(title)
+            Create("TextLabel", {
+                Text = title,
+                Font = Enum.Font.GothamBold,
+                TextSize = 13,
+                TextColor3 = CONFIG.Colors.TextDark,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 22),
+                Parent = page
+            })
+        end
+
+
+        function TabFunctions:CreateToggle(title, desc, callback)
+            local card = Create("Frame", {
+                BackgroundColor3 = CONFIG.Colors.Section,
+                Size = UDim2.new(1, 0, 0, 60),
+                Parent = page
+            })
+            AddCorner(card, 8)
+            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+   
+            Create("TextLabel", {
+                Text = title,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 14,
+                TextColor3 = CONFIG.Colors.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 15, 0, 10),
+                Size = UDim2.new(0, 250, 0, 20),
+                Parent = card
+            })
+   
+            Create("TextLabel", {
+                Text = desc,
                 Font = Enum.Font.Gotham,
                 TextSize = 11,
-                TextColor3 = CONFIG.Colors.Text,
-                BackgroundColor3 = Color3.fromRGB(40, 40, 45),
-                Position = UDim2.new(0, 0, 0, (i-1) * 25),
-                Size = UDim2.new(1, 0, 0, 25),
-                AutoButtonColor = false,
-                ZIndex = 11,
-                Parent = dropdownList
+                TextColor3 = CONFIG.Colors.TextDark,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 15, 0, 30),
+                Size = UDim2.new(0, 250, 0, 20),
+                Parent = card
             })
-
-            optionButton.MouseButton1Click:Connect(function()
-                dropdown.Text = option
-                dropdownList.Visible = false
-                callback(option)
+   
+            local toggleBg = Create("TextButton", {
+                Text = "",
+                BackgroundColor3 = Color3.fromRGB(50, 50, 55),
+                Position = UDim2.new(1, -60, 0.5, -12),
+                Size = UDim2.new(0, 44, 0, 24),
+                AutoButtonColor = false,
+                Parent = card
+            })
+            AddCorner(toggleBg, 24)
+   
+            local toggleCircle = Create("Frame", {
+                BackgroundColor3 = CONFIG.Colors.Text,
+                Position = UDim2.new(0, 2, 0.5, -10),
+                Size = UDim2.new(0, 20, 0, 20),
+                Parent = toggleBg
+            })
+            AddCorner(toggleCircle, 20)
+   
+            local state = false
+            toggleBg.MouseButton1Click:Connect(function()
+                state = not state
+                local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
+                local targetPos = state and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
+   
+                TweenService:Create(toggleBg, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
+                TweenService:Create(toggleCircle, TweenInfo.new(0.2), {Position = targetPos}):Play()
+   
+                callback(state)
             end)
+            return toggleBg
+        end
 
-            optionButton.MouseEnter:Connect(function()
-                TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
-            end)
-            optionButton.MouseLeave:Connect(function()
-                TweenService:Create(optionButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(40, 40, 45)}):Play()
+
+        function TabFunctions:CreateInputField(title, desc, defaultValue, callback)
+            local card = Create("Frame", {
+                BackgroundColor3 = CONFIG.Colors.Section,
+                Size = UDim2.new(1, 0, 0, 60),
+                Parent = page
+            })
+            AddCorner(card, 8)
+            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+   
+            Create("TextLabel", {
+                Text = title,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 14,
+                TextColor3 = CONFIG.Colors.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 15, 0, 10),
+                Size = UDim2.new(0, 250, 0, 20),
+                Parent = card
+            })
+   
+            Create("TextLabel", {
+                Text = desc,
+                Font = Enum.Font.Gotham,
+                TextSize = 11,
+                TextColor3 = CONFIG.Colors.TextDark,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 15, 0, 30),
+                Size = UDim2.new(0, 250, 0, 20),
+                Parent = card
+            })
+   
+            local inputBox = Create("TextBox", {
+                Text = tostring(defaultValue),
+                Font = Enum.Font.GothamMedium,
+                TextSize = 13,
+                TextColor3 = CONFIG.Colors.Text,
+                BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+                Position = UDim2.new(1, -80, 0.5, -12),
+                Size = UDim2.new(0, 65, 0, 24),
+                PlaceholderText = "Value",
+                ClearTextOnFocus = false,
+                Parent = card
+            })
+            AddCorner(inputBox, 6)
+            AddStroke(inputBox, 1, CONFIG.Colors.Accent, 0.6)
+   
+            inputBox.FocusLost:Connect(function(enterPressed)
+                local value = tonumber(inputBox.Text)
+                if value then
+                    callback(value)
+                else
+                    inputBox.Text = tostring(defaultValue)
+                end
             end)
         end
 
-        dropdown.MouseButton1Click:Connect(function()
-            dropdownList.Visible = not dropdownList.Visible
-        end)
 
-        return dropdown
+        function TabFunctions:CreateSlider(title, description, min, max, default, callback, step)
+            step = step or 1
+            local card = Create("Frame", {
+                BackgroundColor3 = CONFIG.Colors.Section,
+                Size = UDim2.new(1, 0, 0, 70),
+                Parent = page
+            })
+            AddCorner(card, 8)
+            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+   
+            Create("TextLabel", {
+                Text = title,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 14,
+                TextColor3 = CONFIG.Colors.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 15, 0, 10),
+                Size = UDim2.new(0, 250, 0, 20),
+                Parent = card
+            })
+   
+            Create("TextLabel", {
+                Text = description,
+                Font = Enum.Font.Gotham,
+                TextSize = 11,
+                TextColor3 = CONFIG.Colors.TextDark,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 15, 0, 30),
+                Size = UDim2.new(0, 250, 0, 20),
+                Parent = card
+            })
+   
+            local sliderBg = Create("Frame", {
+                BackgroundColor3 = Color3.fromRGB(40, 40, 45),
+                Position = UDim2.new(0, 15, 0, 50),
+                Size = UDim2.new(1, -95, 0, 6),
+                Parent = card
+            })
+            AddCorner(sliderBg, 3)
+   
+            local sliderFill = Create("Frame", {
+                BackgroundColor3 = CONFIG.Colors.Accent,
+                Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
+                Parent = sliderBg
+            })
+            AddCorner(sliderFill, 3)
+   
+            local sliderButton = Create("TextButton", {
+                Text = "",
+                BackgroundColor3 = CONFIG.Colors.Text,
+                Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8),
+                Size = UDim2.new(0, 16, 0, 16),
+                AutoButtonColor = false,
+                Parent = sliderBg
+            })
+            AddCorner(sliderButton, 16)
+   
+            local valueLabel = Create("TextLabel", {
+                Text = step >= 1 and string.format("%d", default) or string.format("%.2f", default),
+                Font = Enum.Font.GothamBold,
+                TextSize = 12,
+                TextColor3 = CONFIG.Colors.Accent,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(1, -65, 0, 8),
+                Size = UDim2.new(0, 50, 0, 20),
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = card
+            })
+   
+            local dragging = false
+            local function updateSlider(input)
+                local pos = sliderBg.AbsolutePosition.X
+                local size = sliderBg.AbsoluteSize.X
+                local mouseX = input.Position.X
+               
+                local alpha = math.clamp((mouseX - pos) / size, 0, 1)
+                local value = min + (alpha * (max - min))
+               
+                value = math.floor(value / step + 0.5) * step
+                value = math.clamp(value, min, max)
+               
+                local normalizedValue = (value - min) / (max - min)
+                sliderFill.Size = UDim2.new(normalizedValue, 0, 1, 0)
+                sliderButton.Position = UDim2.new(normalizedValue, -8, 0.5, -8)
+               
+                if step >= 1 then
+                    valueLabel.Text = string.format("%d", value)
+                else
+                    valueLabel.Text = string.format("%.2f", value)
+                end
+               
+                callback(value)
+            end
+   
+            sliderButton.MouseButton1Down:Connect(function() dragging = true end)
+            sliderBg.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = true
+                    updateSlider(input)
+                end
+            end)
+            UserInputService.InputChanged:Connect(function(input)
+                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                    updateSlider(input)
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+            end)
+        end
+
+
+        function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
+            local card = Create("Frame", {
+                BackgroundColor3 = CONFIG.Colors.Section,
+                Size = UDim2.new(1, 0, 0, 50),
+                Parent = page
+            })
+            AddCorner(card, 8)
+            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+   
+            Create("TextLabel", {
+                Text = title,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 14,
+                TextColor3 = CONFIG.Colors.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 15, 0, 0),
+                Size = UDim2.new(0, 200, 1, 0),
+                Parent = card
+            })
+   
+            local bindButton = Create("TextButton", {
+                Text = State.Keybinds[keybindKey] ~= Enum.KeyCode.Unknown and State.Keybinds[keybindKey].Name or "Not Bound",
+                Font = Enum.Font.GothamMedium,
+                TextSize = 12,
+                TextColor3 = CONFIG.Colors.Text,
+                BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+                Position = UDim2.new(1, -110, 0.5, -15),
+                Size = UDim2.new(0, 95, 0, 30),
+                AutoButtonColor = false,
+                Parent = card
+            })
+            AddCorner(bindButton, 6)
+            AddStroke(bindButton, 1, CONFIG.Colors.Accent, 0.6)
+   
+            bindButton.MouseButton1Click:Connect(function()
+                bindButton.Text = "Press Key..."
+                State.ListeningForKeybind = {key = keybindKey, button = bindButton}
+            end)
+           
+            return bindButton
+        end
+
+
+        function TabFunctions:CreatePlayerDropdown(title, desc)
+    local card = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Size = UDim2.new(1, 0, 0, 60),
+        Parent = page
+    })
+    AddCorner(card, 8)
+    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+
+
+    Create("TextLabel", {
+        Text = title,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 14,
+        TextColor3 = CONFIG.Colors.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 10),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+
+
+    Create("TextLabel", {
+        Text = desc,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextColor3 = CONFIG.Colors.TextDark,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 30),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+
+
+    local dropdown = Create("TextButton", {
+        Text = "Select Player ▼",
+        Font = Enum.Font.GothamMedium,
+        TextSize = 11,
+        TextColor3 = CONFIG.Colors.Text,
+        BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+        Position = UDim2.new(1, -110, 0.5, -12),
+        Size = UDim2.new(0, 95, 0, 24),
+        AutoButtonColor = false,
+        ZIndex = 5,
+        Parent = card
+    })
+    AddCorner(dropdown, 6)
+    AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
+   
+    local dropdownFrame = Create("ScrollingFrame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Position = UDim2.new(0, 0, 0, 0), -- Динамически вычисляется
+        Size = UDim2.new(0, 95, 0, 0),
+        Visible = false,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = CONFIG.Colors.Accent,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ClipsDescendants = true,
+        ZIndex = 1000, -- ✅ Максимальный Z-индекс
+        Parent = mainFrame -- ✅ НЕ внутри card!
+    })
+    AddCorner(dropdownFrame, 6)
+    AddStroke(dropdownFrame, 1, CONFIG.Colors.Accent, 0.6)
+
+
+    local listLayout = Create("UIListLayout", {
+        Padding = UDim.new(0, 2),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = dropdownFrame
+    })
+   
+    local function updatePlayerList()
+        for _, child in ipairs(dropdownFrame:GetChildren()) do
+            if child:IsA("TextButton") then child:Destroy() end
+        end
+        local players = getAllPlayers()
+        if #players == 0 then
+            Create("TextLabel", {
+                Text = "No players",
+                Font = Enum.Font.Gotham,
+                TextSize = 11,
+                TextColor3 = CONFIG.Colors.TextDark,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 25),
+                ZIndex = 1001,
+                Parent = dropdownFrame
+            })
+            return
+        end
+        for _, playerName in ipairs(players) do
+            local pb = Create("TextButton", {
+                Text = playerName,
+                Font = Enum.Font.Gotham,
+                TextSize = 10,
+                TextColor3 = CONFIG.Colors.Text,
+                BackgroundColor3 = Color3.fromRGB(50,50,55),
+                Size = UDim2.new(1,0,0,25),
+                AutoButtonColor = false,
+                ZIndex = 1001,
+                Parent = dropdownFrame
+            })
+            AddCorner(pb, 4)
+           
+            pb.MouseButton1Click:Connect(function()
+                State.SelectedPlayerForFling = playerName
+                dropdown.Text = playerName:sub(1, 8) .. " ✓"
+               
+                TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                    Size = UDim2.new(0, 95, 0, 0)
+                }):Play()
+               
+                task.wait(0.2)
+                dropdownFrame.Visible = false
+            end)
+           
+            pb.MouseEnter:Connect(function()
+                TweenService:Create(pb, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+            end)
+            pb.MouseLeave:Connect(function()
+                TweenService:Create(pb, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 55)}):Play()
+            end)
+        end
     end
-
-    -- ✅ ИСПРАВЛЕННЫЙ CreateSlider С ПОДДЕРЖКОЙ ШАГА
-    local function CreateSlider(title, description, min, max, default, callback, step)
-        step = step or 1
-        
-        local card = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Size = UDim2.new(1, 0, 0, 70),
-            Parent = content
-        })
-        AddCorner(card, 8)
-        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
-        Create("TextLabel", {
-            Text = title,
-            Font = Enum.Font.GothamMedium,
-            TextSize = 14,
-            TextColor3 = CONFIG.Colors.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 10),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        Create("TextLabel", {
-            Text = description,
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.TextDark,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 30),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local sliderBg = Create("Frame", {
-            BackgroundColor3 = Color3.fromRGB(40, 40, 45),
-            Position = UDim2.new(0, 15, 0, 50),
-            Size = UDim2.new(1, -95, 0, 6),
-            Parent = card
-        })
-        AddCorner(sliderBg, 3)
-
-        local sliderFill = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Accent,
-            Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
-            Parent = sliderBg
-        })
-        AddCorner(sliderFill, 3)
-
-        local sliderButton = Create("TextButton", {
-            Text = "",
-            BackgroundColor3 = CONFIG.Colors.Text,
-            Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8),
-            Size = UDim2.new(0, 16, 0, 16),
-            AutoButtonColor = false,
-            Parent = sliderBg
-        })
-        AddCorner(sliderButton, 16)
-
-        local valueLabel = Create("TextLabel", {
-            Text = step >= 1 and string.format("%d", default) or string.format("%.2f", default),
-            Font = Enum.Font.GothamBold,
-            TextSize = 12,
-            TextColor3 = CONFIG.Colors.Accent,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(1, -65, 0, 8),
-            Size = UDim2.new(0, 50, 0, 20),
-            TextXAlignment = Enum.TextXAlignment.Right,
-            Parent = card
-        })
-
-        local dragging = false
-
-        local function updateSlider(input)
-            local pos = sliderBg.AbsolutePosition.X
-            local size = sliderBg.AbsoluteSize.X
-            local mouseX = input.Position.X
-            
-            local alpha = math.clamp((mouseX - pos) / size, 0, 1)
-            local value = min + (alpha * (max - min))
-            
-            -- ✅ Округление до шага
-            value = math.floor(value / step + 0.5) * step
-            value = math.clamp(value, min, max)
-            
-            local normalizedValue = (value - min) / (max - min)
-            sliderFill.Size = UDim2.new(normalizedValue, 0, 1, 0)
-            sliderButton.Position = UDim2.new(normalizedValue, -8, 0.5, -8)
-            
-            -- ✅ Форматирование
-            if step >= 1 then
-                valueLabel.Text = string.format("%d", value)
-            else
-                valueLabel.Text = string.format("%.2f", value)
-            end
-            
-            callback(value)
-        end
-
-        sliderButton.MouseButton1Down:Connect(function()
-            dragging = true
-        end)
-
-        sliderBg.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                updateSlider(input)
-            end
-        end)
-
-        UserInputService.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                updateSlider(input)
-            end
-        end)
-
-        UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
-        end)
-
-        return card
-    end
-
-    -- ========================================
-    -- UI КОНТЕНТ НАЧИНАЕТСЯ ЗДЕСЬ
-    -- ========================================
-
-    CreateSection("CHARACTER SETTINGS")
-
-    CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, function(value)
-        ApplyWalkSpeed(value)
-    end)
-
-    CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, function(value)
-        ApplyJumpPower(value)
-    end)
-
-    CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, function(value)
-        ApplyMaxCameraZoom(value)
-    end)
-
-    CreateSection("CAMERA")
-
-    CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(value)
-        pcall(function()
-            ApplyFOV(value)
-        end)
-    end)
-
-    CreateToggle(
-        "ViewClip",
-        "Camera clips through walls",
-        function(state)
-            if state then
-                EnableViewClip()
-            else
-                DisableViewClip()
-            end
-        end
-    )
-
-    CreateSection("NOTIFICATIONS")
-
-    CreateToggle("Enable Notifications", "Show role and gun notifications", function(state)
-        State.NotificationsEnabled = state
-    end)
-
-    CreateSection("ESP OPTIONS (Highlight)")
-
-    CreateToggle("Gun ESP", "Highlight dropped guns", function(state)
-        State.GunESP = state
-        if state then
-            InitialGunScan()
+   
+    dropdown.MouseButton1Click:Connect(function()
+        dropdownFrame.Visible = not dropdownFrame.Visible
+       
+        if dropdownFrame.Visible then
+            updatePlayerList()
+           
+            -- ✅ Вычисляем абсолютную позицию кнопки dropdown относительно mainFrame
+            local dropdownAbsPos = dropdown.AbsolutePosition
+            local dropdownAbsSize = dropdown.AbsoluteSize
+            local mainFramePos = mainFrame.AbsolutePosition
+           
+            local playerCount = #getAllPlayers()
+            local maxHeight = 120
+            local calculatedHeight = math.min(maxHeight, math.max(25, playerCount * 27))
+           
+            -- ✅ Позиция ВНИЗ от кнопки (+ 5 пикселей отступ)
+            dropdownFrame.Position = UDim2.new(
+                0, dropdownAbsPos.X - mainFramePos.X,
+                0, dropdownAbsPos.Y - mainFramePos.Y + dropdownAbsSize.Y + 5
+            )
+           
+            -- Анимация выпадения вниз
+            dropdownFrame.Size = UDim2.new(0, 95, 0, 0)
+            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, 95, 0, calculatedHeight)
+            }):Play()
         else
-            UpdateGunESPVisibility()
+            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 95, 0, 0)
+            }):Play()
+           
+            task.wait(0.2)
+            dropdownFrame.Visible = false
         end
     end)
-
-    CreateToggle("Murder ESP", "Highlight murderer", function(state)
-        State.MurderESP = state
-        UpdateAllHighlightsVisibility()
+   
+    -- ✅ Закрытие при клике вне списка
+    UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if dropdownFrame.Visible then
+                local mousePos = UserInputService:GetMouseLocation()
+                local framePos = dropdownFrame.AbsolutePosition
+                local frameSize = dropdownFrame.AbsoluteSize
+               
+                if mousePos.X < framePos.X or mousePos.X > framePos.X + frameSize.X or
+                   mousePos.Y < framePos.Y or mousePos.Y > framePos.Y + frameSize.Y then
+                   
+                    local dropdownPos = dropdown.AbsolutePosition
+                    local dropdownSize = dropdown.AbsoluteSize
+                   
+                    if mousePos.X < dropdownPos.X or mousePos.X > dropdownPos.X + dropdownSize.X or
+                       mousePos.Y < dropdownPos.Y or mousePos.Y > dropdownPos.Y + dropdownSize.Y then
+                       
+                        TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                            Size = UDim2.new(0, 95, 0, 0)
+                        }):Play()
+                       
+                        task.wait(0.2)
+                        dropdownFrame.Visible = false
+                    end
+                end
+            end
+        end
     end)
-
-    CreateToggle("Sheriff ESP", "Highlight sheriff", function(state)
-        State.SheriffESP = state
-        UpdateAllHighlightsVisibility()
+   
+    Players.PlayerAdded:Connect(function()
+        if dropdownFrame.Visible then updatePlayerList() end
     end)
-
-    CreateToggle("Innocent ESP", "Highlight innocent players", function(state)
-        State.InnocentESP = state
-        UpdateAllHighlightsVisibility()
+    Players.PlayerRemoving:Connect(function()
+        if dropdownFrame.Visible then updatePlayerList() end
     end)
+   
+    return dropdown
+end
 
-    CreateSection("AUTO FARM")
 
-    CreateToggle("Auto Farm Coins", "Automatic coin collection", function(state)
-        State.AutoFarmEnabled = state
-        if state then
+        function TabFunctions:CreateButton(title, buttonText, color, callback)
+            local card = Create("Frame", {
+                BackgroundColor3 = CONFIG.Colors.Section,
+                Size = UDim2.new(1, 0, 0, 50),
+                Parent = page
+            })
+            AddCorner(card, 8)
+            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+   
+            local button = Create("TextButton", {
+                Text = buttonText,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 13,
+                TextColor3 = CONFIG.Colors.Text,
+                BackgroundColor3 = color or CONFIG.Colors.Accent,
+                Position = UDim2.new(0, 15, 0.5, -15),
+                Size = UDim2.new(1, -30, 0, 30),
+                AutoButtonColor = false,
+                Parent = card
+            })
+            AddCorner(button, 6)
+   
+            button.MouseButton1Click:Connect(callback)
+           
+            button.MouseEnter:Connect(function()
+                local hoverColor = Color3.fromRGB(
+                    math.min(255, color.R * 255 + 20),
+                    math.min(255, color.G * 255 + 20),
+                    math.min(255, color.B * 255 + 20)
+                )
+                TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = hoverColor}):Play()
+            end)
+           
+            button.MouseLeave:Connect(function()
+                TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = color}):Play()
+            end)
+           
+            return button
+        end
+
+
+        return TabFunctions
+    end
+
+
+    -- ═══════════════════════════════════════════════════════════════
+    --              СОЗДАНИЕ ВКЛАДОК И РАСПРЕДЕЛЕНИЕ ФУНКЦИЙ
+    -- ═══════════════════════════════════════════════════════════════
+
+
+    local MainTab = CreateTab("Main")
+   
+    MainTab:CreateSection("CHARACTER SETTINGS")
+    MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, ApplyWalkSpeed)
+    MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, ApplyJumpPower)
+    MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, ApplyMaxCameraZoom)
+   
+    MainTab:CreateSection("CAMERA")
+    MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(v) pcall(function() ApplyFOV(v) end) end)
+    MainTab:CreateToggle("ViewClip", "Camera clips through walls", function(s) if s then EnableViewClip() else DisableViewClip() end end)
+   
+    MainTab:CreateSection("TELEPORT & MOVEMENT")
+    MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+    MainTab:CreateKeybindButton("Toggle Noclip", "noclip", "Noclip")
+   
+    MainTab:CreateSection("GODMODE")
+    MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
+
+
+    local VisualsTab = CreateTab("Visuals")
+   
+    VisualsTab:CreateSection("NOTIFICATIONS")
+    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", function(s) State.NotificationsEnabled = s end)
+   
+    VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
+    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", function(s) State.GunESP = s; if s then InitialGunScan() else UpdateGunESPVisibility() end end)
+    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; UpdateAllHighlightsVisibility() end)
+    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; UpdateAllHighlightsVisibility() end)
+    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; UpdateAllHighlightsVisibility() end)
+
+
+    local CombatTab = CreateTab("Combat")
+   
+    CombatTab:CreateSection("EXTENDED HITBOX")
+    CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", function(s) if s then EnableExtendedHitbox() else DisableExtendedHitbox() end end)
+    CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (2-20)", 2, 20, 5, function(v) State.ExtendedHitboxSize = v; if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end, 1)
+   
+    CombatTab:CreateSection("MURDERER TOOLS")
+    CombatTab:CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
+   
+    CombatTab:CreateSection("SHERIFF TOOLS")
+    CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
+    CombatTab:CreateSlider("Prediction Time", "Adjust for moving targets (0.05-0.50)", 0.05, 0.50, 0.20, function(v) State.ShootPrediction = v end, 0.05)
+    CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+
+
+    local FarmTab = CreateTab("Farming")
+   
+    FarmTab:CreateSection("AUTO FARM")
+    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", function(s)
+        State.AutoFarmEnabled = s
+        if s then
             State.CoinBlacklist = {}
             State.StartSessionCoins = GetCollectedCoinsCount()
             ShowNotification("Auto Farm Started", CONFIG.Colors.Green)
@@ -2462,340 +2668,35 @@ local function CreateUI()
             ShowNotification("Auto Farm Stopped", CONFIG.Colors.Red)
         end
     end)
+   
+    FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", function(s) State.UndergroundMode = s end)
+    FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, 23, function(v) State.CoinFarmFlySpeed = v end, 1)
+    FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, 2.0, function(v) State.CoinFarmDelay = v end, 0.5)
 
-    CreateToggle("Underground Mode", "Fly under the map (safer)", function(state)
-        State.UndergroundMode = state
-    end)
 
-    CreateSlider(
-        "Fly Speed", 
-        "Flying speed (10-30)", 
-        10, 30, 23,
-        function(value)
-            State.CoinFarmFlySpeed = value
-        end,
-        1
-    )
+    local FunTab = CreateTab("Fun")
+   
+    FunTab:CreateSection("ANIMATION KEYBINDS")
+    FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
+    FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
+    FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
+    FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
+    FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
+   
+    FunTab:CreateSection("ANTI-FLING")
+    FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(s) if s then EnableAntiFling() else DisableAntiFling() end end)
+   
+    FunTab:CreateSection("FLING PLAYER")
+    FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
+    FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-    CreateSlider(
-        "TP Delay", 
-        "Delay between TPs (0.5-5.0)", 
-        0.5, 5.0, 2.0,
-        function(value)
-            State.CoinFarmDelay = value
-        end,
-        0.5
-    )
 
-    CreateSection("ANIMATION KEYBINDS")
+    local UtilityTab = CreateTab("Utility")
+   
+    UtilityTab:CreateSection("SERVER MANAGEMENT")
+    UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, function() Rejoin() end)
+    UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), function() ServerHop() end)
 
-    CreateKeybindButton("Sit Animation", "sit", "Sit")
-    CreateKeybindButton("Dab Animation", "dab", "Dab")
-    CreateKeybindButton("Zen Animation", "zen", "Zen")
-    CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
-    CreateKeybindButton("Floss Animation", "floss", "Floss")
-
-    CreateSection("TELEPORT")
-
-    CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
-
-    CreateSection("EXTENDED HITBOX")
-
-    CreateToggle(
-        "Enable Extended Hitbox",
-        "Makes all players easier to hit",
-        function(state)
-            if state then
-                EnableExtendedHitbox()
-            else
-                DisableExtendedHitbox()
-            end
-        end
-    )
-
-    CreateSlider(
-        "Hitbox Size", 
-        "Larger = easier to hit (2-20)", 
-        2, 20, 5,
-        function(value)
-            State.ExtendedHitboxSize = value
-            if State.ExtendedHitboxEnabled then
-                UpdateHitboxSize(value)
-            end
-        end,
-        1
-    )
-
-    CreateSection("MURDERER TOOLS")
-    CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
-
-    CreateSection("SHERIFF TOOLS")
-    CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    
-    CreateSlider(
-        "Prediction Time", 
-        "Adjust for moving targets (0.05-0.50)", 
-        0.05, 0.50, 0.20,
-        function(value)
-            State.ShootPrediction = value
-        end,
-        0.05
-    )
-    
-    CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
-
-    CreateSection("ANTI-FLING")
-
-    CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(state)
-        if state then
-            EnableAntiFling()
-        else
-            DisableAntiFling()
-        end
-    end)
-
-    CreateSection("FLING PLAYER")
-
-    local function CreatePlayerDropdown(title, desc)
-        local card = Create("Frame", {
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Size = UDim2.new(1, 0, 0, 60),
-            Parent = content
-        })
-        AddCorner(card, 8)
-        AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
-        local cardTitle = Create("TextLabel", {
-            Text = title,
-            Font = Enum.Font.GothamMedium,
-            TextSize = 14,
-            TextColor3 = CONFIG.Colors.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 10),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local cardDesc = Create("TextLabel", {
-            Text = desc,
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.TextDark,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 15, 0, 30),
-            Size = UDim2.new(0, 250, 0, 20),
-            Parent = card
-        })
-
-        local dropdown = Create("TextButton", {
-            Text = "Select Player ▼",
-            Font = Enum.Font.GothamMedium,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.Text,
-            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-            Position = UDim2.new(1, -110, 0.5, -12),
-            Size = UDim2.new(0, 95, 0, 24),
-            AutoButtonColor = false,
-            Parent = card
-        })
-        AddCorner(dropdown, 6)
-        AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
-
-        local dropdownFrame = Create("ScrollingFrame", {
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Position = UDim2.new(1, -110, 1, 5),
-            Size = UDim2.new(0, 95, 0, 0),
-            Visible = false,
-            CanvasSize = UDim2.new(0, 0, 0, 0),
-            ScrollBarThickness = 4,
-            AutomaticCanvasSize = Enum.AutomaticSize.Y,
-            ClipsDescendants = true,
-            ZIndex = 100,
-            Parent = card
-        })
-        AddCorner(dropdownFrame, 6)
-        AddStroke(dropdownFrame, 1, CONFIG.Colors.Accent, 0.6)
-
-        local listLayout = Create("UIListLayout", {
-            Padding = UDim.new(0, 2),
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Parent = dropdownFrame
-        })
-
-        local function updatePlayerList()
-            for _, child in ipairs(dropdownFrame:GetChildren()) do
-                if child:IsA("TextButton") then
-                    child:Destroy()
-                end
-            end
-
-            local players = getAllPlayers()
-
-            if #players == 0 then
-                local noPlayers = Create("TextLabel", {
-                    Text = "No players",
-                    Font = Enum.Font.Gotham,
-                    TextSize = 11,
-                    TextColor3 = CONFIG.Colors.TextDark,
-                    BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, 25),
-                    Parent = dropdownFrame
-                })
-                return
-            end
-
-            for _, playerName in ipairs(players) do
-                local playerButton = Create("TextButton", {
-                    Text = playerName,
-                    Font = Enum.Font.Gotham,
-                    TextSize = 10,
-                    TextColor3 = CONFIG.Colors.Text,
-                    BackgroundColor3 = Color3.fromRGB(50, 50, 55),
-                    Size = UDim2.new(1, 0, 0, 25),
-                    AutoButtonColor = false,
-                    ZIndex = 101,
-                    Parent = dropdownFrame
-                })
-                AddCorner(playerButton, 4)
-
-                playerButton.MouseButton1Click:Connect(function()
-                    State.SelectedPlayerForFling = playerName
-                    dropdown.Text = playerName:sub(1, 8) .. " ✓"
-                    dropdownFrame:TweenSize(UDim2.new(0, 95, 0, 0), "Out", "Quad", 0.2, true)
-                    task.wait(0.2)
-                    dropdownFrame.Visible = false
-                end)
-
-                playerButton.MouseEnter:Connect(function()
-                    TweenService:Create(playerButton, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
-                end)
-
-                playerButton.MouseLeave:Connect(function()
-                    TweenService:Create(playerButton, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 55)}):Play()
-                end)
-            end
-        end
-
-        dropdown.MouseButton1Click:Connect(function()
-            dropdownFrame.Visible = not dropdownFrame.Visible
-
-            if dropdownFrame.Visible then
-                updatePlayerList()
-                local playerCount = #getAllPlayers()
-                local maxHeight = 120
-                local calculatedHeight = math.min(maxHeight, playerCount * 27)
-                dropdownFrame:TweenSize(UDim2.new(0, 95, 0, calculatedHeight), "Out", "Quad", 0.2, true)
-            else
-                dropdownFrame:TweenSize(UDim2.new(0, 95, 0, 0), "Out", "Quad", 0.2, true)
-                task.wait(0.2)
-                dropdownFrame.Visible = false
-            end
-        end)
-
-        Players.PlayerAdded:Connect(function()
-            if dropdownFrame.Visible then
-                updatePlayerList()
-            end
-        end)
-
-        Players.PlayerRemoving:Connect(function()
-            if dropdownFrame.Visible then
-                updatePlayerList()
-            end
-        end)
-
-        return dropdown
-    end
-
-    CreatePlayerDropdown("Select Target", "Choose player to fling")
-
-    CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
-
-    CreateSection("NOCLIP")
-
-    CreateKeybindButton("Toggle Noclip", "noclip", "Noclip")
-
-    CreateSection("UTILITY")
-
-    local rejoinCard = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Size = UDim2.new(1, 0, 0, 50),
-        Parent = content
-    })
-    AddCorner(rejoinCard, 8)
-    AddStroke(rejoinCard, 1, CONFIG.Colors.Stroke, 0.7)
-
-    local rejoinButton = Create("TextButton", {
-        Text = "🔄 Rejoin Server",
-        Font = Enum.Font.GothamMedium,
-        TextSize = 13,
-        TextColor3 = CONFIG.Colors.Text,
-        BackgroundColor3 = CONFIG.Colors.Accent,
-        Position = UDim2.new(0, 15, 0.5, -15),
-        Size = UDim2.new(1, -30, 0, 30),
-        AutoButtonColor = false,
-        Parent = rejoinCard
-    })
-    AddCorner(rejoinButton, 6)
-
-    rejoinButton.MouseButton1Click:Connect(function()
-        Rejoin()
-    end)
-
-    rejoinButton.MouseEnter:Connect(function()
-        TweenService:Create(rejoinButton, TweenInfo.new(0.2), {
-            BackgroundColor3 = Color3.fromRGB(100, 160, 255)
-        }):Play()
-    end)
-
-    rejoinButton.MouseLeave:Connect(function()
-        TweenService:Create(rejoinButton, TweenInfo.new(0.2), {
-            BackgroundColor3 = CONFIG.Colors.Accent
-        }):Play()
-    end)
-
-    local serverHopCard = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Size = UDim2.new(1, 0, 0, 50),
-        Parent = content
-    })
-    AddCorner(serverHopCard, 8)
-    AddStroke(serverHopCard, 1, CONFIG.Colors.Stroke, 0.7)
-
-    local serverHopButton = Create("TextButton", {
-        Text = "🌐 Server Hop",
-        Font = Enum.Font.GothamMedium,
-        TextSize = 13,
-        TextColor3 = CONFIG.Colors.Text,
-        BackgroundColor3 = Color3.fromRGB(100, 200, 100),
-        Position = UDim2.new(0, 15, 0.5, -15),
-        Size = UDim2.new(1, -30, 0, 30),
-        AutoButtonColor = false,
-        Parent = serverHopCard
-    })
-    AddCorner(serverHopButton, 6)
-
-    serverHopButton.MouseButton1Click:Connect(function()
-        ServerHop()
-    end)
-
-    serverHopButton.MouseEnter:Connect(function()
-        TweenService:Create(serverHopButton, TweenInfo.new(0.2), {
-            BackgroundColor3 = Color3.fromRGB(120, 220, 120)
-        }):Play()
-    end)
-
-    serverHopButton.MouseLeave:Connect(function()
-        TweenService:Create(serverHopButton, TweenInfo.new(0.2), {
-            BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-        }):Play()
-    end)
-
-    CreateSection("GODMODE")
-
-    CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
     local footer = Create("TextLabel", {
         Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
@@ -2808,6 +2709,7 @@ local function CreateUI()
         Parent = mainFrame
     })
 
+
     closeButton.MouseButton1Click:Connect(function()
         for player, highlight in pairs(State.PlayerHighlights) do
             pcall(function() highlight:Destroy() end)
@@ -2816,18 +2718,14 @@ local function CreateUI()
             if espData.highlight then pcall(function() espData.highlight:Destroy() end) end
             if espData.billboard then pcall(function() espData.billboard:Destroy() end) end
         end
-
         for _, connection in ipairs(State.Connections) do
             pcall(function() connection:Disconnect() end)
         end
-
         gui:Destroy()
-        if State.UIElements.NotificationGui then
-            State.UIElements.NotificationGui:Destroy()
-        end
-
+        if State.UIElements.NotificationGui then State.UIElements.NotificationGui:Destroy() end
         getgenv().MM2_ESP_Script = false
     end)
+
 
     closeButton.MouseEnter:Connect(function()
         TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.Red}):Play()
@@ -2836,114 +2734,94 @@ local function CreateUI()
         TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
     end)
 
+
     UserInputService.InputBegan:Connect(function(input, processed)
         if not processed and input.KeyCode == CONFIG.HideKey then
             mainFrame.Visible = not mainFrame.Visible
         end
-    end)
-
-    UserInputService.InputBegan:Connect(function(input, processed)
+       
         if processed then return end
-
+       
         if State.ListeningForKeybind and input.UserInputType == Enum.UserInputType.Keyboard then
             local key = input.KeyCode
             local bindData = State.ListeningForKeybind
-
             if key == Enum.KeyCode.Delete or key == Enum.KeyCode.Backspace then
                 ClearKeybind(bindData.key, bindData.button)
                 State.ListeningForKeybind = nil
                 return
             end
-
-            SetKeybind(bindData.key, key, bindData.button, keybindButtons)
+            SetKeybind(bindData.key, key, bindData.button, {})
             State.ListeningForKeybind = nil
             return
         end
-
-        if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then
-            PlayEmote("sit")
-        elseif input.KeyCode == State.Keybinds.Dab and State.Keybinds.Dab ~= Enum.KeyCode.Unknown then
-            PlayEmote("dab")
-        elseif input.KeyCode == State.Keybinds.Zen and State.Keybinds.Zen ~= Enum.KeyCode.Unknown then
-            PlayEmote("zen")
-        elseif input.KeyCode == State.Keybinds.Ninja and State.Keybinds.Ninja ~= Enum.KeyCode.Unknown then
-            PlayEmote("ninja")
-        elseif input.KeyCode == State.Keybinds.Floss and State.Keybinds.Floss ~= Enum.KeyCode.Unknown then
-            PlayEmote("floss")
+       
+        if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then PlayEmote("sit")
+        elseif input.KeyCode == State.Keybinds.Dab and State.Keybinds.Dab ~= Enum.KeyCode.Unknown then PlayEmote("dab")
+        elseif input.KeyCode == State.Keybinds.Zen and State.Keybinds.Zen ~= Enum.KeyCode.Unknown then PlayEmote("zen")
+        elseif input.KeyCode == State.Keybinds.Ninja and State.Keybinds.Ninja ~= Enum.KeyCode.Unknown then PlayEmote("ninja")
+        elseif input.KeyCode == State.Keybinds.Floss and State.Keybinds.Floss ~= Enum.KeyCode.Unknown then PlayEmote("floss")
         end
-
+       
         if input.KeyCode == State.Keybinds.ThrowKnife and State.Keybinds.ThrowKnife ~= Enum.KeyCode.Unknown then
-            pcall(function()
-                knifeThrow(true)
-            end)
+            pcall(function() knifeThrow(true) end)
         end
-        
+       
         if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
-            pcall(function()
-                shootMurderer()
-            end)
+            pcall(function() shootMurderer() end)
         end
-        
+       
         if input.KeyCode == State.Keybinds.PickupGun and State.Keybinds.PickupGun ~= Enum.KeyCode.Unknown then
-            pcall(function()
-                pickupGun()
-            end)
+            pcall(function() pickupGun() end)
         end
-
+       
         if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
             State.ClickTPActive = true
         end
-        
+       
         if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
             ToggleGodMode()
         end
-        
+       
         if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
             if State.SelectedPlayerForFling then
                 local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
                 if targetPlayer and targetPlayer.Character then
-                    pcall(function()
-                        FlingPlayer(targetPlayer)
-                    end)
+                    pcall(function() FlingPlayer(targetPlayer) end)
                 end
             end
         end
-        
-        -- ✅ ИСПРАВЛЕНО: Noclip кейбинд
+       
         if input.KeyCode == State.Keybinds.Noclip and State.Keybinds.Noclip ~= Enum.KeyCode.Unknown then
-            if State.NoclipEnabled then
-                DisableNoclip()
-            else
-                EnableNoclip()
-            end
+            if State.NoclipEnabled then DisableNoclip() else EnableNoclip() end
         end
+    end)
+   
+    UserInputService.InputEnded:Connect(function(input)
+        if input.KeyCode == State.Keybinds.ClickTP then
+            State.ClickTPActive = false
+        end
+    end)
+   
+    local mouse = LocalPlayer:GetMouse()
+    mouse.Button1Down:Connect(function()
+        if State.ClickTPActive then TeleportToMouse() end
     end)
 end
 
-------------------------------
-UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == State.Keybinds.ClickTP then
-        State.ClickTPActive = false
-    end
-end)
-
-local mouse = LocalPlayer:GetMouse()
-mouse.Button1Down:Connect(function()
-    if State.ClickTPActive then
-        TeleportToMouse()
-    end
-end)
 
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     ApplyCharacterSettings()
+
 
     State.prevMurd = nil
     State.prevSher = nil
     State.heroSent = false
     State.roundStart = true
     State.roundActive = false
+    CleanupMemory()
     end)
+
 
 CreateUI()
 CreateNotificationUI()
@@ -2952,6 +2830,7 @@ SetupGunTracking()
 InitialGunScan()
 StartRoleChecking()
 SetupAntiAFK()
+
 
 -- Инфо сообщение
 if State.NotificationsEnabled then
