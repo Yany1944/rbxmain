@@ -12,6 +12,45 @@
     getgenv().MM2_ESP_Script = true
 
     pcall(function()
+    -- Отключаем встроенные уведомления Roblox
+    game:GetService("StarterGui"):SetCore("TopbarEnabled", true)
+    
+    -- Блокируем конфликтующие функции
+    local function safeEmpty() return false end
+    local function safeNothing() end
+    
+    _G.useSliderMotionStates = safeEmpty
+    getgenv().useSliderMotionStates = safeEmpty
+    _G.SendNotification = safeNothing
+    getgenv().SendNotification = safeNothing
+    
+    -- Подавляем ошибки CorePackages в консоли
+    local oldWarn = warn
+    local oldError = error
+    
+    warn = function(...)
+        local msg = tostring(...)
+        if msg:match("useSliderMotionStates") or 
+           msg:match("SendNotification") or
+           msg:match("CorePackages") then
+            return -- Игнорируем эти ошибки
+        end
+        return oldWarn(...)
+    end
+    
+    error = function(msg, level)
+        if type(msg) == "string" then
+            if msg:match("useSliderMotionStates") or 
+               msg:match("SendNotification") or
+               msg:match("CorePackages") then
+                return -- Игнорируем эти ошибки
+            end
+        end
+        return oldError(msg, level)
+    end
+end)
+
+    pcall(function()
         local mt = getrawmetatable(game)
         local oldNamecall = mt.__namecall
         
