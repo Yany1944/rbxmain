@@ -4,16 +4,16 @@
         game.Loaded:Wait()
     end
 
-    task.wait(2)
-
     if getgenv().MM2_ESP_Script then
         return
     end
     getgenv().MM2_ESP_Script = true
 
-    pcall(function()
-    -- Отключаем встроенные уведомления Roblox
-    game:GetService("StarterGui"):SetCore("TopbarEnabled", true)
+   pcall(function()
+    local StarterGui = game:GetService("StarterGui")
+    
+    -- Отключаем встроенные уведомления
+    StarterGui:SetCore("TopbarEnabled", true)
     
     -- Блокируем конфликтующие функции
     local function safeEmpty() return false end
@@ -24,67 +24,33 @@
     _G.SendNotification = safeNothing
     getgenv().SendNotification = safeNothing
     
-    -- Подавляем ошибки CorePackages в консоли
-    local oldWarn = warn
-    local oldError = error
-    
-    warn = function(...)
-        local msg = tostring(...)
-        if msg:match("useSliderMotionStates") or 
-           msg:match("SendNotification") or
-           msg:match("CorePackages") then
-            return -- Игнорируем эти ошибки
-        end
-        return oldWarn(...)
-    end
-    
-    error = function(msg, level)
-        if type(msg) == "string" then
-            if msg:match("useSliderMotionStates") or 
-               msg:match("SendNotification") or
-               msg:match("CorePackages") then
-                return -- Игнорируем эти ошибки
-            end
-        end
-        return oldError(msg, level)
-    end
 end)
 
-    pcall(function()
-        local mt = getrawmetatable(game)
-        local oldNamecall = mt.__namecall
-        
-        setreadonly(mt, false)
-        
-        mt.__namecall = newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            local args = {...}
-            
-            -- Блокируем детектирование через Workspace
-            if method == "FindFirstChild" or method == "WaitForChild" then
-                if tostring(self) == "Workspace" and (args[1] == "Workshop" or args[1] == "Footsteps") then
-                    return nil
-                end
-            end
-            
-            -- Блокируем footstep детекты
-            if method == "FireServer" and tostring(self):find("Footstep") then
-                return
-            end
-            
-            return oldNamecall(self, ...)
-        end)
-        
-        setreadonly(mt, true)
-    end)
+-- ДОБАВЛЕНО: Переопределяем warn и error
+local oldWarn = warn
+local oldError = error
 
-    pcall(function()
-        for i,v in pairs(getconnections(game.Players.LocalPlayer.Kicked)) do
-            v:Disable()
+warn = function(...)
+    local msg = tostring(...)
+    if msg:match("useSliderMotionStates") or 
+       msg:match("CorePackages") or
+       msg:match("Slider") then
+        return
+    end
+    return oldWarn(...)
+end
+
+error = function(msg, level)
+    if type(msg) == "string" then
+        if msg:match("useSliderMotionStates") or 
+           msg:match("CorePackages") or
+           msg:match("Slider") then
+            return
         end
-    end)
+    end
+    return oldError(msg, level)
+end
 
-    task.wait(0.5)
 
     local CONFIG = {
         HideKey = Enum.KeyCode.Q,
@@ -187,19 +153,63 @@ local State = {
     FPDH = workspace.FallenPartsDestroyHeight
 }
 
+local function CleanupMemory()
+    -- Очистка highlights
+    for player, highlight in pairs(State.PlayerHighlights) do
+        if highlight and highlight.Parent then
+            pcall(function() highlight:Destroy() end)
+        end
+    end
+    State.PlayerHighlights = {}
+
+    -- Очистка gun ESP
+    for gunPart, espData in pairs(State.GunCache) do
+        if espData then
+            pcall(function()
+                if espData.highlight then espData.highlight:Destroy() end
+                if espData.billboard then espData.billboard:Destroy() end
+            end)
+        end
+    end
+    State.GunCache = {}
+
+    -- Очистка coin blacklist
+    State.CoinBlacklist = {}
+
+    -- Принудительная сборка мусора
+    collectgarbage("collect")
+end
 
 
+local function FindRole(player)
+    if not player or not player.Character then return nil end
+
+    local character = player.Character
+    local backpack = player.Backpack
+
+    -- Проверка на убийцу
+    if character:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife")) then
+        return "Murder"
+    end
+
+    -- Проверка на шерифа
+    if character:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun")) then
+        return "Sheriff"
+    end
+
+    return "Innocent"
+end
+
+-- Использование:
 local function findMurderer()
     for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character and player.Character:FindFirstChild("Knife") then
-            return player
-        end
-        if player.Backpack and player.Backpack:FindFirstChild("Knife") then
+        if FindRole(player) == "Murder" then
             return player
         end
     end
     return nil
 end
+
 
 local function findNearestPlayer()
     local nearestPlayer = nil
@@ -368,97 +378,93 @@ local FlingBlockedNotified = false
 
 
 local function EnableAntiFling()
+    if AntiFlingEnabled then return end
     AntiFlingEnabled = true
-    
-    -- Детектор флинга других игроков
+    State.AntiFlingEnabled = true
+
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
+            -- ИСПРАВЛЕНО: Одна проверка вместо двух
+            if player ~= LocalPlayer and player.Character and player.Character:IsDescendantOf(Workspace) then
                 local primaryPart = player.Character.PrimaryPart
-                if primaryPart then
-                    if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
-                        if not DetectedFlingers[player.Name] then
-                            if State.NotificationsEnabled then
-                                ShowNotification("Flinger Detected", CONFIG.Colors.Orange, player.Name, CONFIG.Colors.Red)
-                            end
-                            DetectedFlingers[player.Name] = true
+                if primaryPart and (primaryPart.AssemblyAngularVelocity.Magnitude > 50 or 
+                                    primaryPart.AssemblyLinearVelocity.Magnitude > 100) then
+
+                    if not DetectedFlingers[player.Name] then
+                        if State.NotificationsEnabled then
+                            ShowNotification("Flinger Detected", CONFIG.Colors.Orange, player.Name, CONFIG.Colors.Red)
                         end
-                        
-                        -- Нейтрализуем флинг других игроков
-                        pcall(function()
-                            if player.Character then  -- ← ДОБАВЬТЕ ЭТУ ПРОВЕРКУ!
-                                for _, part in ipairs(player.Character:GetDescendants()) do
-                                    if part:IsA("BasePart") then
-                                        pcall(function()
-                                            part.CanCollide = false
-                                            part.AssemblyAngularVelocity = Vector3.zero
-                                            part.AssemblyLinearVelocity = Vector3.zero
-                                            -- спрятал part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
-                                        end)
-                                    end
-                                end
-                            end
-                        end)
+                        DetectedFlingers[player.Name] = true
                     end
+
+                    pcall(function()
+                        for _, part in ipairs(player.Character:GetDescendants()) do
+                            if part:IsA("BasePart") then
+                                part.CanCollide = false
+                                part.AssemblyAngularVelocity = Vector3.zero
+                                part.AssemblyLinearVelocity = Vector3.zero
+                            end
+                        end
+                    end)
                 end
             end
         end
     end)
-    
-    -- Защита себя от флинга
+
     FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
-            
-                -- ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Пропускаем если мы сами флингаем
-            if State.IsFlingInProgress then
-                -- Сохраняем позицию но не блокируем velocity во время флинга
-                AntiFlingLastPos = primaryPart.Position
-            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 250 or primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
-                    if State.NotificationsEnabled and not FlingBlockedNotified then
-                        ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
-                        FlingBlockedNotified = true
-                        task.delay(3, function()
-                            FlingBlockedNotified = false
-                        end)
-                    end
 
-                
+            -- ИСПРАВЛЕНО: Правильная проверка для фли��га
+            if State.IsFlingInProgress then
+                AntiFlingLastPos = primaryPart.Position
+                return  -- Не блокируем velocity во время своего флинга
+            end
+
+            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or 
+               primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
+
+                if State.NotificationsEnabled and not FlingBlockedNotified then
+                    ShowNotification("Fling Blocked", CONFIG.Colors.Green)
+                    FlingBlockedNotified = true
+                    task.delay(3, function() FlingBlockedNotified = false end)
+                end
+
                 primaryPart.AssemblyLinearVelocity = Vector3.zero
                 primaryPart.AssemblyAngularVelocity = Vector3.zero
-                
-                -- Возврат на последнюю позицию
+
                 if AntiFlingLastPos ~= Vector3.zero then
                     primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
                 end
             else
-                -- Сохраняем текущую позицию
                 AntiFlingLastPos = primaryPart.Position
             end
         end
     end)
-    
+
     table.insert(State.Connections, FlingDetectionConnection)
     table.insert(State.Connections, FlingNeutralizerConnection)
 end
 
 local function DisableAntiFling()
-    if not State.AntiFlingEnabled then return end
+    if not AntiFlingEnabled then return end
+    AntiFlingEnabled = false
     State.AntiFlingEnabled = false
     DetectedFlingers = {}
 
+    -- ИСПРАВЛЕНО: Добавлены проверки перед Disconnect
     if FlingDetectionConnection then
-        FlingDetectionConnection:Disconnect()
+        pcall(function() FlingDetectionConnection:Disconnect() end)
         FlingDetectionConnection = nil
     end
 
     if FlingNeutralizerConnection then
-        FlingNeutralizerConnection:Disconnect()
+        pcall(function() FlingNeutralizerConnection:Disconnect() end)
         FlingNeutralizerConnection = nil
     end
-    
 end
+
 
 
 local function getAllPlayers()
@@ -657,12 +663,14 @@ local function EnableNoclip()
     local char = LocalPlayer.Character
     if not char then return end
 
+    -- Собираем все части персонажа
     for _, obj in ipairs(char:GetChildren()) do
         if obj:IsA("BasePart") then
             table.insert(NoclipObjects, obj)
         end
     end
 
+    -- Обработчик респавна
     State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
         task.wait(0.15)
         table.clear(NoclipObjects)
@@ -673,6 +681,7 @@ local function EnableNoclip()
         end
     end)
 
+    -- Основной noclip loop
     State.NoclipConnection = RunService.Stepped:Connect(function()
         for _, part in ipairs(NoclipObjects) do
             pcall(function()
@@ -695,7 +704,7 @@ local function DisableNoclip()
         State.NoclipRespawnConnection:Disconnect()
         State.NoclipRespawnConnection = nil
     end
-    
+
     -- Восстанавливаем коллизию
     local char = LocalPlayer.Character
     if char then
@@ -711,38 +720,57 @@ local coinLabelCache = nil
 local lastCacheTime = 0
 
 local function GetCollectedCoinsCount()
-    if coinLabelCache and coinLabelCache.Parent and (tick() - lastCacheTime) < 2 then
+    -- Проверяем кэш (5 секунд)
+    if State.CoinLabelCache and State.CoinLabelCache.Parent and 
+       (tick() - State.LastCacheTime) < 5 then
         local success, value = pcall(function()
-            return tonumber(coinLabelCache.Text) or 0
+            return tonumber(State.CoinLabelCache.Text) or 0
         end)
         if success then
             return value
         end
     end
     
+    -- ИСПРАВЛЕНО: Добавлен timeout
     local success, coins = pcall(function()
-        local label = LocalPlayer.PlayerGui
-            :FindFirstChild("MainGUI")
-            :FindFirstChild("Game")
-            :FindFirstChild("CoinBags")
-            :FindFirstChild("Container")
-            :FindFirstChild("SnowToken")
-            :FindFirstChild("CurrencyFrame")
-            :FindFirstChild("Icon")
-            :FindFirstChild("Coins")
+        local playerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
+        if not playerGui then return 0 end
         
-        if label then
-            coinLabelCache = label
-            lastCacheTime = tick()
-            return tonumber(label.Text) or 0
-        end
-        return 0
+        local mainGui = playerGui:FindFirstChild("MainGUI")
+        if not mainGui then return 0 end
+        
+        -- Безопасный путь к coins
+        local game = mainGui:FindFirstChild("Game")
+        if not game then return 0 end
+        
+        local coinBags = game:FindFirstChild("CoinBags")
+        if not coinBags then return 0 end
+        
+        local container = coinBags:FindFirstChild("Container")
+        if not container then return 0 end
+        
+        local snowToken = container:FindFirstChild("SnowToken")
+        if not snowToken then return 0 end
+        
+        local currencyFrame = snowToken:FindFirstChild("CurrencyFrame")
+        if not currencyFrame then return 0 end
+        
+        local icon = currencyFrame:FindFirstChild("Icon")
+        if not icon then return 0 end
+        
+        local coinsLabel = icon:FindFirstChild("Coins")
+        if not coinsLabel then return 0 end
+        
+        State.CoinLabelCache = coinsLabel
+        State.LastCacheTime = tick()
+        return tonumber(coinsLabel.Text) or 0
     end)
     
     if success and coins >= 0 then
         return coins
     end
     
+    -- Fallback через FindFirstChild
     local maxValue = 0
     pcall(function()
         for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
@@ -752,8 +780,8 @@ local function GetCollectedCoinsCount()
                     local value = tonumber(gui.Text) or 0
                     if value > maxValue then
                         maxValue = value
-                        coinLabelCache = gui
-                        lastCacheTime = tick()
+                        State.CoinLabelCache = gui
+                        State.LastCacheTime = tick()
                     end
                 end
             end
@@ -1367,14 +1395,14 @@ local function CreateGunESP(gunPart)
     if State.GunCache[gunPart] then return end
 
     local highlight = CreateHighlight(gunPart, CONFIG.Colors.Gun)
-    highlight.Enabled = State.GunESP  -- ← ДОБАВЬ ЭТУ СТРОКУ
+    highlight.Enabled = State.GunESP  -- ИСПРАВЛЕНО: Учитываем текущее состояние
 
     local billboard = Instance.new("BillboardGui")
     billboard.Adornee = gunPart
     billboard.Size = UDim2.new(0, 150, 0, 40)
     billboard.StudsOffset = Vector3.new(0, 2, 0)
     billboard.AlwaysOnTop = true
-    billboard.Enabled = State.GunESP  -- ← ДОБАВЬ ЭТУ СТРОКУ
+    billboard.Enabled = State.GunESP  -- ИСПРАВЛЕНО: Учитываем текущее состояние
     billboard.Parent = gunPart
 
     local textLabel = Instance.new("TextLabel")
@@ -1392,7 +1420,6 @@ local function CreateGunESP(gunPart)
         textLabel = textLabel
     }
 end
-
 
 local function RemoveGunESP(gunPart)
     local espData = State.GunCache[gunPart]
@@ -2749,21 +2776,39 @@ end
     })
 
 
-    closeButton.MouseButton1Click:Connect(function()
-        for player, highlight in pairs(State.PlayerHighlights) do
-            pcall(function() highlight:Destroy() end)
-        end
-        for gunPart, espData in pairs(State.GunCache) do
-            if espData.highlight then pcall(function() espData.highlight:Destroy() end) end
-            if espData.billboard then pcall(function() espData.billboard:Destroy() end) end
-        end
-        for _, connection in ipairs(State.Connections) do
-            pcall(function() connection:Disconnect() end)
-        end
-        gui:Destroy()
-        if State.UIElements.NotificationGui then State.UIElements.NotificationGui:Destroy() end
-        getgenv().MM2_ESP_Script = false
-    end)
+closeButton.MouseButton1Click:Connect(function()
+    -- Очистка highlights
+    CleanupMemory()
+
+    -- Отключение всех соединений
+    for _, connection in ipairs(State.Connections) do
+        pcall(function()
+            if connection and connection.Disconnect then
+                connection:Disconnect()
+            end
+        end)
+    end
+
+    -- Очистка UI
+    if gui then gui:Destroy() end
+    if State.UIElements.NotificationGui then 
+        State.UIElements.NotificationGui:Destroy() 
+    end
+
+    -- Отключение Auto Farm
+    if State.AutoFarmEnabled then
+        StopAutoFarm()
+    end
+
+    -- Отключение всех активных функций
+    if State.NoclipEnabled then DisableNoclip() end
+    if State.AntiFlingEnabled then DisableAntiFling() end
+    if State.ExtendedHitboxEnabled then DisableExtendedHitbox() end
+
+    -- Финальная очистка
+    getgenv().MM2_ESP_Script = false
+    collectgarbage("collect")
+end)
 
 
     closeButton.MouseEnter:Connect(function()
