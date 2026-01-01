@@ -155,31 +155,33 @@ local State = {
 
 local function CleanupMemory()
     -- Очистка highlights
-    for player, highlight in pairs(State.PlayerHighlights) do
-        if highlight and highlight.Parent then
-            pcall(function() highlight:Destroy() end)
+    if State.PlayerHighlights then
+        for player, highlight in pairs(State.PlayerHighlights) do
+            if highlight and highlight.Parent then
+                pcall(function() highlight:Destroy() end)
+            end
         end
+        State.PlayerHighlights = {}
     end
-    State.PlayerHighlights = {}
 
     -- Очистка gun ESP
-    for gunPart, espData in pairs(State.GunCache) do
-        if espData then
-            pcall(function()
-                if espData.highlight then espData.highlight:Destroy() end
-                if espData.billboard then espData.billboard:Destroy() end
-            end)
+    if State.GunCache then
+        for gunPart, espData in pairs(State.GunCache) do
+            if espData then
+                pcall(function()
+                    if espData.highlight then espData.highlight:Destroy() end
+                    if espData.billboard then espData.billboard:Destroy() end
+                end)
+            end
         end
+        State.GunCache = {}
     end
-    State.GunCache = {}
 
     -- Очистка coin blacklist
     State.CoinBlacklist = {}
-
-    -- Принудительная сборка мусора
-    collectgarbage("collect")
+    
+    -- Roblox автоматически очищает память, вызов не нужен
 end
-
 
 local function FindRole(player)
     if not player or not player.Character then return nil end
@@ -378,94 +380,92 @@ local FlingBlockedNotified = false
 
 
 local function EnableAntiFling()
-    if AntiFlingEnabled then return end
     AntiFlingEnabled = true
-    State.AntiFlingEnabled = true
-
+    
+    -- Детектор флинга других игроков
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
-            -- ИСПРАВЛЕНО: Одна проверка вместо двух
-            if player ~= LocalPlayer and player.Character and player.Character:IsDescendantOf(Workspace) then
+            if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
                 local primaryPart = player.Character.PrimaryPart
-                if primaryPart and (primaryPart.AssemblyAngularVelocity.Magnitude > 50 or 
-                                    primaryPart.AssemblyLinearVelocity.Magnitude > 100) then
-
-                    if not DetectedFlingers[player.Name] then
-                        if State.NotificationsEnabled then
-                            ShowNotification("Flinger Detected", CONFIG.Colors.Orange, player.Name, CONFIG.Colors.Red)
-                        end
-                        DetectedFlingers[player.Name] = true
-                    end
-
-                    pcall(function()
-                        for _, part in ipairs(player.Character:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                part.CanCollide = false
-                                part.AssemblyAngularVelocity = Vector3.zero
-                                part.AssemblyLinearVelocity = Vector3.zero
+                if primaryPart then
+                    if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
+                        if not DetectedFlingers[player.Name] then
+                            if State.NotificationsEnabled then
+                                ShowNotification("Flinger Detected", CONFIG.Colors.Orange, player.Name, CONFIG.Colors.Red)
                             end
+                            DetectedFlingers[player.Name] = true
                         end
-                    end)
+                        
+                        -- Нейтрализуем флинг других игроков
+                        pcall(function()
+                            if player.Character then  -- ← ДОБАВЬТЕ ЭТУ ПРОВЕРКУ!
+                                for _, part in ipairs(player.Character:GetDescendants()) do
+                                    if part:IsA("BasePart") then
+                                        pcall(function()
+                                            part.CanCollide = false
+                                            part.AssemblyAngularVelocity = Vector3.zero
+                                            part.AssemblyLinearVelocity = Vector3.zero
+                                            part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
+                                        end)
+                                    end
+                                end
+                            end
+                        end)
+                    end
                 end
             end
         end
     end)
-
+    
+    -- Защита себя от флинга
     FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
-
-            -- ИСПРАВЛЕНО: Правильная проверка для фли��га
             if State.IsFlingInProgress then
                 AntiFlingLastPos = primaryPart.Position
-                return  -- Не блокируем velocity во время своего флинга
-            end
+            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 250 or primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
+                    if State.NotificationsEnabled and not FlingBlockedNotified then
+                        ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
+                        FlingBlockedNotified = true
+                        task.delay(3, function()
+                            FlingBlockedNotified = false
+                        end)
+                    end
 
-            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or 
-               primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
-
-                if State.NotificationsEnabled and not FlingBlockedNotified then
-                    ShowNotification("Fling Blocked", CONFIG.Colors.Green)
-                    FlingBlockedNotified = true
-                    task.delay(3, function() FlingBlockedNotified = false end)
-                end
-
+                
                 primaryPart.AssemblyLinearVelocity = Vector3.zero
                 primaryPart.AssemblyAngularVelocity = Vector3.zero
-
+                
+                -- Возврат на последнюю позицию
                 if AntiFlingLastPos ~= Vector3.zero then
                     primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
                 end
             else
+                -- Сохраняем текущую позицию
                 AntiFlingLastPos = primaryPart.Position
             end
         end
     end)
-
+    
     table.insert(State.Connections, FlingDetectionConnection)
     table.insert(State.Connections, FlingNeutralizerConnection)
 end
 
 local function DisableAntiFling()
-    if not AntiFlingEnabled then return end
     AntiFlingEnabled = false
-    State.AntiFlingEnabled = false
     DetectedFlingers = {}
-
-    -- ИСПРАВЛЕНО: Добавлены проверки перед Disconnect
+    
     if FlingDetectionConnection then
-        pcall(function() FlingDetectionConnection:Disconnect() end)
+        FlingDetectionConnection:Disconnect()
         FlingDetectionConnection = nil
     end
-
+    
     if FlingNeutralizerConnection then
-        pcall(function() FlingNeutralizerConnection:Disconnect() end)
+        FlingNeutralizerConnection:Disconnect()
         FlingNeutralizerConnection = nil
     end
 end
-
-
 
 local function getAllPlayers()
     local playerList = {}
@@ -663,14 +663,12 @@ local function EnableNoclip()
     local char = LocalPlayer.Character
     if not char then return end
 
-    -- Собираем все части персонажа
     for _, obj in ipairs(char:GetChildren()) do
         if obj:IsA("BasePart") then
             table.insert(NoclipObjects, obj)
         end
     end
 
-    -- Обработчик респавна
     State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
         task.wait(0.15)
         table.clear(NoclipObjects)
@@ -681,7 +679,6 @@ local function EnableNoclip()
         end
     end)
 
-    -- Основной noclip loop
     State.NoclipConnection = RunService.Stepped:Connect(function()
         for _, part in ipairs(NoclipObjects) do
             pcall(function()
@@ -704,8 +701,7 @@ local function DisableNoclip()
         State.NoclipRespawnConnection:Disconnect()
         State.NoclipRespawnConnection = nil
     end
-
-    -- Восстанавливаем коллизию
+    
     local char = LocalPlayer.Character
     if char then
         for _, part in ipairs(char:GetChildren()) do
