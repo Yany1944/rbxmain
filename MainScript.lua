@@ -60,7 +60,8 @@ end
             Section = Color3.fromRGB(35, 35, 40),
             Text = Color3.fromRGB(230, 230, 230),
             TextDark = Color3.fromRGB(150, 150, 150),
-            Accent = Color3.fromRGB(90, 140, 255),
+        --  Accent = Color3.fromRGB(90, 140, 255),
+            Accent = Color3.fromRGB(216, 159, 224),
             Red = Color3.fromRGB(255, 85, 85),
             Green = Color3.fromRGB(85, 255, 120),
             Orange = Color3.fromRGB(255, 170, 50),
@@ -2007,7 +2008,8 @@ local function CreateUI()
 
 
     local titleLabel = Create("TextLabel", {
-        Text = "MM2 ESP <font color=\"rgb(90,140,255)\">v6.0 Tabs</font>",
+        Text = "MM2 ESP <font color=\"rgb(128, 0, 128)\">v6.0 Tabs</font>",
+        --Text = "MM2 ESP <font color=\"rgb(90,140,255)\">v6.0 Tabs</font>",
         RichText = true,
         Font = Enum.Font.GothamBold,
         TextSize = 16,
