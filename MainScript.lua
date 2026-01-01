@@ -380,9 +380,10 @@ local FlingBlockedNotified = false
 
 
 local function EnableAntiFling()
+    if AntiFlingEnabled then return end
     AntiFlingEnabled = true
     
-    -- Детектор флинга других игроков
+    -- Детектор флинга других игроков (без изменений)
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
@@ -396,9 +397,8 @@ local function EnableAntiFling()
                             DetectedFlingers[player.Name] = true
                         end
                         
-                        -- Нейтрализуем флинг других игроков
                         pcall(function()
-                            if player.Character then  -- ← ДОБАВЬТЕ ЭТУ ПРОВЕРКУ!
+                            if player.Character then
                                 for _, part in ipairs(player.Character:GetDescendants()) do
                                     if part:IsA("BasePart") then
                                         pcall(function()
@@ -417,32 +417,45 @@ local function EnableAntiFling()
         end
     end)
     
-    -- Защита себя от флинга
+    -- ✅ ИСПРАВЛЕННАЯ защита себя от флинга
     FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            
+            -- ✅ Игнорируем если персонаж в воздухе
+            if humanoid then
+                local state = humanoid:GetState()
+                if state == Enum.HumanoidStateType.Jumping or 
+                   state == Enum.HumanoidStateType.Freefall or
+                   state == Enum.HumanoidStateType.Flying then
+                    AntiFlingLastPos = primaryPart.Position
+                    return  -- НЕ ТРОГАЕМ скорость!
+                end
+            end
+            
             if State.IsFlingInProgress then
                 AntiFlingLastPos = primaryPart.Position
-            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 250 or primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
-                    if State.NotificationsEnabled and not FlingBlockedNotified then
-                        ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
-                        FlingBlockedNotified = true
-                        task.delay(3, function()
-                            FlingBlockedNotified = false
-                        end)
-                    end
-
+            -- ✅ Увеличен порог: 250 → 500 (безопаснее для высокого JumpPower)
+            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 500 or 
+                   primaryPart.AssemblyAngularVelocity.Magnitude > 500 then
+                
+                if State.NotificationsEnabled and not FlingBlockedNotified then
+                    ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
+                    FlingBlockedNotified = true
+                    task.delay(3, function()
+                        FlingBlockedNotified = false
+                    end)
+                end
                 
                 primaryPart.AssemblyLinearVelocity = Vector3.zero
                 primaryPart.AssemblyAngularVelocity = Vector3.zero
                 
-                -- Возврат на последнюю позицию
                 if AntiFlingLastPos ~= Vector3.zero then
                     primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
                 end
             else
-                -- Сохраняем текущую позицию
                 AntiFlingLastPos = primaryPart.Position
             end
         end
