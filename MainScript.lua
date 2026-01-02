@@ -110,6 +110,7 @@ local State = {
     ShootDirection = "Front",
     ExtendedHitboxSize = 15,
     ExtendedHitboxEnabled = false,
+    KillAuraDistance = 2.5,
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -166,6 +167,12 @@ local State = {
     -- Notifications
     NotificationQueue = {},
     CurrentNotification = nil,
+
+    -- Skin Changer
+    KnifeSkinEnabled = false,
+    GunSkinEnabled = false,
+    SelectedKnifeSkin = "",
+    SelectedGunSkin = "",
     
     -- Keybinds
     Keybinds = {
@@ -1948,8 +1955,6 @@ local function pickupGun()
     ShowNotification("Gun picked up!", CONFIG.Colors.Green)
 end
 
-
-
 local OriginalSizes = {}
 local HitboxConnection = nil
 
@@ -1957,7 +1962,8 @@ local function EnableExtendedHitbox()
     if State.ExtendedHitboxEnabled then return end
     State.ExtendedHitboxEnabled = true
     
-    HitboxConnection = RunService.Heartbeat:Connect(function()
+    -- ✅ RenderStepped вместо Heartbeat - меньше лагов
+    HitboxConnection = RunService.RenderStepped:Connect(function()
         local size = Vector3.new(
             State.ExtendedHitboxSize, 
             State.ExtendedHitboxSize, 
@@ -1970,33 +1976,22 @@ local function EnableExtendedHitbox()
                 if character then
                     local hrp = character:FindFirstChild("HumanoidRootPart")
                     if hrp and hrp:IsA("BasePart") then
-                        -- Сохраняем оригинал только один раз
                         if not OriginalSizes[player] then
                             OriginalSizes[player] = {
                                 Size = hrp.Size,
                                 Transparency = hrp.Transparency,
-                                Material = hrp.Material,
-                                Color = hrp.Color,
                                 CanCollide = hrp.CanCollide
                             }
                         end
                         
-                        -- ✅ ВСЕГДА: Увеличиваем хитбокс, но делаем невидимым
                         hrp.Size = size
-                        hrp.CanCollide = false
-                        -- Сохраняем оригинальный вид (невидимо для других)
-                        hrp.Transparency = OriginalSizes[player].Transparency
-                        hrp.Material = OriginalSizes[player].Material
-                        hrp.Color = OriginalSizes[player].Color
+                        hrp.Transparency = 0.9
+                        hrp.CanCollide = true  -- ✅ Оставляем true для коллизий
                     end
                 end
             end
         end
     end)
-    
-    if State.NotificationsEnabled then
-        ShowNotification("Extended Hitbox ON", CONFIG.Colors.Green, "Size: " .. State.ExtendedHitboxSize, CONFIG.Colors.Accent)
-    end
 end
 
 
@@ -2016,8 +2011,6 @@ local function DisableExtendedHitbox()
             if hrp then
                 hrp.Size = original.Size
                 hrp.Transparency = original.Transparency
-                hrp.Material = original.Material
-                hrp.Color = original.Color
                 hrp.CanCollide = original.CanCollide
             end
         end
@@ -2025,16 +2018,11 @@ local function DisableExtendedHitbox()
     
     OriginalSizes = {}
     
-    if State.NotificationsEnabled then
-        ShowNotification("Extended Hitbox OFF", CONFIG.Colors.Red)
-    end
 end
-
 
 local function UpdateHitboxSize(newSize)
     State.ExtendedHitboxSize = newSize
 end
-
 
 local function EnableViewClip()
     if State.ViewClipEnabled then return end
@@ -2042,10 +2030,7 @@ local function EnableViewClip()
     
     -- ✅ Изменяем режим камеры (из сурса)
     LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
-    
-    if State.NotificationsEnabled then
-        ShowNotification("ViewClip ON", CONFIG.Colors.Green, "Camera clips through walls", CONFIG.Colors.Accent)
-    end
+
 end
 
 local function DisableViewClip()
@@ -2054,110 +2039,150 @@ local function DisableViewClip()
     
     -- ✅ Возвращаем обычный режим камеры
     LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
-    
-    if State.NotificationsEnabled then
-        ShowNotification("ViewClip OFF", CONFIG.Colors.Red)
+
+end
+
+local killAuraCon = nil
+local anchoredPlayers = {}
+
+local function ToggleKillAura(state)
+    if state then
+        anchoredPlayers = {}
+        if killAuraCon then killAuraCon:Disconnect() end
+        killAuraCon = RunService.Heartbeat:Connect(function()
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
+                    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                    local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if localHRP and (hrp.Position - localHRP.Position).Magnitude < 7 then
+                        hrp.Anchored = true
+                        -- Используем значение из State
+                        hrp.CFrame = localHRP.CFrame + localHRP.CFrame.LookVector * State.KillAuraDistance
+                        
+                        if not anchoredPlayers[player] then
+                            anchoredPlayers[player] = true
+                        end
+
+                        task.wait(0.1)
+                        local args = { [1] = "Slash" }
+                        LocalPlayer.Character.Knife.Stab:FireServer(unpack(args))
+                        return
+                    end
+                end
+            end
+        end)
+    else
+        if killAuraCon then 
+            killAuraCon:Disconnect()
+            killAuraCon = nil
+        end
+        
+        for player, _ in pairs(anchoredPlayers) do
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                pcall(function()
+                    player.Character.HumanoidRootPart.Anchored = false
+                end)
+            end
+        end
+        anchoredPlayers = {}
     end
 end
 
+
+
 local function InstantKillAll()
-    local character = LocalPlayer.Character
-    if not character then 
+    if findMurderer() ~= LocalPlayer then 
         if State.NotificationsEnabled then
-            ShowNotification("Kill All Failed", CONFIG.Colors.Red, "No character found", CONFIG.Colors.TextDark)
+            ShowNotification("You're not murderer.", CONFIG.Colors.Red)
         end
         return 
     end
-    
-    -- Проверяем, является ли игрок убийцей
-    local knife = character:FindFirstChild("Knife") or LocalPlayer.Backpack:FindFirstChild("Knife")
-    if not knife then
-        if State.NotificationsEnabled then
-            ShowNotification("Not Murderer!", CONFIG.Colors.Red, "You need to be the murderer", CONFIG.Colors.TextDark)
-        end
-        return
-    end
-    
-    -- Экипируем нож
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    if knife.Parent == LocalPlayer.Backpack then
-        humanoid:EquipTool(knife)
-        task.wait(0.3)
-    end
-    
-    -- Сохраняем оригинальные настройки
-    local originalSize = State.ExtendedHitboxSize
-    local wasEnabled = State.ExtendedHitboxEnabled
-    
-    -- ✅ НОВОЕ: Сохраняем коллизии СВОЕГО персонажа
-    local myOriginalCollisions = {}
-    for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            myOriginalCollisions[part] = part.CanCollide
-            part.CanCollide = false  -- Отключаем коллизии своего персонажа
+
+    if not LocalPlayer.Character:FindFirstChild("Knife") then
+        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if LocalPlayer.Backpack:FindFirstChild("Knife") then
+            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
+        else
+            if State.NotificationsEnabled then
+                ShowNotification("You don't have the knife..?", CONFIG.Colors.Red)
+            end
+            return
         end
     end
-    
-    -- Увеличиваем размер хитбоксов
-    State.ExtendedHitboxSize = 500
-    
-    if not wasEnabled then
-        EnableExtendedHitbox()
+
+    local localHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not localHRP then return end
+
+    -- Телепортируем ВСЕХ игроков перед собой (без проверки расстояния)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            pcall(function()
+                hrp.Anchored = true
+                hrp.CFrame = localHRP.CFrame + localHRP.CFrame.LookVector * 3
+            end)
+        end
     end
+
+    local args = { [1] = "Slash" }
+    LocalPlayer.Character.Knife.Stab:FireServer(unpack(args))
+    
+    task.spawn(function()
+        task.wait(0.1)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
+                pcall(function()
+                    player.Character.HumanoidRootPart.Anchored = false
+                end)
+            end
+        end
+    end)
     
     if State.NotificationsEnabled then
-        ShowNotification("Kill All Active!", CONFIG.Colors.Green, "Attacking all players...", CONFIG.Colors.Accent)
+        ShowNotification("Kill All Complete!", CONFIG.Colors.Green)
     end
+end
+
+
+-- Функция для смены скина ножа
+local function ChangeKnifeSkin(meshId, textureId)
+    local character = LocalPlayer.Character
+    if not character then return end
     
-    -- Ждем применения хитбоксов
-    task.wait(0.2)
+    local knife = character:FindFirstChild("Knife")
+    if not knife then return end
     
-    -- Находим RemoteEvent для атаки
-    local slashEvent = knife:FindFirstChild("Slash")
-    local stab = knife:FindFirstChild("Stab")
-    
-    -- Атакуем несколько раз
-    for i = 1, 5 do
-        -- Метод 1: FireServer на Slash
-        if slashEvent and slashEvent:IsA("RemoteEvent") then
-            slashEvent:FireServer("Slash")
+    pcall(function()
+        local handle = knife:FindFirstChild("Handle")
+        if handle then
+            -- Меняем меш и текстуру
+            local mesh = handle:FindFirstChildOfClass("SpecialMesh")
+            if mesh then
+                mesh.MeshId = meshId
+                mesh.TextureId = textureId
+            end
         end
-        
-        -- Метод 2: FireServer на Stab
-        if stab and stab:IsA("RemoteEvent") then
-            stab:FireServer()
+    end)
+end
+
+-- Функция для смены скина пистолета
+local function ChangeGunSkin(meshId, textureId)
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local gun = character:FindFirstChild("Gun")
+    if not gun then return end
+    
+    pcall(function()
+        local handle = gun:FindFirstChild("Handle")
+        if handle then
+            local mesh = handle:FindFirstChildOfClass("SpecialMesh")
+            if mesh then
+                mesh.MeshId = meshId
+                mesh.TextureId = textureId
+            end
         end
-        
-        -- Метод 3: Activate инструмента
-        pcall(function()
-            knife:Activate()
-        end)
-        
-        task.wait(0.2)
-    end
-    
-    -- Ждем завершения
-    task.wait(0.5)
-    
-    -- ✅ НОВОЕ: Восстанавливаем коллизии СВОЕГО персонажа
-    for part, originalState in pairs(myOriginalCollisions) do
-        if part and part.Parent then
-            part.CanCollide = originalState
-        end
-    end
-    
-    -- Восстанавливаем настройки
-    State.ExtendedHitboxSize = originalSize
-    
-    if not wasEnabled then
-        DisableExtendedHitbox()
-    end
-    
-    if State.NotificationsEnabled then
-        ShowNotification("Kill All Complete!", CONFIG.Colors.Green, "Hitbox restored", CONFIG.Colors.Accent)
-    end
+    end)
 end
 
 local function CreateUI()
@@ -3079,6 +3104,7 @@ end
    
     CombatTab:CreateSection("MURDERER TOOLS")
     CombatTab:CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
+    CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", function(s) ToggleKillAura(s) end)
     CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
    
     CombatTab:CreateSection("SHERIFF TOOLS")
