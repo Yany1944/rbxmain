@@ -167,12 +167,6 @@ local State = {
     -- Notifications
     NotificationQueue = {},
     CurrentNotification = nil,
-
-    -- Skin Changer
-    KnifeSkinEnabled = false,
-    GunSkinEnabled = false,
-    SelectedKnifeSkin = "",
-    SelectedGunSkin = "",
     
     -- Keybinds
     Keybinds = {
@@ -2143,47 +2137,6 @@ local function InstantKillAll()
     end
 end
 
-
--- Функция для смены скина ножа
-local function ChangeKnifeSkin(meshId, textureId)
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local knife = character:FindFirstChild("Knife")
-    if not knife then return end
-    
-    pcall(function()
-        local handle = knife:FindFirstChild("Handle")
-        if handle then
-            -- Меняем меш и текстуру
-            local mesh = handle:FindFirstChildOfClass("SpecialMesh")
-            if mesh then
-                mesh.MeshId = meshId
-                mesh.TextureId = textureId
-            end
-        end
-    end)
-end
-
--- Функция для смены скина пистолета
-local function ChangeGunSkin(meshId, textureId)
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local gun = character:FindFirstChild("Gun")
-    if not gun then return end
-    
-    pcall(function()
-        local handle = gun:FindFirstChild("Handle")
-        if handle then
-            local mesh = handle:FindFirstChildOfClass("SpecialMesh")
-            if mesh then
-                mesh.MeshId = meshId
-                mesh.TextureId = textureId
-            end
-        end
-    end)
-end
 
 local function CreateUI()
     for _, child in ipairs(CoreGui:GetChildren()) do
