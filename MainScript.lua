@@ -61,7 +61,7 @@ end
             Text = Color3.fromRGB(230, 230, 230),
             TextDark = Color3.fromRGB(150, 150, 150),
         --  Accent = Color3.fromRGB(90, 140, 255),
-            Accent = Color3.fromRGB(216, 159, 224),
+            Accent = Color3.fromRGB(220, 145, 230),
             Red = Color3.fromRGB(255, 85, 85),
             Green = Color3.fromRGB(85, 255, 120),
             Orange = Color3.fromRGB(255, 170, 50),
@@ -87,38 +87,87 @@ end
 
 
 local State = {
+    -- ESP настройки
     GunESP = false,
     MurderESP = false,
     SheriffESP = false,
     InnocentESP = false,
+    
+    -- Уведомления
     NotificationsEnabled = false,
-    GodModeEnabled = false,
+    
+    -- Character settings
     WalkSpeed = 18,
     JumpPower = 50,
     MaxCameraZoom = 100,
-    CameraFOV = 70,
-    ShootPrediction = 0.3,
-    ExtendedHitboxSize = 5,  -- ✅ Добавь эту строку
-    ExtendedHitboxEnabled = false,  -- ✅ Добавь эту строку
-    ExtendedHitboxConnection = nil,  -- ✅ Добавь эту строку
-	AutoFarmEnabled = false,
-	CoinFarmThread = nil,
-	CoinFarmFlySpeed = 24,
-	CoinFarmDelay = 2,
-	UndergroundMode = true,
-	UndergroundOffset = 2.5,
-	CoinBlacklist = {},
-	StartSessionCoins = 0,
-	NoClipConnection = nil,
-	ClipEnabled = true,
+    CameraFOV = 90,
+    
+    -- Camera 
     ViewClipEnabled = false,
+    
+    -- Combat
+    ShootPrediction = 0.15,
+    ShootDirection = "Front",
+    ExtendedHitboxSize = 15,
+    ExtendedHitboxEnabled = false,
+    
+    -- Auto Farm
+    AutoFarmEnabled = false,
+    CoinFarmThread = nil,
+    CoinFarmFlySpeed = 24,
+    CoinFarmDelay = 2,
+    UndergroundMode = false,
+    UndergroundOffset = 2.5,
+    CoinBlacklist = {},
+    StartSessionCoins = 0,
+    CoinLabelCache = nil,
+    LastCacheTime = 0,
+    
+    -- Anti-Fling
     AntiFlingEnabled = false,
+    IsFlingInProgress = false,
+    SelectedPlayerForFling = nil,
+    OldPos = nil,
+    
+    -- Noclip
     NoclipEnabled = false,
-    NoclipMode = "Standard",
     NoclipConnection = nil,
     NoclipRespawnConnection = nil,
-
-
+    NoclipObjects = nil,
+    
+    -- NoClip (старая система для auto farm)
+    ClipEnabled = true,
+    NoClipConnection = nil,
+    
+    -- GodMode
+    GodModeEnabled = false,
+    
+    -- Role detection
+    prevMurd = nil,
+    prevSher = nil,
+    heroSent = false,
+    roundStart = true,
+    roundActive = false,
+    
+    -- ESP internals
+    PlayerHighlights = {},
+    GunCache = {},
+    
+    -- System
+    Connections = {},
+    UIElements = {},
+    RoleCheckLoop = nil,
+    FPDH = workspace.FallenPartsDestroyHeight,
+    
+    -- UI State
+    ClickTPActive = false,
+    ListeningForKeybind = nil,
+    
+    -- Notifications
+    NotificationQueue = {},
+    CurrentNotification = nil,
+    
+    -- Keybinds
     Keybinds = {
         Sit = Enum.KeyCode.Unknown,
         Dab = Enum.KeyCode.Unknown,
@@ -131,28 +180,11 @@ local State = {
         ThrowKnife = Enum.KeyCode.Unknown,
         Noclip = Enum.KeyCode.Unknown,
         ShootMurderer = Enum.KeyCode.Unknown,
-        PickupGun = Enum.KeyCode.Unknown
-
-    },
-    prevMurd = nil,
-    prevSher = nil,
-    heroSent = false,
-    roundStart = true,
-    roundActive = false,
-    PlayerHighlights = {},
-    GunCache = {},
-    Connections = {},
-    UIElements = {},
-    ClickTPActive = false,
-    ListeningForKeybind = nil,
-    RoleCheckLoop = nil,
-    NotificationQueue = {},
-    CurrentNotification = nil,
-    SelectedPlayerForFling = nil,
-    OldPos = nil,
-    IsFlingInProgress = false,
-    FPDH = workspace.FallenPartsDestroyHeight
+        PickupGun = Enum.KeyCode.Unknown,
+        InstantKillAll = Enum.KeyCode.Unknown
+    }
 }
+
 
 local function CleanupMemory()
     -- Очистка highlights
@@ -595,12 +627,12 @@ local function FlingPlayer(playerToFling)
                     FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
                 else
-                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
-                    task.wait()
+                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
 
-                    FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
-                    task.wait()
-                end
+                        FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                        task.wait()
+                    end
             else
                 break
             end
@@ -672,57 +704,71 @@ end
 local function EnableNoclip()
     if State.NoclipEnabled then return end
     State.NoclipEnabled = true
-
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    -- ✅ КАК В ИСХОДНИКЕ: Собираем BasePart в таблицу один раз
     local NoclipObjects = {}
-    local char = LocalPlayer.Character
-    if not char then return end
-
-    for _, obj in ipairs(char:GetChildren()) do
+    
+    for _, obj in ipairs(character:GetChildren()) do
         if obj:IsA("BasePart") then
             table.insert(NoclipObjects, obj)
         end
     end
-
+    
+    -- Сохраняем в State для доступа
+    State.NoclipObjects = NoclipObjects
+    
+    -- ✅ КАК В ИСХОДНИКЕ: Обновляем таблицу при респавне
     State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
         task.wait(0.15)
+        
         table.clear(NoclipObjects)
+        
         for _, obj in ipairs(newChar:GetChildren()) do
             if obj:IsA("BasePart") then
                 table.insert(NoclipObjects, obj)
             end
         end
     end)
-
+    
+    -- ✅ КАК В ИСХОДНИКЕ: Просто отключаем коллизии в Stepped
     State.NoclipConnection = RunService.Stepped:Connect(function()
-        for _, part in ipairs(NoclipObjects) do
-            pcall(function()
-                part.CanCollide = false
-            end)
+        for i = 1, #NoclipObjects do
+            NoclipObjects[i].CanCollide = false
         end
     end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Noclip Enabled", CONFIG.Colors.Green)
+    end
 end
+
 
 local function DisableNoclip()
     if not State.NoclipEnabled then return end
     State.NoclipEnabled = false
-
+    
+    -- ✅ КАК В ИСХОДНИКЕ: Просто отключаем соединения, НЕ ТРОГАЯ CanCollide
     if State.NoclipConnection then
         State.NoclipConnection:Disconnect()
         State.NoclipConnection = nil
     end
-
+    
     if State.NoclipRespawnConnection then
         State.NoclipRespawnConnection:Disconnect()
         State.NoclipRespawnConnection = nil
     end
     
-    local char = LocalPlayer.Character
-    if char then
-        for _, part in ipairs(char:GetChildren()) do
-            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                part.CanCollide = true
-            end
-        end
+    -- Очищаем таблицу
+    if State.NoclipObjects then
+        table.clear(State.NoclipObjects)
+        State.NoclipObjects = nil
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Noclip Disabled", CONFIG.Colors.Red)
     end
 end
 
@@ -904,21 +950,42 @@ local function EnableNoClip()
     end)
 end
 
-local function DisableNoClip()
-    if State.NoClipConnection then
-        State.NoClipConnection:Disconnect()
-        State.NoClipConnection = nil
+local function DisableNoclip()
+    if not State.NoclipEnabled then return end
+    State.NoclipEnabled = false
+    
+    -- ✅ СНАЧАЛА отключаем соединения
+    if State.NoclipConnection then
+        State.NoclipConnection:Disconnect()
+        State.NoclipConnection = nil
     end
-
-    State.ClipEnabled = true
-
-    local character = LocalPlayer.Character
-    if character then
-        for _, part in pairs(character:GetDescendants()) do
-            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                part.CanCollide = true
+    
+    if State.NoclipRespawnConnection then
+        State.NoclipRespawnConnection:Disconnect()
+        State.NoclipRespawnConnection = nil
+    end
+    
+    -- ✅ НОВОЕ: Принудительно восстанавливаем коллизии
+    if State.NoclipObjects then
+        local character = LocalPlayer.Character
+        if character then
+            for i = 1, #State.NoclipObjects do
+                local part = State.NoclipObjects[i]
+                if part and part.Parent then
+                    -- Восстанавливаем CanCollide для всех частей кроме HumanoidRootPart
+                    if part.Name ~= "HumanoidRootPart" then
+                        part.CanCollide = true
+                    end
+                end
             end
         end
+        
+        table.clear(State.NoclipObjects)
+        State.NoclipObjects = nil
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Noclip Disabled", CONFIG.Colors.Red)
     end
 end
 
@@ -1632,19 +1699,41 @@ end
 local function ClearKeybind(bindName, button)
     State.Keybinds[bindName] = Enum.KeyCode.Unknown
     button.Text = "Not Bound"
+local originalColor = button.BackgroundColor3
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(80, 40, 40)}):Play()
+    task.wait(0.15)
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = originalColor}):Play()
 end
 
-local function SetKeybind(bindName, keyCode, button, allButtons)
-    local existingBind = FindKeybindButton(keyCode)
-    if existingBind and existingBind ~= bindName then
-        State.Keybinds[existingBind] = Enum.KeyCode.Unknown
-        if allButtons[existingBind] then
-            allButtons[existingBind].Text = "Not Bound"
+local function SetKeybind(key, keyCode, button, callbacks)
+    -- Проверяем, используется ли уже эта клавиша для другого действия
+    for actionName, boundKey in pairs(State.Keybinds) do
+        if boundKey == keyCode and actionName ~= key then
+            -- Нашли дубликат! Очищаем старую привязку
+            State.Keybinds[actionName] = Enum.KeyCode.Unknown
+            
+            -- Находим кнопку старого действия и обновляем её текст
+            for _, element in pairs(State.UIElements) do
+                if element.Name == actionName .. "_Button" then
+                    element.Text = "Not Bound"
+                    break
+                end
+            end
         end
     end
-
-    State.Keybinds[bindName] = keyCode
+    
+    -- Устанавливаем новую привязку
+    State.Keybinds[key] = keyCode
     button.Text = keyCode.Name
+    
+    -- ✅ ВАЖНО: Сбрасываем состояние прослушивания
+    State.ListeningForKeybind = nil
+    
+    -- ✅ Визуальная обратная связь (мигание кнопки)
+    local originalColor = button.BackgroundColor3
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+    task.wait(0.15)
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = originalColor}):Play()
 end
 
 local function Create(className, properties, children)
@@ -1695,9 +1784,6 @@ local function knifeThrow(silent)
             return
         end
     end
-
-    -- Дополнительная проверка после ожидания
-    task.wait(0.1)
     local knife = LocalPlayer.Character:FindFirstChild("Knife")
     if not knife then
         if not silent then
@@ -1748,6 +1834,7 @@ local function knifeThrow(silent)
         end
     end
 end
+
 local function shootMurderer()
     -- Проверка: ты шериф/герой?
     local sheriff = nil
@@ -1790,35 +1877,32 @@ local function shootMurderer()
         return
     end
 
-    -- ✅ ПРЕДСКАЗАНИЕ ПОЗИЦИИ с учетом скорости и прыжков
+    -- ✅ ПРЕДСКАЗАНИЕ ПОЗИЦИИ
     local velocity = murdererHRP.AssemblyLinearVelocity
     local currentPos = murdererHRP.Position
     
     local predictionTime = State.ShootPrediction
     local predictedPos = currentPos + (velocity * predictionTime)
     
-    -- Проверяем высоту (если прыгает, целимся выше)
-    local murdererHumanoid = murderer.Character:FindFirstChildOfClass("Humanoid")
-    if murdererHumanoid then
-        local jumpOffset = Vector3.new(0, 0, 0)
-        
-        -- Если мурдерер в воздухе (прыгает/падает)
-        if murdererHumanoid:GetState() == Enum.HumanoidStateType.Freefall or 
-           murdererHumanoid:GetState() == Enum.HumanoidStateType.Jumping then
-            -- Целимся в центр тела (выше)
-            jumpOffset = Vector3.new(0, 1.5, 0)
-        else
-            -- Обычная цель - голова/грудь
-            jumpOffset = Vector3.new(0, 1, 0)
-        end
-        
-        predictedPos = predictedPos + jumpOffset
+    -- Смещение на уровень груди/торса (центр масс)
+    local chestOffset = Vector3.new(0, 0.5, 0)
+    local targetPos = predictedPos + chestOffset
+    
+    -- ✅ ВЫБОР НАПРАВЛЕНИЯ ВЫСТРЕЛА (спина или спереди)
+    local shootDistance = 3 -- Расстояние в studs
+    local shootFromPos
+    
+    if State.ShootDirection == "Behind" then
+        -- Выстрел СО СПИНЫ
+        shootFromPos = predictedPos - (murdererHRP.CFrame.LookVector * shootDistance) + chestOffset
+    else
+        -- Выстрел СПЕРЕДИ
+        shootFromPos = predictedPos + (murdererHRP.CFrame.LookVector * shootDistance) + chestOffset
     end
-
-    -- ✅ INSTAKILL аргументы с предсказанием
+    
     local args = {
-        [1] = CFrame.new(predictedPos + Vector3.new(0, 1, 0)), -- Откуда (чуть выше предсказанной позиции)
-        [2] = CFrame.new(predictedPos) -- Куда (предсказанная позиция)
+        [1] = CFrame.new(shootFromPos),  -- Откуда
+        [2] = CFrame.new(targetPos)       -- Куда
     }
 
     local success, err = pcall(function()
@@ -1826,11 +1910,13 @@ local function shootMurderer()
     end)
 
     if success then
-        ShowNotification("Shot fired!", CONFIG.Colors.Green, murderer.Name, CONFIG.Colors.Murder)
+        ShowNotification("Shot fired!", CONFIG.Colors.Green, murderer.Name .. " [" .. State.ShootDirection .. "]", CONFIG.Colors.Murder)
     else
         ShowNotification("Shoot failed: " .. tostring(err), CONFIG.Colors.Red)
     end
 end
+
+
 
 local function pickupGun()
     -- Проверяем что пистолет существует на карте
@@ -1851,21 +1937,21 @@ local function pickupGun()
     local previousPosition = hrp.CFrame
     
     -- Телепортируемся к пистолету
-    hrp.CFrame = gun.CFrame + Vector3.new(0, 3, 0)
+    hrp.CFrame = gun.CFrame + Vector3.new(0, 2, 0)
     
     -- Ждём пока подберём
-    task.wait(0.3)
+    task.wait(0.08)
     
     -- Возвращаемся назад
-    hrp.CFrame = previousPosition
+    hrp.CFrame = previousPosition Vector3.new(0, 2, 0)
     
     ShowNotification("Gun picked up!", CONFIG.Colors.Green)
 end
 
 
 
-local HitboxConnection = nil
 local OriginalSizes = {}
+local HitboxConnection = nil
 
 local function EnableExtendedHitbox()
     if State.ExtendedHitboxEnabled then return end
@@ -1879,13 +1965,12 @@ local function EnableExtendedHitbox()
         )
         
         for _, player in ipairs(Players:GetPlayers()) do
-            -- ✅ Убрал проверку команды - применяем ко всем (кроме себя)
             if player ~= LocalPlayer then
                 local character = player.Character
                 if character then
                     local hrp = character:FindFirstChild("HumanoidRootPart")
                     if hrp and hrp:IsA("BasePart") then
-                        -- Сохраняем оригинал
+                        -- Сохраняем оригинал только один раз
                         if not OriginalSizes[player] then
                             OriginalSizes[player] = {
                                 Size = hrp.Size,
@@ -1896,12 +1981,13 @@ local function EnableExtendedHitbox()
                             }
                         end
                         
-                        -- ✅ Применяем изменения (с визуализацией)
+                        -- ✅ ВСЕГДА: Увеличиваем хитбокс, но делаем невидимым
                         hrp.Size = size
-                        hrp.Transparency = 0.5  -- Более видимый
-                        hrp.Material = Enum.Material.ForceField  -- Визуальный эффект
-                        hrp.Color = Color3.fromRGB(255, 0, 0)  -- Красный
-                        -- НЕ меняем CanCollide!
+                        hrp.CanCollide = false
+                        -- Сохраняем оригинальный вид (невидимо для других)
+                        hrp.Transparency = OriginalSizes[player].Transparency
+                        hrp.Material = OriginalSizes[player].Material
+                        hrp.Color = OriginalSizes[player].Color
                     end
                 end
             end
@@ -1912,6 +1998,7 @@ local function EnableExtendedHitbox()
         ShowNotification("Extended Hitbox ON", CONFIG.Colors.Green, "Size: " .. State.ExtendedHitboxSize, CONFIG.Colors.Accent)
     end
 end
+
 
 local function DisableExtendedHitbox()
     if not State.ExtendedHitboxEnabled then return end
@@ -1943,9 +2030,11 @@ local function DisableExtendedHitbox()
     end
 end
 
+
 local function UpdateHitboxSize(newSize)
     State.ExtendedHitboxSize = newSize
 end
+
 
 local function EnableViewClip()
     if State.ViewClipEnabled then return end
@@ -1971,6 +2060,105 @@ local function DisableViewClip()
     end
 end
 
+local function InstantKillAll()
+    local character = LocalPlayer.Character
+    if not character then 
+        if State.NotificationsEnabled then
+            ShowNotification("Kill All Failed", CONFIG.Colors.Red, "No character found", CONFIG.Colors.TextDark)
+        end
+        return 
+    end
+    
+    -- Проверяем, является ли игрок убийцей
+    local knife = character:FindFirstChild("Knife") or LocalPlayer.Backpack:FindFirstChild("Knife")
+    if not knife then
+        if State.NotificationsEnabled then
+            ShowNotification("Not Murderer!", CONFIG.Colors.Red, "You need to be the murderer", CONFIG.Colors.TextDark)
+        end
+        return
+    end
+    
+    -- Экипируем нож
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    if knife.Parent == LocalPlayer.Backpack then
+        humanoid:EquipTool(knife)
+        task.wait(0.3)
+    end
+    
+    -- Сохраняем оригинальные настройки
+    local originalSize = State.ExtendedHitboxSize
+    local wasEnabled = State.ExtendedHitboxEnabled
+    
+    -- ✅ НОВОЕ: Сохраняем коллизии СВОЕГО персонажа
+    local myOriginalCollisions = {}
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            myOriginalCollisions[part] = part.CanCollide
+            part.CanCollide = false  -- Отключаем коллизии своего персонажа
+        end
+    end
+    
+    -- Увеличиваем размер хитбоксов
+    State.ExtendedHitboxSize = 500
+    
+    if not wasEnabled then
+        EnableExtendedHitbox()
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Kill All Active!", CONFIG.Colors.Green, "Attacking all players...", CONFIG.Colors.Accent)
+    end
+    
+    -- Ждем применения хитбоксов
+    task.wait(0.2)
+    
+    -- Находим RemoteEvent для атаки
+    local slashEvent = knife:FindFirstChild("Slash")
+    local stab = knife:FindFirstChild("Stab")
+    
+    -- Атакуем несколько раз
+    for i = 1, 5 do
+        -- Метод 1: FireServer на Slash
+        if slashEvent and slashEvent:IsA("RemoteEvent") then
+            slashEvent:FireServer("Slash")
+        end
+        
+        -- Метод 2: FireServer на Stab
+        if stab and stab:IsA("RemoteEvent") then
+            stab:FireServer()
+        end
+        
+        -- Метод 3: Activate инструмента
+        pcall(function()
+            knife:Activate()
+        end)
+        
+        task.wait(0.2)
+    end
+    
+    -- Ждем завершения
+    task.wait(0.5)
+    
+    -- ✅ НОВОЕ: Восстанавливаем коллизии СВОЕГО персонажа
+    for part, originalState in pairs(myOriginalCollisions) do
+        if part and part.Parent then
+            part.CanCollide = originalState
+        end
+    end
+    
+    -- Восстанавливаем настройки
+    State.ExtendedHitboxSize = originalSize
+    
+    if not wasEnabled then
+        DisableExtendedHitbox()
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Kill All Complete!", CONFIG.Colors.Green, "Hitbox restored", CONFIG.Colors.Accent)
+    end
+end
 
 local function CreateUI()
     for _, child in ipairs(CoreGui:GetChildren()) do
@@ -1990,7 +2178,7 @@ local function CreateUI()
         BackgroundColor3 = CONFIG.Colors.Background,
         Position = UDim2.new(0.5, -225, 0.5, -325),
         Size = UDim2.new(0, 450, 0, 650),
-        ClipsDescendants = true,
+        ClipsDescendants = false,
         Active = true,
         Draggable = true,
         Parent = gui
@@ -2005,6 +2193,7 @@ local function CreateUI()
         Size = UDim2.new(1, 0, 0, 40),
         Parent = mainFrame
     })
+    AddCorner(header, 12)
 
 
     local titleLabel = Create("TextLabel", {
@@ -2112,6 +2301,11 @@ local function CreateUI()
 
 
         local function Activate()
+            if State.UIElements.OpenDropdowns then
+                for _, closeFunc in ipairs(State.UIElements.OpenDropdowns) do
+                    pcall(closeFunc)
+                end
+            end
             if currentTab then
                 TweenService:Create(currentTab.Btn, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Section, TextColor3 = CONFIG.Colors.TextDark}):Play()
                 currentTab.Page.Visible = false
@@ -2146,6 +2340,141 @@ local function CreateUI()
                 Parent = page
             })
         end
+
+        function TabFunctions:CreateDropdown(title, desc, options, default, callback)
+    local card = Create("Frame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Size = UDim2.new(1, 0, 0, 60),
+        Parent = page
+    })
+    AddCorner(card, 8)
+    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+    
+    Create("TextLabel", {
+        Text = title,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 14,
+        TextColor3 = CONFIG.Colors.Text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 10),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+    
+    Create("TextLabel", {
+        Text = desc,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextColor3 = CONFIG.Colors.TextDark,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 15, 0, 30),
+        Size = UDim2.new(0, 250, 0, 20),
+        Parent = card
+    })
+    
+    local dropdown = Create("TextButton", {
+        Text = default .. " ▼",
+        Font = Enum.Font.GothamMedium,
+        TextSize = 11,
+        TextColor3 = CONFIG.Colors.Text,
+        BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+        Position = UDim2.new(1, -110, 0.5, -12),
+        Size = UDim2.new(0, 95, 0, 24),
+        AutoButtonColor = false,
+        ZIndex = 5,
+        Parent = card
+    })
+    AddCorner(dropdown, 6)
+    AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
+    
+    local dropdownFrame = Create("ScrollingFrame", {
+        BackgroundColor3 = CONFIG.Colors.Section,
+        Position = UDim2.new(0, 0, 0, 0),
+        Size = UDim2.new(0, 95, 0, 0),
+        Visible = false,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = CONFIG.Colors.Accent,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ClipsDescendants = false,
+        ZIndex = 1000,
+        Parent = mainFrame
+    })
+    AddCorner(dropdownFrame, 6)
+    AddStroke(dropdownFrame, 1, CONFIG.Colors.Accent, 0.6)
+    
+    local listLayout = Create("UIListLayout", {
+        Padding = UDim.new(0, 2),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Parent = dropdownFrame
+    })
+    
+    for _, option in ipairs(options) do
+        local optionBtn = Create("TextButton", {
+            Text = option,
+            Font = Enum.Font.Gotham,
+            TextSize = 10,
+            TextColor3 = CONFIG.Colors.Text,
+            BackgroundColor3 = Color3.fromRGB(50, 50, 55),
+            Size = UDim2.new(1, 0, 0, 25),
+            AutoButtonColor = false,
+            ZIndex = 1001,
+            Parent = dropdownFrame
+        })
+        AddCorner(optionBtn, 4)
+        
+        optionBtn.MouseButton1Click:Connect(function()
+            dropdown.Text = option .. " ▼"
+            callback(option)
+            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 95, 0, 0)
+            }):Play()
+            task.wait(0.2)
+            dropdownFrame.Visible = false
+        end)
+        
+        optionBtn.MouseEnter:Connect(function()
+            TweenService:Create(optionBtn, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+        end)
+        
+        optionBtn.MouseLeave:Connect(function()
+            TweenService:Create(optionBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 55)}):Play()
+        end)
+    end
+    
+    dropdown.MouseButton1Click:Connect(function()
+        dropdownFrame.Visible = not dropdownFrame.Visible
+        
+        if dropdownFrame.Visible then
+            local dropdownAbsPos = dropdown.AbsolutePosition
+            local dropdownAbsSize = dropdown.AbsoluteSize
+            local mainFramePos = mainFrame.AbsolutePosition
+            
+            local calculatedHeight = math.min(100, #options * 27)
+            
+            dropdownFrame.Position = UDim2.new(
+                0, dropdownAbsPos.X - mainFramePos.X,
+                0, dropdownAbsPos.Y - mainFramePos.Y + dropdownAbsSize.Y + 5
+            )
+            
+            dropdownFrame.Size = UDim2.new(0, 95, 0, 0)
+            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, 95, 0, calculatedHeight)
+            }):Play()
+        else
+            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 95, 0, 0)
+            }):Play()
+            task.wait(0.2)
+            dropdownFrame.Visible = false
+        end
+    end)
+    
+    return dropdown
+end
+
 
 
         function TabFunctions:CreateToggle(title, desc, callback)
@@ -2409,6 +2738,7 @@ local function CreateUI()
             })
    
             local bindButton = Create("TextButton", {
+                Name = keybindKey .. "_Button",  -- ✅ ДОБАВЬТЕ ЭТО
                 Text = State.Keybinds[keybindKey] ~= Enum.KeyCode.Unknown and State.Keybinds[keybindKey].Name or "Not Bound",
                 Font = Enum.Font.GothamMedium,
                 TextSize = 12,
@@ -2421,7 +2751,9 @@ local function CreateUI()
             })
             AddCorner(bindButton, 6)
             AddStroke(bindButton, 1, CONFIG.Colors.Accent, 0.6)
-   
+
+            State.UIElements[keybindKey .. "_Button"] = bindButton
+            
             bindButton.MouseButton1Click:Connect(function()
                 bindButton.Text = "Press Key..."
                 State.ListeningForKeybind = {key = keybindKey, button = bindButton}
@@ -2431,7 +2763,8 @@ local function CreateUI()
         end
 
 
-        function TabFunctions:CreatePlayerDropdown(title, desc)
+
+function TabFunctions:CreatePlayerDropdown(title, desc)
     local card = Create("Frame", {
         BackgroundColor3 = CONFIG.Colors.Section,
         Size = UDim2.new(1, 0, 0, 60),
@@ -2439,7 +2772,6 @@ local function CreateUI()
     })
     AddCorner(card, 8)
     AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
 
     Create("TextLabel", {
         Text = title,
@@ -2453,7 +2785,6 @@ local function CreateUI()
         Parent = card
     })
 
-
     Create("TextLabel", {
         Text = desc,
         Font = Enum.Font.Gotham,
@@ -2466,50 +2797,63 @@ local function CreateUI()
         Parent = card
     })
 
-
     local dropdown = Create("TextButton", {
         Text = "Select Player ▼",
         Font = Enum.Font.GothamMedium,
         TextSize = 11,
         TextColor3 = CONFIG.Colors.Text,
         BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-        Position = UDim2.new(1, -110, 0.5, -12),
-        Size = UDim2.new(0, 95, 0, 24),
+        Position = UDim2.new(1, -180, 0.5, -12),
+        Size = UDim2.new(0, 165, 0, 24),
         AutoButtonColor = false,
         ZIndex = 5,
         Parent = card
     })
     AddCorner(dropdown, 6)
     AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
-   
+
     local dropdownFrame = Create("ScrollingFrame", {
         BackgroundColor3 = CONFIG.Colors.Section,
-        Position = UDim2.new(0, 0, 0, 0), -- Динамически вычисляется
-        Size = UDim2.new(0, 95, 0, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        Size = UDim2.new(0, 165, 0, 0),
         Visible = false,
         CanvasSize = UDim2.new(0, 0, 0, 0),
         ScrollBarThickness = 4,
         ScrollBarImageColor3 = CONFIG.Colors.Accent,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
         ClipsDescendants = true,
-        ZIndex = 1000, -- ✅ Максимальный Z-индекс
-        Parent = mainFrame -- ✅ НЕ внутри card!
+        BorderSizePixel = 0,
+        ZIndex = 1000,
+        Parent = mainFrame
     })
     AddCorner(dropdownFrame, 6)
     AddStroke(dropdownFrame, 1, CONFIG.Colors.Accent, 0.6)
-
 
     local listLayout = Create("UIListLayout", {
         Padding = UDim.new(0, 2),
         SortOrder = Enum.SortOrder.LayoutOrder,
         Parent = dropdownFrame
     })
-   
+
+    -- ✅ ФУНКЦИЯ ЗАКРЫТИЯ ДРОПДАУНА
+    local function closeDropdown()
+        if dropdownFrame.Visible then
+            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 165, 0, 0)
+            }):Play()
+            task.wait(0.2)
+            dropdownFrame.Visible = false
+        end
+    end
+
     local function updatePlayerList()
         for _, child in ipairs(dropdownFrame:GetChildren()) do
-            if child:IsA("TextButton") then child:Destroy() end
+            if child:IsA("TextButton") then
+                child:Destroy()
+            end
         end
+        
         local players = getAllPlayers()
+        
         if #players == 0 then
             Create("TextLabel", {
                 Text = "No players",
@@ -2517,119 +2861,131 @@ local function CreateUI()
                 TextSize = 11,
                 TextColor3 = CONFIG.Colors.TextDark,
                 BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 25),
+                Size = UDim2.new(1, -10, 0, 25),
                 ZIndex = 1001,
                 Parent = dropdownFrame
             })
+            dropdownFrame.CanvasSize = UDim2.new(0, 0, 0, 30)
             return
         end
-        for _, playerName in ipairs(players) do
+        
+        local buttonHeight = 28
+        local buttonSpacing = 2
+        local totalHeight = #players * (buttonHeight + buttonSpacing) + 5
+        
+        dropdownFrame.CanvasSize = UDim2.new(0, 0, 0, totalHeight)
+        
+        for i, playerName in ipairs(players) do
             local pb = Create("TextButton", {
                 Text = playerName,
                 Font = Enum.Font.Gotham,
-                TextSize = 10,
+                TextSize = 11,
                 TextColor3 = CONFIG.Colors.Text,
-                BackgroundColor3 = Color3.fromRGB(50,50,55),
-                Size = UDim2.new(1,0,0,25),
+                BackgroundColor3 = Color3.fromRGB(50, 50, 55),
+                Size = UDim2.new(1, -10, 0, buttonHeight),
+                Position = UDim2.new(0, 5, 0, 0),
                 AutoButtonColor = false,
                 ZIndex = 1001,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
                 Parent = dropdownFrame
             })
             AddCorner(pb, 4)
-           
+            
+            local padding = Instance.new("UIPadding")
+            padding.PaddingLeft = UDim.new(0, 8)
+            padding.Parent = pb
+            
             pb.MouseButton1Click:Connect(function()
                 State.SelectedPlayerForFling = playerName
-                dropdown.Text = playerName:sub(1, 8) .. " ✓"
-               
-                TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-                    Size = UDim2.new(0, 95, 0, 0)
-                }):Play()
-               
-                task.wait(0.2)
-                dropdownFrame.Visible = false
+                dropdown.Text = (#playerName > 12 and playerName:sub(1, 12) .. "..." or playerName)
+                closeDropdown()
             end)
-           
+            
             pb.MouseEnter:Connect(function()
-                TweenService:Create(pb, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+                TweenService:Create(pb, TweenInfo.new(0.15), {
+                    BackgroundColor3 = CONFIG.Colors.Accent
+                }):Play()
             end)
+            
             pb.MouseLeave:Connect(function()
-                TweenService:Create(pb, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 55)}):Play()
+                TweenService:Create(pb, TweenInfo.new(0.15), {
+                    BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+                }):Play()
             end)
         end
     end
-   
+
     dropdown.MouseButton1Click:Connect(function()
         dropdownFrame.Visible = not dropdownFrame.Visible
-       
+        
         if dropdownFrame.Visible then
             updatePlayerList()
-           
-            -- ✅ Вычисляем абсолютную позицию кнопки dropdown относительно mainFrame
+            
             local dropdownAbsPos = dropdown.AbsolutePosition
             local dropdownAbsSize = dropdown.AbsoluteSize
             local mainFramePos = mainFrame.AbsolutePosition
-           
+            
             local playerCount = #getAllPlayers()
-            local maxHeight = 120
-            local calculatedHeight = math.min(maxHeight, math.max(25, playerCount * 27))
-           
-            -- ✅ Позиция ВНИЗ от кнопки (+ 5 пикселей отступ)
+            local maxHeight = 150
+            local calculatedHeight = math.min(maxHeight, math.max(30, playerCount * 30))
+            
             dropdownFrame.Position = UDim2.new(
                 0, dropdownAbsPos.X - mainFramePos.X,
                 0, dropdownAbsPos.Y - mainFramePos.Y + dropdownAbsSize.Y + 5
             )
-           
-            -- Анимация выпадения вниз
-            dropdownFrame.Size = UDim2.new(0, 95, 0, 0)
+            
+            dropdownFrame.Size = UDim2.new(0, 165, 0, 0)
             TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0, 95, 0, calculatedHeight)
+                Size = UDim2.new(0, 165, 0, calculatedHeight)
             }):Play()
         else
-            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-                Size = UDim2.new(0, 95, 0, 0)
-            }):Play()
-           
-            task.wait(0.2)
-            dropdownFrame.Visible = false
+            closeDropdown()
         end
     end)
-   
-    -- ✅ Закрытие при клике вне списка
-    UserInputService.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            if dropdownFrame.Visible then
-                local mousePos = UserInputService:GetMouseLocation()
-                local framePos = dropdownFrame.AbsolutePosition
-                local frameSize = dropdownFrame.AbsoluteSize
-               
-                if mousePos.X < framePos.X or mousePos.X > framePos.X + frameSize.X or
-                   mousePos.Y < framePos.Y or mousePos.Y > framePos.Y + frameSize.Y then
-                   
-                    local dropdownPos = dropdown.AbsolutePosition
-                    local dropdownSize = dropdown.AbsoluteSize
-                   
-                    if mousePos.X < dropdownPos.X or mousePos.X > dropdownPos.X + dropdownSize.X or
-                       mousePos.Y < dropdownPos.Y or mousePos.Y > dropdownPos.Y + dropdownSize.Y then
-                       
-                        TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-                            Size = UDim2.new(0, 95, 0, 0)
-                        }):Play()
-                       
-                        task.wait(0.2)
-                        dropdownFrame.Visible = false
-                    end
-                end
+
+    -- ✅ НОВОЕ: Закрытие при клике мимо
+    local clickOutsideConnection = UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 and dropdownFrame.Visible then
+            local mousePos = UserInputService:GetMouseLocation()
+            local framePos = dropdownFrame.AbsolutePosition
+            local frameSize = dropdownFrame.AbsoluteSize
+            local dropdownPos = dropdown.AbsolutePosition
+            local dropdownSize = dropdown.AbsoluteSize
+            
+            -- Проверяем, клик вне дропдауна и вне кнопки
+            local outsideFrame = mousePos.X < framePos.X or mousePos.X > framePos.X + frameSize.X or
+                                 mousePos.Y < framePos.Y or mousePos.Y > framePos.Y + frameSize.Y
+            
+            local outsideButton = mousePos.X < dropdownPos.X or mousePos.X > dropdownPos.X + dropdownSize.X or
+                                  mousePos.Y < dropdownPos.Y or mousePos.Y > dropdownPos.Y + dropdownSize.Y
+            
+            if outsideFrame and outsideButton then
+                closeDropdown()
             end
         end
     end)
-   
+    
+    table.insert(State.Connections, clickOutsideConnection)
+    
+    -- ✅ НОВОЕ: Сохраняем ссылку на функцию закрытия для других событий
+    if not State.UIElements.OpenDropdowns then
+        State.UIElements.OpenDropdowns = {}
+    end
+    table.insert(State.UIElements.OpenDropdowns, closeDropdown)
+    
     Players.PlayerAdded:Connect(function()
-        if dropdownFrame.Visible then updatePlayerList() end
+        if dropdownFrame.Visible then
+            updatePlayerList()
+        end
     end)
+    
     Players.PlayerRemoving:Connect(function()
-        if dropdownFrame.Visible then updatePlayerList() end
+        if dropdownFrame.Visible then
+            updatePlayerList()
+        end
     end)
-   
+    
     return dropdown
 end
 
@@ -2719,14 +3075,23 @@ end
    
     CombatTab:CreateSection("EXTENDED HITBOX")
     CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", function(s) if s then EnableExtendedHitbox() else DisableExtendedHitbox() end end)
-    CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (2-20)", 2, 20, 5, function(v) State.ExtendedHitboxSize = v; if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end, 1)
+    CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, 15, function(v) State.ExtendedHitboxSize = v; if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end, 1)
    
     CombatTab:CreateSection("MURDERER TOOLS")
     CombatTab:CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
+    CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
    
     CombatTab:CreateSection("SHERIFF TOOLS")
     CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    CombatTab:CreateSlider("Prediction Time", "Adjust for moving targets (0.05-0.50)", 0.05, 0.50, 0.20, function(v) State.ShootPrediction = v end, 0.05)
+    CombatTab:CreateDropdown(
+    "Shoot Direction",
+    "Choose shooting angle",
+    {"Behind", "Front"},
+    "Front",
+    function(value)
+        State.ShootDirection = value
+    end)
+    CombatTab:CreateSlider("Prediction Time", "Adjust for moving targets (0.05-0.30)", 0.05, 0.30, 0.15, function(v) State.ShootPrediction = v end, 0.05)
     CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
 
 
@@ -2788,8 +3153,16 @@ end
 
 
 closeButton.MouseButton1Click:Connect(function()
+    if State.UIElements.OpenDropdowns then
+        for _, closeFunc in ipairs(State.UIElements.OpenDropdowns) do
+            pcall(closeFunc)
+        end
+    end
     -- Очистка highlights
     CleanupMemory()
+    if State.NoclipEnabled then 
+        DisableNoclip() 
+    end
 
     -- Отключение всех соединений
     for _, connection in ipairs(State.Connections) do
@@ -2838,17 +3211,19 @@ end)
         if processed then return end
        
         if State.ListeningForKeybind and input.UserInputType == Enum.UserInputType.Keyboard then
-            local key = input.KeyCode
-            local bindData = State.ListeningForKeybind
-            if key == Enum.KeyCode.Delete or key == Enum.KeyCode.Backspace then
-                ClearKeybind(bindData.key, bindData.button)
-                State.ListeningForKeybind = nil
-                return
-            end
-            SetKeybind(bindData.key, key, bindData.button, {})
-            State.ListeningForKeybind = nil
-            return
-        end
+    local key = input.KeyCode
+    local bindData = State.ListeningForKeybind
+    
+    if key == Enum.KeyCode.Delete or key == Enum.KeyCode.Backspace then
+        ClearKeybind(bindData.key, bindData.button)
+        State.ListeningForKeybind = nil  -- ✅ Сброс состояния
+        return
+    end
+    
+    SetKeybind(bindData.key, key, bindData.button, {})
+    -- State.ListeningForKeybind = nil теперь внутри SetKeybind
+    return
+end
        
         if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then PlayEmote("sit")
         elseif input.KeyCode == State.Keybinds.Dab and State.Keybinds.Dab ~= Enum.KeyCode.Unknown then PlayEmote("dab")
@@ -2859,6 +3234,9 @@ end)
        
         if input.KeyCode == State.Keybinds.ThrowKnife and State.Keybinds.ThrowKnife ~= Enum.KeyCode.Unknown then
             pcall(function() knifeThrow(true) end)
+        end
+        if input.KeyCode == State.Keybinds.InstantKillAll and State.Keybinds.InstantKillAll ~= Enum.KeyCode.Unknown then
+            pcall(function() InstantKillAll() end)
         end
        
         if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
@@ -2917,18 +3295,32 @@ LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
     end)
 
+-- ═══════════════════════════════════════════════════════════════
+--                      ЗАПУСК СКРИПТА
+-- ═══════════════════════════════════════════════════════════════
 
 CreateUI()
 CreateNotificationUI()
 ApplyCharacterSettings()
+
+-- ✅ Применяем FOV
+pcall(function()
+    ApplyFOV(State.CameraFOV)
+end)
+
 SetupGunTracking()
 InitialGunScan()
 StartRoleChecking()
 SetupAntiAFK()
 
-
--- Инфо сообщение
+-- ✅ Приветственное уведомление
 if State.NotificationsEnabled then
     task.wait(1)
-    ShowNotification("MM2 ESP v5.2 Loaded", CONFIG.Colors.Green, "Noclip, Rejoin, ServerHop added!", CONFIG.Colors.Accent)
+    ShowNotification("MM2 ESP v6.0 Loaded", CONFIG.Colors.Green, "All systems ready!", CONFIG.Colors.Accent)
 end
+
+-- выводим в консоль
+print("╔════════════════════════════════════════════╗")
+print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
+print("║   Press [" .. CONFIG.HideKey.Name .. "] to toggle GUI               ║")
+print("╚════════════════════════════════════════════╝")
