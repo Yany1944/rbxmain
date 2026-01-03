@@ -503,35 +503,28 @@ local function EnableAntiFling()
         end
     end)
     
-    -- ✅ ИСПРАВЛЕННАЯ защита себя от флинга
+    -- ✅ ИСПРАВЛЕННАЯ защита с совместимостью FlingPlayer
     FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
             
-            -- ✅ Игнорируем если персонаж в воздухе
-            if humanoid then
-                local state = humanoid:GetState()
-                if state == Enum.HumanoidStateType.Jumping or 
-                   state == Enum.HumanoidStateType.Freefall or
-                   state == Enum.HumanoidStateType.Flying then
-                    AntiFlingLastPos = primaryPart.Position
-                    return  -- НЕ ТРОГАЕМ скорость!
-                end
-            end
-            
+            -- ✅ ВАЖНО: Пропускаем если идёт FlingPlayer
             if State.IsFlingInProgress then
                 AntiFlingLastPos = primaryPart.Position
-            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 350 or 
-                   primaryPart.AssemblyAngularVelocity.Magnitude > 350 then
+                return
+            end
+            
+            -- ✅ ПОНИЖЕН ПОРОГ: 250 вместо 350 (как в рабочем коде)
+            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or 
+               primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
                 
                 if State.NotificationsEnabled and not FlingBlockedNotified then
-                ShowNotification(
-                    "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
-                    CONFIG.Colors.Text
-                )
-
+                    ShowNotification(
+                        "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
+                        CONFIG.Colors.Text
+                    )
+                    
                     FlingBlockedNotified = true
                     task.delay(3, function()
                         FlingBlockedNotified = false
@@ -553,6 +546,8 @@ local function EnableAntiFling()
     table.insert(State.Connections, FlingDetectionConnection)
     table.insert(State.Connections, FlingNeutralizerConnection)
 end
+
+
 
 local function DisableAntiFling()
     AntiFlingEnabled = false
@@ -1557,7 +1552,22 @@ end
 
 local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
-    if State.GunCache[gunPart] then return end
+
+
+        if not gunPart.Parent then
+        if State.GunCache[gunPart] then
+            RemoveGunESP(gunPart)
+        end
+        return
+    end
+    
+    -- ✅ Если уже есть ESP, обновляем его видимость
+    if State.GunCache[gunPart] then
+        local espData = State.GunCache[gunPart]
+        if espData.highlight then espData.highlight.Enabled = State.GunESP end
+        if espData.billboard then espData.billboard.Enabled = State.GunESP end
+        return
+    end
 
     local highlight = CreateHighlight(gunPart, CONFIG.Colors.Gun)
     highlight.Enabled = State.GunESP
@@ -1610,22 +1620,39 @@ local function SetupGunTracking()
     local mapCheckLoop = RunService.Heartbeat:Connect(function()
         local map = GetMap()
         
-        -- Если карты нет (между раундами), сбрасываем
         if not map then
             currentMap = nil
             if currentMapConnection then
                 currentMapConnection:Disconnect()
                 currentMapConnection = nil
             end
+            -- ✅ Очищаем кеш при пропаже карты
+            for gunPart, _ in pairs(State.GunCache) do
+                RemoveGunESP(gunPart)
+            end
             return
         end
         
-        -- Если карта изменилась, переподключаемся
         if map ~= currentMap then
             if currentMapConnection then
                 currentMapConnection:Disconnect()
                 currentMapConnection = nil
             end
+            
+            -- ✅ Добавляем отслеживание ChildRemoved
+            local removeConnection
+            removeConnection = map.ChildRemoved:Connect(function(child)
+                if child.Name == "GunDrop" then
+                    local gunPart = child
+                    if child:IsA("Model") then
+                        gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+                    end
+                    
+                    if gunPart then
+                        RemoveGunESP(gunPart)
+                    end
+                end
+            end)
             
             currentMapConnection = map.ChildAdded:Connect(function(child)
                 if child.Name == "GunDrop" then
@@ -1637,6 +1664,9 @@ local function SetupGunTracking()
                     end
                     
                     if gunPart and gunPart:IsA("BasePart") then
+                        -- ✅ Сначала удаляем старый ESP (если был)
+                        RemoveGunESP(gunPart)
+                        -- Теперь создаём новый
                         CreateGunESP(gunPart)
                         
                         if State.NotificationsEnabled then
@@ -1648,6 +1678,9 @@ local function SetupGunTracking()
                     end
                 end
             end)
+            
+            -- ✅ Сохраняем оба соединения
+            table.insert(State.Connections, removeConnection)
             
             currentMap = map
         end
