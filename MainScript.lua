@@ -9,22 +9,27 @@
     end
     getgenv().MM2_ESP_Script = true
 
-   pcall(function()
+-- ✅ ПОЛНОЕ ПОДАВЛЕНИЕ CorePackages ОШИБОК
+pcall(function()
     local StarterGui = game:GetService("StarterGui")
     
-    -- Отключаем встроенные уведомления
-    StarterGui:SetCore("TopbarEnabled", true)
+    -- Отключаем все CoreGui по отдельности (не используем Enum.CoreGuiType.All)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, false)
     
-    -- Блокируем конфликтующие функции
-    local function safeEmpty() return false end
-    local function safeNothing() end
+    task.wait(0.5)
     
-    _G.useSliderMotionStates = safeEmpty
-    getgenv().useSliderMotionStates = safeEmpty
-    _G.SendNotification = safeNothing
-    getgenv().SendNotification = safeNothing
-    
+    -- Включаем обратно
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
 end)
+
 
 -- ДОБАВЛЕНО: Переопределяем warn и error
 local oldWarn = warn
@@ -58,7 +63,7 @@ end
         Colors = {
             Background = Color3.fromRGB(25, 25, 30),
             Section = Color3.fromRGB(35, 35, 40),
-            Text = Color3.fromRGB(230, 230, 230),
+            Text = Color3.fromRGB(220, 220, 220),
             TextDark = Color3.fromRGB(150, 150, 150),
         --  Accent = Color3.fromRGB(90, 140, 255),
             Accent = Color3.fromRGB(220, 145, 230),
@@ -72,7 +77,7 @@ end
             Innocent = Color3.fromRGB(85, 255, 120)
         },
         Notification = {
-            Duration = 2.5,
+            Duration = 3,
             FadeTime = 0.4
         }
     }
@@ -115,7 +120,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 24,
+    CoinFarmFlySpeed = 23,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -130,11 +135,11 @@ local State = {
     SelectedPlayerForFling = nil,
     OldPos = nil,
     
-    -- Noclip
-    NoclipEnabled = false,
-    NoclipConnection = nil,
-    NoclipRespawnConnection = nil,
-    NoclipObjects = nil,
+    -- NoClip
+    NoClipEnabled = false,
+    NoClipConnection = nil,
+    NoClipRespawnConnection = nil,
+    NoClipObjects = nil,
     
     -- NoClip (старая система для auto farm)
     ClipEnabled = true,
@@ -179,7 +184,7 @@ local State = {
         GodMode = Enum.KeyCode.Unknown,
         FlingPlayer = Enum.KeyCode.Unknown,
         ThrowKnife = Enum.KeyCode.Unknown,
-        Noclip = Enum.KeyCode.Unknown,
+        NoClip = Enum.KeyCode.Unknown,
         ShootMurderer = Enum.KeyCode.Unknown,
         PickupGun = Enum.KeyCode.Unknown,
         InstantKillAll = Enum.KeyCode.Unknown
@@ -221,7 +226,7 @@ local function FindRole(player)
     if not player or not player.Character then return nil end
 
     local character = player.Character
-    local backpack = player.Backpack
+    local backpack = player:WaitForChild("Backpack", 2)  -- ✅ Ждем загрузки
 
     -- Проверка на убийцу
     if character:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife")) then
@@ -236,14 +241,33 @@ local function FindRole(player)
     return "Innocent"
 end
 
--- Использование:
-local function findMurderer()
+-- Универсальная функция поиска убийцы (возвращает Player или имя)
+local function FindMurderer(returnName)
     for _, player in ipairs(Players:GetPlayers()) do
-        if FindRole(player) == "Murder" then
-            return player
+        if player.Character then
+            local knife = player.Character:FindFirstChild("Knife")
+            if knife then
+                return returnName and player.Name or player
+            end
+
+            if player.Backpack then
+                local knifeInBackpack = player.Backpack:FindFirstChild("Knife")
+                if knifeInBackpack then
+                    return returnName and player.Name or player
+                end
+            end
         end
     end
     return nil
+end
+
+-- Алиасы для совместимости
+local function findMurderer()
+    return FindMurderer(false) -- возвращает Player
+end
+
+local function GetMurdererName()
+    return FindMurderer(true) -- возвращает Name
 end
 
 
@@ -311,88 +335,101 @@ local function CreateNotificationUI()
     notifGui.ResetOnSpawn = false
     notifGui.DisplayOrder = 100
     notifGui.Parent = CoreGui
+
+    local container = Instance.new("Frame")
+    container.Name = "NotificationContainer"
+    container.BackgroundTransparency = 1
+    container.AnchorPoint = Vector2.new(1, 0)
+    container.Position = UDim2.new(1, -20, 0, 80) -- правый верх
+    container.Size = UDim2.new(0, 340, 1, -100)
+    container.Parent = notifGui
+
+    local list = Instance.new("UIListLayout")
+    list.FillDirection = Enum.FillDirection.Vertical
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding = UDim.new(0, 6)
+    list.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    list.VerticalAlignment = Enum.VerticalAlignment.Top
+    list.Parent = container
+
     State.UIElements.NotificationGui = notifGui
+    State.UIElements.NotificationContainer = container
 end
 
-local function ShowNotification(text1, color1, text2, color2)
+
+local function ShowNotification(richText, defaultColor)
     if not State.NotificationsEnabled then return end
 
-    if State.CurrentNotification then
-        table.insert(State.NotificationQueue, {text1 = text1, color1 = color1, text2 = text2, color2 = color2})
-        return
-    end
+    task.spawn(function()
+        if not State.UIElements.NotificationGui then
+            CreateNotificationUI()
+        end
 
-    State.CurrentNotification = true
+        local container = State.UIElements.NotificationContainer
+        if not container then return end
 
-    local notifGui = State.UIElements.NotificationGui
-    if not notifGui then
-        CreateNotificationUI()
-        notifGui = State.UIElements.NotificationGui
-    end
+        local notifFrame = Instance.new("Frame")
+        notifFrame.Name = "NotificationItem"
+        notifFrame.BackgroundColor3 = CONFIG.Colors.Section
+        notifFrame.BackgroundTransparency = 0.1
+        notifFrame.Size = UDim2.new(1, 0, 0, 40)
+        notifFrame.Parent = container
 
-    local notifFrame = Instance.new("Frame")
-    notifFrame.Name = "NotificationFrame"
-    notifFrame.BackgroundTransparency = 1
-    notifFrame.AnchorPoint = Vector2.new(0.5, 0)
-    notifFrame.Position = UDim2.new(0.5, 0, 0.25, 0)
-    notifFrame.Size = text2 and UDim2.new(0, 320, 0, 70) or UDim2.new(0, 320, 0, 40)
-    notifFrame.Parent = notifGui
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = notifFrame
 
-    local textLabel1 = Instance.new("TextLabel")
-    textLabel1.Text = text1
-    textLabel1.Font = Enum.Font.GothamBold
-    textLabel1.TextSize = 18
-    textLabel1.TextColor3 = Color3.fromRGB(255, 255, 255)
-    textLabel1.BackgroundTransparency = 1
-    textLabel1.TextTransparency = 1
-    textLabel1.Size = UDim2.new(1, 0, 0, 35)
-    textLabel1.Position = text2 and UDim2.new(0, 0, 0, 0) or UDim2.new(0, 0, 0.5, -17)
-    textLabel1.TextXAlignment = Enum.TextXAlignment.Center
-    textLabel1.Parent = notifFrame
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 1
+        stroke.Color = CONFIG.Colors.Stroke
+        stroke.Transparency = 0.4
+        stroke.Parent = notifFrame
 
-    local textLabel2
-    if text2 then
-        textLabel2 = Instance.new("TextLabel")
-        textLabel2.Text = text2
-        textLabel2.Font = Enum.Font.GothamBold
-        textLabel2.TextSize = 18
-        textLabel2.TextColor3 = Color3.fromRGB(255, 255, 255)
-        textLabel2.BackgroundTransparency = 1
-        textLabel2.TextTransparency = 1
-        textLabel2.Size = UDim2.new(1, 0, 0, 35)
-        textLabel2.Position = UDim2.new(0, 0, 0, 35)
-        textLabel2.TextXAlignment = Enum.TextXAlignment.Center
-        textLabel2.Parent = notifFrame
-    end
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.RichText = true
+        label.Text = richText or ""
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 16
+        label.TextColor3 = defaultColor or Color3.fromRGB(255, 255, 255)
+        label.TextTransparency = 1
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Size = UDim2.new(1, -20, 1, 0)
+        label.Position = UDim2.new(0, 10, 0, 0)
+        label.Parent = notifFrame
 
-    local textFadeIn1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
-    textFadeIn1:Play()
+        -- анимация
+        notifFrame.AnchorPoint = Vector2.new(1, 0)
+        notifFrame.Position = UDim2.new(1, 20, 0, 0)
+        notifFrame.BackgroundTransparency = 1
 
-    if textLabel2 then
-        local textFadeIn2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
-        textFadeIn2:Play()
-    end
+        TweenService:Create(
+            notifFrame,
+            TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { Position = UDim2.new(1, 0, 0, notifFrame.Position.Y.Offset),
+              BackgroundTransparency = 0.1 }
+        ):Play()
 
-    task.wait(CONFIG.Notification.Duration)
+        TweenService:Create(
+            label,
+            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { TextTransparency = 0 }
+        ):Play()
 
-    local textFadeOut1 = TweenService:Create(textLabel1, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
-    textFadeOut1:Play()
+        task.wait(CONFIG.Notification.Duration)
 
-    if textLabel2 then
-        local textFadeOut2 = TweenService:Create(textLabel2, TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1})
-        textFadeOut2:Play()
-    end
-
-    textFadeOut1.Completed:Wait()
-    notifFrame:Destroy()
-
-    State.CurrentNotification = nil
-
-    if #State.NotificationQueue > 0 then
-        local next = table.remove(State.NotificationQueue, 1)
-        ShowNotification(next.text1, next.color1, next.text2, next.color2)
-    end
+        local fadeOut = TweenService:Create(
+            notifFrame,
+            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { BackgroundTransparency = 1 }
+        )
+        fadeOut:Play()
+        fadeOut.Completed:Wait()
+        notifFrame:Destroy()
+    end)
 end
+
+
 
 local function ApplyFOV(fov)
     local camera = Workspace.CurrentCamera
@@ -425,9 +462,6 @@ local function EnableAntiFling()
                 if primaryPart then
                     if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
                         if not DetectedFlingers[player.Name] then
-                            if State.NotificationsEnabled then
-                                ShowNotification("Flinger Detected", CONFIG.Colors.Orange, player.Name, CONFIG.Colors.Red)
-                            end
                             DetectedFlingers[player.Name] = true
                         end
                         
@@ -471,12 +505,15 @@ local function EnableAntiFling()
             
             if State.IsFlingInProgress then
                 AntiFlingLastPos = primaryPart.Position
-            -- ✅ Увеличен порог: 250 → 500 (безопаснее для высокого JumpPower)
-            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 500 or 
-                   primaryPart.AssemblyAngularVelocity.Magnitude > 500 then
+            elseif primaryPart.AssemblyLinearVelocity.Magnitude > 350 or 
+                   primaryPart.AssemblyAngularVelocity.Magnitude > 350 then
                 
                 if State.NotificationsEnabled and not FlingBlockedNotified then
-                    ShowNotification("Fling Blocked", CONFIG.Colors.Green, "Velocity neutralized", CONFIG.Colors.Accent)
+                ShowNotification(
+                    "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
+                    CONFIG.Colors.Text
+                )
+
                     FlingBlockedNotified = true
                     task.delay(3, function()
                         FlingBlockedNotified = false
@@ -536,7 +573,10 @@ end
 local function FlingPlayer(playerToFling)
     if not playerToFling or not playerToFling.Character then 
         if State.NotificationsEnabled then
-            ShowNotification("Fling Failed", CONFIG.Colors.Red, "Invalid target", CONFIG.Colors.TextDark)
+            ShowNotification(
+            "<font color=\"rgb(255, 85, 85)\">Fling error: </font><font color=\"rgb(220,220,220)\">Body parts missing</font>",
+            CONFIG.Colors.Text
+        )
         end
         return 
     end
@@ -564,7 +604,7 @@ local function FlingPlayer(playerToFling)
 
     if not TRootPart and not THead and not Handle then
         if State.NotificationsEnabled then
-            ShowNotification("Fling Failed", CONFIG.Colors.Red, "Target has no valid parts", CONFIG.Colors.TextDark)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Body parts missing</font>",CONFIG.Colors.Text)
         end
         return
     end
@@ -577,7 +617,7 @@ local function FlingPlayer(playerToFling)
     
     if targetPart.Velocity.Magnitude > 500 then
         if State.NotificationsEnabled then
-            ShowNotification("Already Flung", CONFIG.Colors.Orange, playerToFling.Name .. " is already flung", CONFIG.Colors.TextDark)
+            ShowNotification("<font color=\"rgb(220,220,220)\">Fling: Already flung</font>",CONFIG.Colors.Text)
         end
         return
     end
@@ -692,142 +732,97 @@ local function FlingPlayer(playerToFling)
 
 
     if State.NotificationsEnabled then
-        ShowNotification("Player Flung!", CONFIG.Colors.Green, playerToFling.Name, CONFIG.Colors.Accent)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Player flung: " .. playerToFling.Name .. "</font>",CONFIG.Colors.Text)
     end
 end
 
 -- ╔═══════════════════════════════════════════════════════════════╗
--- ║                    🚫 NOCLIP ФУНКЦИИ                          ║
+-- ║                    🚫 NoClip ФУНКЦИИ                          ║
 -- ╚═══════════════════════════════════════════════════════════════╝
 
--- === NOCLIP (УНИВЕРСАЛЬНЫЙ) ===
+-- === NoClip (УНИВЕРСАЛЬНЫЙ) ===
 
-local function EnableNoclip()
-    if State.NoclipEnabled then return end
-    State.NoclipEnabled = true
+local function EnableNoClip()
+    if State.NoClipEnabled then return end
+    State.NoClipEnabled = true
     
     local character = LocalPlayer.Character
     if not character then return end
     
     -- ✅ КАК В ИСХОДНИКЕ: Собираем BasePart в таблицу один раз
-    local NoclipObjects = {}
+    local NoClipObjects = {}
     
     for _, obj in ipairs(character:GetChildren()) do
         if obj:IsA("BasePart") then
-            table.insert(NoclipObjects, obj)
+            table.insert(NoClipObjects, obj)
         end
     end
     
     -- Сохраняем в State для доступа
-    State.NoclipObjects = NoclipObjects
+    State.NoClipObjects = NoClipObjects
     
     -- ✅ КАК В ИСХОДНИКЕ: Обновляем таблицу при респавне
-    State.NoclipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
+    State.NoClipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
         task.wait(0.15)
         
-        table.clear(NoclipObjects)
+        table.clear(NoClipObjects)
         
         for _, obj in ipairs(newChar:GetChildren()) do
             if obj:IsA("BasePart") then
-                table.insert(NoclipObjects, obj)
+                table.insert(NoClipObjects, obj)
             end
         end
     end)
     
     -- ✅ КАК В ИСХОДНИКЕ: Просто отключаем коллизии в Stepped
-    State.NoclipConnection = RunService.Stepped:Connect(function()
-        for i = 1, #NoclipObjects do
-            NoclipObjects[i].CanCollide = false
+    State.NoClipConnection = RunService.Stepped:Connect(function()
+        for i = 1, #NoClipObjects do
+            NoClipObjects[i].CanCollide = false
         end
     end)
     
     if State.NotificationsEnabled then
-        ShowNotification("Noclip Enabled", CONFIG.Colors.Green)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
 end
 
-
-local function DisableNoclip()
-    if not State.NoclipEnabled then return end
-    State.NoclipEnabled = false
-    
-    -- ✅ КАК В ИСХОДНИКЕ: Просто отключаем соединения, НЕ ТРОГАЯ CanCollide
-    if State.NoclipConnection then
-        State.NoclipConnection:Disconnect()
-        State.NoclipConnection = nil
-    end
-    
-    if State.NoclipRespawnConnection then
-        State.NoclipRespawnConnection:Disconnect()
-        State.NoclipRespawnConnection = nil
-    end
-    
-    -- Очищаем таблицу
-    if State.NoclipObjects then
-        table.clear(State.NoclipObjects)
-        State.NoclipObjects = nil
-    end
-    
-    if State.NotificationsEnabled then
-        ShowNotification("Noclip Disabled", CONFIG.Colors.Red)
-    end
-end
 
 local coinLabelCache = nil
 local lastCacheTime = 0
 
 local function GetCollectedCoinsCount()
-    -- Проверяем кэш (5 секунд)
-    if State.CoinLabelCache and State.CoinLabelCache.Parent and 
-       (tick() - State.LastCacheTime) < 5 then
+    if coinLabelCache and coinLabelCache.Parent and (tick() - lastCacheTime) < 2 then
         local success, value = pcall(function()
-            return tonumber(State.CoinLabelCache.Text) or 0
+            return tonumber(coinLabelCache.Text) or 0
         end)
         if success then
             return value
         end
     end
     
-    -- ИСПРАВЛЕНО: Добавлен timeout
     local success, coins = pcall(function()
-        local playerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
-        if not playerGui then return 0 end
+        local label = LocalPlayer.PlayerGui
+            :FindFirstChild("MainGUI")
+            :FindFirstChild("Game")
+            :FindFirstChild("CoinBags")
+            :FindFirstChild("Container")
+            :FindFirstChild("SnowToken")
+            :FindFirstChild("CurrencyFrame")
+            :FindFirstChild("Icon")
+            :FindFirstChild("Coins")
         
-        local mainGui = playerGui:FindFirstChild("MainGUI")
-        if not mainGui then return 0 end
-        
-        -- Безопасный путь к coins
-        local game = mainGui:FindFirstChild("Game")
-        if not game then return 0 end
-        
-        local coinBags = game:FindFirstChild("CoinBags")
-        if not coinBags then return 0 end
-        
-        local container = coinBags:FindFirstChild("Container")
-        if not container then return 0 end
-        
-        local snowToken = container:FindFirstChild("SnowToken")
-        if not snowToken then return 0 end
-        
-        local currencyFrame = snowToken:FindFirstChild("CurrencyFrame")
-        if not currencyFrame then return 0 end
-        
-        local icon = currencyFrame:FindFirstChild("Icon")
-        if not icon then return 0 end
-        
-        local coinsLabel = icon:FindFirstChild("Coins")
-        if not coinsLabel then return 0 end
-        
-        State.CoinLabelCache = coinsLabel
-        State.LastCacheTime = tick()
-        return tonumber(coinsLabel.Text) or 0
+        if label then
+            coinLabelCache = label
+            lastCacheTime = tick()
+            return tonumber(label.Text) or 0
+        end
+        return 0
     end)
     
     if success and coins >= 0 then
         return coins
     end
     
-    -- Fallback через FindFirstChild
     local maxValue = 0
     pcall(function()
         for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
@@ -837,8 +832,8 @@ local function GetCollectedCoinsCount()
                     local value = tonumber(gui.Text) or 0
                     if value > maxValue then
                         maxValue = value
-                        State.CoinLabelCache = gui
-                        State.LastCacheTime = tick()
+                        coinLabelCache = gui
+                        lastCacheTime = tick()
                     end
                 end
             end
@@ -859,44 +854,6 @@ local function ResetCharacter()
             end
         end
     end)
-end
-
-local function GetMurdererName()
-    local success, murdererName = pcall(function()
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character then
-                local knife = player.Character:FindFirstChild("Knife")
-                if knife then
-                    return player.Name
-                end
-                
-                if player.Backpack then
-                    local knifeInBackpack = player.Backpack:FindFirstChild("Knife")
-                    if knifeInBackpack then
-                        return player.Name
-                    end
-                end
-                
-                for _, tool in ipairs(player.Character:GetChildren()) do
-                    if tool:IsA("Tool") and (tool.Name:lower():match("knife") or tool.Name:lower():match("murder")) then
-                        return player.Name
-                    end
-                end
-                
-                if player.Backpack then
-                    for _, tool in ipairs(player.Backpack:GetChildren()) do
-                        if tool:IsA("Tool") and (tool.Name:lower():match("knife") or tool.Name:lower():match("murder")) then
-                            return player.Name
-                        end
-                    end
-                end
-            end
-        end
-        
-        return nil
-    end)
-    
-    return success and murdererName or nil
 end
 
 local function FindNearestCoin()
@@ -931,47 +888,28 @@ local function FindNearestCoin()
     return closestCoin
 end
 
--- === NOCLIP ДЛЯ АВТОФАРМА ===
 
-local function EnableNoClip()
-    if State.NoClipConnection then return end
-
-    State.ClipEnabled = false
-    State.NoClipConnection = RunService.Stepped:Connect(function()
-        if not State.ClipEnabled then
-            local character = LocalPlayer.Character
-            if character then
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") and part.CanCollide == true then
-                        part.CanCollide = false
-                    end
-                end
-            end
-        end
-    end)
-end
-
-local function DisableNoclip()
-    if not State.NoclipEnabled then return end
-    State.NoclipEnabled = false
+local function DisableNoClip()
+    if not State.NoClipEnabled then return end
+    State.NoClipEnabled = false
     
     -- ✅ СНАЧАЛА отключаем соединения
-    if State.NoclipConnection then
-        State.NoclipConnection:Disconnect()
-        State.NoclipConnection = nil
+    if State.NoClipConnection then
+        State.NoClipConnection:Disconnect()
+        State.NoClipConnection = nil
     end
     
-    if State.NoclipRespawnConnection then
-        State.NoclipRespawnConnection:Disconnect()
-        State.NoclipRespawnConnection = nil
+    if State.NoClipRespawnConnection then
+        State.NoClipRespawnConnection:Disconnect()
+        State.NoClipRespawnConnection = nil
     end
     
     -- ✅ НОВОЕ: Принудительно восстанавливаем коллизии
-    if State.NoclipObjects then
+    if State.NoClipObjects then
         local character = LocalPlayer.Character
         if character then
-            for i = 1, #State.NoclipObjects do
-                local part = State.NoclipObjects[i]
+            for i = 1, #State.NoClipObjects do
+                local part = State.NoClipObjects[i]
                 if part and part.Parent then
                     -- Восстанавливаем CanCollide для всех частей кроме HumanoidRootPart
                     if part.Name ~= "HumanoidRootPart" then
@@ -981,12 +919,12 @@ local function DisableNoclip()
             end
         end
         
-        table.clear(State.NoclipObjects)
-        State.NoclipObjects = nil
+        table.clear(State.NoClipObjects)
+        State.NoClipObjects = nil
     end
     
     if State.NotificationsEnabled then
-        ShowNotification("Noclip Disabled", CONFIG.Colors.Red)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Red)
     end
 end
 
@@ -1174,7 +1112,6 @@ local function StartAutoFarm()
                     
                     EnableNoClip()
                     SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
-                    DisableNoClip()
                     
                     local coinsAfter = GetCollectedCoinsCount()
                     if coinsAfter > currentCoins then
@@ -1191,6 +1128,7 @@ local function StartAutoFarm()
         print("[Auto Farm] 🛑 Остановлен")
     end)
 end
+
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
     
@@ -1327,65 +1265,235 @@ local function ServerHop()
     end
 end
 
+-- ╔═══════════════════════════════════════════════════════════════╗
+-- ║    GODMODE (УДАЛЕНИЕ ТРУПА + АГРЕССИВНАЯ ЗАЩИТА)               ║
+-- ╚═══════════════════════════════════════════════════════════════╝
 
+local healthConnection = nil
+local damageBlockerConnection = nil
+local stateConnection = nil
+local workspaceConnection = nil
 
-local lastGodModeApply = 0
-
-local function ApplyGodMode()
-    if not State.GodModeEnabled then return end
-
-    local now = tick()
-    if now - lastGodModeApply < 0.5 then return end
-    lastGodModeApply = now
-
-    local character = LocalPlayer.Character
-    if not character then return end
-
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-
+local function RemoveDeadBody()
+    -- Удаляем труп из Workspace
     pcall(function()
-        humanoid.Name = "OldHumanoid"
-
-        local newHumanoid = humanoid:Clone()
-        newHumanoid.Parent = character
-        newHumanoid.Name = "Humanoid"
-
-        humanoid:Destroy()
-
-        if Workspace.Camera then
-            Workspace.Camera.CameraSubject = newHumanoid
-        end
-
-        local animate = character:FindFirstChild("Animate")
-        if animate then
-            animate.Disabled = true
-            task.wait(0.05)
-            animate.Disabled = false
-        end
-
-        if State.WalkSpeed ~= 18 then
-            newHumanoid.WalkSpeed = State.WalkSpeed
-        end
-        if State.JumpPower ~= 50 then
-            newHumanoid.JumpPower = State.JumpPower
+        local corpse = workspace:FindFirstChild(LocalPlayer.Name)
+        if corpse and corpse:IsA("Model") and corpse ~= LocalPlayer.Character then
+            corpse:Destroy()
+            print("[GodMode] 🗑️ Удалён труп из Workspace")
         end
     end)
 end
 
+local function ApplyGodMode()
+    if not State.GodModeEnabled then return end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    pcall(function()
+        humanoid.MaxHealth = math.huge
+        humanoid.Health = math.huge
+        
+        if not character:FindFirstChild("ForceField") then
+            local ff = Instance.new("ForceField")
+            ff.Visible = false
+            ff.Parent = character
+        end
+        
+        if State.WalkSpeed ~= 18 then
+            humanoid.WalkSpeed = State.WalkSpeed
+        end
+        if State.JumpPower ~= 50 then
+            humanoid.JumpPower = State.JumpPower
+        end
+    end)
+end
+
+local function SetupHealthProtection()
+    if healthConnection then
+        healthConnection:Disconnect()
+    end
+    
+    if stateConnection then
+        stateConnection:Disconnect()
+    end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    -- МГНОВЕННАЯ БЛОКИРОВКА СОСТОЯНИЯ DEAD
+    stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
+        if State.GodModeEnabled then
+            if newState == Enum.HumanoidStateType.Dead then
+                
+                -- МОМЕНТАЛЬНО возвращаем состояние
+                humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                humanoid.Health = math.huge
+                
+                -- Удаляем труп через короткий delay (пока сервер создаёт)
+                task.spawn(function()
+                    for i = 1, 10 do
+                        task.wait(0.05)
+                        RemoveDeadBody()
+                    end
+                end)
+            end
+        end
+    end)
+    table.insert(State.Connections, stateConnection)
+    
+    -- МОНИТОРИМ HP
+    healthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+        if State.GodModeEnabled and humanoid.Health < math.huge then
+            humanoid.Health = math.huge
+        end
+    end)
+    
+    table.insert(State.Connections, healthConnection)
+end
+
+local function SetupDamageBlocker()
+    if damageBlockerConnection then
+        damageBlockerConnection:Disconnect()
+    end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    damageBlockerConnection = character.ChildAdded:Connect(function(child)
+        if State.GodModeEnabled then
+            if child.Name == "Ragdoll" or child.Name == "CreatorTag" or 
+               (child:IsA("ObjectValue") and child.Name == "creator") then
+                task.spawn(function()
+                    child:Destroy()
+                end)
+            end
+        end
+    end)
+    
+    table.insert(State.Connections, damageBlockerConnection)
+end
+
+local function SetupWorkspaceMonitor()
+    if workspaceConnection then
+        workspaceConnection:Disconnect()
+    end
+    
+    -- МОНИТОРИМ ПОЯВЛЕНИЕ ТРУПА В WORKSPACE
+    workspaceConnection = workspace.ChildAdded:Connect(function(child)
+        if State.GodModeEnabled then
+            -- Если добавлена модель с нашим именем (труп)
+            if child.Name == LocalPlayer.Name and child:IsA("Model") and child ~= LocalPlayer.Character then
+                task.spawn(function()
+                    task.wait()
+                    child:Destroy()
+                end)
+            end
+        end
+    end)
+    
+    table.insert(State.Connections, workspaceConnection)
+end
+
 local function ToggleGodMode()
     State.GodModeEnabled = not State.GodModeEnabled
-
+    
     if State.GodModeEnabled then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode:</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Green)
+        end
+        
+        ApplyGodMode()
+        SetupHealthProtection()
+        SetupDamageBlocker()
+        SetupWorkspaceMonitor()
+        
+        -- АГРЕССИВНЫЙ МОНИТОРИНГ HP
         local godModeConnection = RunService.Heartbeat:Connect(function()
             if State.GodModeEnabled and LocalPlayer.Character then
-                ApplyGodMode()
+                local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid then
+                    -- Принудительно держим HP на максимуме
+                    if humanoid.Health < math.huge then
+                        humanoid.Health = math.huge
+                    end
+                    
+                    -- Блокируем состояние Dead КАЖДЫЙ КАДР
+                    local state = humanoid:GetState()
+                    if state == Enum.HumanoidStateType.Dead then
+                        humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                        RemoveDeadBody()
+                    end
+                end
             end
         end)
         table.insert(State.Connections, godModeConnection)
+        
+        local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(character)
+            if State.GodModeEnabled then
+                task.wait(0.5)
+                ApplyGodMode()
+                SetupHealthProtection()
+                SetupDamageBlocker()
+                SetupWorkspaceMonitor()
+                print("[GodMode] 🔄 Переподключён")
+            end
+        end)
+        table.insert(State.Connections, respawnConnection)
+    else
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",CONFIG.Colors.Text)
+        end
+        
+        if healthConnection then
+            healthConnection:Disconnect()
+            healthConnection = nil
+        end
+        
+        if stateConnection then
+            stateConnection:Disconnect()
+            stateConnection = nil
+        end
+        
+        if damageBlockerConnection then
+            damageBlockerConnection:Disconnect()
+            damageBlockerConnection = nil
+        end
+        
+        if workspaceConnection then
+            workspaceConnection:Disconnect()
+            workspaceConnection = nil
+        end
+        
+        for _, connection in ipairs(State.Connections) do
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end
+        State.Connections = {}
+        
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.MaxHealth = 100
+                humanoid.Health = 100
+            end
+            
+            local ff = character:FindFirstChild("ForceField")
+            if ff then
+                ff:Destroy()
+            end
+        end
     end
 end
-
 
 
 local function CreateHighlight(adornee, color)
@@ -1526,7 +1634,10 @@ local function SetupGunTracking()
             CreateGunESP(obj)
             if State.NotificationsEnabled then
                 task.spawn(function()
-                    ShowNotification("Gun Dropped", CONFIG.Colors.Gun)
+                ShowNotification(
+                    "<font color=\"rgb(255, 200, 50)\">Gun dropped</font>",
+                    CONFIG.Colors.Text
+                )
                 end)
             end
         end
@@ -1593,7 +1704,7 @@ local function StartRoleChecking()
 
                     if State.NotificationsEnabled then
                         task.spawn(function()
-                            ShowNotification("Round Ended", CONFIG.Colors.TextDark)
+                            ShowNotification("<font color=\"rgb(220, 220, 220)\">Round ended</font>",CONFIG.Colors.Text)
                         end)
                     end
                 end
@@ -1605,10 +1716,13 @@ local function StartRoleChecking()
                     if State.NotificationsEnabled then
                         task.spawn(function()
                             ShowNotification(
-                                "Murder: " .. murder.Name,
-                                CONFIG.Colors.Murder,
-                                "Sheriff: " .. sheriff.Name,
-                                CONFIG.Colors.Sheriff
+                                "<font color=\"rgb(255, 50, 50)\">Murderer: </font>" .. murder.Name .. "",
+                                CONFIG.Colors.Text
+                            )
+
+                            ShowNotification(
+                                "<font color=\"rgb(50, 150, 255)\">Sheriff: </font>" .. sheriff.Name .. "",
+                                CONFIG.Colors.Text
                             )
                         end)
                     end
@@ -1621,12 +1735,16 @@ local function StartRoleChecking()
                 if sheriff and sheriff ~= State.prevSher and murder == State.prevMurd then
                     if State.NotificationsEnabled then
                         task.spawn(function()
-                            ShowNotification("Sheriff: " .. sheriff.Name, CONFIG.Colors.Sheriff)
+                            ShowNotification(
+                                "<font color=\"rgb(50, 150, 255)\">Sheriff: </font>" .. sheriff.Name .. "",
+                                CONFIG.Colors.Text
+                            )
                         end)
                     end
                     State.heroSent = true
                     State.prevSher = sheriff
                 end
+
 
                 if murder and murder ~= State.prevMurd then
                     State.prevMurd = murder
@@ -1767,7 +1885,7 @@ local function knifeThrow(silent)
     local murderer = findMurderer()
     if murderer ~= LocalPlayer then 
         if not silent then
-            ShowNotification("You're not murderer.", CONFIG.Colors.Red)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
         end
         return 
     end
@@ -1780,7 +1898,7 @@ local function knifeThrow(silent)
             task.wait(0.3)
         else
             if not silent then
-                ShowNotification("You don't have the knife..?", CONFIG.Colors.Red)
+                ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the knife..?</font>",CONFIG.Colors.Text)
             end
             return
         end
@@ -1788,7 +1906,7 @@ local function knifeThrow(silent)
     local knife = LocalPlayer.Character:FindFirstChild("Knife")
     if not knife then
         if not silent then
-            ShowNotification("Knife not equipped!", CONFIG.Colors.Red)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220, 220, 220)\">Knife not equipped</font>",CONFIG.Colors.Text)
         end
         return
     end
@@ -1796,7 +1914,7 @@ local function knifeThrow(silent)
     -- Проверка что у персонажа есть RightHand
     if not LocalPlayer.Character:FindFirstChild("RightHand") then
         if not silent then
-            ShowNotification("Can't find RightHand!", CONFIG.Colors.Red)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
         end
         return
     end
@@ -1807,7 +1925,7 @@ local function knifeThrow(silent)
     
     if not targetPosition then
         if not silent then
-            ShowNotification("Can't get mouse position!", CONFIG.Colors.Red)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220, 220, 220)\">No mouse position</font>", nil)
         end
         return
     end
@@ -1824,19 +1942,16 @@ local function knifeThrow(silent)
     local success, err = pcall(function()
         LocalPlayer.Character.Knife.Events.KnifeThrown:FireServer(unpack(argsThrowRemote))
     end)
-    
-    if success then
-        if not silent then
-            ShowNotification("Knife thrown!", CONFIG.Colors.Green)
-        end
-    else
-        if not silent then
-            ShowNotification("Failed to throw: " .. tostring(err), CONFIG.Colors.Red)
-        end
-    end
 end
 
+local CanShootMurderer = true
+
 local function shootMurderer()
+    if not CanShootMurderer then
+        return
+    end
+    CanShootMurderer = false
+
     -- Проверка: ты шериф/герой?
     local sheriff = nil
     for _, p in pairs(Players:GetPlayers()) do
@@ -1847,16 +1962,22 @@ local function shootMurderer()
             break
         end
     end
-    
+
     if sheriff ~= LocalPlayer then
-        ShowNotification("Not Sheriff/Hero", CONFIG.Colors.Red)
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Not sheriff/hero</font>", nil)
+        task.delay(1, function()
+            CanShootMurderer = true
+        end)
         return
     end
 
     -- Найти убийцу
     local murderer = findMurderer()
     if not murderer then
-        ShowNotification("No murderer found", CONFIG.Colors.Red)
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No murderer found</font>", nil)
+        task.delay(1, function()
+            CanShootMurderer = true
+        end)
         return
     end
 
@@ -1867,43 +1988,45 @@ local function shootMurderer()
             hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
             task.wait(0.3)
         else
-            ShowNotification("No gun found", CONFIG.Colors.Red)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun found</font>", nil)
+            task.delay(1, function()
+                CanShootMurderer = true
+            end)
             return
         end
     end
 
-    local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
+    local murdererHRP = murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart")
     if not murdererHRP then
-        ShowNotification("Can't find murderer HRP", CONFIG.Colors.Red)
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No murderer HRP</font>", nil)
+        task.delay(1, function()
+            CanShootMurderer = true
+        end)
         return
     end
 
-    -- ✅ ПРЕДСКАЗАНИЕ ПОЗИЦИИ
+    -- ПРЕДСКАЗАНИЕ ПОЗИЦИИ
     local velocity = murdererHRP.AssemblyLinearVelocity
     local currentPos = murdererHRP.Position
-    
+
     local predictionTime = State.ShootPrediction
     local predictedPos = currentPos + (velocity * predictionTime)
-    
-    -- Смещение на уровень груди/торса (центр масс)
+
     local chestOffset = Vector3.new(0, 0.5, 0)
     local targetPos = predictedPos + chestOffset
-    
-    -- ✅ ВЫБОР НАПРАВЛЕНИЯ ВЫСТРЕЛА (спина или спереди)
-    local shootDistance = 3 -- Расстояние в studs
+
+    local shootDistance = 3
     local shootFromPos
-    
+
     if State.ShootDirection == "Behind" then
-        -- Выстрел СО СПИНЫ
         shootFromPos = predictedPos - (murdererHRP.CFrame.LookVector * shootDistance) + chestOffset
     else
-        -- Выстрел СПЕРЕДИ
         shootFromPos = predictedPos + (murdererHRP.CFrame.LookVector * shootDistance) + chestOffset
     end
-    
+
     local args = {
-        [1] = CFrame.new(shootFromPos),  -- Откуда
-        [2] = CFrame.new(targetPos)       -- Куда
+        [1] = CFrame.new(shootFromPos),
+        [2] = CFrame.new(targetPos)
     }
 
     local success, err = pcall(function()
@@ -1911,20 +2034,26 @@ local function shootMurderer()
     end)
 
     if success then
-        ShowNotification("Shot fired!", CONFIG.Colors.Green, murderer.Name .. " [" .. State.ShootDirection .. "]", CONFIG.Colors.Murder)
+        ShowNotification(
+            "<font color=\"rgb(255, 85, 85)\">Shot fired: </font>" .. murderer.Name .. " [" .. State.ShootDirection .. "]",CONFIG.Colors.Text)
     else
-        ShowNotification("Shoot failed: " .. tostring(err), CONFIG.Colors.Red)
+        ShowNotification(
+            "<font color=\"rgb(255, 85, 85)\">Shoot failed: </font>" .. tostring(err) .. "",
+            CONFIG.Colors.Text
+        )
     end
+
+    task.delay(1, function()
+        CanShootMurderer = true
+    end)
 end
-
-
 
 local function pickupGun()
     -- Проверяем что пистолет существует на карте
     local gun = Workspace:FindFirstChild("GunDrop", true) -- true = recursive search
     
     if not gun then
-        ShowNotification("No gun on map", CONFIG.Colors.Red)
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>",CONFIG.Colors.Text)
         return
     end
     
@@ -1945,8 +2074,7 @@ local function pickupGun()
     
     -- Возвращаемся назад
     hrp.CFrame = previousPosition Vector3.new(0, 2, 0)
-    
-    ShowNotification("Gun picked up!", CONFIG.Colors.Green)
+    ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>",CONFIG.Colors.Text)
 end
 
 local OriginalSizes = {}
@@ -2042,35 +2170,43 @@ local anchoredPlayers = {}
 local function ToggleKillAura(state)
     if state then
         anchoredPlayers = {}
-        if killAuraCon then killAuraCon:Disconnect() end
+        
+        if killAuraCon then
+            killAuraCon:Disconnect()
+        end
+        
         killAuraCon = RunService.Heartbeat:Connect(function()
+            local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not localHRP then return end
+            
             for _, player in ipairs(Players:GetPlayers()) do
                 if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-                    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                    local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if localHRP and (hrp.Position - localHRP.Position).Magnitude < 7 then
-                        hrp.Anchored = true
-                        -- Используем значение из State
-                        hrp.CFrame = localHRP.CFrame + localHRP.CFrame.LookVector * State.KillAuraDistance
+                    local hrp = player.Character.HumanoidRootPart
+                    local distance = (hrp.Position - localHRP.Position).Magnitude
+                    
+                    -- ✅ Проверяем дистанцию 7 studs для активации
+                    if distance <= 7 then
+                        pcall(function()
+                            hrp.Anchored = true
+                            -- ✅ Телепортируем на безопасную дистанцию из State (2.5 studs)
+                            hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * State.KillAuraDistance)
+                        end)
                         
                         if not anchoredPlayers[player] then
                             anchoredPlayers[player] = true
                         end
-
-                        task.wait(0.1)
-                        local args = { [1] = "Slash" }
-                        LocalPlayer.Character.Knife.Stab:FireServer(unpack(args))
-                        return
                     end
                 end
             end
         end)
+        
     else
-        if killAuraCon then 
+        if killAuraCon then
             killAuraCon:Disconnect()
             killAuraCon = nil
         end
         
+        -- Освобождаем заанкоренных игроков
         for player, _ in pairs(anchoredPlayers) do
             if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                 pcall(function()
@@ -2084,45 +2220,54 @@ end
 
 
 
-local function InstantKillAll()
-    if findMurderer() ~= LocalPlayer then 
-        if State.NotificationsEnabled then
-            ShowNotification("You're not murderer.", CONFIG.Colors.Red)
-        end
-        return 
-    end
 
+local function InstantKillAll()
+    -- Проверка роли
+    if findMurderer() ~= LocalPlayer then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- Проверка наличия ножа
     if not LocalPlayer.Character:FindFirstChild("Knife") then
         local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
         if LocalPlayer.Backpack:FindFirstChild("Knife") then
             hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
+            task.wait(0.2)
         else
             if State.NotificationsEnabled then
-                ShowNotification("You don't have the knife..?", CONFIG.Colors.Red)
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No knife in inventory</font>",CONFIG.Colors.Text)
             end
             return
         end
     end
-
+    
     local localHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not localHRP then return end
-
-    -- Телепортируем ВСЕХ игроков перед собой (без проверки расстояния)
+    
+    -- ✅ ТОЛЬКО ТЕЛЕПОРТ всех игроков к себе
+    local teleportedCount = 0
     for _, player in ipairs(Players:GetPlayers()) do
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            local hrp = player.Character.HumanoidRootPart
             pcall(function()
                 hrp.Anchored = true
-                hrp.CFrame = localHRP.CFrame + localHRP.CFrame.LookVector * 3
+                hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * 2.5)
+                teleportedCount = teleportedCount + 1
             end)
         end
     end
-
-    local args = { [1] = "Slash" }
-    LocalPlayer.Character.Knife.Stab:FireServer(unpack(args))
     
+    -- ✅ Уведомление о том, что нужно бить самому
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220, 220, 220)\">Players Teleported: " .. teleportedCount .. "</font> <font color=\"rgb(220, 220, 220)\">Now swing your knife!</font>",CONFIG.Colors.Text)
+    end
+    
+    -- Освобождаем через 3 секунды
     task.spawn(function()
-        task.wait(0.1)
+        task.wait(3)
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
                 pcall(function()
@@ -2131,12 +2276,7 @@ local function InstantKillAll()
             end
         end
     end)
-    
-    if State.NotificationsEnabled then
-        ShowNotification("Kill All Complete!", CONFIG.Colors.Green)
-    end
 end
-
 
 local function CreateUI()
     for _, child in ipairs(CoreGui:GetChildren()) do
@@ -2175,7 +2315,7 @@ local function CreateUI()
 
 
     local titleLabel = Create("TextLabel", {
-        Text = "MM2 ESP <font color=\"rgb(128, 0, 128)\">v6.0 Tabs</font>",
+        Text = "MM2 <font color=\"rgb(128, 0, 128)\">for my lubimka</font>",
         --Text = "MM2 ESP <font color=\"rgb(90,140,255)\">v6.0 Tabs</font>",
         RichText = true,
         Font = Enum.Font.GothamBold,
@@ -3031,7 +3171,7 @@ end
    
     MainTab:CreateSection("TELEPORT & MOVEMENT")
     MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
-    MainTab:CreateKeybindButton("Toggle Noclip", "noclip", "Noclip")
+    MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
    
     MainTab:CreateSection("GODMODE")
     MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
@@ -3082,11 +3222,17 @@ end
         if s then
             State.CoinBlacklist = {}
             State.StartSessionCoins = GetCollectedCoinsCount()
-            ShowNotification("Auto Farm Started", CONFIG.Colors.Green)
+            ShowNotification(
+                "Auto Farm: <font color=\"rgb(85, 255, 120)\">ON</font>",
+                CONFIG.Colors.Text
+            )
             StartAutoFarm()
         else
             StopAutoFarm()
-            ShowNotification("Auto Farm Stopped", CONFIG.Colors.Red)
+            ShowNotification(
+            "Auto Farm: <font color=\"rgb(255, 85, 85)\">OFF</font>",
+            CONFIG.Colors.Text
+        )
         end
     end)
    
@@ -3139,8 +3285,8 @@ closeButton.MouseButton1Click:Connect(function()
     end
     -- Очистка highlights
     CleanupMemory()
-    if State.NoclipEnabled then 
-        DisableNoclip() 
+    if State.NoClipEnabled then 
+        DisableNoClip() 
     end
 
     -- Отключение всех соединений
@@ -3164,13 +3310,12 @@ closeButton.MouseButton1Click:Connect(function()
     end
 
     -- Отключение всех активных функций
-    if State.NoclipEnabled then DisableNoclip() end
+    if State.NoClipEnabled then DisableNoClip() end
     if State.AntiFlingEnabled then DisableAntiFling() end
     if State.ExtendedHitboxEnabled then DisableExtendedHitbox() end
 
     -- Финальная очистка
     getgenv().MM2_ESP_Script = false
-    collectgarbage("collect")
 end)
 
 
@@ -3243,8 +3388,8 @@ end
             end
         end
        
-        if input.KeyCode == State.Keybinds.Noclip and State.Keybinds.Noclip ~= Enum.KeyCode.Unknown then
-            if State.NoclipEnabled then DisableNoclip() else EnableNoclip() end
+        if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
+            if State.NoClipEnabled then DisableNoClip() else EnableNoClip() end
         end
     end)
    
@@ -3291,12 +3436,6 @@ SetupGunTracking()
 InitialGunScan()
 StartRoleChecking()
 SetupAntiAFK()
-
--- ✅ Приветственное уведомление
-if State.NotificationsEnabled then
-    task.wait(1)
-    ShowNotification("MM2 ESP v6.0 Loaded", CONFIG.Colors.Green, "All systems ready!", CONFIG.Colors.Accent)
-end
 
 -- выводим в консоль
 print("╔════════════════════════════════════════════╗")
