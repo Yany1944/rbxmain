@@ -191,11 +191,13 @@ local State = {
     }
 }
 
+local currentMapConnection = nil
+local currentMap = nil
 
 local function CleanupMemory()
     -- Очистка highlights
     if State.PlayerHighlights then
-        for player, highlight in pairs(State.PlayerHighlights) do
+        for _, highlight in pairs(State.PlayerHighlights) do
             if highlight and highlight.Parent then
                 pcall(function() highlight:Destroy() end)
             end
@@ -205,7 +207,7 @@ local function CleanupMemory()
 
     -- Очистка gun ESP
     if State.GunCache then
-        for gunPart, espData in pairs(State.GunCache) do
+        for _, espData in pairs(State.GunCache) do
             if espData then
                 pcall(function()
                     if espData.highlight then espData.highlight:Destroy() end
@@ -216,11 +218,22 @@ local function CleanupMemory()
         State.GunCache = {}
     end
 
+    -- ✅ ДОБАВЛЕНО: Сброс Gun tracking
+    if currentMapConnection then
+        currentMapConnection:Disconnect()
+        currentMapConnection = nil
+    end
+    currentMap = nil
+
+    -- Очистка очереди уведомлений
+    State.NotificationQueue = {}
+    State.CurrentNotification = nil
+
     -- Очистка coin blacklist
     State.CoinBlacklist = {}
-    
-    -- Roblox автоматически очищает память, вызов не нужен
 end
+
+
 
 local function FindRole(player)
     if not player or not player.Character then return nil end
@@ -339,8 +352,8 @@ local function CreateNotificationUI()
     local container = Instance.new("Frame")
     container.Name = "NotificationContainer"
     container.BackgroundTransparency = 1
-    container.AnchorPoint = Vector2.new(1, 0)
-    container.Position = UDim2.new(1, -20, 0, 80) -- правый верх
+    container.AnchorPoint = Vector2.new(0.5, 0)
+    container.Position = UDim2.new(0.5, 0, 0, 80) -- правый верх
     container.Size = UDim2.new(0, 340, 1, -100)
     container.Parent = notifGui
 
@@ -348,7 +361,7 @@ local function CreateNotificationUI()
     list.FillDirection = Enum.FillDirection.Vertical
     list.SortOrder = Enum.SortOrder.LayoutOrder
     list.Padding = UDim.new(0, 6)
-    list.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    list.HorizontalAlignment = Enum.HorizontalAlignment.Center
     list.VerticalAlignment = Enum.VerticalAlignment.Top
     list.Parent = container
 
@@ -393,20 +406,20 @@ local function ShowNotification(richText, defaultColor)
         label.TextSize = 16
         label.TextColor3 = defaultColor or Color3.fromRGB(255, 255, 255)
         label.TextTransparency = 1
-        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextXAlignment = Enum.TextXAlignment.Center
         label.Size = UDim2.new(1, -20, 1, 0)
         label.Position = UDim2.new(0, 10, 0, 0)
         label.Parent = notifFrame
 
-        -- анимация
-        notifFrame.AnchorPoint = Vector2.new(1, 0)
-        notifFrame.Position = UDim2.new(1, 20, 0, 0)
+        -- ✅ НОВАЯ анимация: появление сверху вниз с fade-in
+        notifFrame.AnchorPoint = Vector2.new(0.5, 0)  -- Центрируем по X
+        notifFrame.Position = UDim2.new(0.5, 0, 0, -50)  -- Начинаем выше контейнера
         notifFrame.BackgroundTransparency = 1
 
         TweenService:Create(
             notifFrame,
-            TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { Position = UDim2.new(1, 0, 0, notifFrame.Position.Y.Offset),
+            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+            { Position = UDim2.new(0.5, 0, 0, 0),  -- Опускаем на место
               BackgroundTransparency = 0.1 }
         ):Play()
 
@@ -421,15 +434,20 @@ local function ShowNotification(richText, defaultColor)
         local fadeOut = TweenService:Create(
             notifFrame,
             TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1 }
+            { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50) }  -- ✅ Уходит вверх
         )
         fadeOut:Play()
+        
+        TweenService:Create(
+            label,
+            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { TextTransparency = 1 }
+        ):Play()
+        
         fadeOut.Completed:Wait()
         notifFrame:Destroy()
     end)
 end
-
-
 
 local function ApplyFOV(fov)
     local camera = Workspace.CurrentCamera
@@ -1272,18 +1290,6 @@ end
 local healthConnection = nil
 local damageBlockerConnection = nil
 local stateConnection = nil
-local workspaceConnection = nil
-
-local function RemoveDeadBody()
-    -- Удаляем труп из Workspace
-    pcall(function()
-        local corpse = workspace:FindFirstChild(LocalPlayer.Name)
-        if corpse and corpse:IsA("Model") and corpse ~= LocalPlayer.Character then
-            corpse:Destroy()
-            print("[GodMode] 🗑️ Удалён труп из Workspace")
-        end
-    end)
-end
 
 local function ApplyGodMode()
     if not State.GodModeEnabled then return end
@@ -1336,14 +1342,6 @@ local function SetupHealthProtection()
                 -- МОМЕНТАЛЬНО возвращаем состояние
                 humanoid:ChangeState(Enum.HumanoidStateType.Running)
                 humanoid.Health = math.huge
-                
-                -- Удаляем труп через короткий delay (пока сервер создаёт)
-                task.spawn(function()
-                    for i = 1, 10 do
-                        task.wait(0.05)
-                        RemoveDeadBody()
-                    end
-                end)
             end
         end
     end)
@@ -1381,27 +1379,6 @@ local function SetupDamageBlocker()
     table.insert(State.Connections, damageBlockerConnection)
 end
 
-local function SetupWorkspaceMonitor()
-    if workspaceConnection then
-        workspaceConnection:Disconnect()
-    end
-    
-    -- МОНИТОРИМ ПОЯВЛЕНИЕ ТРУПА В WORKSPACE
-    workspaceConnection = workspace.ChildAdded:Connect(function(child)
-        if State.GodModeEnabled then
-            -- Если добавлена модель с нашим именем (труп)
-            if child.Name == LocalPlayer.Name and child:IsA("Model") and child ~= LocalPlayer.Character then
-                task.spawn(function()
-                    task.wait()
-                    child:Destroy()
-                end)
-            end
-        end
-    end)
-    
-    table.insert(State.Connections, workspaceConnection)
-end
-
 local function ToggleGodMode()
     State.GodModeEnabled = not State.GodModeEnabled
     
@@ -1413,8 +1390,6 @@ local function ToggleGodMode()
         ApplyGodMode()
         SetupHealthProtection()
         SetupDamageBlocker()
-        SetupWorkspaceMonitor()
-        
         -- АГРЕССИВНЫЙ МОНИТОРИНГ HP
         local godModeConnection = RunService.Heartbeat:Connect(function()
             if State.GodModeEnabled and LocalPlayer.Character then
@@ -1429,7 +1404,6 @@ local function ToggleGodMode()
                     local state = humanoid:GetState()
                     if state == Enum.HumanoidStateType.Dead then
                         humanoid:ChangeState(Enum.HumanoidStateType.Running)
-                        RemoveDeadBody()
                     end
                 end
             end
@@ -1442,7 +1416,6 @@ local function ToggleGodMode()
                 ApplyGodMode()
                 SetupHealthProtection()
                 SetupDamageBlocker()
-                SetupWorkspaceMonitor()
                 print("[GodMode] 🔄 Переподключён")
             end
         end)
@@ -1467,10 +1440,6 @@ local function ToggleGodMode()
             damageBlockerConnection = nil
         end
         
-        if workspaceConnection then
-            workspaceConnection:Disconnect()
-            workspaceConnection = nil
-        end
         
         for _, connection in ipairs(State.Connections) do
             if connection and connection.Connected then
@@ -1576,25 +1545,35 @@ local function UpdateAllHighlightsVisibility()
     end
 end
 
+-- Добавь функцию поиска карты
+local function GetMap()
+    for _, v in ipairs(Workspace:GetChildren()) do
+        if v:FindFirstChild("CoinContainer") then
+            return v
+        end
+    end
+    return nil
+end
+
 local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
     if State.GunCache[gunPart] then return end
 
     local highlight = CreateHighlight(gunPart, CONFIG.Colors.Gun)
-    highlight.Enabled = State.GunESP  -- ИСПРАВЛЕНО: Учитываем текущее состояние
+    highlight.Enabled = State.GunESP
 
     local billboard = Instance.new("BillboardGui")
     billboard.Adornee = gunPart
     billboard.Size = UDim2.new(0, 150, 0, 40)
     billboard.StudsOffset = Vector3.new(0, 2, 0)
     billboard.AlwaysOnTop = true
-    billboard.Enabled = State.GunESP  -- ИСПРАВЛЕНО: Учитываем текущее состояние
+    billboard.Enabled = State.GunESP
     billboard.Parent = gunPart
 
     local textLabel = Instance.new("TextLabel")
     textLabel.Text = "GUN"
     textLabel.Font = Enum.Font.GothamBold
-    textLabel.TextSize = 18
+    textLabel.TextSize = 14
     textLabel.TextColor3 = CONFIG.Colors.Gun
     textLabel.BackgroundTransparency = 1
     textLabel.Size = UDim2.new(1, 0, 1, 0)
@@ -1628,40 +1607,74 @@ local function UpdateGunESPVisibility()
 end
 
 local function SetupGunTracking()
-    local gunAddedConnection = Workspace.DescendantAdded:Connect(function(obj)
-        if obj:IsA("BasePart") and obj.Name == "GunDrop" then
-            task.wait(0.1)
-            CreateGunESP(obj)
-            if State.NotificationsEnabled then
-                task.spawn(function()
-                ShowNotification(
-                    "<font color=\"rgb(255, 200, 50)\">Gun dropped</font>",
-                    CONFIG.Colors.Text
-                )
-                end)
+    local mapCheckLoop = RunService.Heartbeat:Connect(function()
+        local map = GetMap()
+        
+        -- Если карты нет (между раундами), сбрасываем
+        if not map then
+            currentMap = nil
+            if currentMapConnection then
+                currentMapConnection:Disconnect()
+                currentMapConnection = nil
             end
+            return
+        end
+        
+        -- Если карта изменилась, переподключаемся
+        if map ~= currentMap then
+            if currentMapConnection then
+                currentMapConnection:Disconnect()
+                currentMapConnection = nil
+            end
+            
+            currentMapConnection = map.ChildAdded:Connect(function(child)
+                if child.Name == "GunDrop" then
+                    task.wait(0.1)
+                    
+                    local gunPart = child
+                    if child:IsA("Model") then
+                        gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+                    end
+                    
+                    if gunPart and gunPart:IsA("BasePart") then
+                        CreateGunESP(gunPart)
+                        
+                        if State.NotificationsEnabled then
+                            ShowNotification(
+                                "<font color=\"rgb(255, 200, 50)\">Gun Dropped</font>",
+                                CONFIG.Colors.Gun
+                            )
+                        end
+                    end
+                end
+            end)
+            
+            currentMap = map
         end
     end)
-
-    local gunRemovedConnection = Workspace.DescendantRemoving:Connect(function(obj)
-        if obj:IsA("BasePart") and obj.Name == "GunDrop" then
-            RemoveGunESP(obj)
-        end
-    end)
-
-    table.insert(State.Connections, gunAddedConnection)
-    table.insert(State.Connections, gunRemovedConnection)
+    
+    table.insert(State.Connections, mapCheckLoop)
 end
 
 local function InitialGunScan()
-    if State.GunESP then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj.Name == "GunDrop" then
-                CreateGunESP(obj)
-            end
+    if not State.GunESP then return end
+    
+    local map = GetMap()
+    if not map then return end
+    
+    local gunDrop = map:FindFirstChild("GunDrop")
+    if gunDrop then
+        local gunPart = gunDrop
+        if gunDrop:IsA("Model") then
+            gunPart = gunDrop.PrimaryPart or gunDrop:FindFirstChildWhichIsA("BasePart")
+        end
+        
+        if gunPart and gunPart:IsA("BasePart") then
+            CreateGunESP(gunPart)
         end
     end
 end
+
 
 local function StartRoleChecking()
     if State.RoleCheckLoop then
@@ -3278,18 +3291,35 @@ end
 
 
 closeButton.MouseButton1Click:Connect(function()
+    -- Закрыть все открытые дропдауны
     if State.UIElements.OpenDropdowns then
         for _, closeFunc in ipairs(State.UIElements.OpenDropdowns) do
             pcall(closeFunc)
         end
-    end
-    -- Очистка highlights
-    CleanupMemory()
-    if State.NoClipEnabled then 
-        DisableNoClip() 
+        State.UIElements.OpenDropdowns = {}
     end
 
-    -- Отключение всех соединений
+    -- Очистка ESP / gun / coin
+    CleanupMemory()
+
+    -- Выключаем все активные режимы
+    if State.AutoFarmEnabled then
+        StopAutoFarm()
+    end
+    if State.NoClipEnabled then
+        DisableNoClip()
+    end
+    if State.AntiFlingEnabled then
+        DisableAntiFling()
+    end
+    if State.ExtendedHitboxEnabled then
+        DisableExtendedHitbox()
+    end
+    if State.GodModeEnabled then
+        ToggleGodMode()  -- сам отключит свои коннекты и сбросит HP
+    end
+
+    -- Отключение всех общих соединений
     for _, connection in ipairs(State.Connections) do
         pcall(function()
             if connection and connection.Disconnect then
@@ -3297,24 +3327,17 @@ closeButton.MouseButton1Click:Connect(function()
             end
         end)
     end
+    State.Connections = {}
 
     -- Очистка UI
-    if gui then gui:Destroy() end
-    if State.UIElements.NotificationGui then 
-        State.UIElements.NotificationGui:Destroy() 
+    if gui then pcall(function() gui:Destroy() end) end
+    if State.UIElements.NotificationGui then
+        pcall(function() State.UIElements.NotificationGui:Destroy() end)
+        State.UIElements.NotificationGui = nil
+        State.UIElements.NotificationContainer = nil
     end
 
-    -- Отключение Auto Farm
-    if State.AutoFarmEnabled then
-        StopAutoFarm()
-    end
-
-    -- Отключение всех активных функций
-    if State.NoClipEnabled then DisableNoClip() end
-    if State.AntiFlingEnabled then DisableAntiFling() end
-    if State.ExtendedHitboxEnabled then DisableExtendedHitbox() end
-
-    -- Финальная очистка
+    -- Финальный флаг
     getgenv().MM2_ESP_Script = false
 end)
 
