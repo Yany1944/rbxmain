@@ -1,15 +1,15 @@
-    if game.PlaceId ~= 142823291 then return end
+if game.PlaceId ~= 142823291 then return end
 
-    if not game:IsLoaded() then
-        game.Loaded:Wait()
-    end
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Emotes.lua"))()
 
-    if getgenv().MM2_ESP_Script then
-        return
-    end
-    getgenv().MM2_ESP_Script = true
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
 
--- ✅ ПОЛНОЕ ПОДАВЛЕНИЕ CorePackages ОШИБОК
+if getgenv().MM2_ESP_Script then
+    return
+end
+getgenv().MM2_ESP_Script = true
 pcall(function()
     local StarterGui = game:GetService("StarterGui")
     
