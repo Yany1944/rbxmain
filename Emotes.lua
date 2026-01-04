@@ -2140,25 +2140,23 @@ task.spawn(function()
     end
 end)
 
--- Добавляем дополнительную клавишу ` для открытия меню эмоций
+-- Добавляем клавишу ` которая симулирует нажатие .
 if UserInputService.KeyboardEnabled then
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+    
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
-        -- При нажатии на ` открываем/закрываем меню эмоций
+        -- При нажатии на ` симулируем нажатие .
         if input.KeyCode == Enum.KeyCode.Backquote then
-            local success = pcall(function()
-                local emotesMenu = CoreGui.RobloxGui.EmotesMenu.Children
-                emotesMenu.Visible = not emotesMenu.Visible
-            end)
-            
-            -- Если меню не найдено, пробуем через GuiService
-            if not success then
-                pcall(function()
-                    local GuiService = game:GetService("GuiService")
-                    GuiService.EmotesMenuOpen = not GuiService.EmotesMenuOpen
-                end)
-            end
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Period, false, game)
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input, gameProcessed)
+        -- Отпускаем клавишу .
+        if input.KeyCode == Enum.KeyCode.Backquote then
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Period, false, game)
         end
     end)
     
