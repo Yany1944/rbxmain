@@ -2150,9 +2150,32 @@ if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
 end
 
 if UserInputService.KeyboardEnabled then
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.KeyCode == Enum.KeyCode.Backquote then
+            local StarterGui = game:GetService("StarterGui")
+            local CoreGui = game:GetService("CoreGui")
+            
+            local robloxGui = CoreGui:FindFirstChild("RobloxGui")
+            local emotesMenu = robloxGui and robloxGui:FindFirstChild("EmotesMenu")
+            
+            if emotesMenu and emotesMenu:FindFirstChild("Children") then
+                local isVisible = emotesMenu.Children.Visible
+                emotesMenu.Children.Visible = not isVisible
+            else
+                StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
+                task.wait(0.1)
+                if emotesMenu and emotesMenu:FindFirstChild("Children") then
+                    emotesMenu.Children.Visible = true
+                end
+            end
+        end
+    end)
+    
     getgenv().Notify({
         Title = '7yd7 | Emote PC',
-        Content = '💻 Open menu press button "."',
+        Content = '💻 Open menu press button "`"',
         Duration = 10
     })
 end
