@@ -2149,48 +2149,23 @@ if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
     })
 end
 
--- Обработчик открытия меню на клавишу ` (работает с любой раскладкой)
+-- Добавляем дополнительную клавишу ` для открытия меню эмоций
 if UserInputService.KeyboardEnabled then
-    local lastToggleTime = 0
-    local TOGGLE_COOLDOWN = 0.3
-    
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
-        -- Проверяем клавишу ` (Grave/Backquote) - работает независимо от раскладки
-        if input.KeyCode == Enum.KeyCode.Backquote or input.KeyCode == Enum.KeyCode.Grave then
-            local currentTime = tick()
-            if currentTime - lastToggleTime < TOGGLE_COOLDOWN then
-                return
-            end
-            lastToggleTime = currentTime
-            
+        -- При нажатии на ` вызываем то же действие, что и на .
+        if input.KeyCode == Enum.KeyCode.Backquote then
             local StarterGui = game:GetService("StarterGui")
-            local CoreGui = game:GetService("CoreGui")
-            
-            -- Включаем EmotesMenu если отключено
-            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
-            task.wait(0.05)
-            
-            -- Переключаем видимость меню
-            local success = pcall(function()
-                local emotesMenu = CoreGui.RobloxGui.EmotesMenu.Children
-                emotesMenu.Visible = not emotesMenu.Visible
-            end)
-            
-            if not success then
-                -- Если меню не существует, принудительно открываем
-                StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, false)
-                task.wait(0.05)
-                StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
-            end
+            StarterGui:SetCore("EmotesMenuOpen", true)
         end
     end)
     
     getgenv().Notify({
         Title = '7yd7 | Emote PC',
-        Content = '💻 Open menu: press "`" key (Ё in RU layout)',
+        Content = '💻 Open menu: "." or "`" (Ё)',
         Duration = 10
     })
 end
+
 
