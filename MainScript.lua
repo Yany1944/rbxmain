@@ -59,7 +59,6 @@ end
 
     local CONFIG = {
         HideKey = Enum.KeyCode.Q,
-        CheckInterval = 0.5,
         Colors = {
             Background = Color3.fromRGB(25, 25, 30),
             Section = Color3.fromRGB(35, 35, 40),
@@ -173,6 +172,22 @@ local State = {
     -- Notifications
     NotificationQueue = {},
     CurrentNotification = nil,
+
+    -- Trolling
+    OrbitEnabled = false,
+    OrbitThread = nil,
+    OrbitAngle = 0,
+    OrbitRadius = 5,
+    OrbitSpeed = 2,
+    OrbitHeight = 0,
+    OrbitTilt = 0,
+    LoopFlingEnabled = false,
+    LoopFlingThread = nil,
+    BlockPathEnabled = false,
+    BlockPathThread = nil,
+    BlockPathPosition = 0,
+    BlockPathSpeed = 0.2,
+    BlockPathDirection = 1,
     
     -- Keybinds
     Keybinds = {
@@ -228,6 +243,15 @@ local function CleanupMemory()
     State.NotificationQueue = {}
     State.CurrentNotification = nil
     State.CoinBlacklist = {}
+
+-- Отключаем trolling
+    State.OrbitEnabled = false
+    State.LoopFlingEnabled = false
+    State.BlockPathEnabled = false
+    
+    if State.OrbitThread then task.cancel(State.OrbitThread) end
+    if State.LoopFlingThread then task.cancel(State.LoopFlingThread) end
+    if State.BlockPathThread then task.cancel(State.BlockPathThread) end
 end
 
 local function FullShutdown()
@@ -285,7 +309,16 @@ local function FullShutdown()
             LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
         end)
     end
+    -- Отключаем trolling
+    State.OrbitEnabled = false
+    State.LoopFlingEnabled = false
+    State.BlockPathEnabled = false
+    State.AlreadyFlungPlayers = {}
     
+    if State.OrbitThread then task.cancel(State.OrbitThread) end
+    if State.LoopFlingThread then task.cancel(State.LoopFlingThread) end
+    if State.BlockPathThread then task.cancel(State.BlockPathThread) end
+
     if State.FPDH then
         workspace.FallenPartsDestroyHeight = State.FPDH
     end
@@ -294,54 +327,6 @@ local function FullShutdown()
     lastCacheTime = 0
 end
 
-
-local function FindRole(player)
-    if not player or not player.Character then return nil end
-
-    local character = player.Character
-    local backpack = player:WaitForChild("Backpack", 2)  -- ✅ Ждем загрузки
-
-    -- Проверка на убийцу
-    if character:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife")) then
-        return "Murder"
-    end
-
-    -- Проверка на шерифа
-    if character:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun")) then
-        return "Sheriff"
-    end
-
-    return "Innocent"
-end
-
--- Универсальная функция поиска убийцы (возвращает Player или имя)
-local function FindMurderer(returnName)
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character then
-            local knife = player.Character:FindFirstChild("Knife")
-            if knife then
-                return returnName and player.Name or player
-            end
-
-            if player.Backpack then
-                local knifeInBackpack = player.Backpack:FindFirstChild("Knife")
-                if knifeInBackpack then
-                    return returnName and player.Name or player
-                end
-            end
-        end
-    end
-    return nil
-end
-
--- Алиасы для совместимости
-local function findMurderer()
-    return FindMurderer(false) -- возвращает Player
-end
-
-local function GetMurdererName()
-    return FindMurderer(true) -- возвращает Name
-end
 
 
 local function findNearestPlayer()
@@ -527,6 +512,36 @@ local FlingNeutralizerConnection = nil
 local DetectedFlingers = {}
 local FlingBlockedNotified = false
 
+-- ========================================
+-- ✅ НОВЫЕ ФУНКЦИИ (MANA LOGIC)
+-- ========================================
+
+local function getMurder()
+    -- ✅ ПРОВЕРЯЕМ ВСЕХ ИГРОКОВ (включая LocalPlayer)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        local backpack = plr:FindFirstChild("Backpack")
+        
+        if (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife")) then
+            return plr
+        end
+    end
+    return nil
+end
+
+local function getSheriff()
+    -- ✅ ПРОВЕРЯЕМ ВСЕХ ИГРОКОВ (включая LocalPlayer)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        local backpack = plr:FindFirstChild("Backpack")
+        
+        if (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun")) then
+            return plr
+        end
+    end
+    return nil
+end
+
 
 local function EnableAntiFling()
     if AntiFlingEnabled then return end
@@ -624,6 +639,7 @@ local function DisableAntiFling()
     end
 end
 
+-- Найди функцию getAllPlayers() и обнови:
 local function getAllPlayers()
     local playerList = {}
     for _, player in ipairs(Players:GetPlayers()) do
@@ -631,8 +647,11 @@ local function getAllPlayers()
             table.insert(playerList, player.Name)
         end
     end
+    -- Сортируем по алфавиту
+    table.sort(playerList)
     return playerList
 end
+
 
 local function getPlayerByName(playerName)
     for _, player in ipairs(Players:GetPlayers()) do
@@ -810,7 +829,7 @@ end
 -- Добавь эти функции после функции FlingPlayer (примерно строка 850)
 
 local function FlingMurderer()
-    local murderer = findMurderer()
+    local murderer = getMurder()
     if not murderer then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
@@ -1256,7 +1275,7 @@ local function StartAutoFarm()
                 continue 
             end
 
-            local murdererExists = GetMurdererName() ~= nil
+            local murdererExists = getMurder() ~= nil
             
             if not murdererExists then
                 print("[Auto Farm] ⏳ Жду начала раунда...")
@@ -1285,13 +1304,13 @@ local function StartAutoFarm()
                     print("[Auto Farm] ⏳ Жду окончания раунда...")
                     repeat
                         task.wait(1)
-                    until GetMurdererName() == nil or not State.AutoFarmEnabled
+                    until getMurder() == nil or not State.AutoFarmEnabled
                     
                     -- ✅ ИСПРАВЛЕНО: Теперь ждём НАЧАЛА нового раунда
                     print("[Auto Farm] ⏳ Жду начала нового раунда...")
                     repeat
                         task.wait(1)
-                    until GetMurdererName() ~= nil or not State.AutoFarmEnabled
+                    until getMurder() ~= nil or not State.AutoFarmEnabled
                     
                     print("[Auto Farm] ✅ Новый раунд начался! Продолжаю фарм...")
                 else
@@ -1675,6 +1694,139 @@ local function ToggleGodMode()
     end
 end
 
+-- ========================================
+-- SMOOTH ORBIT MODE
+-- ========================================
+
+-- ========================================
+-- TROLLING FEATURES
+-- ========================================
+
+-- Rigid Orbit
+local function RigidOrbitPlayer(targetName, enabled)
+    if enabled then
+        State.OrbitAngle = 0
+        
+        State.OrbitThread = task.spawn(function()
+            while State.OrbitEnabled do
+                pcall(function()
+                    local target = getPlayerByName(targetName)
+                    if target and target.Character then
+                        local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
+                        local myChar = LocalPlayer.Character
+                        
+                        if targetHRP and myChar then
+                            local myHRP = myChar:FindFirstChild("HumanoidRootPart")
+                            if myHRP then
+                                State.OrbitAngle = State.OrbitAngle + State.OrbitSpeed
+                                
+                                local angleRad = math.rad(State.OrbitAngle)
+                                local tiltRad = math.rad(State.OrbitTilt)
+                                
+                                local x = math.cos(angleRad) * State.OrbitRadius
+                                local z = math.sin(angleRad) * State.OrbitRadius
+                                
+                                local y = math.sin(angleRad) * State.OrbitRadius * math.sin(tiltRad)
+                                local adjustedX = x * math.cos(tiltRad)
+                                local adjustedZ = z * math.cos(tiltRad)
+                                
+                                myHRP.CFrame = targetHRP.CFrame * CFrame.new(
+                                    adjustedX,
+                                    State.OrbitHeight + y,
+                                    adjustedZ
+                                )
+                            end
+                        end
+                    end
+                end)
+                task.wait()
+            end
+        end)
+    else
+        if State.OrbitThread then
+            task.cancel(State.OrbitThread)
+            State.OrbitThread = nil
+        end
+    end
+end
+
+local function SimpleLoopFling(targetName, enabled)
+    if enabled then
+        State.LoopFlingThread = task.spawn(function()
+            while State.LoopFlingEnabled do
+                pcall(function()
+                    local target = getPlayerByName(targetName)
+                    if target then
+                        -- ✅ Просто вызываем существующую функцию FlingPlayer
+                        FlingPlayer(target)
+                    end
+                end)
+                task.wait(3)  -- ✅ Каждые 3 секунды
+            end
+        end)
+    else
+        if State.LoopFlingThread then
+            task.cancel(State.LoopFlingThread)
+            State.LoopFlingThread = nil
+        end
+    end
+end
+
+-- ========================================
+-- FORWARD-BACKWARD PENDULUM BLOCK PATH
+-- ========================================
+
+local function PendulumBlockPath(targetName, enabled)
+    if enabled then
+        State.BlockPathPosition = 0
+        State.BlockPathDirection = 1
+        
+        State.BlockPathThread = task.spawn(function()
+            while State.BlockPathEnabled do
+                pcall(function()
+                    local target = getPlayerByName(targetName)
+                    if target and target.Character then
+                        local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
+                        local myChar = LocalPlayer.Character
+                        
+                        if targetHRP and myChar then
+                            local myHRP = myChar:FindFirstChild("HumanoidRootPart")
+                            if myHRP then
+                                -- ✅ Обновляем позицию маятника
+                                State.BlockPathPosition = State.BlockPathPosition + (State.BlockPathSpeed * State.BlockPathDirection)
+                                
+                                -- ✅ Меняем направление при достижении границ (-4 до +4)
+                                if State.BlockPathPosition >= 5 then
+                                    State.BlockPathDirection = -1
+                                elseif State.BlockPathPosition <= -5 then
+                                    State.BlockPathDirection = 1
+                                end
+                                
+                                -- ✅ Позиция относительно игрока (проходим через него)
+                                -- -4 = сзади игрока на 4 стада
+                                -- 0 = В игроке
+                                -- +4 = впереди игрока на 4 стада
+                                local offset = CFrame.new(0, 0, State.BlockPathPosition)
+                                
+                                -- ✅ Финальная позиция - жёсткое крепление
+                                myHRP.CFrame = targetHRP.CFrame * offset
+                                
+                                -- ✅ Смотрим на игрока
+                                myHRP.CFrame = CFrame.new(myHRP.Position, targetHRP.Position)
+                            end
+                        end
+                    end
+                end)
+                task.wait()  -- Каждый фрейм
+            end
+        end)
+    else
+        if State.BlockPathThread then
+            task.cancel(State.BlockPathThread)
+            State.BlockPathThread = nil
+        end
+    end
+end
 
 
 local function CreateHighlight(adornee, color)
@@ -1693,17 +1845,20 @@ local function CreateHighlight(adornee, color)
 end
 
 local function UpdatePlayerHighlight(player, role)
-    if player == LocalPlayer then return end
-
+    if not player or player == LocalPlayer then return end
+    
     local character = player.Character
-    if not character or not character.Parent then 
+    if not character or not character.Parent then
+        -- Удаляем highlight если character пропал
         if State.PlayerHighlights[player] then
-            pcall(function() State.PlayerHighlights[player]:Destroy() end)
+            pcall(function()
+                State.PlayerHighlights[player]:Destroy()
+            end)
             State.PlayerHighlights[player] = nil
         end
-        return 
+        return
     end
-
+    
     local color, shouldShow
     if role == "Murder" then
         color = CONFIG.Colors.Murder
@@ -1717,48 +1872,27 @@ local function UpdatePlayerHighlight(player, role)
     else
         shouldShow = false
     end
-
+    
+    -- Удаляем старый highlight
     if State.PlayerHighlights[player] then
-        pcall(function() State.PlayerHighlights[player]:Destroy() end)
+        pcall(function()
+            State.PlayerHighlights[player]:Destroy()
+        end)
         State.PlayerHighlights[player] = nil
     end
-
-    local highlight = CreateHighlight(character, color)
-    if highlight then
-        highlight.Enabled = shouldShow
-        State.PlayerHighlights[player] = highlight
-    end
-end
-
-local function UpdateAllHighlightsVisibility()
-    for player, highlight in pairs(State.PlayerHighlights) do
-        if highlight and highlight.Parent then
-            local items = player.Backpack
-            local character = player.Character
-
-            local role = "Innocent"
-            if (items and items:FindFirstChild("Knife")) or (character and character:FindFirstChild("Knife")) then
-                role = "Murder"
-            elseif (items and items:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
-                role = "Sheriff"
-            end
-
-            local shouldShow = false
-            if role == "Murder" and State.MurderESP then
-                shouldShow = true
-            elseif role == "Sheriff" and State.SheriffESP then
-                shouldShow = true
-            elseif role == "Innocent" and State.InnocentESP then
-                shouldShow = true
-            end
-
-            highlight.Enabled = shouldShow
+    
+    -- Создаём новый highlight (ТОЛЬКО если нужно показывать)
+    if shouldShow then
+        local highlight = CreateHighlight(character, color)
+        if highlight then
+            highlight.Enabled = true
+            State.PlayerHighlights[player] = highlight
         end
     end
 end
 
--- Добавь функцию поиска карты
-local function GetMap()
+
+local function getMap()
     for _, v in ipairs(Workspace:GetChildren()) do
         if v:FindFirstChild("CoinContainer") then
             return v
@@ -1767,10 +1901,15 @@ local function GetMap()
     return nil
 end
 
-local function CreateGunESP(gunPart, gunDropContainer)
+local function getGun()
+    local map = getMap()
+    if not map then return nil end
+    return map:FindFirstChild("GunDrop")
+end
+
+local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
     
-    -- Проверяем Parent
     if not gunPart.Parent then
         if State.GunCache[gunPart] then
             RemoveGunESP(gunPart)
@@ -1778,71 +1917,56 @@ local function CreateGunESP(gunPart, gunDropContainer)
         return
     end
     
-    -- Если уже есть ESP, просто обновляем видимость
     if State.GunCache[gunPart] then
-        local espData = State.GunCache[gunPart]
-        if espData.highlight then
-            espData.highlight.Enabled = State.GunESP
-        end
-        if espData.billboard then
-            espData.billboard.Enabled = State.GunESP
-        end
-        return
+        RemoveGunESP(gunPart)
     end
     
-    -- Создаём highlight
-    local success, highlight = pcall(function()
-        return CreateHighlight(gunPart, CONFIG.Colors.Gun)
-    end)
-    
-    if not success or not highlight then
-        return
-    end
-    
+    -- ✅ ЗОЛОТИСТЫЙ Highlight
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = gunPart
+    highlight.FillColor = Color3.fromRGB(255, 200, 50)  -- Золотистый
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255, 200, 50)
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Enabled = State.GunESP
+    highlight.Parent = gunPart
     
-    -- Billboard
+    -- ✅ КРАСИВЫЙ текст
     local billboard = Instance.new("BillboardGui")
+    billboard.Name = "GunESPLabel"
     billboard.Adornee = gunPart
-    billboard.Size = UDim2.new(0, 150, 0, 40)
-    billboard.StudsOffset = Vector3.new(0, 2, 0)
+    billboard.Size = UDim2.new(0, 140, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
     billboard.AlwaysOnTop = true
-    billboard.Enabled = State.GunESP
     billboard.Parent = gunPart
     
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Text = "GUN"
-    textLabel.Font = Enum.Font.GothamBold
-    textLabel.TextSize = 14
-    textLabel.TextColor3 = CONFIG.Colors.Gun
-    textLabel.BackgroundTransparency = 1
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.Parent = billboard
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Text = "GUN"
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)  -- Белый текст
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 12
+    label.TextStrokeTransparency = 0.6  -- Сильная обводка
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Parent = billboard
     
-    -- Сохраняем в кеш
     State.GunCache[gunPart] = {
         highlight = highlight,
-        billboard = billboard,
-        textLabel = textLabel,
-        container = gunDropContainer
+        billboard = billboard
     }
 end
 
-
 local function RemoveGunESP(gunPart)
-    if not gunPart then return end
+    if not gunPart or not State.GunCache[gunPart] then return end
     
     local espData = State.GunCache[gunPart]
-    if not espData then return end
     
-    -- ✅ Безопасное удаление
     pcall(function()
         if espData.highlight then
             espData.highlight:Destroy()
         end
-    end)
-    
-    pcall(function()
         if espData.billboard then
             espData.billboard:Destroy()
         end
@@ -1850,6 +1974,7 @@ local function RemoveGunESP(gunPart)
     
     State.GunCache[gunPart] = nil
 end
+
 
 
 local function UpdateGunESPVisibility()
@@ -1863,233 +1988,163 @@ local function UpdateGunESPVisibility()
     end
 end
 
-local function InitialGunScan()
-    if not State.GunESP then return end
-    
-    local map = GetMap()
-    if not map then return end
-    
-    -- Проверяем: пистолет у кого-то из игроков?
-    local function isGunEquipped()
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character and player.Character:FindFirstChild("Gun") then
-                return true
-            end
-            if player.Backpack and player.Backpack:FindFirstChild("Gun") then
-                return true
-            end
-        end
-        return false
-    end
-    
-    -- Если пистолет экипирован - не сканируем
-    if isGunEquipped() then
-        return
-    end
-    
-    -- Сканируем GunDrop
-    for _, child in ipairs(map:GetChildren()) do
-        if child.Name == "GunDrop" then
-            task.wait(0.05)
-            
-            local gunPart = child
-            if child:IsA("Model") then
-                gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
-            end
-            
-            if gunPart and gunPart:IsA("BasePart") and gunPart.Parent then
-                CreateGunESP(gunPart, child)
-            end
-        end
-    end
-end
+local previousGun = nil  -- ✅ ДОБАВИТЬ переменную для отслеживания
 
 local function SetupGunTracking()
-    local mapCheckLoop = RunService.Heartbeat:Connect(function()
-        local map = GetMap()
-        
-        if not map then
-            currentMap = nil
-            if currentMapConnection then
-                currentMapConnection:Disconnect()
-                currentMapConnection = nil
-            end
-            -- Очищаем кеш
-            for gunPart, _ in pairs(State.GunCache) do
-                RemoveGunESP(gunPart)
-            end
-            return
-        end
-        
-        if map ~= currentMap then
-            if currentMapConnection then
-                currentMapConnection:Disconnect()
+    -- Отключаем старые connections
+    if currentMapConnection then
+        currentMapConnection:Disconnect()
+        currentMapConnection = nil
+    end
+    
+    -- ✅ HEARTBEAT для постоянной проверки
+    currentMapConnection = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            local gun = getGun()
+            
+            -- ✅ УВЕДОМЛЕНИЕ о выпадении пистолета
+            if gun and gun ~= previousGun then
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(255, 200, 50)\">🔫 Gun dropped!</font>",
+                        CONFIG.Colors.Gun
+                    )
+                end
+                previousGun = gun
             end
             
-            -- ChildRemoved - удаление GunDrop
-            local removeConnection = map.ChildRemoved:Connect(function(child)
-                if child.Name == "GunDrop" then
-                    -- Удаляем ESP для этого контейнера
-                    for cachedGunPart, espData in pairs(State.GunCache) do
-                        if espData.container == child then
-                            RemoveGunESP(cachedGunPart)
-                        end
+            -- Если пистолет исчез (подобрали)
+            if not gun and previousGun then
+                previousGun = nil
+            end
+            
+            -- Если пистолет есть
+            if gun and State.GunESP then
+                -- Создаём ESP если его нет
+                if not State.GunCache[gun] then
+                    CreateGunESP(gun)
+                else
+                    -- Обновляем видимость
+                    local espData = State.GunCache[gun]
+                    if espData.highlight then
+                        espData.highlight.Enabled = State.GunESP
                     end
                 end
-            end)
-            
-            -- ChildAdded - появление GunDrop
-            local addConnection = map.ChildAdded:Connect(function(child)
-                if child.Name == "GunDrop" then
-                    task.wait(0.15)  -- Ждём чтобы части загрузились
-                    
-                    pcall(function()
-                        -- Проверяем: пистолет у кого-то?
-                        local isEquipped = false
-                        for _, player in ipairs(Players:GetPlayers()) do
-                            if player.Character and player.Character:FindFirstChild("Gun") then
-                                isEquipped = true
-                                break
-                            end
-                            if player.Backpack and player.Backpack:FindFirstChild("Gun") then
-                                isEquipped = true
-                                break
-                            end
-                        end
-                        
-                        -- Если экипирован - не создаём ESP
-                        if isEquipped then
-                            return
-                        end
-                        
-                        -- Получаем BasePart
-                        local gunPart = child
-                        if child:IsA("Model") then
-                            gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
-                        end
-                        
-                        if gunPart and gunPart:IsA("BasePart") and gunPart.Parent then
-                            CreateGunESP(gunPart, child)
-                            
-                            -- Уведомление только если ESP включен
-                            if State.GunESP and State.NotificationsEnabled then
-                                ShowNotification("<font color=\"rgb(255, 200, 50)\">🔫 Gun Dropped</font>", CONFIG.Colors.Gun)
-                            end
-                        end
-                    end)
-                end
-            end)
-            
-            table.insert(State.Connections, removeConnection)
-            table.insert(State.Connections, addConnection)
-            
-            currentMap = map
-            
-            -- Начальное сканирование (если ESP включен)
-            if State.GunESP then
-                task.spawn(function()
-                    task.wait(0.2)
-                    InitialGunScan()
-                end)
             end
-        end
+            
+            -- Очистка старых ESP (пистолет был подобран)
+            for cachedGun, espData in pairs(State.GunCache) do
+                if cachedGun ~= gun or not gun then
+                    RemoveGunESP(cachedGun)
+                end
+            end
+        end)
     end)
     
-    table.insert(State.Connections, mapCheckLoop)
+    table.insert(State.Connections, currentMapConnection)
 end
 
 local function StartRoleChecking()
     if State.RoleCheckLoop then
-        State.RoleCheckLoop:Disconnect()
+        pcall(function()
+            State.RoleCheckLoop:Disconnect()
+        end)
+        State.RoleCheckLoop = nil
     end
-
-    State.RoleCheckLoop = task.spawn(function()
-        while getgenv().MM2_ESP_Script do
-            pcall(function()
-                local murder, sheriff = nil, nil
+    
+    -- Очистка всех highlight перед началом
+    for player, highlight in pairs(State.PlayerHighlights) do
+        pcall(function()
+            highlight:Destroy()
+        end)
+        State.PlayerHighlights[player] = nil
+    end
+    
+    State.RoleCheckLoop = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            -- ✅ ОПРЕДЕЛЯЕМ роли через функции (ТОЛЬКО ОДИН ВОЗВРАТ)
+            local murder = getMurder()
+            local sheriff = getSheriff()
+            
+            -- ✅ СОЗДАЁМ ТАБЛИЦЫ ДЛЯ КАЖДОЙ РОЛИ (без дубликатов)
+            local murderers = {}
+            local sheriffs = {}
+            local innocents = {}
+            
+            -- ✅ РАСПРЕДЕЛЯЕМ игроков по ролям
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr == murder then
+                    table.insert(murderers, plr)
+                elseif plr == sheriff then
+                    table.insert(sheriffs, plr)
+                else
+                    table.insert(innocents, plr)
+                end
+            end
+            
+            -- ✅ ОБНОВЛЯЕМ highlights
+            for _, plr in ipairs(murderers) do
+                UpdatePlayerHighlight(plr, "Murder")
+            end
+            
+            for _, plr in ipairs(sheriffs) do
+                UpdatePlayerHighlight(plr, "Sheriff")
+            end
+            
+            for _, plr in ipairs(innocents) do
+                UpdatePlayerHighlight(plr, "Innocent")
+            end
+            
+            -- ✅ Определение начала раунда
+            if murder and sheriff and State.roundStart then
+                State.roundActive = true
+                State.roundStart = false
+                State.prevMurd = murder
+                State.prevSher = sheriff
+                State.heroSent = false
                 
-                -- ✅ ПЕРВЫЙ ПРОХОД: Определяем роли
-                for _, p in pairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Character then
-                        local items = p.Backpack
-                        local character = p.Character
-
-                        if (items and items:FindFirstChild("Knife")) or 
-                           (character and character:FindFirstChild("Knife")) then
-                            murder = p
-                        elseif (items and items:FindFirstChild("Gun")) or 
-                               (character and character:FindFirstChild("Gun")) then
-                            sheriff = p
-                        end
-                    end
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(255, 50, 50)\">🔪 Murderer:</font> " .. murder.Name,
+                        CONFIG.Colors.Text
+                    )
+                    task.wait(0.1)
+                    ShowNotification(
+                        "<font color=\"rgb(50, 150, 255)\">👮 Sheriff:</font> " .. sheriff.Name,
+                        CONFIG.Colors.Text
+                    )
                 end
+            end
+            
+            -- ✅ Определение конца раунда
+            if not murder and State.roundActive then
+                State.roundActive = false
+                State.roundStart = true
+                State.prevMurd = nil
+                State.prevSher = nil
+                State.heroSent = false
                 
-                -- ✅ ВТОРОЙ ПРОХОД: Обновляем highlights ПОСЛЕ определения всех ролей
-                for _, p in pairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer then
-                        if p == murder then
-                            UpdatePlayerHighlight(p, "Murder")
-                        elseif p == sheriff then
-                            UpdatePlayerHighlight(p, "Sheriff")
-                        else
-                            UpdatePlayerHighlight(p, "Innocent")
-                        end
-                    end
+                if State.NotificationsEnabled then
+                    ShowNotification("<font color=\"rgb(220, 220, 220)\">⏸️ Round ended</font>", CONFIG.Colors.Text)
                 end
-
-                -- ✅ Логика раунда БЕЗ race conditions
-                if not murder and State.roundActive then
-                    State.roundActive = false
-                    State.roundStart = true
-                    State.prevMurd = nil
-                    State.prevSher = nil
-                    State.heroSent = false
-
-                    if State.NotificationsEnabled then
-                        ShowNotification("<font color=\"rgb(220, 220, 220)\">Round ended</font>", CONFIG.Colors.Text)
-                    end
+            end
+            
+            -- ✅ Новый герой (Sheriff умер, кто-то подобрал пистолет)
+            if sheriff and State.prevSher and sheriff ~= State.prevSher and murder and murder == State.prevMurd and not State.heroSent then
+                State.prevSher = sheriff
+                State.heroSent = true
+                
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(50, 150, 255)\">🦸 New Sheriff:</font> " .. sheriff.Name,
+                        CONFIG.Colors.Text
+                    )
                 end
-
-                -- ✅ Начало раунда: оба игрока найдены
-                if murder and sheriff and State.roundStart then
-                    State.roundActive = true
-                    State.roundStart = false  -- ❌ ПЕРЕМЕСТИТЕ ЭТО СЮДА
-                    State.prevMurd = murder
-                    State.prevSher = sheriff
-                    State.heroSent = false
-
-                    if State.NotificationsEnabled then
-                        ShowNotification(
-                            "<font color=\"rgb(255, 50, 50)\">Murderer: </font>" .. murder.Name,
-                            CONFIG.Colors.Text
-                        )
-                        task.wait(0.1)  -- ✅ Небольшая задержка между нотификациями
-                        ShowNotification(
-                            "<font color=\"rgb(50, 150, 255)\">Sheriff: </font>" .. sheriff.Name,
-                            CONFIG.Colors.Text
-                        )
-                    end
-                end
-
-                -- ✅ Смена шерифа (герой подобрал пистолет)
-                if sheriff and State.prevSher and sheriff ~= State.prevSher and 
-                   murder and murder == State.prevMurd and not State.heroSent then
-                    
-                    State.prevSher = sheriff
-                    State.heroSent = true
-                    
-                    if State.NotificationsEnabled then
-                        ShowNotification(
-                            "<font color=\"rgb(50, 150, 255)\">New Sheriff: </font>" .. sheriff.Name,
-                            CONFIG.Colors.Text
-                        )
-                    end
-                end
-            end)
-
-            task.wait(CONFIG.CheckInterval)
-        end
+            end
+        end)
     end)
+    
+    table.insert(State.Connections, State.RoleCheckLoop)
 end
 
 local function PlayEmote(emoteName)
@@ -2210,7 +2265,7 @@ end
 
 local function knifeThrow(silent)
     -- Проверка: игрок убийца?
-    local murderer = findMurderer()
+    local murderer = getMurder()
     if murderer ~= LocalPlayer then 
         if not silent then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
@@ -2300,7 +2355,7 @@ local function shootMurderer()
     end
 
     -- Найти убийцу
-    local murderer = findMurderer()
+    local murderer = getMurder()
     if not murderer then
         ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No murderer found</font>", nil)
         task.delay(1, function()
@@ -2551,7 +2606,7 @@ end
 
 local function InstantKillAll()
     -- Проверка роли
-    if findMurderer() ~= LocalPlayer then
+    if getMurder() ~= LocalPlayer then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
         end
@@ -3511,11 +3566,10 @@ end
     VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", function(s) State.NotificationsEnabled = s end)
    
     VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", function(s) State.GunESP = s if s then task.spawn(InitialGunScan) end UpdateGunESPVisibility() end)
-
-    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; UpdateAllHighlightsVisibility() end)
-    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; UpdateAllHighlightsVisibility() end)
-    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; UpdateAllHighlightsVisibility() end)
+    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", function(s) State.GunESP = s; end)
+    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; end)
+    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; end)
+    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; end)
 
 
     local CombatTab = CreateTab("Combat")
@@ -3595,6 +3649,121 @@ VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", function(s) State.G
     UtilityTab:CreateSection("SERVER MANAGEMENT")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, function() Rejoin() end)
     UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), function() ServerHop() end)
+-- ========================================
+-- TROLLING TAB
+-- ========================================
+local TrollingTab = CreateTab("Trolling")
+
+-- Target Selection
+TrollingTab:CreateSection("🎯 SELECT TARGET")
+TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
+
+-- Main Trolling Features
+TrollingTab:CreateSection("💀 TROLLING MODES")
+
+TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", function(s)
+    State.OrbitEnabled = s
+    if State.SelectedPlayerForFling then
+        RigidOrbitPlayer(State.SelectedPlayerForFling, s)
+        if s and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 200, 50)\">🌀 Orbiting " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+        end
+    else
+        if s and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+        end
+        State.OrbitEnabled = false
+    end
+end)
+
+TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", function(s)
+    State.LoopFlingEnabled = s
+    if State.SelectedPlayerForFling then
+        SimpleLoopFling(State.SelectedPlayerForFling, s)
+        if s and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 200, 50)\">💥 Loop Flinging " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+        end
+    else
+        if s and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+        end
+        State.LoopFlingEnabled = false
+    end
+end)
+
+TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", function(s)
+    State.BlockPathEnabled = s
+    if State.SelectedPlayerForFling then
+        PendulumBlockPath(State.SelectedPlayerForFling, s)
+        if s and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 200, 50)\">🚧 Blocking " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+        end
+    else
+        if s and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+        end
+        State.BlockPathEnabled = false
+    end
+end)
+
+-- Orbit Settings
+TrollingTab:CreateSection("⚙️ ORBIT SETTINGS")
+
+TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, 5, function(v)
+    State.OrbitRadius = v
+end, 0.5)
+
+TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, 3, function(v)
+    State.OrbitSpeed = v
+end, 0.5)
+
+TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, 0, function(v)
+    State.OrbitHeight = v
+end, 1)
+
+TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, 0, function(v)
+    State.OrbitTilt = v
+end, 5)
+
+-- Block Path Settings
+TrollingTab:CreateSection("⚙️ BLOCK PATH SETTINGS")
+
+TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, 0.1, function(v)
+    State.BlockPathSpeed = v
+end, 0.05)
+
+-- Orbit Presets
+TrollingTab:CreateSection("⚡ ORBIT PRESETS")
+
+TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), function()
+    State.OrbitRadius = 4
+    State.OrbitSpeed = 10
+    State.OrbitHeight = 0
+    State.OrbitTilt = 0
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(255, 170, 50)\">⚡ Fast Spin</font>", CONFIG.Colors.Orange)
+    end
+end)
+
+TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), function()
+    State.OrbitRadius = 5
+    State.OrbitSpeed = 5
+    State.OrbitHeight = 0
+    State.OrbitTilt = 90
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">🎢 Vertical Loop</font>", CONFIG.Colors.Red)
+    end
+end)
+
+TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), function()
+    State.OrbitRadius = 3
+    State.OrbitSpeed = 15
+    State.OrbitHeight = 0
+    State.OrbitTilt = 30
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(200, 100, 200)\">💫 Chaotic Spin</font>", Color3.fromRGB(200, 100, 200))
+    end
+end)
 
 
     local footer = Create("TextLabel", {
@@ -3805,7 +3974,6 @@ pcall(function()
 end)
 
 SetupGunTracking()
-InitialGunScan()
 StartRoleChecking()
 SetupAntiAFK()
 
