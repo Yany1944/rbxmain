@@ -2140,24 +2140,18 @@ task.spawn(function()
     end
 end)
 
-if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/OpenEmote.lua"))()
-    getgenv().Notify({
-        Title = '7yd7 | Emote Mobile',
-        Content = '📱 Added emote open button for ease of use',
-        Duration = 10
-    })
-end
-
 -- Добавляем дополнительную клавишу ` для открытия меню эмоций
 if UserInputService.KeyboardEnabled then
+    local GuiService = game:GetService("GuiService")
+    
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
-        -- При нажатии на ` вызываем то же действие, что и на .
+        -- При нажатии на ` открываем меню эмоций
         if input.KeyCode == Enum.KeyCode.Backquote then
-            local StarterGui = game:GetService("StarterGui")
-            StarterGui:SetCore("EmotesMenuOpen", true)
+            pcall(function()
+                GuiService:SetEmotesMenuOpen(true)
+            end)
         end
     end)
     
@@ -2167,5 +2161,3 @@ if UserInputService.KeyboardEnabled then
         Duration = 10
     })
 end
-
-
