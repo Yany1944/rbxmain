@@ -3649,133 +3649,128 @@ end
     UtilityTab:CreateSection("SERVER MANAGEMENT")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, function() Rejoin() end)
     UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), function() ServerHop() end)
--- ========================================
--- TROLLING TAB
--- ========================================
-local TrollingTab = CreateTab("Trolling")
 
--- Target Selection
-TrollingTab:CreateSection("🎯 SELECT TARGET")
-TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
+    local TrollingTab = CreateTab("Trolling")
 
--- Main Trolling Features
-TrollingTab:CreateSection("💀 TROLLING MODES")
+    TrollingTab:CreateSection("🎯 SELECT TARGET")
+    TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
 
-TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", function(s)
-    State.OrbitEnabled = s
-    if State.SelectedPlayerForFling then
-        RigidOrbitPlayer(State.SelectedPlayerForFling, s)
-        if s and State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 200, 50)\">🌀 Orbiting " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+    TrollingTab:CreateSection("💀 TROLLING MODES")
+
+    TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", function(s)
+        State.OrbitEnabled = s
+        if State.SelectedPlayerForFling then
+            RigidOrbitPlayer(State.SelectedPlayerForFling, s)
+            if s and State.NotificationsEnabled then
+                ShowNotification("<font color=\"rgb(255, 200, 50)\">🌀 Orbiting " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+            end
+        else
+            if s and State.NotificationsEnabled then
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+            end
+            State.OrbitEnabled = false
         end
-    else
-        if s and State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+    end)
+
+    TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", function(s)
+        State.LoopFlingEnabled = s
+        if State.SelectedPlayerForFling then
+            SimpleLoopFling(State.SelectedPlayerForFling, s)
+            if s and State.NotificationsEnabled then
+                ShowNotification("<font color=\"rgb(255, 200, 50)\">💥 Loop Flinging " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+            end
+        else
+            if s and State.NotificationsEnabled then
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+            end
+            State.LoopFlingEnabled = false
         end
-        State.OrbitEnabled = false
-    end
-end)
+    end)
 
-TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", function(s)
-    State.LoopFlingEnabled = s
-    if State.SelectedPlayerForFling then
-        SimpleLoopFling(State.SelectedPlayerForFling, s)
-        if s and State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 200, 50)\">💥 Loop Flinging " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+    TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", function(s)
+        State.BlockPathEnabled = s
+        if State.SelectedPlayerForFling then
+            PendulumBlockPath(State.SelectedPlayerForFling, s)
+            if s and State.NotificationsEnabled then
+                ShowNotification("<font color=\"rgb(255, 200, 50)\">🚧 Blocking " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+            end
+        else
+            if s and State.NotificationsEnabled then
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+            end
+            State.BlockPathEnabled = false
         end
-    else
-        if s and State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+    end)
+
+    TrollingTab:CreateSection("⚙️ ORBIT SETTINGS")
+
+    TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, 5, function(v)
+        State.OrbitRadius = v
+    end, 0.5)
+
+    TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, 3, function(v)
+        State.OrbitSpeed = v
+    end, 0.5)
+
+    TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, 0, function(v)
+        State.OrbitHeight = v
+    end, 1)
+
+    TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, 0, function(v)
+        State.OrbitTilt = v
+    end, 5)
+
+    -- Block Path Settings
+    TrollingTab:CreateSection("⚙️ BLOCK PATH SETTINGS")
+
+    TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, 0.1, function(v)
+        State.BlockPathSpeed = v
+    end, 0.05)
+
+    -- Orbit Presets
+    TrollingTab:CreateSection("⚡ ORBIT PRESETS")
+
+    TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), function()
+        State.OrbitRadius = 4
+        State.OrbitSpeed = 10
+        State.OrbitHeight = 0
+        State.OrbitTilt = 0
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 170, 50)\">⚡ Fast Spin</font>", CONFIG.Colors.Orange)
         end
-        State.LoopFlingEnabled = false
-    end
-end)
+    end)
 
-TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", function(s)
-    State.BlockPathEnabled = s
-    if State.SelectedPlayerForFling then
-        PendulumBlockPath(State.SelectedPlayerForFling, s)
-        if s and State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 200, 50)\">🚧 Blocking " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
+    TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), function()
+        State.OrbitRadius = 5
+        State.OrbitSpeed = 5
+        State.OrbitHeight = 0
+        State.OrbitTilt = 90
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">🎢 Vertical Loop</font>", CONFIG.Colors.Red)
         end
-    else
-        if s and State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
+    end)
+
+    TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), function()
+        State.OrbitRadius = 3
+        State.OrbitSpeed = 15
+        State.OrbitHeight = 0
+        State.OrbitTilt = 30
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(200, 100, 200)\">💫 Chaotic Spin</font>", Color3.fromRGB(200, 100, 200))
         end
-        State.BlockPathEnabled = false
-    end
-end)
-
--- Orbit Settings
-TrollingTab:CreateSection("⚙️ ORBIT SETTINGS")
-
-TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, 5, function(v)
-    State.OrbitRadius = v
-end, 0.5)
-
-TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, 3, function(v)
-    State.OrbitSpeed = v
-end, 0.5)
-
-TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, 0, function(v)
-    State.OrbitHeight = v
-end, 1)
-
-TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, 0, function(v)
-    State.OrbitTilt = v
-end, 5)
-
--- Block Path Settings
-TrollingTab:CreateSection("⚙️ BLOCK PATH SETTINGS")
-
-TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, 0.1, function(v)
-    State.BlockPathSpeed = v
-end, 0.05)
-
--- Orbit Presets
-TrollingTab:CreateSection("⚡ ORBIT PRESETS")
-
-TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), function()
-    State.OrbitRadius = 4
-    State.OrbitSpeed = 10
-    State.OrbitHeight = 0
-    State.OrbitTilt = 0
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(255, 170, 50)\">⚡ Fast Spin</font>", CONFIG.Colors.Orange)
-    end
-end)
-
-TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), function()
-    State.OrbitRadius = 5
-    State.OrbitSpeed = 5
-    State.OrbitHeight = 0
-    State.OrbitTilt = 90
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">🎢 Vertical Loop</font>", CONFIG.Colors.Red)
-    end
-end)
-
-TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), function()
-    State.OrbitRadius = 3
-    State.OrbitSpeed = 15
-    State.OrbitHeight = 0
-    State.OrbitTilt = 30
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(200, 100, 200)\">💫 Chaotic Spin</font>", Color3.fromRGB(200, 100, 200))
-    end
-end)
+    end)
 
 
-    local footer = Create("TextLabel", {
-        Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        TextColor3 = CONFIG.Colors.TextDark,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0.5, -110, 1, -25),
-        Size = UDim2.new(0, 220, 0, 20),
-        Parent = mainFrame
-    })
+        local footer = Create("TextLabel", {
+            Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.TextDark,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, -110, 1, -25),
+            Size = UDim2.new(0, 220, 0, 20),
+            Parent = mainFrame
+        })
 
 
 closeButton.MouseButton1Click:Connect(function()
