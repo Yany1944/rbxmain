@@ -15,7 +15,7 @@ if _G.EmotesGUIRunning then
 end
 _G.EmotesGUIRunning = true
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Menu-7yd7/refs/heads/Script/GUIS/Off-site/Notify.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Notify.lua"))()
 pcall(function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/Branch/GUIS/count-emote"))()
 end)
@@ -2141,7 +2141,7 @@ task.spawn(function()
 end)
 
 if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/OpenEmote.lua"))()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/OpenEmote.lua"))()
     getgenv().Notify({
         Title = '7yd7 | Emote Mobile',
         Content = '📱 Added emote open button for ease of use',
