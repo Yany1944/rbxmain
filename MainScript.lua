@@ -749,6 +749,68 @@ local function FlingPlayer(playerToFling)
     end
 end
 
+-- Добавь эти функции после функции FlingPlayer (примерно строка 850)
+
+local function FlingMurderer()
+    local murderer = findMurderer()
+    if not murderer then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- Проверка: не флингим сам себя
+    if murderer == LocalPlayer then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You cannot fling yourself!</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    FlingPlayer(murderer)
+end
+
+local function FlingSheriff()
+    -- Поиск шерифа (аналогично FindMurderer)
+    local sheriff = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character then
+            local gun = player.Character:FindFirstChild("Gun")
+            if gun then
+                sheriff = player
+                break
+            end
+            
+            if player.Backpack then
+                local gunInBackpack = player.Backpack:FindFirstChild("Gun")
+                if gunInBackpack then
+                    sheriff = player
+                    break
+                end
+            end
+        end
+    end
+    
+    if not sheriff then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Sheriff not found</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- Проверка: не флингим сам себя
+    if sheriff == LocalPlayer then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You cannot fling yourself!</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    FlingPlayer(sheriff)
+end
+
+
 -- ╔═══════════════════════════════════════════════════════════════╗
 -- ║                    🚫 NoClip ФУНКЦИИ                          ║
 -- ╚═══════════════════════════════════════════════════════════════╝
@@ -3302,6 +3364,9 @@ end
     FunTab:CreateSection("FLING PLAYER")
     FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
     FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
+    FunTab:CreateSection("FLING ROLE")
+    FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), function() FlingMurderer() end)
+    FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), function() FlingSheriff() end)
 
 
     local UtilityTab = CreateTab("Utility")
