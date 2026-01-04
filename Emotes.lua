@@ -2142,16 +2142,23 @@ end)
 
 -- Добавляем дополнительную клавишу ` для открытия меню эмоций
 if UserInputService.KeyboardEnabled then
-    local GuiService = game:GetService("GuiService")
-    
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
-        -- При нажатии на ` открываем меню эмоций
+        -- При нажатии на ` открываем/закрываем меню эмоций
         if input.KeyCode == Enum.KeyCode.Backquote then
-            pcall(function()
-                GuiService:SetEmotesMenuOpen(true)
+            local success = pcall(function()
+                local emotesMenu = CoreGui.RobloxGui.EmotesMenu.Children
+                emotesMenu.Visible = not emotesMenu.Visible
             end)
+            
+            -- Если меню не найдено, пробуем через GuiService
+            if not success then
+                pcall(function()
+                    local GuiService = game:GetService("GuiService")
+                    GuiService.EmotesMenuOpen = not GuiService.EmotesMenuOpen
+                end)
+            end
         end
     end)
     
