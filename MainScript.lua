@@ -1688,7 +1688,7 @@ local function SetupGunTracking()
                 currentMapConnection:Disconnect()
                 currentMapConnection = nil
             end
-            -- ✅ Очищаем кеш при пропаже карты
+            -- Очищаем кеш
             for gunPart, _ in pairs(State.GunCache) do
                 RemoveGunESP(gunPart)
             end
@@ -1698,18 +1698,13 @@ local function SetupGunTracking()
         if map ~= currentMap then
             if currentMapConnection then
                 currentMapConnection:Disconnect()
-                currentMapConnection = nil
             end
             
-            -- ✅ Добавляем отслеживание ChildRemoved
-            local removeConnection
-            removeConnection = map.ChildRemoved:Connect(function(child)
+            -- ✅ ДОБАВЛЕНО: Отслеживание удаления
+            local removeConnection = map.ChildRemoved:Connect(function(child)
                 if child.Name == "GunDrop" then
-                    local gunPart = child
-                    if child:IsA("Model") then
-                        gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
-                    end
-                    
+                    local gunPart = child:IsA("Model") and 
+                                   (child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")) or child
                     if gunPart then
                         RemoveGunESP(gunPart)
                     end
@@ -1718,32 +1713,37 @@ local function SetupGunTracking()
             
             currentMapConnection = map.ChildAdded:Connect(function(child)
                 if child.Name == "GunDrop" then
-                    task.wait(0.1)
+                    task.wait(0.05)  -- ✅ Уменьшенная задержка
                     
-                    local gunPart = child
-                    if child:IsA("Model") then
-                        gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
-                    end
+                    local gunPart = child:IsA("Model") and 
+                                   (child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")) or child
                     
-                    if gunPart and gunPart:IsA("BasePart") then
-                        -- ✅ Сначала удаляем старый ESP (если был)
-                        RemoveGunESP(gunPart)
-                        -- Теперь создаём новый
-                        CreateGunESP(gunPart)
+                    if gunPart and gunPart:IsA("BasePart") and gunPart.Parent then
+                        -- ✅ Проверяем, что это не экипированное оружие игрока
+                        local isEquipped = false
+                        for _, player in ipairs(Players:GetPlayers()) do
+                            if player.Character and player.Character:FindFirstChild("Gun") then
+                                isEquipped = true
+                                break
+                            end
+                        end
                         
-                        if State.NotificationsEnabled then
-                            ShowNotification(
-                                "<font color=\"rgb(255, 200, 50)\">Gun Dropped</font>",
-                                CONFIG.Colors.Gun
-                            )
+                        if not isEquipped then
+                            RemoveGunESP(gunPart)
+                            CreateGunESP(gunPart)
+                            
+                            if State.NotificationsEnabled then
+                                ShowNotification(
+                                    "<font color=\"rgb(255, 200, 50)\">Gun Dropped</font>",
+                                    CONFIG.Colors.Gun
+                                )
+                            end
                         end
                     end
                 end
             end)
             
-            -- ✅ Сохраняем оба соединения
             table.insert(State.Connections, removeConnection)
-            
             currentMap = map
         end
     end)
@@ -1780,17 +1780,29 @@ local function StartRoleChecking()
         while getgenv().MM2_ESP_Script do
             pcall(function()
                 local murder, sheriff = nil, nil
-
+                
+                -- ✅ ПЕРВЫЙ ПРОХОД: Определяем роли
                 for _, p in pairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer then
+                    if p ~= LocalPlayer and p.Character then
                         local items = p.Backpack
                         local character = p.Character
 
-                        if (items and items:FindFirstChild("Knife")) or (character and character:FindFirstChild("Knife")) then
+                        if (items and items:FindFirstChild("Knife")) or 
+                           (character and character:FindFirstChild("Knife")) then
                             murder = p
-                            UpdatePlayerHighlight(p, "Murder")
-                        elseif (items and items:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
+                        elseif (items and items:FindFirstChild("Gun")) or 
+                               (character and character:FindFirstChild("Gun")) then
                             sheriff = p
+                        end
+                    end
+                end
+                
+                -- ✅ ВТОРОЙ ПРОХОД: Обновляем highlights ПОСЛЕ определения всех ролей
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer then
+                        if p == murder then
+                            UpdatePlayerHighlight(p, "Murder")
+                        elseif p == sheriff then
                             UpdatePlayerHighlight(p, "Sheriff")
                         else
                             UpdatePlayerHighlight(p, "Innocent")
@@ -1798,69 +1810,53 @@ local function StartRoleChecking()
                     end
                 end
 
+                -- ✅ Логика раунда БЕЗ race conditions
                 if not murder and State.roundActive then
                     State.roundActive = false
                     State.roundStart = true
-
-                        if State.ExtendedHitboxEnabled then
-                            DisableExtendedHitbox()
-                        end
-
                     State.prevMurd = nil
                     State.prevSher = nil
                     State.heroSent = false
 
                     if State.NotificationsEnabled then
-                        task.spawn(function()
-                            ShowNotification("<font color=\"rgb(220, 220, 220)\">Round ended</font>",CONFIG.Colors.Text)
-                        end)
+                        ShowNotification("<font color=\"rgb(220, 220, 220)\">Round ended</font>", CONFIG.Colors.Text)
                     end
                 end
 
-
+                -- ✅ Начало раунда: оба игрока найдены
                 if murder and sheriff and State.roundStart then
                     State.roundActive = true
-
-                    if State.NotificationsEnabled then
-                        task.spawn(function()
-                            ShowNotification(
-                                "<font color=\"rgb(255, 50, 50)\">Murderer: </font>" .. murder.Name .. "",
-                                CONFIG.Colors.Text
-                            )
-
-                            ShowNotification(
-                                "<font color=\"rgb(50, 150, 255)\">Sheriff: </font>" .. sheriff.Name .. "",
-                                CONFIG.Colors.Text
-                            )
-                        end)
-                    end
-                    State.roundStart = false
+                    State.roundStart = false  -- ❌ ПЕРЕМЕСТИТЕ ЭТО СЮДА
                     State.prevMurd = murder
                     State.prevSher = sheriff
-                    State.heroSent = false                
-                    end
+                    State.heroSent = false
 
-                if sheriff and sheriff ~= State.prevSher and murder == State.prevMurd then
                     if State.NotificationsEnabled then
-                        task.spawn(function()
-                            ShowNotification(
-                                "<font color=\"rgb(50, 150, 255)\">Sheriff: </font>" .. sheriff.Name .. "",
-                                CONFIG.Colors.Text
-                            )
-                        end)
+                        ShowNotification(
+                            "<font color=\"rgb(255, 50, 50)\">Murderer: </font>" .. murder.Name,
+                            CONFIG.Colors.Text
+                        )
+                        task.wait(0.1)  -- ✅ Небольшая задержка между нотификациями
+                        ShowNotification(
+                            "<font color=\"rgb(50, 150, 255)\">Sheriff: </font>" .. sheriff.Name,
+                            CONFIG.Colors.Text
+                        )
                     end
+                end
+
+                -- ✅ Смена шерифа (герой подобрал пистолет)
+                if sheriff and State.prevSher and sheriff ~= State.prevSher and 
+                   murder and murder == State.prevMurd and not State.heroSent then
+                    
+                    State.prevSher = sheriff
                     State.heroSent = true
-                    State.prevSher = sheriff
-                end
-
-
-                if murder and murder ~= State.prevMurd then
-                    State.prevMurd = murder
-                    State.roundStart = true
-                end
-
-                if sheriff and sheriff ~= State.prevSher and not State.heroSent and not State.roundStart then
-                    State.prevSher = sheriff
+                    
+                    if State.NotificationsEnabled then
+                        ShowNotification(
+                            "<font color=\"rgb(50, 150, 255)\">New Sheriff: </font>" .. sheriff.Name,
+                            CONFIG.Colors.Text
+                        )
+                    end
                 end
             end)
 
@@ -1868,9 +1864,6 @@ local function StartRoleChecking()
         end
     end)
 end
-
-
-
 
 local function PlayEmote(emoteName)
     task.spawn(function()
