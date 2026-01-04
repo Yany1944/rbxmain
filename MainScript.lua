@@ -1,4 +1,4 @@
-if game.PlaceId ~= 142823291 then return end
+--if game.PlaceId ~= 142823291 then return end
 
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Emotes.lua"))()
 
