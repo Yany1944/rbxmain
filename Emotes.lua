@@ -2149,33 +2149,48 @@ if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
     })
 end
 
+-- Обработчик открытия меню на клавишу ` (работает с любой раскладкой)
 if UserInputService.KeyboardEnabled then
+    local lastToggleTime = 0
+    local TOGGLE_COOLDOWN = 0.3
+    
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
-        if input.KeyCode == Enum.KeyCode.Backquote then
+        -- Проверяем клавишу ` (Grave/Backquote) - работает независимо от раскладки
+        if input.KeyCode == Enum.KeyCode.Backquote or input.KeyCode == Enum.KeyCode.Grave then
+            local currentTime = tick()
+            if currentTime - lastToggleTime < TOGGLE_COOLDOWN then
+                return
+            end
+            lastToggleTime = currentTime
+            
             local StarterGui = game:GetService("StarterGui")
             local CoreGui = game:GetService("CoreGui")
             
-            local robloxGui = CoreGui:FindFirstChild("RobloxGui")
-            local emotesMenu = robloxGui and robloxGui:FindFirstChild("EmotesMenu")
+            -- Включаем EmotesMenu если отключено
+            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
+            task.wait(0.05)
             
-            if emotesMenu and emotesMenu:FindFirstChild("Children") then
-                local isVisible = emotesMenu.Children.Visible
-                emotesMenu.Children.Visible = not isVisible
-            else
+            -- Переключаем видимость меню
+            local success = pcall(function()
+                local emotesMenu = CoreGui.RobloxGui.EmotesMenu.Children
+                emotesMenu.Visible = not emotesMenu.Visible
+            end)
+            
+            if not success then
+                -- Если меню не существует, принудительно открываем
+                StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, false)
+                task.wait(0.05)
                 StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
-                task.wait(0.1)
-                if emotesMenu and emotesMenu:FindFirstChild("Children") then
-                    emotesMenu.Children.Visible = true
-                end
             end
         end
     end)
     
     getgenv().Notify({
         Title = '7yd7 | Emote PC',
-        Content = '💻 Open menu press button "`"',
+        Content = '💻 Open menu: press "`" key (Ё in RU layout)',
         Duration = 10
     })
 end
+
