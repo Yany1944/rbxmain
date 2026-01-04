@@ -167,6 +167,7 @@ local State = {
     
     -- UI State
     ClickTPActive = false,
+    GodModeConnections = {},
     ListeningForKeybind = nil,
     
     -- Notifications
@@ -193,9 +194,9 @@ local State = {
 
 local currentMapConnection = nil
 local currentMap = nil
-
+-- ✅ Для респавна (без keybinds)
 local function CleanupMemory()
-    -- Очистка highlights
+    -- highlights
     if State.PlayerHighlights then
         for _, highlight in pairs(State.PlayerHighlights) do
             if highlight and highlight.Parent then
@@ -204,8 +205,8 @@ local function CleanupMemory()
         end
         State.PlayerHighlights = {}
     end
-
-    -- Очистка gun ESP
+    
+    -- gun ESP
     if State.GunCache then
         for _, espData in pairs(State.GunCache) do
             if espData then
@@ -217,22 +218,81 @@ local function CleanupMemory()
         end
         State.GunCache = {}
     end
-
-    -- ✅ ДОБАВЛЕНО: Сброс Gun tracking
+    
     if currentMapConnection then
         currentMapConnection:Disconnect()
         currentMapConnection = nil
     end
     currentMap = nil
-
-    -- Очистка очереди уведомлений
+    
     State.NotificationQueue = {}
     State.CurrentNotification = nil
-
-    -- Очистка coin blacklist
     State.CoinBlacklist = {}
 end
 
+local function FullShutdown()
+    if State.PlayerHighlights then
+        for _, highlight in pairs(State.PlayerHighlights) do
+            if highlight and highlight.Parent then
+                pcall(function() highlight:Destroy() end)
+            end
+        end
+        State.PlayerHighlights = {}
+    end
+    
+    if State.GunCache then
+        for _, espData in pairs(State.GunCache) do
+            if espData then
+                pcall(function()
+                    if espData.highlight then espData.highlight:Destroy() end
+                    if espData.billboard then espData.billboard:Destroy() end
+                end)
+            end
+        end
+        State.GunCache = {}
+    end
+    
+    if currentMapConnection then
+        currentMapConnection:Disconnect()
+        currentMapConnection = nil
+    end
+    currentMap = nil
+    
+    State.NotificationQueue = {}
+    State.CurrentNotification = nil
+    State.CoinBlacklist = {}
+    
+    for bindName, _ in pairs(State.Keybinds) do
+        State.Keybinds[bindName] = Enum.KeyCode.Unknown
+    end
+    
+    -- RoleCheckLoop
+    if State.RoleCheckLoop then
+        pcall(function()
+            if type(State.RoleCheckLoop) == "thread" then
+                task.cancel(State.RoleCheckLoop)
+            elseif State.RoleCheckLoop.Disconnect then
+                State.RoleCheckLoop:Disconnect()
+            end
+        end)
+        State.RoleCheckLoop = nil
+    end
+    
+    -- ViewClip
+    if State.ViewClipEnabled then
+        pcall(function()
+            State.ViewClipEnabled = false
+            LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+        end)
+    end
+    
+    if State.FPDH then
+        workspace.FallenPartsDestroyHeight = State.FPDH
+    end
+    
+    coinLabelCache = nil
+    lastCacheTime = 0
+end
 
 
 local function FindRole(player)
@@ -600,13 +660,12 @@ local function FlingPlayer(playerToFling)
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
     local RootPart = Humanoid and Humanoid.RootPart
     if not RootPart then return end
-    -- Временно отключаем anti-fling
+    
     local antiFlingWasEnabled = State.AntiFlingEnabled
     if antiFlingWasEnabled then
         DisableAntiFling()
     end
     State.IsFlingInProgress = true
-
 
     local TCharacter = playerToFling.Character
     local THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
@@ -647,8 +706,8 @@ local function FlingPlayer(playerToFling)
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
 
     local function FPos(BasePart, Pos, Ang)
-        RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
-        Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+        local newCFrame = CFrame.new(BasePart.Position) * Pos * Ang
+        RootPart.CFrame = newCFrame  -- ✅ ИСПРАВЛЕНО: прямая установка вместо SetPrimaryPartCFrame
         RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
         RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
     end
@@ -681,12 +740,12 @@ local function FlingPlayer(playerToFling)
                     FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
                 else
-                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
-                        task.wait()
+                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                    task.wait()
 
-                        FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
-                        task.wait()
-                    end
+                    FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                    task.wait()
+                end
             else
                 break
             end
@@ -720,7 +779,6 @@ local function FlingPlayer(playerToFling)
     if State.OldPos then
         repeat
             RootPart.CFrame = State.OldPos * CFrame.new(0, 0.5, 0)
-            Character:SetPrimaryPartCFrame(State.OldPos * CFrame.new(0, 0.5, 0))
             Humanoid:ChangeState("GettingUp")
 
             for _, part in pairs(Character:GetChildren()) do
@@ -735,7 +793,7 @@ local function FlingPlayer(playerToFling)
     end
 
     workspace.FallenPartsDestroyHeight = State.FPDH
-    -- Включаем anti-fling обратно
+    
     State.IsFlingInProgress = false
     if antiFlingWasEnabled then
         task.delay(1, function()
@@ -743,11 +801,11 @@ local function FlingPlayer(playerToFling)
         end)
     end
 
-
     if State.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220,220,220)\">Player flung: " .. playerToFling.Name .. "</font>",CONFIG.Colors.Text)
     end
 end
+
 
 -- Добавь эти функции после функции FlingPlayer (примерно строка 850)
 
@@ -920,6 +978,55 @@ end
 
 local function ResetCharacter()
     print("[Auto Farm] 💀 Ресет персонажа")
+    
+    -- ✅ Запоминаем состояние GodMode
+    local wasGodModeEnabled = State.GodModeEnabled
+    
+    -- ✅ Выключаем GodMode перед ресетом
+    if wasGodModeEnabled then
+        State.GodModeEnabled = false
+        
+        -- Отключаем локальные connections
+        if healthConnection then
+            healthConnection:Disconnect()
+            healthConnection = nil
+        end
+        if stateConnection then
+            stateConnection:Disconnect()
+            stateConnection = nil
+        end
+        if damageBlockerConnection then
+            damageBlockerConnection:Disconnect()
+            damageBlockerConnection = nil
+        end
+        
+        -- ✅ ДОБАВЛЕНО: Очищаем GodModeConnections
+        for _, connection in ipairs(State.GodModeConnections) do
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end
+        State.GodModeConnections = {}
+        
+        -- Восстанавливаем нормальные параметры
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                pcall(function()
+                    humanoid.MaxHealth = 100
+                    humanoid.Health = 100
+                end)
+            end
+            
+            local ff = character:FindFirstChild("ForceField")
+            if ff then
+                ff:Destroy()
+            end
+        end
+    end
+    
+    -- Делаем ресет
     pcall(function()
         local character = LocalPlayer.Character
         if character then
@@ -929,7 +1036,58 @@ local function ResetCharacter()
             end
         end
     end)
+    
+    -- ✅ Включаем GodMode обратно после респавна
+    if wasGodModeEnabled then
+        task.spawn(function()
+            -- Ждём появления нового персонажа
+            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+            task.wait(0.5)
+            
+            -- Ждём Humanoid
+            local humanoid = character:WaitForChild("Humanoid", 5)
+            if humanoid then
+                task.wait(0.3)
+                
+                -- Включаем GodMode
+                State.GodModeEnabled = true
+                
+                -- Применяем GodMode
+                ApplyGodMode()
+                SetupHealthProtection()
+                SetupDamageBlocker()
+
+                local godModeConnection = RunService.Heartbeat:Connect(function()
+                    if State.GodModeEnabled and LocalPlayer.Character then
+                        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                        if hum then
+                            if hum.Health ~= math.huge then
+                                hum.Health = math.huge
+                            end
+                            local state = hum:GetState()
+                            if state == Enum.HumanoidStateType.Dead then
+                                hum:ChangeState(Enum.HumanoidStateType.Running)
+                            end
+                        end
+                    end
+                end)
+                table.insert(State.GodModeConnections, godModeConnection)
+                
+                -- Respawn protection
+                local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
+                    if State.GodModeEnabled then
+                        task.wait(0.5)
+                        ApplyGodMode()
+                        SetupHealthProtection()
+                        SetupDamageBlocker()
+                    end
+                end)
+                table.insert(State.GodModeConnections, respawnConnection)
+            end
+        end)
+    end
 end
+
 
 local function FindNearestCoin()
     local character = LocalPlayer.Character
@@ -1115,6 +1273,7 @@ local function StartAutoFarm()
                 
                 if noCoinsAttempts >= maxNoCoinsAttempts then
                     print("[Auto Farm] ✅ Все монеты собраны! Делаю ресет и жду нового раунда...")
+                    
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
@@ -1438,26 +1597,23 @@ end
 
 local function ToggleGodMode()
     State.GodModeEnabled = not State.GodModeEnabled
-    
     if State.GodModeEnabled then
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode:</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Green)
+            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Green)
         end
         
         ApplyGodMode()
         SetupHealthProtection()
         SetupDamageBlocker()
-        -- АГРЕССИВНЫЙ МОНИТОРИНГ HP
+        
+        -- HP monitoring
         local godModeConnection = RunService.Heartbeat:Connect(function()
             if State.GodModeEnabled and LocalPlayer.Character then
                 local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
                 if humanoid then
-                    -- Принудительно держим HP на максимуме
-                    if humanoid.Health < math.huge then
+                    if humanoid.Health ~= math.huge then
                         humanoid.Health = math.huge
                     end
-                    
-                    -- Блокируем состояние Dead КАЖДЫЙ КАДР
                     local state = humanoid:GetState()
                     if state == Enum.HumanoidStateType.Dead then
                         humanoid:ChangeState(Enum.HumanoidStateType.Running)
@@ -1465,7 +1621,7 @@ local function ToggleGodMode()
                 end
             end
         end)
-        table.insert(State.Connections, godModeConnection)
+        table.insert(State.GodModeConnections, godModeConnection)  -- ✅ В ОТДЕЛЬНОЕ хранилище
         
         local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(character)
             if State.GodModeEnabled then
@@ -1473,38 +1629,37 @@ local function ToggleGodMode()
                 ApplyGodMode()
                 SetupHealthProtection()
                 SetupDamageBlocker()
-                print("[GodMode] 🔄 Переподключён")
             end
         end)
-        table.insert(State.Connections, respawnConnection)
+        table.insert(State.GodModeConnections, respawnConnection)  -- ✅ В ОТДЕЛЬНОЕ хранилище
     else
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",CONFIG.Colors.Text)
+            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",CONFIG.Colors.Text)
         end
         
+        -- Отключаем локальные connections
         if healthConnection then
             healthConnection:Disconnect()
             healthConnection = nil
         end
-        
         if stateConnection then
             stateConnection:Disconnect()
             stateConnection = nil
         end
-        
         if damageBlockerConnection then
             damageBlockerConnection:Disconnect()
             damageBlockerConnection = nil
         end
         
-        
-        for _, connection in ipairs(State.Connections) do
+        -- ✅ Очищаем ТОЛЬКО GodMode connections
+        for _, connection in ipairs(State.GodModeConnections) do
             if connection and connection.Connected then
                 connection:Disconnect()
             end
         end
-        State.Connections = {}
+        State.GodModeConnections = {}
         
+        -- Восстанавливаем персонажа
         local character = LocalPlayer.Character
         if character then
             local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -1512,7 +1667,6 @@ local function ToggleGodMode()
                 humanoid.MaxHealth = 100
                 humanoid.Health = 100
             end
-            
             local ff = character:FindFirstChild("ForceField")
             if ff then
                 ff:Destroy()
@@ -1520,6 +1674,7 @@ local function ToggleGodMode()
         end
     end
 end
+
 
 
 local function CreateHighlight(adornee, color)
@@ -1612,28 +1767,41 @@ local function GetMap()
     return nil
 end
 
-local function CreateGunESP(gunPart)
+local function CreateGunESP(gunPart, gunDropContainer)
     if not gunPart or not gunPart:IsA("BasePart") then return end
-
-
-        if not gunPart.Parent then
+    
+    -- Проверяем Parent
+    if not gunPart.Parent then
         if State.GunCache[gunPart] then
             RemoveGunESP(gunPart)
         end
         return
     end
     
-    -- ✅ Если уже есть ESP, обновляем его видимость
+    -- Если уже есть ESP, просто обновляем видимость
     if State.GunCache[gunPart] then
         local espData = State.GunCache[gunPart]
-        if espData.highlight then espData.highlight.Enabled = State.GunESP end
-        if espData.billboard then espData.billboard.Enabled = State.GunESP end
+        if espData.highlight then
+            espData.highlight.Enabled = State.GunESP
+        end
+        if espData.billboard then
+            espData.billboard.Enabled = State.GunESP
+        end
         return
     end
-
-    local highlight = CreateHighlight(gunPart, CONFIG.Colors.Gun)
+    
+    -- Создаём highlight
+    local success, highlight = pcall(function()
+        return CreateHighlight(gunPart, CONFIG.Colors.Gun)
+    end)
+    
+    if not success or not highlight then
+        return
+    end
+    
     highlight.Enabled = State.GunESP
-
+    
+    -- Billboard
     local billboard = Instance.new("BillboardGui")
     billboard.Adornee = gunPart
     billboard.Size = UDim2.new(0, 150, 0, 40)
@@ -1641,7 +1809,7 @@ local function CreateGunESP(gunPart)
     billboard.AlwaysOnTop = true
     billboard.Enabled = State.GunESP
     billboard.Parent = gunPart
-
+    
     local textLabel = Instance.new("TextLabel")
     textLabel.Text = "GUN"
     textLabel.Font = Enum.Font.GothamBold
@@ -1650,22 +1818,39 @@ local function CreateGunESP(gunPart)
     textLabel.BackgroundTransparency = 1
     textLabel.Size = UDim2.new(1, 0, 1, 0)
     textLabel.Parent = billboard
-
+    
+    -- Сохраняем в кеш
     State.GunCache[gunPart] = {
         highlight = highlight,
         billboard = billboard,
-        textLabel = textLabel
+        textLabel = textLabel,
+        container = gunDropContainer
     }
 end
 
+
 local function RemoveGunESP(gunPart)
+    if not gunPart then return end
+    
     local espData = State.GunCache[gunPart]
     if not espData then return end
-
-    if espData.highlight then espData.highlight:Destroy() end
-    if espData.billboard then espData.billboard:Destroy() end
+    
+    -- ✅ Безопасное удаление
+    pcall(function()
+        if espData.highlight then
+            espData.highlight:Destroy()
+        end
+    end)
+    
+    pcall(function()
+        if espData.billboard then
+            espData.billboard:Destroy()
+        end
+    end)
+    
     State.GunCache[gunPart] = nil
 end
+
 
 local function UpdateGunESPVisibility()
     for gunPart, espData in pairs(State.GunCache) do
@@ -1674,6 +1859,47 @@ local function UpdateGunESPVisibility()
         end
         if espData.billboard then
             espData.billboard.Enabled = State.GunESP
+        end
+    end
+end
+
+local function InitialGunScan()
+    if not State.GunESP then return end
+    
+    local map = GetMap()
+    if not map then return end
+    
+    -- Проверяем: пистолет у кого-то из игроков?
+    local function isGunEquipped()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character and player.Character:FindFirstChild("Gun") then
+                return true
+            end
+            if player.Backpack and player.Backpack:FindFirstChild("Gun") then
+                return true
+            end
+        end
+        return false
+    end
+    
+    -- Если пистолет экипирован - не сканируем
+    if isGunEquipped() then
+        return
+    end
+    
+    -- Сканируем GunDrop
+    for _, child in ipairs(map:GetChildren()) do
+        if child.Name == "GunDrop" then
+            task.wait(0.05)
+            
+            local gunPart = child
+            if child:IsA("Model") then
+                gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+            end
+            
+            if gunPart and gunPart:IsA("BasePart") and gunPart.Parent then
+                CreateGunESP(gunPart, child)
+            end
         end
     end
 end
@@ -1700,76 +1926,77 @@ local function SetupGunTracking()
                 currentMapConnection:Disconnect()
             end
             
-            -- ✅ ДОБАВЛЕНО: Отслеживание удаления
+            -- ChildRemoved - удаление GunDrop
             local removeConnection = map.ChildRemoved:Connect(function(child)
                 if child.Name == "GunDrop" then
-                    local gunPart = child:IsA("Model") and 
-                                   (child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")) or child
-                    if gunPart then
-                        RemoveGunESP(gunPart)
+                    -- Удаляем ESP для этого контейнера
+                    for cachedGunPart, espData in pairs(State.GunCache) do
+                        if espData.container == child then
+                            RemoveGunESP(cachedGunPart)
+                        end
                     end
                 end
             end)
             
-            currentMapConnection = map.ChildAdded:Connect(function(child)
+            -- ChildAdded - появление GunDrop
+            local addConnection = map.ChildAdded:Connect(function(child)
                 if child.Name == "GunDrop" then
-                    task.wait(0.05)  -- ✅ Уменьшенная задержка
+                    task.wait(0.15)  -- Ждём чтобы части загрузились
                     
-                    local gunPart = child:IsA("Model") and 
-                                   (child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")) or child
-                    
-                    if gunPart and gunPart:IsA("BasePart") and gunPart.Parent then
-                        -- ✅ Проверяем, что это не экипированное оружие игрока
+                    pcall(function()
+                        -- Проверяем: пистолет у кого-то?
                         local isEquipped = false
                         for _, player in ipairs(Players:GetPlayers()) do
                             if player.Character and player.Character:FindFirstChild("Gun") then
                                 isEquipped = true
                                 break
                             end
-                        end
-                        
-                        if not isEquipped then
-                            RemoveGunESP(gunPart)
-                            CreateGunESP(gunPart)
-                            
-                            if State.NotificationsEnabled then
-                                ShowNotification(
-                                    "<font color=\"rgb(255, 200, 50)\">Gun Dropped</font>",
-                                    CONFIG.Colors.Gun
-                                )
+                            if player.Backpack and player.Backpack:FindFirstChild("Gun") then
+                                isEquipped = true
+                                break
                             end
                         end
-                    end
+                        
+                        -- Если экипирован - не создаём ESP
+                        if isEquipped then
+                            return
+                        end
+                        
+                        -- Получаем BasePart
+                        local gunPart = child
+                        if child:IsA("Model") then
+                            gunPart = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+                        end
+                        
+                        if gunPart and gunPart:IsA("BasePart") and gunPart.Parent then
+                            CreateGunESP(gunPart, child)
+                            
+                            -- Уведомление только если ESP включен
+                            if State.GunESP and State.NotificationsEnabled then
+                                ShowNotification("<font color=\"rgb(255, 200, 50)\">🔫 Gun Dropped</font>", CONFIG.Colors.Gun)
+                            end
+                        end
+                    end)
                 end
             end)
             
             table.insert(State.Connections, removeConnection)
+            table.insert(State.Connections, addConnection)
+            
             currentMap = map
+            
+            -- Начальное сканирование (если ESP включен)
+            if State.GunESP then
+                task.spawn(function()
+                    task.wait(0.2)
+                    InitialGunScan()
+                end)
+            end
         end
     end)
     
     table.insert(State.Connections, mapCheckLoop)
 end
-
-local function InitialGunScan()
-    if not State.GunESP then return end
-    
-    local map = GetMap()
-    if not map then return end
-    
-    local gunDrop = map:FindFirstChild("GunDrop")
-    if gunDrop then
-        local gunPart = gunDrop
-        if gunDrop:IsA("Model") then
-            gunPart = gunDrop.PrimaryPart or gunDrop:FindFirstChildWhichIsA("BasePart")
-        end
-        
-        if gunPart and gunPart:IsA("BasePart") then
-            CreateGunESP(gunPart)
-        end
-    end
-end
-
 
 local function StartRoleChecking()
     if State.RoleCheckLoop then
@@ -2165,7 +2392,7 @@ local function pickupGun()
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    local previousPosition = hrp.CFrame
+    local previousPosition = hrp.CFrame + Vector3.new(0, 1, 0)
     
     -- Телепортируемся к пистолету
     hrp.CFrame = gun.CFrame + Vector3.new(0, 2, 0)
@@ -2174,7 +2401,7 @@ local function pickupGun()
     task.wait(0.08)
     
     -- Возвращаемся назад
-    hrp.CFrame = previousPosition Vector3.new(0, 2, 0)
+    hrp.CFrame = previousPosition
     ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>",CONFIG.Colors.Text)
 end
 
@@ -3284,7 +3511,8 @@ end
     VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", function(s) State.NotificationsEnabled = s end)
    
     VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", function(s) State.GunESP = s; if s then InitialGunScan() else UpdateGunESPVisibility() end end)
+VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", function(s) State.GunESP = s if s then task.spawn(InitialGunScan) end UpdateGunESPVisibility() end)
+
     VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; UpdateAllHighlightsVisibility() end)
     VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; UpdateAllHighlightsVisibility() end)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; UpdateAllHighlightsVisibility() end)
@@ -3382,6 +3610,8 @@ end
 
 
 closeButton.MouseButton1Click:Connect(function()
+    print("[Shutdown] Starting cleanup...")
+    
     -- Закрыть все открытые дропдауны
     if State.UIElements.OpenDropdowns then
         for _, closeFunc in ipairs(State.UIElements.OpenDropdowns) do
@@ -3389,9 +3619,6 @@ closeButton.MouseButton1Click:Connect(function()
         end
         State.UIElements.OpenDropdowns = {}
     end
-
-    -- Очистка ESP / gun / coin
-    CleanupMemory()
 
     -- Выключаем все активные режимы
     if State.AutoFarmEnabled then
@@ -3407,11 +3634,22 @@ closeButton.MouseButton1Click:Connect(function()
         DisableExtendedHitbox()
     end
     if State.GodModeEnabled then
-        ToggleGodMode()  -- сам отключит свои коннекты и сбросит HP
+        ToggleGodMode()
+    end
+    if State.ViewClipEnabled then
+        DisableViewClip()
+    end
+    
+    -- ✅ НОВОЕ: Kill Aura
+    if killAuraCon then
+        ToggleKillAura(false)
     end
 
+    -- Очистка ESP / gun / coin / keybinds
+    FullShutdown()
+
     -- Отключение всех общих соединений
-    for _, connection in ipairs(State.Connections) do
+    for i, connection in ipairs(State.Connections) do
         pcall(function()
             if connection and connection.Disconnect then
                 connection:Disconnect()
@@ -3427,10 +3665,16 @@ closeButton.MouseButton1Click:Connect(function()
         State.UIElements.NotificationGui = nil
         State.UIElements.NotificationContainer = nil
     end
+    
+    -- ✅ НОВОЕ: Восстановление warn/error
+    if oldWarn then warn = oldWarn end
+    if oldError then error = oldError end
 
     -- Финальный флаг
     getgenv().MM2_ESP_Script = false
+    print("[Shutdown] ✅ Complete! All connections cleared.")
 end)
+
 
 
     closeButton.MouseEnter:Connect(function()
@@ -3440,59 +3684,67 @@ end)
         TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
     end)
 
-
-    UserInputService.InputBegan:Connect(function(input, processed)
+    local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
         if not processed and input.KeyCode == CONFIG.HideKey then
             mainFrame.Visible = not mainFrame.Visible
         end
-       
+        
         if processed then return end
-       
+        
+        -- Обработка keybinds
         if State.ListeningForKeybind and input.UserInputType == Enum.UserInputType.Keyboard then
-    local key = input.KeyCode
-    local bindData = State.ListeningForKeybind
-    
-    if key == Enum.KeyCode.Delete or key == Enum.KeyCode.Backspace then
-        ClearKeybind(bindData.key, bindData.button)
-        State.ListeningForKeybind = nil  -- ✅ Сброс состояния
-        return
-    end
-    
-    SetKeybind(bindData.key, key, bindData.button, {})
-    -- State.ListeningForKeybind = nil теперь внутри SetKeybind
-    return
-end
-       
-        if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then PlayEmote("sit")
-        elseif input.KeyCode == State.Keybinds.Dab and State.Keybinds.Dab ~= Enum.KeyCode.Unknown then PlayEmote("dab")
-        elseif input.KeyCode == State.Keybinds.Zen and State.Keybinds.Zen ~= Enum.KeyCode.Unknown then PlayEmote("zen")
-        elseif input.KeyCode == State.Keybinds.Ninja and State.Keybinds.Ninja ~= Enum.KeyCode.Unknown then PlayEmote("ninja")
-        elseif input.KeyCode == State.Keybinds.Floss and State.Keybinds.Floss ~= Enum.KeyCode.Unknown then PlayEmote("floss")
+            local key = input.KeyCode
+            local bindData = State.ListeningForKeybind
+            
+            if key == Enum.KeyCode.Delete or key == Enum.KeyCode.Backspace then
+                ClearKeybind(bindData.key, bindData.button)
+                State.ListeningForKeybind = nil
+                return
+            end
+            
+            SetKeybind(bindData.key, key, bindData.button)
+            State.ListeningForKeybind = nil
+            return
         end
-       
+        
+        -- Emotes
+        if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then
+            PlayEmote("sit")
+        elseif input.KeyCode == State.Keybinds.Dab and State.Keybinds.Dab ~= Enum.KeyCode.Unknown then
+            PlayEmote("dab")
+        elseif input.KeyCode == State.Keybinds.Zen and State.Keybinds.Zen ~= Enum.KeyCode.Unknown then
+            PlayEmote("zen")
+        elseif input.KeyCode == State.Keybinds.Ninja and State.Keybinds.Ninja ~= Enum.KeyCode.Unknown then
+            PlayEmote("ninja")
+        elseif input.KeyCode == State.Keybinds.Floss and State.Keybinds.Floss ~= Enum.KeyCode.Unknown then
+            PlayEmote("floss")
+        end
+        
+        -- Actions
         if input.KeyCode == State.Keybinds.ThrowKnife and State.Keybinds.ThrowKnife ~= Enum.KeyCode.Unknown then
             pcall(function() knifeThrow(true) end)
         end
+        
         if input.KeyCode == State.Keybinds.InstantKillAll and State.Keybinds.InstantKillAll ~= Enum.KeyCode.Unknown then
             pcall(function() InstantKillAll() end)
         end
-       
+        
         if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
             pcall(function() shootMurderer() end)
         end
-       
+        
         if input.KeyCode == State.Keybinds.PickupGun and State.Keybinds.PickupGun ~= Enum.KeyCode.Unknown then
             pcall(function() pickupGun() end)
         end
-       
+        
         if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
             State.ClickTPActive = true
         end
-       
+        
         if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
             ToggleGodMode()
         end
-       
+        
         if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
             if State.SelectedPlayerForFling then
                 local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
@@ -3501,22 +3753,29 @@ end
                 end
             end
         end
-       
+        
         if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
-            if State.NoClipEnabled then DisableNoClip() else EnableNoClip() end
+            if State.NoClipEnabled then
+                DisableNoClip()
+            else
+                EnableNoClip()
+            end
         end
     end)
-   
-    UserInputService.InputEnded:Connect(function(input)
+    table.insert(State.Connections, inputBeganConnection)
+
+    local inputEndedConnection = UserInputService.InputEnded:Connect(function(input)
         if input.KeyCode == State.Keybinds.ClickTP then
             State.ClickTPActive = false
         end
     end)
-   
+    table.insert(State.Connections, inputEndedConnection)
+
     local mouse = LocalPlayer:GetMouse()
-    mouse.Button1Down:Connect(function()
+    local mouseClickConnection = mouse.Button1Down:Connect(function()
         if State.ClickTPActive then TeleportToMouse() end
     end)
+    table.insert(State.Connections, mouseClickConnection)
 end
 
 
@@ -3530,7 +3789,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.heroSent = false
     State.roundStart = true
     State.roundActive = false
-    CleanupMemory()
     end)
 
 -- ═══════════════════════════════════════════════════════════════
