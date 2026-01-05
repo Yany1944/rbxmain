@@ -133,10 +133,14 @@ local State = {
     StartSessionCoins = 0,
     CoinLabelCache = nil,
     LastCacheTime = 0,
+    
+    -- XP Farm
+    XPFarmEnabled = false,
+    XPFarmThread = nil,
+    
     -- Instant Pickup
     InstantPickupEnabled = false,
     InstantPickupThread = nil,
-
     
     -- Anti-Fling
     AntiFlingEnabled = false,
@@ -149,13 +153,11 @@ local State = {
     NoClipConnection = nil,
     NoClipRespawnConnection = nil,
     NoClipObjects = nil,
-    
-    -- NoClip (старая система для auto farm)
     ClipEnabled = true,
-    NoClipConnection = nil,
     
     -- GodMode
     GodModeEnabled = false,
+    GodModeConnections = {},
     
     -- Role detection
     prevMurd = nil,
@@ -176,13 +178,12 @@ local State = {
     
     -- UI State
     ClickTPActive = false,
-    GodModeConnections = {},
     ListeningForKeybind = nil,
     
     -- Notifications
     NotificationQueue = {},
     CurrentNotification = nil,
-
+    
     -- Trolling
     OrbitEnabled = false,
     OrbitThread = nil,
@@ -1073,17 +1074,17 @@ end
 
 -- ResetCharacter() - Ресет с сохранением GodMode
 local function ResetCharacter()
-    print("[Auto Farm] 💀 Ресет персонажа")
+    print("[Auto Farm] 🔄 Делаю ресет...")
     
-    -- ✅ Запоминаем состояние GodMode
+    -- Сохраняем статус GodMode
     local wasGodModeEnabled = State.GodModeEnabled
     
-    -- ✅ Выключаем GodMode вручную (без ToggleGodMode)
+    -- Отключаем GodMode перед ресетом
     if wasGodModeEnabled then
-        print("[Auto Farm] 🛡️ Выключаю GodMode перед ресетом...")
+        print("[Auto Farm] 🛡️ GodMode был включен, временно отключаю...")
         State.GodModeEnabled = false
         
-        -- Отключаем локальные connections
+        -- Отключаем все connections
         if healthConnection then
             healthConnection:Disconnect()
             healthConnection = nil
@@ -1097,7 +1098,6 @@ local function ResetCharacter()
             damageBlockerConnection = nil
         end
         
-        -- Очищаем GodModeConnections
         for _, connection in ipairs(State.GodModeConnections) do
             if connection and connection.Connected then
                 connection:Disconnect()
@@ -1105,7 +1105,7 @@ local function ResetCharacter()
         end
         State.GodModeConnections = {}
         
-        -- Восстанавливаем нормальные параметры
+        -- Возвращаем нормальное здоровье
         local character = LocalPlayer.Character
         if character then
             local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -1123,7 +1123,7 @@ local function ResetCharacter()
         end
     end
     
-    -- ✅ Делаем ресет
+    -- ✅ ДЕЛАЕМ РЕСЕТ
     pcall(function()
         local character = LocalPlayer.Character
         if character then
@@ -1134,63 +1134,108 @@ local function ResetCharacter()
         end
     end)
     
-    -- ✅ Включаем GodMode обратно после респавна
+    -- ✅ ЖДЁМ НОВОГО ПЕРСОНАЖА
     if wasGodModeEnabled then
         task.spawn(function()
-            -- Ждём появления нового персонажа
+            -- Ждём появления персонажа
             local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+            print("[Auto Farm] ⏳ Новый персонаж появился, жду Humanoid...")
+            
+            -- ✅ ЖДЁМ HUMANOID
+            local humanoid = character:WaitForChild("Humanoid", 10)
+            if not humanoid then
+                print("[Auto Farm] ⚠️ Humanoid не найден за 10 секунд!")
+                return
+            end
+            
+            -- ✅ ДОПОЛНИТЕЛЬНАЯ ЗАДЕРЖКА
             task.wait(0.5)
             
-            -- Ждём Humanoid
-            local humanoid = character:WaitForChild("Humanoid", 5)
-            if humanoid then
-                task.wait(0.3)
-                
-                print("[Auto Farm] 🛡️ Включаю GodMode после респавна...")
-                
-                -- ✅ ВРУЧНУЮ включаем GodMode (без вызова ToggleGodMode)
-                State.GodModeEnabled = true
-                
-                -- Применяем GodMode
-                if ApplyGodMode then ApplyGodMode() end
-                if SetupHealthProtection then SetupHealthProtection() end
-                if SetupDamageBlocker then SetupDamageBlocker() end
-                
-                -- HP monitoring
-                local godModeConnection = RunService.Heartbeat:Connect(function()
-                    if State.GodModeEnabled and LocalPlayer.Character then
-                        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                        if hum then
-                            if hum.Health ~= math.huge then
-                                hum.Health = math.huge
-                            end
-                            local state = hum:GetState()
-                            if state == Enum.HumanoidStateType.Dead then
-                                hum:ChangeState(Enum.HumanoidStateType.Running)
-                            end
+            print("[Auto Farm] 🛡️ Humanoid найден, восстанавливаю GodMode...")
+            
+            -- Восстанавливаем GodMode
+            State.GodModeEnabled = true
+            
+            if ApplyGodMode then
+                ApplyGodMode()
+            end
+            if SetupHealthProtection then
+                SetupHealthProtection()
+            end
+            if SetupDamageBlocker then
+                SetupDamageBlocker()
+            end
+            
+            -- HP monitoring
+            local godModeConnection = RunService.Heartbeat:Connect(function()
+                if State.GodModeEnabled and LocalPlayer.Character then
+                    local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        if hum.Health ~= math.huge then
+                            hum.Health = math.huge
+                        end
+                        local state = hum:GetState()
+                        if state == Enum.HumanoidStateType.Dead then
+                            hum:ChangeState(Enum.HumanoidStateType.Running)
                         end
                     end
-                end)
-                table.insert(State.GodModeConnections, godModeConnection)
-                
-                -- Respawn protection
-                local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
-                    if State.GodModeEnabled then
-                        task.wait(0.5)
-                        if ApplyGodMode then ApplyGodMode() end
-                        if SetupHealthProtection then SetupHealthProtection() end
-                        if SetupDamageBlocker then SetupDamageBlocker() end
-                    end
-                end)
-                table.insert(State.GodModeConnections, respawnConnection)
-            else
-                print("[Auto Farm] ⚠️ Не удалось найти Humanoid, GodMode не включен")
-            end
+                end
+            end)
+            table.insert(State.GodModeConnections, godModeConnection)
+            
+            -- Respawn protection
+            local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
+                if State.GodModeEnabled then
+                    task.wait(0.5)
+                    if ApplyGodMode then ApplyGodMode() end
+                    if SetupHealthProtection then SetupHealthProtection() end
+                    if SetupDamageBlocker then SetupDamageBlocker() end
+                end
+            end)
+            table.insert(State.GodModeConnections, respawnConnection)
+            
+            print("[Auto Farm] ✅ GodMode восстановлен!")
         end)
     end
 end
 
 
+local function FindSafeAFKSpot()
+    local character = LocalPlayer.Character
+    if not character then return nil end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    
+    -- ✅ ПРАВИЛЬНАЯ ЛОГИКА getMap()
+    local map = nil
+    for _, o in ipairs(Workspace:GetChildren()) do
+        if o:FindFirstChild("CoinContainer") and o:FindFirstChild("Spawns") then
+            map = o
+            break
+        end
+    end
+    
+    if not map then
+        return hrp.CFrame
+    end
+    
+    local spawnsFolder = map:FindFirstChild("Spawns")
+    if not spawnsFolder then
+        return hrp.CFrame
+    end
+    
+    local spawns = spawnsFolder:GetChildren()
+    if #spawns == 0 then
+        return hrp.CFrame
+    end
+    
+    -- ✅ Выбираем случайный спавн
+    local randomSpawn = spawns[math.random(1, #spawns)]
+    
+    -- ✅ Возвращаем CFrame на 50 studs выше спавна
+    return CFrame.new(randomSpawn.Position) + Vector3.new(0, 70, 0)
+end
 
 -- FindNearestCoin() - Поиск ближайшей монеты
 local function FindNearestCoin()
@@ -1309,7 +1354,10 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     return true
 end
 
--- StartAutoFarm() - Запуск авто фарма
+local shootMurderer
+local InstantKillAll
+
+-- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
     if State.CoinFarmThread then
         task.cancel(State.CoinFarmThread)
@@ -1353,13 +1401,240 @@ local function StartAutoFarm()
                 continue
             end
             
-            local coin = FindNearestCoin()
-            if not coin then
-                noCoinsAttempts = noCoinsAttempts + 1
-                print("[Auto Farm] 🔍 Монет не найдено (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
+            local currentCoins = GetCollectedCoinsCount()
+            
+            if currentCoins >= 50 then
+                print("[Auto Farm] ✅ Все 50 монет собраны!")
+                noCoinsAttempts = maxNoCoinsAttempts
+            else
+                local coin = FindNearestCoin()
                 
-                if noCoinsAttempts >= maxNoCoinsAttempts then
-                    print("[Auto Farm] ✅ Все монеты собраны! Делаю ресет и жду нового раунда...")
+                if not coin then
+                    noCoinsAttempts = noCoinsAttempts + 1
+                    print("[Auto Farm] 🔍 Монета не найдена (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
+                    
+                    if noCoinsAttempts < maxNoCoinsAttempts then
+                        task.wait(0.3)
+                    end
+                else
+                    noCoinsAttempts = 0
+                    
+                    pcall(function()
+                        if currentCoins < 1 then
+                            local currentTime = tick()
+                            local timeSinceLastTP = currentTime - lastTeleportTime
+                            
+                            if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
+                                local waitTime = State.CoinFarmDelay - timeSinceLastTP
+                                task.wait(waitTime)
+                            end
+                            
+                            print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
+                            
+                            local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
+                            
+                            if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
+                                humanoidRootPart.CFrame = targetCFrame
+                                lastTeleportTime = tick()
+                                
+                                if firetouchinterest then
+                                    firetouchinterest(humanoidRootPart, coin, 0)
+                                    task.wait(0.05)
+                                    firetouchinterest(humanoidRootPart, coin, 1)
+                                end
+                                
+                                task.wait(0.2)
+                                
+                                coinLabelCache = nil
+                                local coinsAfter = GetCollectedCoinsCount()
+                                if coinsAfter > currentCoins then
+                                    print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
+                                end
+                                
+                                State.CoinBlacklist[coin] = true
+                            end
+                        else
+                            if State.UndergroundMode then
+                                print("[Auto Farm] 🕳️ Полёт под землёй к монете")
+                            else
+                                print("[Auto Farm] ✈️ Полёт к монете")
+                            end
+                            
+                            EnableNoClip()
+                            SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                            
+                            coinLabelCache = nil
+                            local coinsAfter = GetCollectedCoinsCount()
+                            if coinsAfter > currentCoins then
+                                print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
+                            end
+                            
+                            State.CoinBlacklist[coin] = true
+                        end
+                    end)
+                end
+            end
+            
+            if noCoinsAttempts >= maxNoCoinsAttempts then
+                print("[Auto Farm] ✅ Все доступные монеты собраны!")
+                
+                pcall(function()
+                    DisableNoClip()
+                end)
+                
+                if State.XPFarmEnabled then
+                    print("[Auto Farm] ⏳ XP Farm включен, передаю управление...")
+                    
+                    currentCoins = GetCollectedCoinsCount()
+                    print("[Auto Farm] 💰 Собрано монет: " .. currentCoins .. "/50")
+                    
+                    if currentCoins >= 50 then
+                        character = LocalPlayer.Character
+                        if character then
+                            humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+                            
+                            if humanoidRootPart then
+                                local safeSpot = FindSafeAFKSpot()
+                                if safeSpot then
+                                    humanoidRootPart.CFrame = safeSpot + Vector3.new(0, 5, 0)
+                                    print("[XP Farm] 📍 Телепортировался в безопасное место")
+                                    task.wait(1)
+                                end
+                                
+                                if State.XPFarmEnabled then
+                                    local murderer = getMurder()
+                                    local sheriff = getSheriff()
+                                    
+                                    if murderer == LocalPlayer then
+                                        print("[XP Farm] 🔪 Мы мурдерер! InstantKillAll...")
+                                        local success, error = pcall(function()
+                                            InstantKillAll()
+                                        end)
+                                        
+                                        if success then
+                                            print("[XP Farm] ✅ InstantKillAll выполнен успешно!")
+                                        else
+                                            print("[XP Farm] ❌ InstantKillAll ошибка: " .. tostring(error))
+                                        end
+                                                                    
+                                    elseif sheriff == LocalPlayer then
+                                    print("[XP Farm] 🔫 Мы шериф, стреляем в мурдерера...")
+                                    
+                                    -- ✅ Стреляем пока мурдерер жив (без ограничения попыток)
+                                    while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled do
+                                        character = LocalPlayer.Character
+                                        if not character then break end
+                                        
+                                        local murdererPlayer = getMurder()
+                                        if not murdererPlayer then 
+                                            print("[XP Farm] ✅ Мурдерер мёртв!")
+                                            break 
+                                        end
+                                        
+                                        local murdererChar = murdererPlayer.Character
+                                        if not murdererChar then 
+                                            task.wait(0.5)
+                                            continue 
+                                        end
+                                        
+                                        -- ✅ Проверяем: жив ли мурдерер?
+                                        local murdererHumanoid = murdererChar:FindFirstChildOfClass("Humanoid")
+                                        if murdererHumanoid and murdererHumanoid.Health <= 0 then
+                                            print("[XP Farm] ✅ Мурдерер умер!")
+                                            break
+                                        end
+                                        
+                                        pcall(function()
+                                            shootMurderer()
+                                        end)
+                                        
+                                        print("[XP Farm] 🎯 Выстрел произведён, жду результата...")
+                                        task.wait(3)
+                                    end
+                                    
+                                    if not State.XPFarmEnabled then
+                                        print("[XP Farm] ⚠️ XP Farm был отключен во время стрельбы")
+                                    end
+                                    else
+                                        print("[XP Farm] 👤 Инносент | Флинг мурдерера")
+                                        
+                                        local flingAttempts = 0
+                                        local maxFlingAttempts = 10
+                                        
+                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and flingAttempts < maxFlingAttempts do
+                                            local murdererPlayer = getMurder()
+                                            if not murdererPlayer then break end
+                                            
+                                            local murdererChar = murdererPlayer.Character
+                                            if not murdererChar then
+                                                task.wait(0.5)
+                                                continue
+                                            end
+                                            
+                                            -- ✅ ПРОВЕРКА VELOCITY: Пропускаем если мурдерер уже летит
+                                            local murdererHRP = murdererChar:FindFirstChild("HumanoidRootPart")
+                                            if murdererHRP then
+                                                local velocity = murdererHRP.AssemblyLinearVelocity.Magnitude
+                                                
+                                                if velocity > 500 then
+                                                    print("[XP Farm] ✅ Мурдерер уже сфлингован (velocity: " .. math.floor(velocity) .. ")!")
+                                                    break
+                                                elseif velocity > 100 then
+                                                    print("[XP Farm] ⏭️ Мурдерер летит (velocity: " .. math.floor(velocity) .. "), пропускаю...")
+                                                    task.wait(1)
+                                                    continue
+                                                end
+                                            end
+                                            
+                                            pcall(function()
+                                                FlingMurderer()
+                                            end)
+                                            
+                                            flingAttempts = flingAttempts + 1
+                                            print("[XP Farm] 💫 Флинг #" .. flingAttempts)
+                                            
+                                            task.wait(3)
+                                            
+                                            if getMurder() == nil then
+                                                print("[XP Farm] ✅ Мурдерер был сфлингован!")
+                                                break
+                                            end
+                                        end
+                                        
+                                        if not State.XPFarmEnabled then
+                                            print("[XP Farm] ⚠️ XP Farm был отключен во время флинга")
+                                        end
+                                    end
+                                else
+                                    print("[XP Farm] ⚠️ XP Farm был отключен, пропускаю действия")
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                if State.XPFarmEnabled then
+                    print("[Auto Farm] ⏳ XP Farm включен - жду смерти мурдерера...")
+                    repeat
+                        task.wait(1)
+                    until getMurder() == nil or not State.AutoFarmEnabled
+                    
+                    if not State.AutoFarmEnabled then
+                        print("[Auto Farm] ⚠️ Автофарм был выключен, выхожу из цикла...")
+                        break
+                    end
+                    
+                    print("[Auto Farm] 🎉 Мурдерер мёртв! Жду официального окончания раунда...")
+                    task.wait(5)
+                    
+                    if getMurder() ~= nil then
+                        print("[Auto Farm] ⚠️ Новый раунд уже начался! Пропускаю ресет...")
+                        State.CoinBlacklist = {}
+                        noCoinsAttempts = 0
+                        continue
+                    end
+                    
+                    print("[Auto Farm] 🔄 Раунд полностью закончился! Делаю ресет...")
                     
                     ResetCharacter()
                     State.CoinBlacklist = {}
@@ -1367,85 +1642,60 @@ local function StartAutoFarm()
                     
                     task.wait(3)
                     
-                    print("[Auto Farm] ⏳ Жду окончания раунда...")
-                    repeat
-                        task.wait(1)
-                    until getMurder() == nil or not State.AutoFarmEnabled
-                    
                     print("[Auto Farm] ⏳ Жду начала нового раунда...")
                     repeat
                         task.wait(1)
                     until getMurder() ~= nil or not State.AutoFarmEnabled
                     
-                    print("[Auto Farm] ✅ Новый раунд начался! Продолжаю фарм...")
+                    if not State.AutoFarmEnabled then
+                        print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания раунда")
+                        break
+                    end
+                    
+                    print("[Auto Farm] ✅ Новый раунд начался! Сбрасываю счётчики и продолжаю фарм...")
+                    State.CoinBlacklist = {}
+                    noCoinsAttempts = 0
+                    
                 else
-                    task.wait(1)
+                    print("[Auto Farm] 🔄 XP Farm выключен - делаю быстрый ресет без ожидания конца раунда...")
+                    
+                    ResetCharacter()
+                    State.CoinBlacklist = {}
+                    noCoinsAttempts = 0
+                    
+                    task.wait(3)
+                    
+                    print("[Auto Farm] ⏳ Жду конца текущего раунда...")
+                    repeat
+                        task.wait(1)
+                    until getMurder() == nil or not State.AutoFarmEnabled
+                    
+                    if not State.AutoFarmEnabled then
+                        print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания")
+                        break
+                    end
+                    
+                    print("[Auto Farm] ⏳ Раунд закончился, жду начала нового раунда...")
+                    repeat
+                        task.wait(1)
+                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    
+                    if not State.AutoFarmEnabled then
+                        print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания нового раунда")
+                        break
+                    end
+                    
+                    print("[Auto Farm] ✅ Новый раунд начался! Сбрасываю счётчики и продолжаю фарм...")
+                    State.CoinBlacklist = {}
+                    noCoinsAttempts = 0
                 end
-                continue
             end
-            
-            noCoinsAttempts = 0
-            
-            pcall(function()
-                local currentCoins = GetCollectedCoinsCount()
-                
-                if currentCoins < 1 then
-                    -- ✅ ТЕЛЕПОРТ К ПЕРВОЙ МОНЕТЕ
-                    local currentTime = tick()
-                    local timeSinceLastTP = currentTime - lastTeleportTime
-                    
-                    if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
-                        local waitTime = State.CoinFarmDelay - timeSinceLastTP
-                        task.wait(waitTime)
-                    end
-                    
-                    print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
-                    
-                    local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
-                    
-                    if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
-                        humanoidRootPart.CFrame = targetCFrame
-                        lastTeleportTime = tick()
-                        
-                        if firetouchinterest then
-                            firetouchinterest(humanoidRootPart, coin, 0)
-                            task.wait(0.05)
-                            firetouchinterest(humanoidRootPart, coin, 1)
-                        end
-                        
-                        task.wait(0.2)
-                        
-                        coinLabelCache = nil  -- ✅ Обновляем кеш
-                        local coinsAfter = GetCollectedCoinsCount()
-                        if coinsAfter > currentCoins then
-                            print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
-                        end
-                        
-                        State.CoinBlacklist[coin] = true
-                    end
-                else
-                    -- ✅ ПОЛЁТ К ОСТАЛЬНЫМ МОНЕТАМ
-                    if State.UndergroundMode then
-                        print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
-                    else
-                        print("[Auto Farm] ✈️ Полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
-                    end
-                    
-                    EnableNoClip()
-                    SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
-                    
-                    coinLabelCache = nil  -- ✅ Обновляем кеш
-                    local coinsAfter = GetCollectedCoinsCount()
-                    if coinsAfter > currentCoins then
-                        print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
-                    end
-                    
-                    State.CoinBlacklist[coin] = true
-                end
-            end)
         end
         
-        DisableNoClip()
+        pcall(function()
+            DisableNoClip()
+        end)
+        
         State.CoinFarmThread = nil
         print("[Auto Farm] 🛑 Остановлен")
     end)
@@ -1458,8 +1708,28 @@ local function StopAutoFarm()
         task.cancel(State.CoinFarmThread)
         State.CoinFarmThread = nil
     end
-    DisableNoClip()
-    print("[Auto Farm] Полностью выключен")
+    pcall(function()
+        DisableNoClip()
+    end)
+    State.CoinBlacklist = {}
+    print("[Auto Farm] 🛑 Остановлен")
+end
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- XP FARM SYSTEM
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Главная функция XP фарма (оптимизированная версия)
+local function StartXPFarm()
+    -- Просто активируем флаг, Auto Farm сделает всё сам
+    State.XPFarmEnabled = true
+    print("[XP Farm] ✅ Включен (интегрирован с Auto Farm)")
+end
+
+local function StopXPFarm()
+    State.XPFarmEnabled = false
+    print("[XP Farm] ❌ Выключен")
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -2177,15 +2447,13 @@ local function knifeThrow(silent)
     end)
 end
 
--- shootMurderer() - Выстрел в убийцу
 local CanShootMurderer = true
 
-local function shootMurderer()
+shootMurderer = function()
     if not CanShootMurderer then
         return
     end
-    CanShootMurderer = false
-
+    
     -- Проверка: ты шериф/герой?
     local sheriff = nil
     for _, p in pairs(Players:GetPlayers()) do
@@ -2196,15 +2464,15 @@ local function shootMurderer()
             break
         end
     end
-
+    
     if sheriff ~= LocalPlayer then
         ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Not sheriff/hero</font>", nil)
-        task.delay(1, function()
-            CanShootMurderer = true
-        end)
-        return
+        return  -- ✅ НЕ блокируем CanShootMurderer
     end
-
+    
+    -- ✅ БЛОКИРОВКА ТОЛЬКО ПОСЛЕ ПРОВЕРКИ РОЛИ
+    CanShootMurderer = false
+    
     -- Найти убийцу
     local murderer = getMurder()
     if not murderer then
@@ -2214,13 +2482,13 @@ local function shootMurderer()
         end)
         return
     end
-
-    -- Экипировать пистолет
+    
+    -- ✅ Экипировать пистолет С УВЕЛИЧЕННОЙ ЗАДЕРЖКОЙ
     if not LocalPlayer.Character:FindFirstChild("Gun") then
         local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
         if LocalPlayer.Backpack:FindFirstChild("Gun") then
             hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
-            task.wait(0.3)
+            task.wait(0.5)  -- ✅ БЫЛО 0.3, СТАЛО 0.5
         else
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun found</font>", nil)
             task.delay(1, function()
@@ -2229,7 +2497,16 @@ local function shootMurderer()
             return
         end
     end
-
+    
+    -- ✅ ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: пистолет экипирован?
+    if not LocalPlayer.Character:FindFirstChild("Gun") then
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Gun not equipped</font>", nil)
+        task.delay(1, function()
+            CanShootMurderer = true
+        end)
+        return
+    end
+    
     local murdererHRP = murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart")
     if not murdererHRP then
         ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No murderer HRP</font>", nil)
@@ -2238,55 +2515,49 @@ local function shootMurderer()
         end)
         return
     end
-
-    -- ✅ УМНЫЙ ПРЕДИКТ С УЧЁТОМ БОКОВОГО ДВИЖЕНИЯ
+    
+    -- ✅ УМНЫЙ ПРЕДИКТ С УЧЁТОМ БОКОВОГО ДВИЖЕНИЯ (ОСТАВЛЯЕМ КАК ЕСТЬ)
     local velocity = murdererHRP.AssemblyLinearVelocity
     local currentPos = murdererHRP.Position
     local lookVector = murdererHRP.CFrame.LookVector
     local rightVector = murdererHRP.CFrame.RightVector
     
-    -- Определяем направление движения относительно взгляда
-    local forwardSpeed = velocity:Dot(lookVector)  -- Вперёд/назад
-    local strafeSpeed = velocity:Dot(rightVector)   -- Влево/вправо
+    local forwardSpeed = velocity:Dot(lookVector)
+    local strafeSpeed = velocity:Dot(rightVector)
     local totalSpeed = velocity.Magnitude
     
-    -- Базовое время предикта из слайдера
     local predictionTime = State.ShootPrediction
     
-    -- Адаптация под общую скорость
     if totalSpeed > 50 then
         predictionTime = predictionTime * 1.2
     elseif totalSpeed < 5 then
         predictionTime = predictionTime * 0.6
     end
     
-    -- ✅ Компенсация бокового движения (стрейфа)
     local lateralCompensation = rightVector * strafeSpeed * predictionTime * 0.8
-    
-    -- ✅ Основное предсказание позиции
     local predictedPos = currentPos + (velocity * predictionTime) + lateralCompensation
-
+    
     local chestOffset = Vector3.new(0, 0.5, 0)
     local targetPos = predictedPos + chestOffset
-
+    
     local shootDistance = 3
     local shootFromPos
-
+    
     if State.ShootDirection == "Behind" then
         shootFromPos = predictedPos - (lookVector * shootDistance) + chestOffset
     else
         shootFromPos = predictedPos + (lookVector * shootDistance) + chestOffset
     end
-
+    
     local args = {
         [1] = CFrame.new(shootFromPos),
         [2] = CFrame.new(targetPos)
     }
-
+    
     local success, err = pcall(function()
         LocalPlayer.Character:WaitForChild("Gun"):WaitForChild("Shoot"):FireServer(unpack(args))
     end)
-
+    
     if success then
         ShowNotification(
             "<font color=\"rgb(255, 85, 85)\">Shot fired: </font>" .. murderer.Name .. " [" .. State.ShootDirection .. "]",
@@ -2298,11 +2569,12 @@ local function shootMurderer()
             CONFIG.Colors.Text
         )
     end
-
+    
     task.delay(1, function()
         CanShootMurderer = true
     end)
 end
+
 
 -- pickupGun() - Подбор пистолета
 local function pickupGun()
@@ -2329,6 +2601,7 @@ local function pickupGun()
     ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>",CONFIG.Colors.Text)
 end
 
+-- EnableInstantPickup - Включить автоподбор пистолета
 local function EnableInstantPickup()
     if State.InstantPickupThread then
         task.cancel(State.InstantPickupThread)
@@ -2338,53 +2611,82 @@ local function EnableInstantPickup()
     State.InstantPickupEnabled = true
     
     State.InstantPickupThread = task.spawn(function()
-        print("[Instant Pickup] Started monitoring...")
         
         while State.InstantPickupEnabled do
-            -- Проверяем: есть ли пистолет на карте и являемся ли мы шерифом
+            local murderer = getMurder()
+            
+            -- ✅ Проверка: раунд активен?
+            if not murderer then
+                task.wait(2)
+                continue
+            end
+            
+            -- ✅ Проверка: мы мурдерер?
+            if murderer == LocalPlayer then
+                task.wait(1)
+                continue
+            end
+            
             local gun = getGun()
             local sheriff = getSheriff()
             
-            -- Если пистолет есть и мы НЕ шериф (значит пистолет упал)
-            if gun and sheriff ~= LocalPlayer then
-                print("[Instant Pickup] Gun dropped! Attempting pickup...")
+            -- ✅ Проверка: пистолет лежит И нет шерифа?
+            if gun and not sheriff then   
+                local pickupSuccess = false
                 
-                -- Пытаемся подобрать до 3 раз
-                local attempts = 0
-                local maxAttempts = 3
-                
-                while attempts < maxAttempts and State.InstantPickupEnabled do
-                    attempts = attempts + 1
-                    
-                    -- Используем существующую функцию pickupGun
-                    pcall(pickupGun)
-                    
-                    task.wait(0.15)
-                    
-                    -- Проверяем подобрали ли пистолет
-                    if getSheriff() == LocalPlayer then
-                        if State.NotificationsEnabled then
-                            ShowNotification("<font color=\"rgb(85, 255, 120)\">✓ Gun picked up!</font>", CONFIG.Colors.Green)
-                        end
-                        print("[Instant Pickup] Success!")
+                for attempt = 1, 3 do
+                    -- ✅ Проверка: пистолет ещё существует?
+                    if not getGun() then
+                        pickupSuccess = true
                         break
                     end
                     
-                    print("[Instant Pickup] Retry " .. attempts .. "/" .. maxAttempts)
+                    pcall(function()
+                        local character = LocalPlayer.Character
+                        if not character then return end
+                        
+                        local hrp = character:FindFirstChild("HumanoidRootPart")
+                        if not hrp then return end
+                        
+                        -- Телепорт к пистолету
+                        local gunCFrame = gun:IsA("BasePart") and gun.CFrame or gun.PrimaryPart.CFrame
+                        hrp.CFrame = gunCFrame + Vector3.new(0, 2, 0)
+                        
+                        -- firetouchinterest
+                        if firetouchinterest then
+                            firetouchinterest(hrp, gun, 0)
+                            task.wait(0.05)
+                            firetouchinterest(hrp, gun, 1)
+                        end
+                    end)
+                    
+                    task.wait(0.15)
+                    
+                    -- ✅ Проверка: пистолет подобран?
+                    if LocalPlayer.Character:FindFirstChild("Gun") or 
+                       LocalPlayer.Backpack:FindFirstChild("Gun") then
+                        pickupSuccess = true
+                        break
+                    end
                 end
                 
-                if getSheriff() ~= LocalPlayer then
-                    print("[Instant Pickup] Failed after " .. maxAttempts .. " attempts")
+                -- ✅ ЕСЛИ НЕ ПОДОБРАЛИ - ЖДЁМ НОВЫЙ РАУНД
+                if not pickupSuccess then
+                    
+                    -- Ждём окончания текущего раунда
+                    repeat
+                        task.wait(0.5)
+                    until getMurder() == nil or not State.InstantPickupEnabled
+                    
+                    -- Ждём начала нового раунда
+                    repeat
+                        task.wait(0.5)
+                    until getMurder() ~= nil or not State.InstantPickupEnabled
                 end
-                
-                -- Ждем немного перед следующей проверкой
-                task.wait(0.5)
+            else
+                task.wait(0.2)
             end
-            
-            task.wait(0.1) -- Проверка каждые 0.1 секунды
         end
-        
-        print("[Instant Pickup] Stopped.")
     end)
 end
 
@@ -2395,7 +2697,6 @@ local function DisableInstantPickup()
         task.cancel(State.InstantPickupThread)
         State.InstantPickupThread = nil
     end
-    print("[Instant Pickup] Disabled")
 end
 
 -- EnableExtendedHitbox() - Включение расширенного хитбокса
@@ -2526,63 +2827,110 @@ local function ToggleKillAura(state)
     end
 end
 
-local function InstantKillAll()
-    -- Проверка роли
-    if findMurderer() ~= LocalPlayer then
+InstantKillAll = function()
+    print("[InstantKillAll] 🚀 Запущен")
+    
+    local murderer = getMurder()
+    if murderer ~= LocalPlayer then
+        print("[InstantKillAll] ❌ Ты не мурдерер!")
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
+            ShowNotification(
+                "<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You are not the murderer</font>",
+                CONFIG.Colors.Text
+            )
+        end
+        return
+    end
+
+    local character = LocalPlayer.Character
+    if not character then
+        print("[InstantKillAll] ❌ Нет персонажа!")
+        return
+    end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        print("[InstantKillAll] ❌ Нет HumanoidRootPart!")
+        return
+    end
+
+    if not character:FindFirstChild("Knife") then
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid and LocalPlayer.Backpack:FindFirstChild("Knife") then
+            humanoid:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
+            task.wait(0.3)  -- ✅ Увеличена задержка
+        end
+    end
+    
+    local knife = character:FindFirstChild("Knife")
+    if not knife then
+        print("[InstantKillAll] ❌ Нож не найден!")
+        if State.NotificationsEnabled then
+            ShowNotification(
+                "<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Knife not found</font>",
+                CONFIG.Colors.Text
+            )
         end
         return
     end
     
-    -- Проверка наличия ножа
-    if not LocalPlayer.Character:FindFirstChild("Knife") then
-        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
-        if LocalPlayer.Backpack:FindFirstChild("Knife") then
-            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.2)
-        else
-            if State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No knife in inventory</font>",CONFIG.Colors.Text)
-            end
-            return
-        end
-    end
-    
-    local localHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not localHRP then return end
-    
-    -- ✅ ТОЛЬКО ТЕЛЕПОРТ всех игроков к себе
-    local teleportedCount = 0
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-            local hrp = player.Character.HumanoidRootPart
-            pcall(function()
-                hrp.Anchored = true
-                hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * 2.5)
-                teleportedCount = teleportedCount + 1
-            end)
-        end
-    end
-    
-    -- ✅ Уведомление о том, что нужно бить самому
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220, 220, 220)\">Players Teleported: " .. teleportedCount .. "</font> <font color=\"rgb(220, 220, 220)\">Now swing your knife!</font>",CONFIG.Colors.Text)
-    end
-    
-    -- Освобождаем через 3 секунды
-    task.spawn(function()
-        task.wait(3)
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-                pcall(function()
-                    player.Character.HumanoidRootPart.Anchored = false
-                end)
-            end
-        end
-    end)
-end
+    local originalCFrame = hrp.CFrame
 
+    local teleportedPlayers = 0
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
+            if targetHRP then
+                targetHRP.CFrame = hrp.CFrame
+                targetHRP.Anchored = true
+                teleportedPlayers = teleportedPlayers + 1
+            end
+        end
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">InstantKillAll: Players teleported (" .. teleportedPlayers .. "), attacking...</font>",
+            CONFIG.Colors.Text
+        )
+    end
+
+    task.wait(0.5)
+    for i = 1, 3 do
+        knife = character:FindFirstChild("Knife")  -- Перепроверяем каждый раз
+        if knife and knife.Parent then
+            knife:Activate()
+            print("[InstantKillAll] 🔪 Автоудар #" .. i)
+        else
+            print("[InstantKillAll] ⚠️ Нож исчез во время атаки!")
+            break
+        end
+        
+        if i < 3 then
+            task.wait(1.5)
+        end
+    end
+    
+    -- ✅ Держим игроков ещё 0.5 секунды
+    task.wait(0.5)
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
+            if targetHRP then
+                targetHRP.Anchored = false
+            end
+        end
+    end
+    
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">InstantKillAll: </font><font color=\"rgb(168,228,160)\">Complete!</font>",
+            CONFIG.Colors.Green
+        )
+    end
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 16: VIEW CLIP & TELEPORT (СТРОКИ 2801-2930)
@@ -2715,82 +3063,115 @@ local function Rejoin()
     end)
 end
 
--- ServerHop() - HttpGet серверов + телепорт
-local function ServerHop()
-    print("[Server Hop] Поиск нового сервера...")
-    
-    local success, result = pcall(function()
-        local serverlist = {}
-        local cursor = ""
-        local foundServers = 0
-
-        for i = 1, 3 do
-            local url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
-                game.PlaceId,
-                cursor
-            )
-
-            local success2, response = pcall(function()
-                return game:HttpGet(url)
-            end)
-
-            if not success2 then
-                warn("[Server Hop] Ошибка получения списка серверов:", response)
-                break
-            end
-
-            local data = HttpService:JSONDecode(response)
-
-            for _, server in ipairs(data.data) do
-                if server.id ~= game.JobId and 
-                   server.playing < server.maxPlayers and
-                   server.playing > 0 then
-                    table.insert(serverlist, server)
-                    foundServers = foundServers + 1
-                end
-            end
-
-            cursor = data.nextPageCursor
-            if not cursor or cursor == "" then
-                break
-            end
-
-            if foundServers >= 10 then
-                break
-            end
-        end
-
-        if #serverlist == 0 then
-            print("[Server Hop] Нет доступных серверов, используем Rejoin")
-            task.wait(1)
-            return Rejoin()
-        end
-
-        table.sort(serverlist, function(a, b)
-            return a.playing < b.playing
-        end)
-
-        local targetIndex = math.random(1, math.min(5, #serverlist))
-        local targetServer = serverlist[targetIndex]
-
-        print("[Server Hop] Телепорт на сервер с " .. targetServer.playing .. " игроками")
-        task.wait(1)
-
-        TeleportService:TeleportToPlaceInstance(
-            game.PlaceId, 
-            targetServer.id, 
-            LocalPlayer
-        )
+local function GetCurrentPing()
+    local success, ping = pcall(function()
+        return math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
     end)
-
-    if not success then
-        warn("[Server Hop] Ошибка:", result)
-        task.wait(1)
-        Rejoin()
-    end
+    return success and ping or 999
 end
 
+-- ServerHop - Максимально быстрый выбор сервера
+local function ServerHop()
+    local HttpService = game:GetService("HttpService")
+    local TeleportService = game:GetService("TeleportService")
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(255,170,50)\">Searching...</font>",
+            CONFIG.Colors.Orange
+        )
+    end
+    
+    task.spawn(function()
+        local success, result = pcall(function()
+            local currentJobId = game.JobId
+            local bestServers = {}
+            
+            -- Получаем список друзей параллельно (не ждём результат)
+            local friendsMap = {}
+            task.spawn(function()
+                pcall(function()
+                    local friends = LocalPlayer:GetFriendsOnline(200)
+                    for _, friend in ipairs(friends) do
+                        friendsMap[friend.PlaceId] = true
+                    end
+                end)
+            end)
+            
+            -- Загружаем ТОЛЬКО первую страницу серверов (100 серверов)
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
+                game.PlaceId
+            )
+            
+            local response = game:HttpGet(url)
+            local data = HttpService:JSONDecode(response)
+            
+            -- Быстрая фильтрация и сортировка в один проход
+            for _, server in ipairs(data.data) do
+                -- Фильтр: не текущий, не полный, не пустой, оптимальное кол-во игроков
+                if server.id ~= currentJobId and 
+                   server.playing >= 1 and 
+                   server.playing <= 10 and  -- Только серверы с 1-10 игроками
+                   server.playing < server.maxPlayers then
+                    
+                    -- Вычисляем score сразу при вставке
+                    local score = server.playing
+                    
+                    -- Оптимальный диапазон: 2-8 игроков
+                    if server.playing >= 2 and server.playing <= 8 then
+                        score = score - 3
+                    end
+                    
+                    -- Штраф за 1 игрока (может быть нестабильный сервер)
+                    if server.playing == 1 then
+                        score = score + 2
+                    end
+                    
+                    table.insert(bestServers, {
+                        server = server,
+                        score = score
+                    })
+                end
+            end
+            
+            -- Проверка наличия серверов
+            if #bestServers == 0 then
+                print("[Server Hop] Подходящие серверы не найдены, Rejoin...")
+                return Rejoin()
+            end
+            
+            -- Быстрая сортировка по score
+            table.sort(bestServers, function(a, b)
+                return a.score < b.score
+            end)
+            
+            -- Берём ПЕРВЫЙ лучший сервер (никаких случайностей)
+            local targetServer = bestServers[1].server
+            
+            print("[Server Hop] ✅ Подключение: " .. targetServer.playing .. "/" .. targetServer.maxPlayers .. " игроков")
+            
+            if State.NotificationsEnabled then
+                ShowNotification(
+                    "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(168,228,160)\">Joining (" .. targetServer.playing .. "p)</font>",
+                    CONFIG.Colors.Green
+                )
+            end
+            
+            -- Мгновенный телепорт (без задержек)
+            TeleportService:TeleportToPlaceInstance(
+                game.PlaceId,
+                targetServer.id,
+                LocalPlayer
+            )
+        end)
+        
+        if not success then
+            warn("[Server Hop] Ошибка:", result)
+            Rejoin()
+        end
+    end)
+end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 19: UI HELPER FUNCTIONS (СТРОКИ 3201-3450)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -2865,7 +3246,7 @@ local function CreateUI()
 
 
     local titleLabel = Create("TextLabel", {
-        Text = "MM2 <font color=\"rgb(128, 0, 128)\">for my lubimka</font>",
+        Text = "MM2 <font color=\"rgb(128, 0, 128)\">for my кошичка жена!</font>",
         --Text = "MM2 ESP <font color=\"rgb(90,140,255)\">v6.0 Tabs</font>",
         RichText = true,
         Font = Enum.Font.GothamBold,
@@ -3787,6 +4168,7 @@ end
         )
         end
     end)
+    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent",  function(s) State.XPFarmEnabled = s if s then StartXPFarm() else StopXPFarm() end end)
    
     FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", function(s) State.UndergroundMode = s end)
     FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, 23, function(v) State.CoinFarmFlySpeed = v end, 1)
