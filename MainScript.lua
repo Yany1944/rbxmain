@@ -1,27 +1,29 @@
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 1: INITIALIZATION & PROTECTION (СТРОКИ 1-70)
+-- ══════════════════════════════════════════════════════════════════════════════
+
 --if game.PlaceId ~= 142823291 then return end
 
+-- Loadstring Emotes (строка 3)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Emotes.lua"))()
 
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
+-- Game.Loaded проверка (строка 5-7)
+if not game:IsLoaded() then game.Loaded:Wait() end
 
-if getgenv().MM2_ESP_Script then
-    return
-end
+-- Защита от повторного запуска (строка 9-12)
+if getgenv().MM2_ESP_Script then return end
 getgenv().MM2_ESP_Script = true
+
+-- CoreGui Toggle Fix (строка 13-31)
 pcall(function()
     local StarterGui = game:GetService("StarterGui")
-    
-    -- Отключаем все CoreGui по отдельности (не используем Enum.CoreGuiType.All)
+    -- Отключаем CoreGui
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, false)
-    
     task.wait(0.5)
-    
     -- Включаем обратно
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, true)
@@ -30,16 +32,13 @@ pcall(function()
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
 end)
 
-
--- ДОБАВЛЕНО: Переопределяем warn и error
+-- Warn/Error Override (строка 34-62)
 local oldWarn = warn
 local oldError = error
 
 warn = function(...)
     local msg = tostring(...)
-    if msg:match("useSliderMotionStates") or 
-       msg:match("CorePackages") or
-       msg:match("Slider") then
+    if msg:match("useSliderMotionStates") or msg:match("CorePackages") or msg:match("Slider") then
         return
     end
     return oldWarn(...)
@@ -47,9 +46,7 @@ end
 
 error = function(msg, level)
     if type(msg) == "string" then
-        if msg:match("useSliderMotionStates") or 
-           msg:match("CorePackages") or
-           msg:match("Slider") then
+        if msg:match("useSliderMotionStates") or msg:match("CorePackages") or msg:match("Slider") then
             return
         end
     end
@@ -57,38 +54,46 @@ error = function(msg, level)
 end
 
 
-    local CONFIG = {
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 2: CONFIG & SERVICES (СТРОКИ 65-115)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local CONFIG = {
         HideKey = Enum.KeyCode.Q,
         Colors = {
-            Background = Color3.fromRGB(25, 25, 30),
-            Section = Color3.fromRGB(35, 35, 40),
-            Text = Color3.fromRGB(220, 220, 220),
-            TextDark = Color3.fromRGB(150, 150, 150),
-        --  Accent = Color3.fromRGB(90, 140, 255),
-            Accent = Color3.fromRGB(220, 145, 230),
-            Red = Color3.fromRGB(255, 85, 85),
-            Green = Color3.fromRGB(85, 255, 120),
-            Orange = Color3.fromRGB(255, 170, 50),
-            Stroke = Color3.fromRGB(50, 50, 55),
-            Murder = Color3.fromRGB(255, 50, 50),
-            Sheriff = Color3.fromRGB(50, 150, 255),
-            Gun = Color3.fromRGB(255, 200, 50),
-            Innocent = Color3.fromRGB(85, 255, 120)
+        Background = Color3.fromRGB(25, 25, 30),
+        Section = Color3.fromRGB(35, 35, 40),
+		Text = Color3.fromRGB(220, 220, 220),
+        TextDark = Color3.fromRGB(150, 150, 150),
+	--  Accent = Color3.fromRGB(90, 140, 255),
+        Accent = Color3.fromRGB(220, 145, 230),
+        Red = Color3.fromRGB(255, 85, 85),
+        Green = Color3.fromRGB(85, 255, 120),
+        Orange = Color3.fromRGB(255, 170, 50),
+        Stroke = Color3.fromRGB(50, 50, 55),
+        Murder = Color3.fromRGB(255, 50, 50),
+        Sheriff = Color3.fromRGB(50, 150, 255),
+        Gun = Color3.fromRGB(255, 200, 50),
+        Innocent = Color3.fromRGB(85, 255, 120)
         },
-        Notification = {
-            Duration = 3,
-            FadeTime = 0.4
+    Notification = {
+        Duration = 3,
+        FadeTime = 0.4
         }
-    }
+	}
 
-    local Players = game:GetService("Players")
-    local Workspace = game:GetService("Workspace")
-    local RunService = game:GetService("RunService")
-    local UserInputService = game:GetService("UserInputService")
-    local CoreGui = game:GetService("CoreGui")
-    local TweenService = game:GetService("TweenService")
-    local LocalPlayer = Players.LocalPlayer
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
 
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 3: STATE MANAGEMENT (СТРОКИ 116-252)
+-- ══════════════════════════════════════════════════════════════════════════════
 
 local State = {
     -- ESP настройки
@@ -121,6 +126,7 @@ local State = {
     CoinFarmThread = nil,
     CoinFarmFlySpeed = 23,
     CoinFarmDelay = 2,
+    FirstCoinCollected = false,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
     CoinBlacklist = {},
@@ -209,7 +215,13 @@ local State = {
 
 local currentMapConnection = nil
 local currentMap = nil
--- ✅ Для респавна (без keybinds)
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 4: SYSTEM FUNCTIONS (СТРОКИ 253-410)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- CleanupMemory() - Очистка при респавне
 local function CleanupMemory()
     -- highlights
     if State.PlayerHighlights then
@@ -327,8 +339,7 @@ local function FullShutdown()
     lastCacheTime = 0
 end
 
-
-
+-- findNearestPlayer() - Поиск ближайшего игрока
 local function findNearestPlayer()
     local nearestPlayer = nil
     local shortestDistance = math.huge
@@ -356,6 +367,34 @@ local function findNearestPlayer()
     return nearestPlayer
 end
 
+-- getAllPlayers() - Список игроков (без LocalPlayer)
+local function getAllPlayers()
+    local playerList = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerList, player.Name)
+        end
+    end
+    table.sort(playerList)
+    return playerList
+end
+
+-- getPlayerByName() - Поиск игрока по имени
+local function getPlayerByName(playerName)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name == playerName or player.DisplayName == playerName then
+            return player
+        end
+    end
+    return nil
+end
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 5: CHARACTER FUNCTIONS (СТРОКИ 411-470)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- ApplyWalkSpeed() - Установка скорости
 local function ApplyWalkSpeed(speed)
     local character = LocalPlayer.Character
     if not character then return end
@@ -366,6 +405,7 @@ local function ApplyWalkSpeed(speed)
     end
 end
 
+-- ApplyJumpPower() - Установка прыжка
 local function ApplyJumpPower(power)
     local character = LocalPlayer.Character
     if not character then return end
@@ -376,17 +416,36 @@ local function ApplyJumpPower(power)
     end
 end
 
+-- ApplyMaxCameraZoom() - Установка зума
 local function ApplyMaxCameraZoom(distance)
     LocalPlayer.CameraMaxZoomDistance = distance
     State.MaxCameraZoom = distance
 end
 
+-- ApplyCharacterSettings() - Применение всех настроек
 local function ApplyCharacterSettings()
     ApplyWalkSpeed(State.WalkSpeed)
     ApplyJumpPower(State.JumpPower)
     ApplyMaxCameraZoom(State.MaxCameraZoom)
 end
 
+-- ApplyFOV() - Плавное изменение FOV
+local function ApplyFOV(fov)
+    local camera = Workspace.CurrentCamera
+    if camera then
+        TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            FieldOfView = fov
+        }):Play()
+        State.CameraFOV = fov
+    end
+end
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 6: NOTIFICATION SYSTEM (СТРОКИ 471-610)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- CreateNotificationUI() - Создание UI уведомлений
 local function CreateNotificationUI()
     local notifGui = Instance.new("ScreenGui")
     notifGui.Name = "MM2_Notifications"
@@ -398,7 +457,7 @@ local function CreateNotificationUI()
     container.Name = "NotificationContainer"
     container.BackgroundTransparency = 1
     container.AnchorPoint = Vector2.new(0.5, 0)
-    container.Position = UDim2.new(0.5, 0, 0, 80) -- правый верх
+    container.Position = UDim2.new(0.5, 0, 0, 80)
     container.Size = UDim2.new(0, 340, 1, -100)
     container.Parent = notifGui
 
@@ -414,7 +473,7 @@ local function CreateNotificationUI()
     State.UIElements.NotificationContainer = container
 end
 
-
+-- ShowNotification() - Показ уведомления
 local function ShowNotification(richText, defaultColor)
     if not State.NotificationsEnabled then return end
 
@@ -456,15 +515,14 @@ local function ShowNotification(richText, defaultColor)
         label.Position = UDim2.new(0, 10, 0, 0)
         label.Parent = notifFrame
 
-        -- ✅ НОВАЯ анимация: появление сверху вниз с fade-in
-        notifFrame.AnchorPoint = Vector2.new(0.5, 0)  -- Центрируем по X
-        notifFrame.Position = UDim2.new(0.5, 0, 0, -50)  -- Начинаем выше контейнера
+        notifFrame.AnchorPoint = Vector2.new(0.5, 0)
+        notifFrame.Position = UDim2.new(0.5, 0, 0, -50)
         notifFrame.BackgroundTransparency = 1
 
         TweenService:Create(
             notifFrame,
             TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-            { Position = UDim2.new(0.5, 0, 0, 0),  -- Опускаем на место
+            { Position = UDim2.new(0.5, 0, 0, 0),
               BackgroundTransparency = 0.1 }
         ):Play()
 
@@ -479,7 +537,7 @@ local function ShowNotification(richText, defaultColor)
         local fadeOut = TweenService:Create(
             notifFrame,
             TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50) }  -- ✅ Уходит вверх
+            { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50) }
         )
         fadeOut:Play()
         
@@ -494,16 +552,10 @@ local function ShowNotification(richText, defaultColor)
     end)
 end
 
-local function ApplyFOV(fov)
-    local camera = Workspace.CurrentCamera
-    if camera then
-        TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
-            FieldOfView = fov
-        }):Play()
-        State.CameraFOV = fov
-    end
-end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 7: ROLE DETECTION (СТРОКИ 611-660)
+-- ══════════════════════════════════════════════════════════════════════════════
 
 local AntiFlingEnabled = false
 local AntiFlingLastPos = Vector3.zero
@@ -512,12 +564,8 @@ local FlingNeutralizerConnection = nil
 local DetectedFlingers = {}
 local FlingBlockedNotified = false
 
--- ========================================
--- ✅ НОВЫЕ ФУНКЦИИ (MANA LOGIC)
--- ========================================
-
+-- getMurder() - Поиск убийцы
 local function getMurder()
-    -- ✅ ПРОВЕРЯЕМ ВСЕХ ИГРОКОВ (включая LocalPlayer)
     for _, plr in ipairs(Players:GetPlayers()) do
         local character = plr.Character
         local backpack = plr:FindFirstChild("Backpack")
@@ -529,8 +577,8 @@ local function getMurder()
     return nil
 end
 
+-- getSheriff() - Поиск шерифа
 local function getSheriff()
-    -- ✅ ПРОВЕРЯЕМ ВСЕХ ИГРОКОВ (включая LocalPlayer)
     for _, plr in ipairs(Players:GetPlayers()) do
         local character = plr.Character
         local backpack = plr:FindFirstChild("Backpack")
@@ -543,11 +591,15 @@ local function getSheriff()
 end
 
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 8: ANTI-FLING (СТРОКИ 661-790)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- EnableAntiFling() - Включение защиты от флинга
 local function EnableAntiFling()
     if AntiFlingEnabled then return end
     AntiFlingEnabled = true
-    
-    -- Детектор флинга других игроков (без изменений)
+
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
@@ -578,19 +630,16 @@ local function EnableAntiFling()
         end
     end)
     
-    -- ✅ ИСПРАВЛЕННАЯ защита с совместимостью FlingPlayer
+
     FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
-            
-            -- ✅ ВАЖНО: Пропускаем если идёт FlingPlayer
             if State.IsFlingInProgress then
                 AntiFlingLastPos = primaryPart.Position
                 return
             end
-            
-            -- ✅ ПОНИЖЕН ПОРОГ: 250 вместо 350 (как в рабочем коде)
+			
             if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or 
                primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
                 
@@ -622,8 +671,7 @@ local function EnableAntiFling()
     table.insert(State.Connections, FlingNeutralizerConnection)
 end
 
-
-
+-- DisableAntiFling() - Отключение защиты
 local function DisableAntiFling()
     AntiFlingEnabled = false
     DetectedFlingers = {}
@@ -639,29 +687,12 @@ local function DisableAntiFling()
     end
 end
 
--- Найди функцию getAllPlayers() и обнови:
-local function getAllPlayers()
-    local playerList = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            table.insert(playerList, player.Name)
-        end
-    end
-    -- Сортируем по алфавиту
-    table.sort(playerList)
-    return playerList
-end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 9: FLING FUNCTIONS (СТРОКИ 791-1050)
+-- ══════════════════════════════════════════════════════════════════════════════
 
-local function getPlayerByName(playerName)
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Name == playerName or player.DisplayName == playerName then
-            return player
-        end
-    end
-    return nil
-end
-
+-- FlingPlayer() - Главная функция флинга
 local function FlingPlayer(playerToFling)
     if not playerToFling or not playerToFling.Character then 
         if State.NotificationsEnabled then
@@ -825,9 +856,7 @@ local function FlingPlayer(playerToFling)
     end
 end
 
-
--- Добавь эти функции после функции FlingPlayer (примерно строка 850)
-
+-- FlingMurderer() - Флинг убийцы
 local function FlingMurderer()
     local murderer = getMurder()
     if not murderer then
@@ -837,7 +866,6 @@ local function FlingMurderer()
         return
     end
     
-    -- Проверка: не флингим сам себя
     if murderer == LocalPlayer then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You cannot fling yourself!</font>", CONFIG.Colors.Text)
@@ -848,6 +876,7 @@ local function FlingMurderer()
     FlingPlayer(murderer)
 end
 
+-- FlingSheriff() - Флинг шерифа
 local function FlingSheriff()
     -- Поиск шерифа (аналогично FindMurderer)
     local sheriff = nil
@@ -888,12 +917,11 @@ local function FlingSheriff()
 end
 
 
--- ╔═══════════════════════════════════════════════════════════════╗
--- ║                    🚫 NoClip ФУНКЦИИ                          ║
--- ╚═══════════════════════════════════════════════════════════════╝
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 10: NOCLIP SYSTEM (СТРОКИ 1051-1180)
+-- ══════════════════════════════════════════════════════════════════════════════
 
--- === NoClip (УНИВЕРСАЛЬНЫЙ) ===
-
+-- EnableNoClip() - Включение NoClip
 local function EnableNoClip()
     if State.NoClipEnabled then return end
     State.NoClipEnabled = true
@@ -901,7 +929,6 @@ local function EnableNoClip()
     local character = LocalPlayer.Character
     if not character then return end
     
-    -- ✅ КАК В ИСХОДНИКЕ: Собираем BasePart в таблицу один раз
     local NoClipObjects = {}
     
     for _, obj in ipairs(character:GetChildren()) do
@@ -910,10 +937,8 @@ local function EnableNoClip()
         end
     end
     
-    -- Сохраняем в State для доступа
     State.NoClipObjects = NoClipObjects
     
-    -- ✅ КАК В ИСХОДНИКЕ: Обновляем таблицу при респавне
     State.NoClipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
         task.wait(0.15)
         
@@ -926,7 +951,6 @@ local function EnableNoClip()
         end
     end)
     
-    -- ✅ КАК В ИСХОДНИКЕ: Просто отключаем коллизии в Stepped
     State.NoClipConnection = RunService.Stepped:Connect(function()
         for i = 1, #NoClipObjects do
             NoClipObjects[i].CanCollide = false
@@ -938,10 +962,52 @@ local function EnableNoClip()
     end
 end
 
+-- DisableNoClip() - Отключение NoClip
+local function DisableNoClip()
+    if not State.NoClipEnabled then return end
+    State.NoClipEnabled = false
+    
+    if State.NoClipConnection then
+        State.NoClipConnection:Disconnect()
+        State.NoClipConnection = nil
+    end
+    
+    if State.NoClipRespawnConnection then
+        State.NoClipRespawnConnection:Disconnect()
+        State.NoClipRespawnConnection = nil
+    end
+    
+    if State.NoClipObjects then
+        local character = LocalPlayer.Character
+        if character then
+            for i = 1, #State.NoClipObjects do
+                local part = State.NoClipObjects[i]
+                if part and part.Parent then
+                    if part.Name ~= "HumanoidRootPart" then
+                        part.CanCollide = true
+                    end
+                end
+            end
+        end
+        
+        table.clear(State.NoClipObjects)
+        State.NoClipObjects = nil
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Red)
+    end
+end
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 11: AUTO FARM SYSTEM (СТРОКИ 1181-1600)
+-- ══════════════════════════════════════════════════════════════════════════════
 
 local coinLabelCache = nil
 local lastCacheTime = 0
 
+-- GetCollectedCoinsCount() - Получение кол-ва монет
 local function GetCollectedCoinsCount()
     if coinLabelCache and coinLabelCache.Parent and (tick() - lastCacheTime) < 2 then
         local success, value = pcall(function()
@@ -995,6 +1061,7 @@ local function GetCollectedCoinsCount()
     return maxValue
 end
 
+-- ResetCharacter() - Ресет с сохранением GodMode
 local function ResetCharacter()
     print("[Auto Farm] 💀 Ресет персонажа")
     
@@ -1108,6 +1175,7 @@ local function ResetCharacter()
 end
 
 
+-- FindNearestCoin() - Поиск ближайшей монеты
 local function FindNearestCoin()
     local character = LocalPlayer.Character
     if not character then return nil end
@@ -1119,7 +1187,18 @@ local function FindNearestCoin()
     local closestDistance = math.huge
     local hrpPosition = humanoidRootPart.Position
     
-    for _, coin in ipairs(Workspace:GetDescendants()) do
+    -- ✅ Оптимизация: ищем в CoinContainer, если он есть
+    local coinContainer = nil
+    pcall(function()
+        local map = getMap()
+        if map then
+            coinContainer = map:FindFirstChild("CoinContainer")
+        end
+    end)
+    
+    local searchRoot = coinContainer or Workspace
+    
+    for _, coin in ipairs(searchRoot:GetDescendants()) do
         if coin:IsA("BasePart") 
            and coin.Name == "Coin_Server" 
            and coin:FindFirstChildWhichIsA("TouchTransmitter") 
@@ -1140,51 +1219,10 @@ local function FindNearestCoin()
     return closestCoin
 end
 
-
-local function DisableNoClip()
-    if not State.NoClipEnabled then return end
-    State.NoClipEnabled = false
-    
-    -- ✅ СНАЧАЛА отключаем соединения
-    if State.NoClipConnection then
-        State.NoClipConnection:Disconnect()
-        State.NoClipConnection = nil
-    end
-    
-    if State.NoClipRespawnConnection then
-        State.NoClipRespawnConnection:Disconnect()
-        State.NoClipRespawnConnection = nil
-    end
-    
-    -- ✅ НОВОЕ: Принудительно восстанавливаем коллизии
-    if State.NoClipObjects then
-        local character = LocalPlayer.Character
-        if character then
-            for i = 1, #State.NoClipObjects do
-                local part = State.NoClipObjects[i]
-                if part and part.Parent then
-                    -- Восстанавливаем CanCollide для всех частей кроме HumanoidRootPart
-                    if part.Name ~= "HumanoidRootPart" then
-                        part.CanCollide = true
-                    end
-                end
-            end
-        end
-        
-        table.clear(State.NoClipObjects)
-        State.NoClipObjects = nil
-    end
-    
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Red)
-    end
-end
-
--- === ПЛАВНЫЙ ПОЛЁТ ===
-
+-- SmoothFlyToCoin() - Плавный полёт к монете
 local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     speed = speed or State.CoinFarmFlySpeed
-
+    
     local startPos = humanoidRootPart.Position
     
     local targetPos
@@ -1196,19 +1234,30 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     
     local distance = (targetPos - startPos).Magnitude
     local duration = distance / speed
-
+    
     local startTime = tick()
     local collectionAttempted = false
-
+    
     while tick() - startTime < duration do
         if not State.AutoFarmEnabled then break end
-
+        
+        -- ✅ ПРОВЕРКА: существует ли монета
+        if not coin or not coin.Parent then
+            return false
+        end
+        
+        -- ✅ ПРОВЕРКА: видима ли монета (CoinVisual.Transparency)
+        local coinVisual = coin:FindFirstChild("CoinVisual")
+        if not coinVisual or coinVisual.Transparency ~= 0 then
+            return false
+        end
+        
         local character = LocalPlayer.Character
         if not character or not humanoidRootPart.Parent then break end
-
+        
         local elapsed = tick() - startTime
         local alpha = math.min(elapsed / duration, 1)
-
+        
         local currentPos = startPos:Lerp(targetPos, alpha)
         
         local cframe
@@ -1226,7 +1275,7 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
         if humanoidRootPart.AssemblyAngularVelocity then
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
-
+        
         if alpha >= 0.5 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
@@ -1237,54 +1286,59 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
                 end)
             end
         end
-
+        
         task.wait()
     end
+    
+    return true
 end
 
+-- StartAutoFarm() - Запуск авто фарма
 local function StartAutoFarm()
     if State.CoinFarmThread then
         task.cancel(State.CoinFarmThread)
         State.CoinFarmThread = nil
     end
-
+    
     if not State.AutoFarmEnabled then return end
     
     State.CoinBlacklist = {}
-
+    
     State.CoinFarmThread = task.spawn(function()
-        print("[Auto Farm] 🚀 Запущен")
-        if State.UndergroundMode then
-            print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
-        end
+        print("[Auto Farm] 🚀 Запуск...")
         
         local noCoinsAttempts = 0
         local maxNoCoinsAttempts = 4
         local lastTeleportTime = 0
+        local coinsCollected = 0
+        local firstCoinCollected = false  -- ✅ Флаг сбора первой монеты
         
         while State.AutoFarmEnabled do
             local character = LocalPlayer.Character
-            if not character then 
+            if not character then
                 task.wait(0.5)
-                continue 
+                continue
             end
-
+            
             local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-            if not humanoidRootPart then 
+            if not humanoidRootPart then
                 task.wait(0.5)
-                continue 
+                continue
             end
-
+            
+            -- ✅ Проверяем наличие убийцы
             local murdererExists = getMurder() ~= nil
             
             if not murdererExists then
                 print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
+                firstCoinCollected = false  -- ✅ Сбрасываем флаг при новом раунде
                 task.wait(2)
                 continue
             end
-
+            
+            -- ✅ Поиск ближайшей монеты
             local coin = FindNearestCoin()
             if not coin then
                 noCoinsAttempts = noCoinsAttempts + 1
@@ -1296,17 +1350,18 @@ local function StartAutoFarm()
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
+                    firstCoinCollected = false  -- ✅ Сбрасываем флаг после ресета
                     
-                    -- ✅ ИСПРАВЛЕНО: Ждём респавна
+                    -- ✅ Ждём респавна
                     task.wait(3)
                     
-                    -- ✅ ИСПРАВЛЕНО: Ждём пока убийца исчезнет (конец раунда)
+                    -- ✅ Ждём ОКОНЧАНИЯ раунда (убийца исчезает)
                     print("[Auto Farm] ⏳ Жду окончания раунда...")
                     repeat
                         task.wait(1)
                     until getMurder() == nil or not State.AutoFarmEnabled
                     
-                    -- ✅ ИСПРАВЛЕНО: Теперь ждём НАЧАЛА нового раунда
+                    -- ✅ Ждём НАЧАЛА нового раунда (убийца появляется)
                     print("[Auto Farm] ⏳ Жду начала нового раунда...")
                     repeat
                         task.wait(1)
@@ -1318,25 +1373,35 @@ local function StartAutoFarm()
                 end
                 continue
             end
-
+            
+            -- Проверяем видимость монеты
+            local coinVisual = coin:FindFirstChild("CoinVisual")
+            if not coinVisual or coinVisual.Transparency ~= 0 then
+                State.CoinBlacklist[coin] = true
+                continue
+            end
+            
             noCoinsAttempts = 0
-
+            
+            -- ✅ Сбор монеты
             pcall(function()
                 local currentCoins = GetCollectedCoinsCount()
-
-                if currentCoins < 1 then
+                
+                if not firstCoinCollected then
+                    -- ✅ ТЕЛЕПОРТ К ПЕРВОЙ МОНЕТЕ (пока не соберём)
                     local currentTime = tick()
                     local timeSinceLastTP = currentTime - lastTeleportTime
                     
-                    if timeSinceLastTP < 0.5 and lastTeleportTime > 0 then
-                        local waitTime = 0.5 - timeSinceLastTP
+                    -- ✅ Ждём кулдаун перед телепортом
+                    if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
+                        local waitTime = State.CoinFarmDelay - timeSinceLastTP
+                        print("[Auto Farm] ⏱️ Ожидание кулдауна: " .. string.format("%.1f", waitTime) .. "с")
                         task.wait(waitTime)
                     end
                     
-                    print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
+                    print("[Auto Farm] 📍 ТП к первой монете")
                     
                     local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
-
                     if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
                         humanoidRootPart.CFrame = targetCFrame
                         lastTeleportTime = tick()
@@ -1347,40 +1412,50 @@ local function StartAutoFarm()
                             firetouchinterest(humanoidRootPart, coin, 1)
                         end
                         
-                        task.wait(State.CoinFarmDelay)
+                        -- ✅ Увеличенная задержка для обновления счетчика
+                        task.wait(0.3)
                         
+                        coinLabelCache = nil  -- ✅ Обновляем кеш
                         local coinsAfter = GetCollectedCoinsCount()
+                        
                         if coinsAfter > currentCoins then
-                            print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
+                            coinsCollected = coinsCollected + 1
+                            firstCoinCollected = true  -- ✅ Первая монета собрана!
+                            print("[Auto Farm] ✅ Первая монета собрана (TP) | Перехожу к полёту")
+                        else
+                            print("[Auto Farm] ⚠️ Монета не собралась, повторю попытку после кулдауна")
                         end
                         
                         State.CoinBlacklist[coin] = true
                     end
                 else
-                    if State.UndergroundMode then
-                        print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
-                    else
-                        print("[Auto Farm] ✈️ Полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
-                    end
+                    -- ✅ ПОЛЁТ К ОСТАЛЬНЫМ МОНЕТАМ (без кулдауна)
+                    print("[Auto Farm] ✈️ Полёт к монете #" .. (currentCoins + 1))
                     
                     EnableNoClip()
                     SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
                     
+                    coinLabelCache = nil  -- ✅ Обновляем кеш
                     local coinsAfter = GetCollectedCoinsCount()
+                    
                     if coinsAfter > currentCoins then
+                        coinsCollected = coinsCollected + 1
                         print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
+                    else
+                        print("[Auto Farm] ⚠️ Монета не собралась (Fly)")
                     end
                     
                     State.CoinBlacklist[coin] = true
                 end
             end)
         end
-
+        
         DisableNoClip()
         State.CoinFarmThread = nil
-        print("[Auto Farm] 🛑 Остановлен")
+        print("[Auto Farm] 🛑 Остановлен (собрано: " .. coinsCollected .. ")")
     end)
 end
+
 
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
@@ -1389,144 +1464,24 @@ local function StopAutoFarm()
         task.cancel(State.CoinFarmThread)
         State.CoinFarmThread = nil
     end
-    
     DisableNoClip()
     print("[Auto Farm] Полностью выключен")
 end
 
--- ╔═══════════════════════════════════════════════════════════════╗
--- ║                    ⏰ ANTI-AFK (РАБОЧИЙ)                      ║
--- ╚═══════════════════════════════════════════════════════════════╝
-
-local function SetupAntiAFK()
-    local VirtualUser = game:GetService("VirtualUser")
-    LocalPlayer.Idled:Connect(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end)
-    
-    task.spawn(function()
-        while getgenv().MM2_ESP_Script do
-            pcall(function()
-                if getconnections then
-                    for _, connection in next, getconnections(LocalPlayer.Idled) do
-                        if connection.Disable then
-                            connection:Disable()
-                        end
-                    end
-                end
-            end)
-            task.wait(60)
-        end
-    end)
-end
 
 
--- ╔═══════════════════════════════════════════════════════════════╗
--- ║                    🔄 REJOIN / SERVER HOP                     ║
--- ╚═══════════════════════════════════════════════════════════════╝
 
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-
-local function Rejoin()
-    print("[Rejoin] Переподключение...")
-    task.wait(0.5)
-
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-    end)
-
-    task.wait(2)
-    pcall(function()
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
-    end)
-end
-
-local function ServerHop()
-    print("[Server Hop] Поиск нового сервера...")
-    
-    local success, result = pcall(function()
-        local serverlist = {}
-        local cursor = ""
-        local foundServers = 0
-
-        for i = 1, 3 do
-            local url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
-                game.PlaceId,
-                cursor
-            )
-
-            local success2, response = pcall(function()
-                return game:HttpGet(url)
-            end)
-
-            if not success2 then
-                warn("[Server Hop] Ошибка получения списка серверов:", response)
-                break
-            end
-
-            local data = HttpService:JSONDecode(response)
-
-            for _, server in ipairs(data.data) do
-                if server.id ~= game.JobId and 
-                   server.playing < server.maxPlayers and
-                   server.playing > 0 then
-                    table.insert(serverlist, server)
-                    foundServers = foundServers + 1
-                end
-            end
-
-            cursor = data.nextPageCursor
-            if not cursor or cursor == "" then
-                break
-            end
-
-            if foundServers >= 10 then
-                break
-            end
-        end
-
-        if #serverlist == 0 then
-            print("[Server Hop] Нет доступных серверов, используем Rejoin")
-            task.wait(1)
-            return Rejoin()
-        end
-
-        table.sort(serverlist, function(a, b)
-            return a.playing < b.playing
-        end)
-
-        local targetIndex = math.random(1, math.min(5, #serverlist))
-        local targetServer = serverlist[targetIndex]
-
-        print("[Server Hop] Телепорт на сервер с " .. targetServer.playing .. " игроками")
-        task.wait(1)
-
-        TeleportService:TeleportToPlaceInstance(
-            game.PlaceId, 
-            targetServer.id, 
-            LocalPlayer
-        )
-    end)
-
-    if not success then
-        warn("[Server Hop] Ошибка:", result)
-        task.wait(1)
-        Rejoin()
-    end
-end
-
--- ╔═══════════════════════════════════════════════════════════════╗
--- ║    GODMODE (УДАЛЕНИЕ ТРУПА + АГРЕССИВНАЯ ЗАЩИТА)               ║
--- ╚═══════════════════════════════════════════════════════════════╝
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 12: GODMODE SYSTEM (СТРОКИ 1601-1800)
+-- ══════════════════════════════════════════════════════════════════════════════
 
 local healthConnection = nil
 local damageBlockerConnection = nil
 local stateConnection = nil
+local ApplyGodMode, SetupHealthProtection, SetupDamageBlocker
 
-local function ApplyGodMode()
+-- ApplyGodMode() - Установка Health = math.huge
+ApplyGodMode = function()
     if not State.GodModeEnabled then return end
     
     local character = LocalPlayer.Character
@@ -1554,7 +1509,8 @@ local function ApplyGodMode()
     end)
 end
 
-local function SetupHealthProtection()
+-- SetupHealthProtection() - Защита Health/StateChanged
+SetupHealthProtection = function()
     if healthConnection then
         healthConnection:Disconnect()
     end
@@ -1569,12 +1525,9 @@ local function SetupHealthProtection()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
     
-    -- МГНОВЕННАЯ БЛОКИРОВКА СОСТОЯНИЯ DEAD
     stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
         if State.GodModeEnabled then
             if newState == Enum.HumanoidStateType.Dead then
-                
-                -- МОМЕНТАЛЬНО возвращаем состояние
                 humanoid:ChangeState(Enum.HumanoidStateType.Running)
                 humanoid.Health = math.huge
             end
@@ -1582,7 +1535,6 @@ local function SetupHealthProtection()
     end)
     table.insert(State.Connections, stateConnection)
     
-    -- МОНИТОРИМ HP
     healthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
         if State.GodModeEnabled and humanoid.Health < math.huge then
             humanoid.Health = math.huge
@@ -1591,8 +1543,8 @@ local function SetupHealthProtection()
     
     table.insert(State.Connections, healthConnection)
 end
-
-local function SetupDamageBlocker()
+-- SetupDamageBlocker() - Блокировка Ragdoll/CreatorTag
+SetupDamageBlocker = function()
     if damageBlockerConnection then
         damageBlockerConnection:Disconnect()
     end
@@ -1614,6 +1566,7 @@ local function SetupDamageBlocker()
     table.insert(State.Connections, damageBlockerConnection)
 end
 
+-- ToggleGodMode() - Включение/отключение
 local function ToggleGodMode()
     State.GodModeEnabled = not State.GodModeEnabled
     if State.GodModeEnabled then
@@ -1694,15 +1647,12 @@ local function ToggleGodMode()
     end
 end
 
--- ========================================
--- SMOOTH ORBIT MODE
--- ========================================
 
--- ========================================
--- TROLLING FEATURES
--- ========================================
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 13: TROLLING FEATURES (СТРОКИ 1801-2050)
+-- ══════════════════════════════════════════════════════════════════════════════
 
--- Rigid Orbit
+-- RigidOrbitPlayer() - Орбита вокруг игрока
 local function RigidOrbitPlayer(targetName, enabled)
     if enabled then
         State.OrbitAngle = 0
@@ -1750,6 +1700,7 @@ local function RigidOrbitPlayer(targetName, enabled)
     end
 end
 
+-- SimpleLoopFling() - Цикличный флинг
 local function SimpleLoopFling(targetName, enabled)
     if enabled then
         State.LoopFlingThread = task.spawn(function()
@@ -1757,11 +1708,10 @@ local function SimpleLoopFling(targetName, enabled)
                 pcall(function()
                     local target = getPlayerByName(targetName)
                     if target then
-                        -- ✅ Просто вызываем существующую функцию FlingPlayer
                         FlingPlayer(target)
                     end
                 end)
-                task.wait(3)  -- ✅ Каждые 3 секунды
+                task.wait(3)
             end
         end)
     else
@@ -1772,10 +1722,7 @@ local function SimpleLoopFling(targetName, enabled)
     end
 end
 
--- ========================================
--- FORWARD-BACKWARD PENDULUM BLOCK PATH
--- ========================================
-
+-- PendulumBlockPath() - Маятник перед игроком
 local function PendulumBlockPath(targetName, enabled)
     if enabled then
         State.BlockPathPosition = 0
@@ -1792,32 +1739,24 @@ local function PendulumBlockPath(targetName, enabled)
                         if targetHRP and myChar then
                             local myHRP = myChar:FindFirstChild("HumanoidRootPart")
                             if myHRP then
-                                -- ✅ Обновляем позицию маятника
                                 State.BlockPathPosition = State.BlockPathPosition + (State.BlockPathSpeed * State.BlockPathDirection)
                                 
-                                -- ✅ Меняем направление при достижении границ (-4 до +4)
                                 if State.BlockPathPosition >= 5 then
                                     State.BlockPathDirection = -1
                                 elseif State.BlockPathPosition <= -5 then
                                     State.BlockPathDirection = 1
                                 end
                                 
-                                -- ✅ Позиция относительно игрока (проходим через него)
-                                -- -4 = сзади игрока на 4 стада
-                                -- 0 = В игроке
-                                -- +4 = впереди игрока на 4 стада
                                 local offset = CFrame.new(0, 0, State.BlockPathPosition)
                                 
-                                -- ✅ Финальная позиция - жёсткое крепление
                                 myHRP.CFrame = targetHRP.CFrame * offset
                                 
-                                -- ✅ Смотрим на игрока
                                 myHRP.CFrame = CFrame.new(myHRP.Position, targetHRP.Position)
                             end
                         end
                     end
                 end)
-                task.wait()  -- Каждый фрейм
+                task.wait()
             end
         end)
     else
@@ -1829,6 +1768,11 @@ local function PendulumBlockPath(targetName, enabled)
 end
 
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 14: ESP SYSTEM (СТРОКИ 2051-2350)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- CreateHighlight() - Создание Highlight
 local function CreateHighlight(adornee, color)
     if not adornee or not adornee.Parent then return nil end
 
@@ -1844,6 +1788,7 @@ local function CreateHighlight(adornee, color)
     return highlight
 end
 
+-- UpdatePlayerHighlight() - Обновление ESP игрока
 local function UpdatePlayerHighlight(player, role)
     if not player or player == LocalPlayer then return end
     
@@ -1891,7 +1836,7 @@ local function UpdatePlayerHighlight(player, role)
     end
 end
 
-
+-- getMap() - Поиск карты
 local function getMap()
     for _, v in ipairs(Workspace:GetChildren()) do
         if v:FindFirstChild("CoinContainer") then
@@ -1901,12 +1846,14 @@ local function getMap()
     return nil
 end
 
+-- getGun() - Поиск пистолета
 local function getGun()
     local map = getMap()
     if not map then return nil end
     return map:FindFirstChild("GunDrop")
 end
 
+-- CreateGunESP() - Создание Gun ESP
 local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
     
@@ -1958,6 +1905,7 @@ local function CreateGunESP(gunPart)
     }
 end
 
+-- RemoveGunESP() - Удаление Gun ESP
 local function RemoveGunESP(gunPart)
     if not gunPart or not State.GunCache[gunPart] then return end
     
@@ -1975,8 +1923,7 @@ local function RemoveGunESP(gunPart)
     State.GunCache[gunPart] = nil
 end
 
-
-
+-- UpdateGunESPVisibility() - Обновление видимости
 local function UpdateGunESPVisibility()
     for gunPart, espData in pairs(State.GunCache) do
         if espData.highlight then
@@ -1988,7 +1935,8 @@ local function UpdateGunESPVisibility()
     end
 end
 
-local previousGun = nil  -- ✅ ДОБАВИТЬ переменную для отслеживания
+-- SetupGunTracking() - Heartbeat для Gun ESP
+local previousGun = nil
 
 local function SetupGunTracking()
     -- Отключаем старые connections
@@ -2006,7 +1954,7 @@ local function SetupGunTracking()
             if gun and gun ~= previousGun then
                 if State.NotificationsEnabled then
                     ShowNotification(
-                        "<font color=\"rgb(255, 200, 50)\">🔫 Gun dropped!</font>",
+                        "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
                         CONFIG.Colors.Gun
                     )
                 end
@@ -2044,6 +1992,7 @@ local function SetupGunTracking()
     table.insert(State.Connections, currentMapConnection)
 end
 
+-- StartRoleChecking() - Heartbeat для Role ESP
 local function StartRoleChecking()
     if State.RoleCheckLoop then
         pcall(function()
@@ -2105,7 +2054,7 @@ local function StartRoleChecking()
                 
                 if State.NotificationsEnabled then
                     ShowNotification(
-                        "<font color=\"rgb(255, 50, 50)\">🔪 Murderer:</font> " .. murder.Name,
+                        "<font color=\"rgb(255, 85, 85)\">🔪 Murderer:</font> " .. murder.Name,
                         CONFIG.Colors.Text
                     )
                     task.wait(0.1)
@@ -2125,7 +2074,7 @@ local function StartRoleChecking()
                 State.heroSent = false
                 
                 if State.NotificationsEnabled then
-                    ShowNotification("<font color=\"rgb(220, 220, 220)\">⏸️ Round ended</font>", CONFIG.Colors.Text)
+                    ShowNotification("<font color=\"rgb(220, 220, 220)\">Round ended</font>", CONFIG.Colors.Text)
                 end
             end
             
@@ -2136,7 +2085,7 @@ local function StartRoleChecking()
                 
                 if State.NotificationsEnabled then
                     ShowNotification(
-                        "<font color=\"rgb(50, 150, 255)\">🦸 New Sheriff:</font> " .. sheriff.Name,
+                        "<font color=\"rgb(50, 150, 255)\">New Sheriff:</font> " .. sheriff.Name,
                         CONFIG.Colors.Text
                     )
                 end
@@ -2147,6 +2096,12 @@ local function StartRoleChecking()
     table.insert(State.Connections, State.RoleCheckLoop)
 end
 
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 15: COMBAT FUNCTIONS (СТРОКИ 2351-2800)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- PlayEmote() - Воспроизведение эмоций
 local function PlayEmote(emoteName)
     task.spawn(function()
         pcall(function()
@@ -2174,95 +2129,7 @@ local function PlayEmote(emoteName)
     end)
 end
 
-local function TeleportToMouse()
-    local character = LocalPlayer.Character
-    if not character then return end
-
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local mouse = LocalPlayer:GetMouse()
-    local targetPos = mouse.Hit.Position
-
-    if targetPos then
-        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
-    end
-end
-
-local function FindKeybindButton(keyCode)
-    for bindName, boundKey in pairs(State.Keybinds) do
-        if boundKey == keyCode then
-            return bindName
-        end
-    end
-    return nil
-end
-
-local function ClearKeybind(bindName, button)
-    State.Keybinds[bindName] = Enum.KeyCode.Unknown
-    button.Text = "Not Bound"
-local originalColor = button.BackgroundColor3
-    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(80, 40, 40)}):Play()
-    task.wait(0.15)
-    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = originalColor}):Play()
-end
-
-local function SetKeybind(key, keyCode, button, callbacks)
-    -- Проверяем, используется ли уже эта клавиша для другого действия
-    for actionName, boundKey in pairs(State.Keybinds) do
-        if boundKey == keyCode and actionName ~= key then
-            -- Нашли дубликат! Очищаем старую привязку
-            State.Keybinds[actionName] = Enum.KeyCode.Unknown
-            
-            -- Находим кнопку старого действия и обновляем её текст
-            for _, element in pairs(State.UIElements) do
-                if element.Name == actionName .. "_Button" then
-                    element.Text = "Not Bound"
-                    break
-                end
-            end
-        end
-    end
-    
-    -- Устанавливаем новую привязку
-    State.Keybinds[key] = keyCode
-    button.Text = keyCode.Name
-    
-    -- ✅ ВАЖНО: Сбрасываем состояние прослушивания
-    State.ListeningForKeybind = nil
-    
-    -- ✅ Визуальная обратная связь (мигание кнопки)
-    local originalColor = button.BackgroundColor3
-    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
-    task.wait(0.15)
-    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = originalColor}):Play()
-end
-
-local function Create(className, properties, children)
-    local obj = Instance.new(className)
-    for k, v in pairs(properties or {}) do
-        obj[k] = v
-    end
-    for _, child in ipairs(children or {}) do
-        child.Parent = obj
-    end
-    return obj
-end
-
-local function AddCorner(parent, radius)
-    return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
-end
-
-local function AddStroke(parent, thickness, color, transparency)
-    return Create("UIStroke", {
-        Thickness = thickness or 1,
-        Color = color or CONFIG.Colors.Stroke,
-        Transparency = transparency or 0.5,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        Parent = parent
-    })
-end
-
+-- knifeThrow() - Бросок ножа (по КУРСОРУ!)
 local function knifeThrow(silent)
     -- Проверка: игрок убийца?
     local murderer = getMurder()
@@ -2273,7 +2140,6 @@ local function knifeThrow(silent)
         return 
     end
 
-    -- Проверка: нож экипирован?
     if not LocalPlayer.Character:FindFirstChild("Knife") then
         local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
         if LocalPlayer.Backpack:FindFirstChild("Knife") then
@@ -2294,7 +2160,6 @@ local function knifeThrow(silent)
         return
     end
 
-    -- Проверка что у персонажа есть RightHand
     if not LocalPlayer.Character:FindFirstChild("RightHand") then
         if not silent then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
@@ -2302,7 +2167,6 @@ local function knifeThrow(silent)
         return
     end
 
-    -- ✅ ПОЛУЧАЕМ ПОЗИЦИЮ КУРСОРА (НЕ БЛИЖАЙШЕГО ИГРОКА!)
     local mouse = LocalPlayer:GetMouse()
     local targetPosition = mouse.Hit.Position
     
@@ -2312,21 +2176,17 @@ local function knifeThrow(silent)
         end
         return
     end
-
-    -- ✅ ПРАВИЛЬНЫЕ АРГУМЕНТЫ ДЛЯ БРОСКА
-    -- Arg 1: CFrame позиции правой руки
-    -- Arg 2: CFrame позиции КУРСОРА (не игрока!)
     local argsThrowRemote = {
         [1] = CFrame.new(LocalPlayer.Character.RightHand.Position),
         [2] = CFrame.new(targetPosition)  -- Позиция мыши!
     }
 
-    -- Бросаем нож через Events.KnifeThrown
     local success, err = pcall(function()
         LocalPlayer.Character.Knife.Events.KnifeThrown:FireServer(unpack(argsThrowRemote))
     end)
 end
 
+-- shootMurderer() - Выстрел в убийцу
 local CanShootMurderer = true
 
 local function shootMurderer()
@@ -2431,16 +2291,15 @@ local function shootMurderer()
     end)
 end
 
+-- pickupGun() - Подбор пистолета
 local function pickupGun()
-    -- Проверяем что пистолет существует на карте
-    local gun = Workspace:FindFirstChild("GunDrop", true) -- true = recursive search
+    local gun = Workspace:FindFirstChild("GunDrop", true)
     
     if not gun then
         ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>",CONFIG.Colors.Text)
         return
     end
     
-    -- Сохраняем текущую позицию
     local character = LocalPlayer.Character
     if not character then return end
     
@@ -2449,17 +2308,15 @@ local function pickupGun()
     
     local previousPosition = hrp.CFrame + Vector3.new(0, 1, 0)
     
-    -- Телепортируемся к пистолету
     hrp.CFrame = gun.CFrame + Vector3.new(0, 2, 0)
     
-    -- Ждём пока подберём
     task.wait(0.08)
     
-    -- Возвращаемся назад
     hrp.CFrame = previousPosition
     ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>",CONFIG.Colors.Text)
 end
 
+-- EnableExtendedHitbox() - Включение расширенного хитбокса
 local OriginalSizes = {}
 local HitboxConnection = nil
 
@@ -2499,7 +2356,7 @@ local function EnableExtendedHitbox()
     end)
 end
 
-
+-- DisableExtendedHitbox() - Отключение хитбокса
 local function DisableExtendedHitbox()
     if not State.ExtendedHitboxEnabled then return end
     State.ExtendedHitboxEnabled = false
@@ -2525,27 +2382,13 @@ local function DisableExtendedHitbox()
     
 end
 
+-- UpdateHitboxSize() - Обновление размера
 local function UpdateHitboxSize(newSize)
     State.ExtendedHitboxSize = newSize
 end
 
-local function EnableViewClip()
-    if State.ViewClipEnabled then return end
-    State.ViewClipEnabled = true
-    
-    -- ✅ Изменяем режим камеры (из сурса)
-    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
-
-end
-
-local function DisableViewClip()
-    if not State.ViewClipEnabled then return end
-    State.ViewClipEnabled = false
-    
-    -- ✅ Возвращаем обычный режим камеры
-    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
-
-end
+-- ToggleKillAura() - Kill Aura
+local killAuraCon = nil
 
 local killAuraCon = nil
 local anchoredPlayers = {}
@@ -2602,64 +2445,249 @@ local function ToggleKillAura(state)
 end
 
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 16: VIEW CLIP & TELEPORT (СТРОКИ 2801-2930)
+-- ══════════════════════════════════════════════════════════════════════════════
 
+-- EnableViewClip() - DevCameraOcclusionMode.Invisicam
+local function EnableViewClip()
+    State.ViewClipEnabled = true
+    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+end
 
-local function InstantKillAll()
-    -- Проверка роли
-    if getMurder() ~= LocalPlayer then
-        if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
-        end
-        return
+-- DisableViewClip() - DevCameraOcclusionMode.Zoom
+local function DisableViewClip()
+    State.ViewClipEnabled = false
+    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+end
+
+-- TeleportToMouse() - TP на mouse.Hit.Position
+local function TeleportToMouse()
+    local character = LocalPlayer.Character
+    if not character then return end
+
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local mouse = LocalPlayer:GetMouse()
+    local targetPos = mouse.Hit.Position
+
+    if targetPos then
+        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
     end
+end
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 17: KEYBIND SYSTEM (СТРОКИ 2931-3050)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- FindKeybindButton() - Поиск кнопки по KeyCode
+local function FindKeybindButton(keyCode)
+    for bindName, boundKey in pairs(State.Keybinds) do
+        if boundKey == keyCode then
+            return bindName
+        end
+    end
+    return nil
+end
+
+-- ClearKeybind() - Очистка привязки
+local function ClearKeybind(bindName, button)
+    State.Keybinds[bindName] = Enum.KeyCode.Unknown
+    button.Text = "Not Bound"
     
-    -- Проверка наличия ножа
-    if not LocalPlayer.Character:FindFirstChild("Knife") then
-        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
-        if LocalPlayer.Backpack:FindFirstChild("Knife") then
-            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.2)
-        else
-            if State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No knife in inventory</font>",CONFIG.Colors.Text)
+    local originalColor = button.BackgroundColor3
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(80, 40, 40)}):Play()
+    task.wait(0.15)
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = originalColor}):Play()
+end
+
+-- SetKeybind() - Установка привязки
+local function SetKeybind(key, keyCode, button, callbacks)
+    -- Проверка дубликатов
+    for actionName, boundKey in pairs(State.Keybinds) do
+        if boundKey == keyCode and actionName ~= key then
+            State.Keybinds[actionName] = Enum.KeyCode.Unknown
+            
+            for _, element in pairs(State.UIElements) do
+                if element.Name == actionName .. "_Button" then
+                    element.Text = "Not Bound"
+                    break
+                end
             end
-            return
         end
     end
     
-    local localHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not localHRP then return end
+    State.Keybinds[key] = keyCode
+    button.Text = keyCode.Name
+    State.ListeningForKeybind = nil
     
-    -- ✅ ТОЛЬКО ТЕЛЕПОРТ всех игроков к себе
-    local teleportedCount = 0
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-            local hrp = player.Character.HumanoidRootPart
-            pcall(function()
-                hrp.Anchored = true
-                hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * 2.5)
-                teleportedCount = teleportedCount + 1
-            end)
-        end
-    end
+    local originalColor = button.BackgroundColor3
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
+    task.wait(0.15)
+    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = originalColor}):Play()
+end
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 18: UTILITY FUNCTIONS (СТРОКИ 3051-3200)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- SetupAntiAFK() - VirtualUser:CaptureController()
+local function SetupAntiAFK()
+    local VirtualUser = game:GetService("VirtualUser")
+    LocalPlayer.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
     
-    -- ✅ Уведомление о том, что нужно бить самому
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220, 220, 220)\">Players Teleported: " .. teleportedCount .. "</font> <font color=\"rgb(220, 220, 220)\">Now swing your knife!</font>",CONFIG.Colors.Text)
-    end
-    
-    -- Освобождаем через 3 секунды
     task.spawn(function()
-        task.wait(3)
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-                pcall(function()
-                    player.Character.HumanoidRootPart.Anchored = false
-                end)
-            end
+        while getgenv().MM2_ESP_Script do
+            pcall(function()
+                if getconnections then
+                    for _, connection in next, getconnections(LocalPlayer.Idled) do
+                        if connection.Disable then
+                            connection:Disable()
+                        end
+                    end
+                end
+            end)
+            task.wait(60)
         end
     end)
 end
+
+-- Rejoin() - TeleportToPlaceInstance(PlaceId, JobId)
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+
+local function Rejoin()
+    print("[Rejoin] Переподключение...")
+    task.wait(0.5)
+
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end)
+
+    task.wait(2)
+    pcall(function()
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    end)
+end
+
+-- ServerHop() - HttpGet серверов + телепорт
+local function ServerHop()
+    print("[Server Hop] Поиск нового сервера...")
+    
+    local success, result = pcall(function()
+        local serverlist = {}
+        local cursor = ""
+        local foundServers = 0
+
+        for i = 1, 3 do
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
+                game.PlaceId,
+                cursor
+            )
+
+            local success2, response = pcall(function()
+                return game:HttpGet(url)
+            end)
+
+            if not success2 then
+                warn("[Server Hop] Ошибка получения списка серверов:", response)
+                break
+            end
+
+            local data = HttpService:JSONDecode(response)
+
+            for _, server in ipairs(data.data) do
+                if server.id ~= game.JobId and 
+                   server.playing < server.maxPlayers and
+                   server.playing > 0 then
+                    table.insert(serverlist, server)
+                    foundServers = foundServers + 1
+                end
+            end
+
+            cursor = data.nextPageCursor
+            if not cursor or cursor == "" then
+                break
+            end
+
+            if foundServers >= 10 then
+                break
+            end
+        end
+
+        if #serverlist == 0 then
+            print("[Server Hop] Нет доступных серверов, используем Rejoin")
+            task.wait(1)
+            return Rejoin()
+        end
+
+        table.sort(serverlist, function(a, b)
+            return a.playing < b.playing
+        end)
+
+        local targetIndex = math.random(1, math.min(5, #serverlist))
+        local targetServer = serverlist[targetIndex]
+
+        print("[Server Hop] Телепорт на сервер с " .. targetServer.playing .. " игроками")
+        task.wait(1)
+
+        TeleportService:TeleportToPlaceInstance(
+            game.PlaceId, 
+            targetServer.id, 
+            LocalPlayer
+        )
+    end)
+
+    if not success then
+        warn("[Server Hop] Ошибка:", result)
+        task.wait(1)
+        Rejoin()
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 19: UI HELPER FUNCTIONS (СТРОКИ 3201-3450)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Create() - Универсальный конструктор
+local function Create(className, properties, children)
+    local obj = Instance.new(className)
+    for k, v in pairs(properties or {}) do
+        obj[k] = v
+    end
+    for _, child in ipairs(children or {}) do
+        child.Parent = obj
+    end
+    return obj
+end
+
+-- AddCorner() - UICorner
+local function AddCorner(parent, radius)
+    return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
+end
+
+-- AddStroke() - UIStroke
+local function AddStroke(parent, thickness, color, transparency)
+    return Create("UIStroke", {
+        Thickness = thickness or 1,
+        Color = color or CONFIG.Colors.Stroke,
+        Transparency = transparency or 0.5,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Parent = parent
+    })
+end
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 20: UI CREATION (СТРОКИ 3451-5200+)
+-- ══════════════════════════════════════════════════════════════════════════════
 
 local function CreateUI()
     for _, child in ipairs(CoreGui:GetChildren()) do
@@ -2842,7 +2870,7 @@ local function CreateUI()
             })
         end
 
-        function TabFunctions:CreateDropdown(title, desc, options, default, callback)
+    function TabFunctions:CreateDropdown(title, desc, options, default, callback)
     local card = Create("Frame", {
         BackgroundColor3 = CONFIG.Colors.Section,
         Size = UDim2.new(1, 0, 0, 60),
@@ -3761,16 +3789,16 @@ end
     end)
 
 
-        local footer = Create("TextLabel", {
-            Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
-            Font = Enum.Font.Gotham,
-            TextSize = 11,
-            TextColor3 = CONFIG.Colors.TextDark,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0.5, -110, 1, -25),
-            Size = UDim2.new(0, 220, 0, 20),
-            Parent = mainFrame
-        })
+local footer = Create("TextLabel", {
+    Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
+    Font = Enum.Font.Gotham,
+    TextSize = 11,
+    TextColor3 = CONFIG.Colors.TextDark,
+    BackgroundTransparency = 1,
+    Position = UDim2.new(0.5, -110, 1, -25),
+    Size = UDim2.new(0, 220, 0, 20),
+    Parent = mainFrame
+})
 
 
 closeButton.MouseButton1Click:Connect(function()
@@ -3841,14 +3869,14 @@ end)
 
 
 
-    closeButton.MouseEnter:Connect(function()
-        TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.Red}):Play()
-    end)
-    closeButton.MouseLeave:Connect(function()
-        TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
-    end)
+closeButton.MouseEnter:Connect(function()
+    TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.Red}):Play()
+end)
+closeButton.MouseLeave:Connect(function()
+    TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
+end)
 
-    local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
+local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
         if not processed and input.KeyCode == CONFIG.HideKey then
             mainFrame.Visible = not mainFrame.Visible
         end
@@ -3953,7 +3981,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.heroSent = false
     State.roundStart = true
     State.roundActive = false
-    end)
+end)
 
 -- ═══════════════════════════════════════════════════════════════
 --                      ЗАПУСК СКРИПТА
