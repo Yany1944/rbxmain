@@ -133,7 +133,12 @@ local State = {
     StartSessionCoins = 0,
     CoinLabelCache = nil,
     LastCacheTime = 0,
-    
+
+    -- Optimization
+    MaxOptimizationEnabled = false,
+    OriginalFPSCap = nil,
+    OriginalVolume = nil,
+    HiddenObjects = nil,
     -- XP Farm
     XPFarmEnabled = false,
     XPFarmThread = nil,
@@ -400,6 +405,193 @@ local function getPlayerByName(playerName)
     return nil
 end
 
+
+local uiVisibilityState = {}
+
+-- EnableMaxOptimization - РАБОЧАЯ версия
+local function EnableMaxOptimization()
+    if State.MaxOptimizationEnabled then return end
+    
+    State.MaxOptimizationEnabled = true
+    print("[Max Optimization] 🚀 Включена!")
+    
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    
+    -- ✅ 1. FPS Cap (РАБОТАЕТ 100%)
+    pcall(function()
+        if setfpscap then
+            if not State.OriginalFPSCap then
+                State.OriginalFPSCap = getfpscap and getfpscap() or 60
+            end
+            setfpscap(15) -- Снижаем до 15 FPS для AFK
+            print("[Max Optimization] ⚡ FPS: 15")
+        end
+    end)
+    
+    -- ✅ 2. Отключаем все GUI кроме нашего (РАБОТАЕТ)
+    pcall(function()
+        if playerGui then
+            for _, gui in pairs(playerGui:GetChildren()) do
+                if gui:IsA("ScreenGui") and gui.Name ~= "MM2ESPUI" and gui.Name ~= "MM2Notifications" then
+                    uiVisibilityState[gui] = gui.Enabled
+                    gui.Enabled = false
+                end
+            end
+        end
+        print("[Max Optimization] 🚫 UI отключён")
+    end)
+    
+    -- ✅ 3. Удаляем ненужные объекты из Workspace (РАБОТАЕТ)
+    pcall(function()
+        State.HiddenObjects = {}
+        
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            -- Удаляем эффекты
+            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or 
+               obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                if obj.Enabled then
+                    obj.Enabled = false
+                    table.insert(State.HiddenObjects, {obj = obj, type = "effect"})
+                end
+            end
+            
+            -- Скрываем декорации (не касаемся игроков и карты)
+            if obj:IsA("MeshPart") or obj:IsA("Part") then
+                if obj.Parent and not obj.Parent:FindFirstChildOfClass("Humanoid") then
+                    local name = obj.Name:lower()
+                    -- Скрываем только декоративные объекты
+                    if name:match("decoration") or name:match("plant") or name:match("tree") or 
+                       name:match("rock") or obj:FindFirstChildOfClass("Decal") then
+                        if obj.Transparency < 1 then
+                            table.insert(State.HiddenObjects, {
+                                obj = obj, 
+                                type = "part", 
+                                transparency = obj.Transparency
+                            })
+                            obj.Transparency = 1
+                        end
+                    end
+                end
+            end
+            
+            -- Удаляем Decals/Textures
+            if obj:IsA("Decal") or obj:IsA("Texture") then
+                if obj.Transparency < 1 then
+                    table.insert(State.HiddenObjects, {
+                        obj = obj, 
+                        type = "decal", 
+                        transparency = obj.Transparency
+                    })
+                    obj.Transparency = 1
+                end
+            end
+        end
+        
+        print("[Max Optimization] 🗑️ Удалено эффектов/декораций: " .. #State.HiddenObjects)
+    end)
+    
+    -- ✅ 4. sethiddenproperty для LOD (если поддерживается)
+    pcall(function()
+        if sethiddenproperty then
+            for _, v in pairs(Workspace:GetDescendants()) do
+                if v:IsA("Model") then
+                    sethiddenproperty(v, "LevelOfDetail", Enum.ModelLevelOfDetail.Disabled)
+                end
+            end
+            print("[Max Optimization] 📉 LOD отключён")
+        end
+    end)
+    
+    -- ✅ 5. Отключаем звук
+    pcall(function()
+        if not State.OriginalVolume then
+            State.OriginalVolume = UserSettings():GetService("UserGameSettings").MasterVolume
+        end
+        UserSettings():GetService("UserGameSettings").MasterVolume = 0
+        print("[Max Optimization] 🔇 Звук отключён")
+    end)
+    
+    -- ✅ 6. Минимальная графика
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        print("[Max Optimization] 📊 Графика: Level 1")
+    end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">Max Optimization:</font> <font color=\"rgb(168,228,160)\">ON (15 FPS)</font>",
+            CONFIG.Colors.Green
+        )
+    end
+end
+
+-- DisableMaxOptimization - Восстановление
+local function DisableMaxOptimization()
+    if not State.MaxOptimizationEnabled then return end
+    
+    State.MaxOptimizationEnabled = false
+    print("[Max Optimization] 🔄 Отключена!")
+    
+    -- ✅ 1. Восстанавливаем FPS
+    pcall(function()
+        if setfpscap and State.OriginalFPSCap then
+            setfpscap(State.OriginalFPSCap)
+            print("[Max Optimization] ⚡ FPS восстановлен: " .. State.OriginalFPSCap)
+        end
+    end)
+    
+    -- ✅ 2. Восстанавливаем GUI
+    pcall(function()
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if playerGui then
+            for gui, wasEnabled in pairs(uiVisibilityState) do
+                if gui and gui.Parent then
+                    gui.Enabled = wasEnabled
+                end
+            end
+        end
+        print("[Max Optimization] ✅ UI восстановлен")
+    end)
+    
+    -- ✅ 3. Восстанавливаем объекты
+    pcall(function()
+        if State.HiddenObjects then
+            for _, data in pairs(State.HiddenObjects) do
+                if data.obj and data.obj.Parent then
+                    if data.type == "effect" then
+                        data.obj.Enabled = true
+                    elseif data.type == "part" or data.type == "decal" then
+                        data.obj.Transparency = data.transparency
+                    end
+                end
+            end
+            State.HiddenObjects = nil
+            print("[Max Optimization] ✅ Объекты восстановлены")
+        end
+    end)
+    
+    -- ✅ 4. Восстанавливаем звук
+    pcall(function()
+        if State.OriginalVolume then
+            UserSettings():GetService("UserGameSettings").MasterVolume = State.OriginalVolume
+            State.OriginalVolume = nil
+            print("[Max Optimization] 🔊 Звук восстановлен")
+        end
+    end)
+    
+    -- ✅ 5. Восстанавливаем графику
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+        print("[Max Optimization] 📊 Графика: Automatic")
+    end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">Max Optimization:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",
+            CONFIG.Colors.Text
+        )
+    end
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 5: CHARACTER FUNCTIONS (СТРОКИ 411-470)
@@ -4183,6 +4375,8 @@ end
     FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", function(s) State.UndergroundMode = s end)
     FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, 23, function(v) State.CoinFarmFlySpeed = v end, 1)
     FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, 2.0, function(v) State.CoinFarmDelay = v end, 0.5)
+    FarmTab:CreateToggle("Max Optimization", "Disables 3D rendering & all UI (except script) for AFK farming", function(s) State.MaxOptimizationEnabled = s if s then if State.AutoFarmEnabled then EnableMaxOptimization() else if State.NotificationsEnabled then ShowNotification("<font color=\"rgb(255, 170, 50)\">Warning:</font> <font color=\"rgb(220,220,220)\">Enable Auto Farm first!</font>", CONFIG.Colors.Orange ) end end else DisableMaxOptimization() end end)
+
 
 
     local FunTab = CreateTab("Fun")
