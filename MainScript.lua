@@ -1508,7 +1508,7 @@ local function StartAutoFarm()
                                     if murderer == LocalPlayer then
                                         print("[XP Farm] 🔪 Мы мурдерер! InstantKillAll...")
                                         local success, error = pcall(function()
-                                            task.wait(2)
+                                            task.wait(0.5)
                                             InstantKillAll()
                                         end)
                                         
