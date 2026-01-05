@@ -1064,55 +1064,10 @@ end
 -- ResetCharacter() - Ресет с сохранением GodMode
 local function ResetCharacter()
     print("[Auto Farm] 💀 Ресет персонажа")
-    
-    -- ✅ Запоминаем состояние GodMode
     local wasGodModeEnabled = State.GodModeEnabled
-    
-    -- ✅ Выключаем GodMode перед ресетом
     if wasGodModeEnabled then
-        State.GodModeEnabled = false
-        
-        -- Отключаем локальные connections
-        if healthConnection then
-            healthConnection:Disconnect()
-            healthConnection = nil
-        end
-        if stateConnection then
-            stateConnection:Disconnect()
-            stateConnection = nil
-        end
-        if damageBlockerConnection then
-            damageBlockerConnection:Disconnect()
-            damageBlockerConnection = nil
-        end
-        
-        -- ✅ ДОБАВЛЕНО: Очищаем GodModeConnections
-        for _, connection in ipairs(State.GodModeConnections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
-            end
-        end
-        State.GodModeConnections = {}
-        
-        -- Восстанавливаем нормальные параметры
-        local character = LocalPlayer.Character
-        if character then
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                pcall(function()
-                    humanoid.MaxHealth = 100
-                    humanoid.Health = 100
-                end)
-            end
-            
-            local ff = character:FindFirstChild("ForceField")
-            if ff then
-                ff:Destroy()
-            end
-        end
+        ToggleGodMode()  -- ✅ Используем готовую функцию вместо ручного отключения
     end
-    
-    -- Делаем ресет
     pcall(function()
         local character = LocalPlayer.Character
         if character then
@@ -1122,8 +1077,6 @@ local function ResetCharacter()
             end
         end
     end)
-    
-    -- ✅ Включаем GodMode обратно после респавна
     if wasGodModeEnabled then
         task.spawn(function()
             -- Ждём появления нового персонажа
@@ -1133,46 +1086,14 @@ local function ResetCharacter()
             -- Ждём Humanoid
             local humanoid = character:WaitForChild("Humanoid", 5)
             if humanoid then
-                task.wait(0.3)
-                
-                -- Включаем GodMode
-                State.GodModeEnabled = true
-                
-                -- Применяем GodMode
-                ApplyGodMode()
-                SetupHealthProtection()
-                SetupDamageBlocker()
-
-                local godModeConnection = RunService.Heartbeat:Connect(function()
-                    if State.GodModeEnabled and LocalPlayer.Character then
-                        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                        if hum then
-                            if hum.Health ~= math.huge then
-                                hum.Health = math.huge
-                            end
-                            local state = hum:GetState()
-                            if state == Enum.HumanoidStateType.Dead then
-                                hum:ChangeState(Enum.HumanoidStateType.Running)
-                            end
-                        end
-                    end
-                end)
-                table.insert(State.GodModeConnections, godModeConnection)
-                
-                -- Respawn protection
-                local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
-                    if State.GodModeEnabled then
-                        task.wait(0.5)
-                        ApplyGodMode()
-                        SetupHealthProtection()
-                        SetupDamageBlocker()
-                    end
-                end)
-                table.insert(State.GodModeConnections, respawnConnection)
+                task.wait(0.3)      
+                ToggleGodMode()
+            else
             end
         end)
     end
 end
+
 
 
 -- FindNearestCoin() - Поиск ближайшей монеты
@@ -1186,8 +1107,7 @@ local function FindNearestCoin()
     local closestCoin = nil
     local closestDistance = math.huge
     local hrpPosition = humanoidRootPart.Position
-    
-    -- ✅ Оптимизация: ищем в CoinContainer, если он есть
+
     local coinContainer = nil
     pcall(function()
         local map = getMap()
@@ -1305,40 +1225,38 @@ local function StartAutoFarm()
     State.CoinBlacklist = {}
     
     State.CoinFarmThread = task.spawn(function()
-        print("[Auto Farm] 🚀 Запуск...")
+        print("[Auto Farm] 🚀 Запущен")
+        if State.UndergroundMode then
+            print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
+        end
         
         local noCoinsAttempts = 0
         local maxNoCoinsAttempts = 4
         local lastTeleportTime = 0
-        local coinsCollected = 0
-        local firstCoinCollected = false  -- ✅ Флаг сбора первой монеты
         
         while State.AutoFarmEnabled do
             local character = LocalPlayer.Character
-            if not character then
+            if not character then 
                 task.wait(0.5)
-                continue
+                continue 
             end
             
             local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-            if not humanoidRootPart then
+            if not humanoidRootPart then 
                 task.wait(0.5)
-                continue
+                continue 
             end
             
-            -- ✅ Проверяем наличие убийцы
             local murdererExists = getMurder() ~= nil
             
             if not murdererExists then
                 print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
-                firstCoinCollected = false  -- ✅ Сбрасываем флаг при новом раунде
                 task.wait(2)
                 continue
             end
             
-            -- ✅ Поиск ближайшей монеты
             local coin = FindNearestCoin()
             if not coin then
                 noCoinsAttempts = noCoinsAttempts + 1
@@ -1350,18 +1268,14 @@ local function StartAutoFarm()
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
-                    firstCoinCollected = false  -- ✅ Сбрасываем флаг после ресета
                     
-                    -- ✅ Ждём респавна
                     task.wait(3)
                     
-                    -- ✅ Ждём ОКОНЧАНИЯ раунда (убийца исчезает)
                     print("[Auto Farm] ⏳ Жду окончания раунда...")
                     repeat
                         task.wait(1)
                     until getMurder() == nil or not State.AutoFarmEnabled
                     
-                    -- ✅ Ждём НАЧАЛА нового раунда (убийца появляется)
                     print("[Auto Farm] ⏳ Жду начала нового раунда...")
                     repeat
                         task.wait(1)
@@ -1374,34 +1288,25 @@ local function StartAutoFarm()
                 continue
             end
             
-            -- Проверяем видимость монеты
-            local coinVisual = coin:FindFirstChild("CoinVisual")
-            if not coinVisual or coinVisual.Transparency ~= 0 then
-                State.CoinBlacklist[coin] = true
-                continue
-            end
-            
             noCoinsAttempts = 0
             
-            -- ✅ Сбор монеты
             pcall(function()
                 local currentCoins = GetCollectedCoinsCount()
                 
-                if not firstCoinCollected then
-                    -- ✅ ТЕЛЕПОРТ К ПЕРВОЙ МОНЕТЕ (пока не соберём)
+                if currentCoins < 1 then
+                    -- ✅ ТЕЛЕПОРТ К ПЕРВОЙ МОНЕТЕ
                     local currentTime = tick()
                     local timeSinceLastTP = currentTime - lastTeleportTime
                     
-                    -- ✅ Ждём кулдаун перед телепортом
                     if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
                         local waitTime = State.CoinFarmDelay - timeSinceLastTP
-                        print("[Auto Farm] ⏱️ Ожидание кулдауна: " .. string.format("%.1f", waitTime) .. "с")
                         task.wait(waitTime)
                     end
                     
-                    print("[Auto Farm] 📍 ТП к первой монете")
+                    print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
                     
                     local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
+                    
                     if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
                         humanoidRootPart.CFrame = targetCFrame
                         lastTeleportTime = tick()
@@ -1412,37 +1317,31 @@ local function StartAutoFarm()
                             firetouchinterest(humanoidRootPart, coin, 1)
                         end
                         
-                        -- ✅ Увеличенная задержка для обновления счетчика
-                        task.wait(0.3)
+                        task.wait(0.2)
                         
                         coinLabelCache = nil  -- ✅ Обновляем кеш
                         local coinsAfter = GetCollectedCoinsCount()
-                        
                         if coinsAfter > currentCoins then
-                            coinsCollected = coinsCollected + 1
-                            firstCoinCollected = true  -- ✅ Первая монета собрана!
-                            print("[Auto Farm] ✅ Первая монета собрана (TP) | Перехожу к полёту")
-                        else
-                            print("[Auto Farm] ⚠️ Монета не собралась, повторю попытку после кулдауна")
+                            print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
                         end
                         
                         State.CoinBlacklist[coin] = true
                     end
                 else
-                    -- ✅ ПОЛЁТ К ОСТАЛЬНЫМ МОНЕТАМ (без кулдауна)
-                    print("[Auto Farm] ✈️ Полёт к монете #" .. (currentCoins + 1))
+                    -- ✅ ПОЛЁТ К ОСТАЛЬНЫМ МОНЕТАМ
+                    if State.UndergroundMode then
+                        print("[Auto Farm] 🕳️ Полёт под землёй к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                    else
+                        print("[Auto Farm] ✈️ Полёт к монете (скорость: " .. State.CoinFarmFlySpeed .. ")")
+                    end
                     
                     EnableNoClip()
                     SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
                     
                     coinLabelCache = nil  -- ✅ Обновляем кеш
                     local coinsAfter = GetCollectedCoinsCount()
-                    
                     if coinsAfter > currentCoins then
-                        coinsCollected = coinsCollected + 1
                         print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
-                    else
-                        print("[Auto Farm] ⚠️ Монета не собралась (Fly)")
                     end
                     
                     State.CoinBlacklist[coin] = true
@@ -1452,10 +1351,9 @@ local function StartAutoFarm()
         
         DisableNoClip()
         State.CoinFarmThread = nil
-        print("[Auto Farm] 🛑 Остановлен (собрано: " .. coinsCollected .. ")")
+        print("[Auto Farm] 🛑 Остановлен")
     end)
 end
-
 
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
@@ -1467,9 +1365,6 @@ local function StopAutoFarm()
     DisableNoClip()
     print("[Auto Farm] Полностью выключен")
 end
-
-
-
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 12: GODMODE SYSTEM (СТРОКИ 1601-1800)
@@ -2248,12 +2143,32 @@ local function shootMurderer()
         return
     end
 
-    -- ПРЕДСКАЗАНИЕ ПОЗИЦИИ
+    -- ✅ УМНЫЙ ПРЕДИКТ С УЧЁТОМ БОКОВОГО ДВИЖЕНИЯ
     local velocity = murdererHRP.AssemblyLinearVelocity
     local currentPos = murdererHRP.Position
-
+    local lookVector = murdererHRP.CFrame.LookVector
+    local rightVector = murdererHRP.CFrame.RightVector
+    
+    -- Определяем направление движения относительно взгляда
+    local forwardSpeed = velocity:Dot(lookVector)  -- Вперёд/назад
+    local strafeSpeed = velocity:Dot(rightVector)   -- Влево/вправо
+    local totalSpeed = velocity.Magnitude
+    
+    -- Базовое время предикта из слайдера
     local predictionTime = State.ShootPrediction
-    local predictedPos = currentPos + (velocity * predictionTime)
+    
+    -- Адаптация под общую скорость
+    if totalSpeed > 50 then
+        predictionTime = predictionTime * 1.2
+    elseif totalSpeed < 5 then
+        predictionTime = predictionTime * 0.6
+    end
+    
+    -- ✅ Компенсация бокового движения (стрейфа)
+    local lateralCompensation = rightVector * strafeSpeed * predictionTime * 0.8
+    
+    -- ✅ Основное предсказание позиции
+    local predictedPos = currentPos + (velocity * predictionTime) + lateralCompensation
 
     local chestOffset = Vector3.new(0, 0.5, 0)
     local targetPos = predictedPos + chestOffset
@@ -2262,9 +2177,9 @@ local function shootMurderer()
     local shootFromPos
 
     if State.ShootDirection == "Behind" then
-        shootFromPos = predictedPos - (murdererHRP.CFrame.LookVector * shootDistance) + chestOffset
+        shootFromPos = predictedPos - (lookVector * shootDistance) + chestOffset
     else
-        shootFromPos = predictedPos + (murdererHRP.CFrame.LookVector * shootDistance) + chestOffset
+        shootFromPos = predictedPos + (lookVector * shootDistance) + chestOffset
     end
 
     local args = {
@@ -2278,7 +2193,9 @@ local function shootMurderer()
 
     if success then
         ShowNotification(
-            "<font color=\"rgb(255, 85, 85)\">Shot fired: </font>" .. murderer.Name .. " [" .. State.ShootDirection .. "]",CONFIG.Colors.Text)
+            "<font color=\"rgb(255, 85, 85)\">Shot fired: </font>" .. murderer.Name .. " [" .. State.ShootDirection .. "]",
+            CONFIG.Colors.Text
+        )
     else
         ShowNotification(
             "<font color=\"rgb(255, 85, 85)\">Shoot failed: </font>" .. tostring(err) .. "",
