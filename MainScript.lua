@@ -1064,10 +1064,56 @@ end
 -- ResetCharacter() - Ресет с сохранением GodMode
 local function ResetCharacter()
     print("[Auto Farm] 💀 Ресет персонажа")
+    
+    -- ✅ Запоминаем состояние GodMode
     local wasGodModeEnabled = State.GodModeEnabled
+    
+    -- ✅ Выключаем GodMode вручную (без ToggleGodMode)
     if wasGodModeEnabled then
-        ToggleGodMode()  -- ✅ Используем готовую функцию вместо ручного отключения
+        print("[Auto Farm] 🛡️ Выключаю GodMode перед ресетом...")
+        State.GodModeEnabled = false
+        
+        -- Отключаем локальные connections
+        if healthConnection then
+            healthConnection:Disconnect()
+            healthConnection = nil
+        end
+        if stateConnection then
+            stateConnection:Disconnect()
+            stateConnection = nil
+        end
+        if damageBlockerConnection then
+            damageBlockerConnection:Disconnect()
+            damageBlockerConnection = nil
+        end
+        
+        -- Очищаем GodModeConnections
+        for _, connection in ipairs(State.GodModeConnections) do
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end
+        State.GodModeConnections = {}
+        
+        -- Восстанавливаем нормальные параметры
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                pcall(function()
+                    humanoid.MaxHealth = 100
+                    humanoid.Health = 100
+                end)
+            end
+            
+            local ff = character:FindFirstChild("ForceField")
+            if ff then
+                ff:Destroy()
+            end
+        end
     end
+    
+    -- ✅ Делаем ресет
     pcall(function()
         local character = LocalPlayer.Character
         if character then
@@ -1077,6 +1123,8 @@ local function ResetCharacter()
             end
         end
     end)
+    
+    -- ✅ Включаем GodMode обратно после респавна
     if wasGodModeEnabled then
         task.spawn(function()
             -- Ждём появления нового персонажа
@@ -1086,9 +1134,47 @@ local function ResetCharacter()
             -- Ждём Humanoid
             local humanoid = character:WaitForChild("Humanoid", 5)
             if humanoid then
-                task.wait(0.3)      
-                ToggleGodMode()
+                task.wait(0.3)
+                
+                print("[Auto Farm] 🛡️ Включаю GodMode после респавна...")
+                
+                -- ✅ ВРУЧНУЮ включаем GodMode (без вызова ToggleGodMode)
+                State.GodModeEnabled = true
+                
+                -- Применяем GodMode
+                if ApplyGodMode then ApplyGodMode() end
+                if SetupHealthProtection then SetupHealthProtection() end
+                if SetupDamageBlocker then SetupDamageBlocker() end
+                
+                -- HP monitoring
+                local godModeConnection = RunService.Heartbeat:Connect(function()
+                    if State.GodModeEnabled and LocalPlayer.Character then
+                        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                        if hum then
+                            if hum.Health ~= math.huge then
+                                hum.Health = math.huge
+                            end
+                            local state = hum:GetState()
+                            if state == Enum.HumanoidStateType.Dead then
+                                hum:ChangeState(Enum.HumanoidStateType.Running)
+                            end
+                        end
+                    end
+                end)
+                table.insert(State.GodModeConnections, godModeConnection)
+                
+                -- Respawn protection
+                local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
+                    if State.GodModeEnabled then
+                        task.wait(0.5)
+                        if ApplyGodMode then ApplyGodMode() end
+                        if SetupHealthProtection then SetupHealthProtection() end
+                        if SetupDamageBlocker then SetupDamageBlocker() end
+                    end
+                end)
+                table.insert(State.GodModeConnections, respawnConnection)
             else
+                print("[Auto Farm] ⚠️ Не удалось найти Humanoid, GodMode не включен")
             end
         end)
     end
