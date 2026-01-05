@@ -133,6 +133,10 @@ local State = {
     StartSessionCoins = 0,
     CoinLabelCache = nil,
     LastCacheTime = 0,
+    -- Instant Pickup
+    InstantPickupEnabled = false,
+    InstantPickupThread = nil,
+
     
     -- Anti-Fling
     AntiFlingEnabled = false,
@@ -326,6 +330,12 @@ local function FullShutdown()
     State.LoopFlingEnabled = false
     State.BlockPathEnabled = false
     State.AlreadyFlungPlayers = {}
+
+    if State.InstantPickupThread then
+        task.cancel(State.InstantPickupThread)
+        State.InstantPickupThread = nil
+    end
+    State.InstantPickupEnabled = false
     
     if State.OrbitThread then task.cancel(State.OrbitThread) end
     if State.LoopFlingThread then task.cancel(State.LoopFlingThread) end
@@ -2319,6 +2329,75 @@ local function pickupGun()
     ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>",CONFIG.Colors.Text)
 end
 
+local function EnableInstantPickup()
+    if State.InstantPickupThread then
+        task.cancel(State.InstantPickupThread)
+        State.InstantPickupThread = nil
+    end
+    
+    State.InstantPickupEnabled = true
+    
+    State.InstantPickupThread = task.spawn(function()
+        print("[Instant Pickup] Started monitoring...")
+        
+        while State.InstantPickupEnabled do
+            -- Проверяем: есть ли пистолет на карте и являемся ли мы шерифом
+            local gun = getGun()
+            local sheriff = getSheriff()
+            
+            -- Если пистолет есть и мы НЕ шериф (значит пистолет упал)
+            if gun and sheriff ~= LocalPlayer then
+                print("[Instant Pickup] Gun dropped! Attempting pickup...")
+                
+                -- Пытаемся подобрать до 3 раз
+                local attempts = 0
+                local maxAttempts = 3
+                
+                while attempts < maxAttempts and State.InstantPickupEnabled do
+                    attempts = attempts + 1
+                    
+                    -- Используем существующую функцию pickupGun
+                    pcall(pickupGun)
+                    
+                    task.wait(0.15)
+                    
+                    -- Проверяем подобрали ли пистолет
+                    if getSheriff() == LocalPlayer then
+                        if State.NotificationsEnabled then
+                            ShowNotification("<font color=\"rgb(85, 255, 120)\">✓ Gun picked up!</font>", CONFIG.Colors.Green)
+                        end
+                        print("[Instant Pickup] Success!")
+                        break
+                    end
+                    
+                    print("[Instant Pickup] Retry " .. attempts .. "/" .. maxAttempts)
+                end
+                
+                if getSheriff() ~= LocalPlayer then
+                    print("[Instant Pickup] Failed after " .. maxAttempts .. " attempts")
+                end
+                
+                -- Ждем немного перед следующей проверкой
+                task.wait(0.5)
+            end
+            
+            task.wait(0.1) -- Проверка каждые 0.1 секунды
+        end
+        
+        print("[Instant Pickup] Stopped.")
+    end)
+end
+
+-- DisableInstantPickup - Отключить автоподбор пистолета
+local function DisableInstantPickup()
+    State.InstantPickupEnabled = false
+    if State.InstantPickupThread then
+        task.cancel(State.InstantPickupThread)
+        State.InstantPickupThread = nil
+    end
+    print("[Instant Pickup] Disabled")
+end
+
 -- EnableExtendedHitbox() - Включение расширенного хитбокса
 local OriginalSizes = {}
 local HitboxConnection = nil
@@ -2445,6 +2524,63 @@ local function ToggleKillAura(state)
         end
         anchoredPlayers = {}
     end
+end
+
+local function InstantKillAll()
+    -- Проверка роли
+    if findMurderer() ~= LocalPlayer then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- Проверка наличия ножа
+    if not LocalPlayer.Character:FindFirstChild("Knife") then
+        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if LocalPlayer.Backpack:FindFirstChild("Knife") then
+            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
+            task.wait(0.2)
+        else
+            if State.NotificationsEnabled then
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No knife in inventory</font>",CONFIG.Colors.Text)
+            end
+            return
+        end
+    end
+    
+    local localHRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not localHRP then return end
+    
+    -- ✅ ТОЛЬКО ТЕЛЕПОРТ всех игроков к себе
+    local teleportedCount = 0
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
+            local hrp = player.Character.HumanoidRootPart
+            pcall(function()
+                hrp.Anchored = true
+                hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * 2.5)
+                teleportedCount = teleportedCount + 1
+            end)
+        end
+    end
+    
+    -- ✅ Уведомление о том, что нужно бить самому
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220, 220, 220)\">Players Teleported: " .. teleportedCount .. "</font> <font color=\"rgb(220, 220, 220)\">Now swing your knife!</font>",CONFIG.Colors.Text)
+    end
+    
+    -- Освобождаем через 3 секунды
+    task.spawn(function()
+        task.wait(3)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
+                pcall(function()
+                    player.Character.HumanoidRootPart.Anchored = false
+                end)
+            end
+        end
+    end)
 end
 
 
@@ -3625,7 +3761,9 @@ end
         State.ShootDirection = value
     end)
     CombatTab:CreateSlider("Prediction Time", "Adjust for moving targets (0.05-0.30)", 0.05, 0.30, 0.15, function(v) State.ShootPrediction = v end, 0.05)
+    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", function(s) if s then EnableInstantPickup() else DisableInstantPickup() end end)
     CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+    
 
 
     local FarmTab = CreateTab("Farming")
@@ -3835,7 +3973,6 @@ closeButton.MouseButton1Click:Connect(function()
         DisableViewClip()
     end
     
-    -- ✅ НОВОЕ: Kill Aura
     if killAuraCon then
         ToggleKillAura(false)
     end
@@ -3853,15 +3990,13 @@ closeButton.MouseButton1Click:Connect(function()
     end
     State.Connections = {}
 
-    -- Очистка UI
     if gui then pcall(function() gui:Destroy() end) end
     if State.UIElements.NotificationGui then
         pcall(function() State.UIElements.NotificationGui:Destroy() end)
         State.UIElements.NotificationGui = nil
         State.UIElements.NotificationContainer = nil
     end
-    
-    -- ✅ НОВОЕ: Восстановление warn/error
+
     if oldWarn then warn = oldWarn end
     if oldError then error = oldError end
 
