@@ -1508,6 +1508,7 @@ local function StartAutoFarm()
                                     if murderer == LocalPlayer then
                                         print("[XP Farm] 🔪 Мы мурдерер! InstantKillAll...")
                                         local success, error = pcall(function()
+                                            task.wait(2)
                                             InstantKillAll()
                                         end)
                                         
@@ -1519,8 +1520,6 @@ local function StartAutoFarm()
                                                                     
                                     elseif sheriff == LocalPlayer then
                                     print("[XP Farm] 🔫 Мы шериф, стреляем в мурдерера...")
-                                    
-                                    -- ✅ Стреляем пока мурдерер жив (без ограничения попыток)
                                     while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled do
                                         character = LocalPlayer.Character
                                         if not character then break end
@@ -1545,11 +1544,12 @@ local function StartAutoFarm()
                                         end
                                         
                                         pcall(function()
+                                            task.wait(0.5)
                                             shootMurderer()
                                         end)
                                         
                                         print("[XP Farm] 🎯 Выстрел произведён, жду результата...")
-                                        task.wait(3)
+                                        task.wait(2)
                                     end
                                     
                                     if not State.XPFarmEnabled then
@@ -2828,37 +2828,38 @@ local function ToggleKillAura(state)
 end
 
 InstantKillAll = function()
-    print("[InstantKillAll] 🚀 Запущен")
+    print("[InstantKillAll] 🔪 Запуск...")
     
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
-        print("[InstantKillAll] ❌ Ты не мурдерер!")
+        print("[InstantKillAll] ❌ Вы не мурдерер!")
         if State.NotificationsEnabled then
             ShowNotification(
-                "<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You are not the murderer</font>",
+                "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">You are not the murderer</font>",
                 CONFIG.Colors.Text
             )
         end
         return
     end
-
+    
     local character = LocalPlayer.Character
     if not character then
-        print("[InstantKillAll] ❌ Нет персонажа!")
+        print("[InstantKillAll] ❌ Character не найден!")
         return
     end
     
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then
-        print("[InstantKillAll] ❌ Нет HumanoidRootPart!")
+        print("[InstantKillAll] ❌ HumanoidRootPart не найден!")
         return
     end
-
+    
+    -- ✅ Проверяем есть ли нож
     if not character:FindFirstChild("Knife") then
         local humanoid = character:FindFirstChild("Humanoid")
         if humanoid and LocalPlayer.Backpack:FindFirstChild("Knife") then
             humanoid:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.3)  -- ✅ Увеличена задержка
+            task.wait(0.3)
         end
     end
     
@@ -2867,7 +2868,7 @@ InstantKillAll = function()
         print("[InstantKillAll] ❌ Нож не найден!")
         if State.NotificationsEnabled then
             ShowNotification(
-                "<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Knife not found</font>",
+                "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">Knife not found</font>",
                 CONFIG.Colors.Text
             )
         end
@@ -2875,13 +2876,17 @@ InstantKillAll = function()
     end
     
     local originalCFrame = hrp.CFrame
-
     local teleportedPlayers = 0
+    
+    -- ✅ ИЗМЕНЕНИЕ: Телепортируем игроков ПЕРЕД собой (как в KillAura)
+    local killAuraDistance = State.KillAuraDistance or 2.5
+    
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
             local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
             if targetHRP then
-                targetHRP.CFrame = hrp.CFrame
+                -- ✅ Телепортируем игрока ПЕРЕД нами на расстоянии killAuraDistance
+                targetHRP.CFrame = hrp.CFrame + hrp.CFrame.LookVector * killAuraDistance
                 targetHRP.Anchored = true
                 teleportedPlayers = teleportedPlayers + 1
             end
@@ -2890,19 +2895,23 @@ InstantKillAll = function()
     
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll: Players teleported (" .. teleportedPlayers .. "), attacking...</font>",
+            "<font color=\"rgb(220,220,220)\">InstantKillAll: Players teleported: " .. teleportedPlayers .. ", attacking...</font>",
             CONFIG.Colors.Text
         )
     end
-
+    
+    print("[InstantKillAll] 📍 Телепортировано: " .. teleportedPlayers .. " игроков ПЕРЕД собой")
+    
     task.wait(0.5)
+    
+    -- ✅ Активируем нож 3 раза
     for i = 1, 3 do
-        knife = character:FindFirstChild("Knife")  -- Перепроверяем каждый раз
+        knife = character:FindFirstChild("Knife")
         if knife and knife.Parent then
             knife:Activate()
-            print("[InstantKillAll] 🔪 Автоудар #" .. i)
+            print("[InstantKillAll] 🔪 Активация ножа #" .. i)
         else
-            print("[InstantKillAll] ⚠️ Нож исчез во время атаки!")
+            print("[InstantKillAll] ⚠️ Нож пропал во время атаки!")
             break
         end
         
@@ -2911,9 +2920,9 @@ InstantKillAll = function()
         end
     end
     
-    -- ✅ Держим игроков ещё 0.5 секунды
     task.wait(0.5)
     
+    -- ✅ Освобождаем игроков
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
             local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
@@ -2923,10 +2932,11 @@ InstantKillAll = function()
         end
     end
     
+    print("[InstantKillAll] ✅ Завершено!")
     
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll: </font><font color=\"rgb(168,228,160)\">Complete!</font>",
+            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Complete!</font>",
             CONFIG.Colors.Green
         )
     end
