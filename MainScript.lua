@@ -2867,18 +2867,35 @@ local function EnableInstantPickup()
     State.InstantPickupThread = task.spawn(function()
         while State.InstantPickupEnabled do
             local murderer = getMurder()
-            local gun = getGun()
-            local sheriff = getSheriff()
-            
-            -- Если раунд идет, мы не мурдерер, пистолет есть и нет шерифа
-            if murderer and murderer ~= LocalPlayer and gun and not sheriff then
-                pickupGun()
+            if not murderer then
+                task.wait(2)
+                continue
+            end
+            if murderer == LocalPlayer then
+                task.wait(1)
+                continue
             end
             
+            local gun = getGun()
+            local sheriff = getSheriff()
+            if gun and not sheriff then
+                for attempt = 1, 3 do
+                    if not getGun() then
+                        break
+                    end
+                    pickupGun()
+                    task.wait(0.15)
+                    if LocalPlayer.Character:FindFirstChild("Gun") or 
+                       LocalPlayer.Backpack:FindFirstChild("Gun") then
+                        break
+                    end
+                end
+            end
             task.wait(0.2)
         end
     end)
 end
+
 
 -- DisableInstantPickup - Отключить автоподбор пистолета
 local function DisableInstantPickup()
