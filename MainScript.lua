@@ -1210,6 +1210,70 @@ local function ResetCharacter()
 end
 
 
+local function FloatCharacter()
+    local character = LocalPlayer.Character
+    if not character then return false end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    
+    -- ✅ FIX: Проверка существования и здоровья
+    if not hrp or not humanoid or humanoid.Health <= 0 then 
+        return false 
+    end
+    
+    -- Удаляем старый BodyPosition если есть
+    local oldBP = hrp:FindFirstChild("AFK_BodyPosition")
+    if oldBP then oldBP:Destroy() end
+    
+    -- Создаём BodyPosition для левитации
+    local bodyPos = Instance.new("BodyPosition")
+    bodyPos.Name = "AFK_BodyPosition"
+    bodyPos.Position = hrp.Position
+    bodyPos.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyPos.D = 1250
+    bodyPos.P = 10000
+    bodyPos.Parent = hrp
+    
+    -- Также создаём BodyGyro для стабилизации вращения
+    local oldBG = hrp:FindFirstChild("AFK_BodyGyro")
+    if oldBG then oldBG:Destroy() end
+    
+    local bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.Name = "AFK_BodyGyro"
+    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bodyGyro.P = 10000
+    bodyGyro.CFrame = hrp.CFrame
+    bodyGyro.Parent = hrp
+    
+    print("[Auto Farm] 🎈 Левитация включена")
+    return true
+end
+
+-- ✅ ИСПРАВЛЕНО: Добавлена проверка существования
+local function UnfloatCharacter()
+    local character = LocalPlayer.Character
+    if not character then return false end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    
+    -- ✅ FIX: Проверка существования перед удалением
+    local bodyPos = hrp:FindFirstChild("AFK_BodyPosition")
+    if bodyPos and bodyPos.Parent then
+        bodyPos:Destroy()
+    end
+    
+    local bodyGyro = hrp:FindFirstChild("AFK_BodyGyro")
+    if bodyGyro and bodyGyro.Parent then
+        bodyGyro:Destroy()
+    end
+    
+    print("[Auto Farm] 🎈 Левитация выключена")
+    return true
+end
+
+
 local function FindSafeAFKSpot()
     local character = LocalPlayer.Character
     if not character then return nil end
@@ -1217,7 +1281,13 @@ local function FindSafeAFKSpot()
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
     
-    -- ✅ ПРАВИЛЬНАЯ ЛОГИКА getMap()
+    -- ✅ FIX: Проверка здоровья
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then 
+        return nil 
+    end
+    
+    -- Ищем карту
     local map = nil
     for _, o in ipairs(Workspace:GetChildren()) do
         if o:FindFirstChild("CoinContainer") and o:FindFirstChild("Spawns") then
@@ -1227,24 +1297,31 @@ local function FindSafeAFKSpot()
     end
     
     if not map then
-        return hrp.CFrame
+        return hrp.CFrame * CFrame.new(0, 300, 0)
     end
     
     local spawnsFolder = map:FindFirstChild("Spawns")
     if not spawnsFolder then
-        return hrp.CFrame
+        return hrp.CFrame * CFrame.new(0, 300, 0)
     end
     
     local spawns = spawnsFolder:GetChildren()
     if #spawns == 0 then
-        return hrp.CFrame
+        return hrp.CFrame * CFrame.new(0, 300, 0)
     end
     
-    -- ✅ Выбираем случайный спавн
     local randomSpawn = spawns[math.random(1, #spawns)]
+
+    if randomSpawn:IsA("BasePart") then
+        return randomSpawn.CFrame * CFrame.new(0, 300, 0)
+    elseif randomSpawn:IsA("Model") then
+        local spawnPart = randomSpawn:FindFirstChildWhichIsA("BasePart")
+        if spawnPart then
+            return spawnPart.CFrame * CFrame.new(0, 300, 0)
+        end
+    end
     
-    -- ✅ Возвращаем CFrame на 50 studs выше спавна
-    return CFrame.new(randomSpawn.Position) + Vector3.new(0, 70, 0)
+    return hrp.CFrame * CFrame.new(0, 300, 0)
 end
 
 -- FindNearestCoin() - Поиск ближайшей монеты
@@ -1366,7 +1443,6 @@ end
 
 local shootMurderer
 local InstantKillAll
-
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
     if State.CoinFarmThread then
@@ -1407,6 +1483,10 @@ local function StartAutoFarm()
                 print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
+                -- ✅ Убираем левитацию при ожидании раунда
+                pcall(function()
+                    UnfloatCharacter()
+                end)
                 task.wait(2)
                 continue
             end
@@ -1508,7 +1588,15 @@ local function StartAutoFarm()
                                 if safeSpot then
                                     humanoidRootPart.CFrame = safeSpot + Vector3.new(0, 5, 0)
                                     print("[XP Farm] 📍 Телепортировался в безопасное место")
-                                    task.wait(1)
+                                    
+                                    -- ✅ НОВОЕ: Включаем левитацию после телепорта
+                                    task.wait(0.5)
+                                    local floatSuccess = FloatCharacter()
+                                    if floatSuccess then
+                                        print("[XP Farm] 🎈 Закрепление активировано")
+                                    end
+                                    
+                                    task.wait(0.5)
                                 end
                                 
                                 if State.XPFarmEnabled then
@@ -1529,42 +1617,41 @@ local function StartAutoFarm()
                                         end
                                                                     
                                     elseif sheriff == LocalPlayer then
-                                    print("[XP Farm] 🔫 Мы шериф, стреляем в мурдерера...")
-                                    while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled do
-                                        character = LocalPlayer.Character
-                                        if not character then break end
-                                        
-                                        local murdererPlayer = getMurder()
-                                        if not murdererPlayer then 
-                                            print("[XP Farm] ✅ Мурдерер мёртв!")
-                                            break 
+                                        print("[XP Farm] 🔫 Мы шериф, стреляем в мурдерера...")
+                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled do
+                                            character = LocalPlayer.Character
+                                            if not character then break end
+                                            
+                                            local murdererPlayer = getMurder()
+                                            if not murdererPlayer then 
+                                                print("[XP Farm] ✅ Мурдерер мёртв!")
+                                                break 
+                                            end
+                                            
+                                            local murdererChar = murdererPlayer.Character
+                                            if not murdererChar then 
+                                                task.wait(0.5)
+                                                continue 
+                                            end
+                                            
+                                            local murdererHumanoid = murdererChar:FindFirstChildOfClass("Humanoid")
+                                            if murdererHumanoid and murdererHumanoid.Health <= 0 then
+                                                print("[XP Farm] ✅ Мурдерер умер!")
+                                                break
+                                            end
+                                            
+                                            pcall(function()
+                                                task.wait(0.5)
+                                                shootMurderer()
+                                            end)
+                                            
+                                            print("[XP Farm] 🎯 Выстрел произведён, жду результата...")
+                                            task.wait(2)
                                         end
                                         
-                                        local murdererChar = murdererPlayer.Character
-                                        if not murdererChar then 
-                                            task.wait(0.5)
-                                            continue 
+                                        if not State.XPFarmEnabled then
+                                            print("[XP Farm] ⚠️ XP Farm был отключен во время стрельбы")
                                         end
-                                        
-                                        -- ✅ Проверяем: жив ли мурдерер?
-                                        local murdererHumanoid = murdererChar:FindFirstChildOfClass("Humanoid")
-                                        if murdererHumanoid and murdererHumanoid.Health <= 0 then
-                                            print("[XP Farm] ✅ Мурдерер умер!")
-                                            break
-                                        end
-                                        
-                                        pcall(function()
-                                            task.wait(0.5)
-                                            shootMurderer()
-                                        end)
-                                        
-                                        print("[XP Farm] 🎯 Выстрел произведён, жду результата...")
-                                        task.wait(2)
-                                    end
-                                    
-                                    if not State.XPFarmEnabled then
-                                        print("[XP Farm] ⚠️ XP Farm был отключен во время стрельбы")
-                                    end
                                     else
                                         print("[XP Farm] 👤 Инносент | Флинг мурдерера")
                                         
@@ -1581,7 +1668,6 @@ local function StartAutoFarm()
                                                 continue
                                             end
                                             
-                                            -- ✅ ПРОВЕРКА VELOCITY: Пропускаем если мурдерер уже летит
                                             local murdererHRP = murdererChar:FindFirstChild("HumanoidRootPart")
                                             if murdererHRP then
                                                 local velocity = murdererHRP.AssemblyLinearVelocity.Magnitude
@@ -1634,6 +1720,11 @@ local function StartAutoFarm()
                         break
                     end
                     
+                    -- ✅ Убираем левитацию перед ресетом
+                    pcall(function()
+                        UnfloatCharacter()
+                    end)
+                    
                     print("[Auto Farm] 🎉 Мурдерер мёртв! Жду официального окончания раунда...")
                     task.wait(5)
                     
@@ -1668,6 +1759,11 @@ local function StartAutoFarm()
                     
                 else
                     print("[Auto Farm] 🔄 XP Farm выключен - делаю быстрый ресет без ожидания конца раунда...")
+                    
+                    -- ✅ Убираем левитацию перед ресетом
+                    pcall(function()
+                        UnfloatCharacter()
+                    end)
                     
                     ResetCharacter()
                     State.CoinBlacklist = {}
@@ -1704,6 +1800,7 @@ local function StartAutoFarm()
         
         pcall(function()
             DisableNoClip()
+            UnfloatCharacter()  -- ✅ Убираем левитацию при остановке
         end)
         
         State.CoinFarmThread = nil
@@ -1718,13 +1815,35 @@ local function StopAutoFarm()
         task.cancel(State.CoinFarmThread)
         State.CoinFarmThread = nil
     end
+    
     pcall(function()
         DisableNoClip()
+        UnfloatCharacter()  -- ✅ Убираем левитацию при остановке
     end)
+    
     State.CoinBlacklist = {}
     print("[Auto Farm] 🛑 Остановлен")
 end
 
+
+
+-- ✅ ОБНОВЛЁННАЯ StopAutoFarm с правильным cleanup
+local function StopAutoFarm()
+    State.AutoFarmEnabled = false
+
+    -- ✅ Сначала отключаем флаг, ПОТОМ отменяем поток
+    if State.CoinFarmThread then
+        task.cancel(State.CoinFarmThread)
+        State.CoinFarmThread = nil
+    end
+
+    -- ✅ Cleanup должен быть здесь (дублируется для надёжности)
+    pcall(UnfloatCharacter)
+    pcall(DisableNoClip)
+    State.CoinBlacklist = {}
+
+    print("[Auto Farm] 🛑 Остановлен")
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- XP FARM SYSTEM
@@ -1739,6 +1858,9 @@ end
 
 local function StopXPFarm()
     State.XPFarmEnabled = false
+    pcall(function()
+        UnfloatCharacter()
+    end)
     print("[XP Farm] ❌ Выключен")
 end
 
