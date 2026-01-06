@@ -233,117 +233,182 @@ local currentMap = nil
 
 -- CleanupMemory() - Очистка при респавне
 local function CleanupMemory()
+    -- Очистка highlights
     if State.PlayerHighlights then
-        for player, highlight in pairs(State.PlayerHighlights) do
-            pcall(function()
-                if highlight then highlight:Destroy() end
-            end)
+        for _, highlight in pairs(State.PlayerHighlights) do
+            if highlight and highlight.Parent then
+                pcall(function() highlight:Destroy() end)
+            end
         end
         State.PlayerHighlights = {}
     end
-    
+
+    -- Очистка gun ESP (только визуальные объекты)
     if State.GunCache then
-        for gunPart, espData in pairs(State.GunCache) do
-            pcall(function()
-                if espData.highlight then espData.highlight:Destroy() end
-                if espData.billboard then espData.billboard:Destroy() end
-            end)
+        for _, espData in pairs(State.GunCache) do
+            if espData then
+                pcall(function()
+                    if espData.highlight then espData.highlight:Destroy() end
+                    if espData.billboard then espData.billboard:Destroy() end
+                end)
+            end
         end
         State.GunCache = {}
     end
     
-    if currentMapConnection then
-        currentMapConnection:Disconnect()
-        currentMapConnection = nil
-    end
-    currentMap = nil
-    
+    -- Очистка очереди уведомлений (безопасно)
     State.NotificationQueue = {}
     State.CurrentNotification = nil
+
+    -- Очистка coin blacklist (безопасно - относится к Auto Farm)
     State.CoinBlacklist = {}
-    
-    State.OrbitEnabled = false
-    State.LoopFlingEnabled = false
-    State.BlockPathEnabled = false
-    
-    if State.OrbitThread then task.cancel(State.OrbitThread) end
-    if State.LoopFlingThread then task.cancel(State.LoopFlingThread) end
-    if State.BlockPathThread then task.cancel(State.BlockPathThread) end
+
 end
 
 local function FullShutdown()
-    if State.PlayerHighlights then
-        for player, highlight in pairs(State.PlayerHighlights) do
-            pcall(function()
-                if highlight then highlight:Destroy() end
-            end)
+    print("[FullShutdown] Starting complete cleanup...")
+    
+    -- ✅ Остановка всех активных фич
+    pcall(function()
+        if State.AutoFarmEnabled then StopAutoFarm() end
+        if State.XPFarmEnabled then StopXPFarm() end
+        if State.NoClipEnabled then DisableNoClip() end
+        if State.AntiFlingEnabled then DisableAntiFling() end
+        if State.ExtendedHitboxEnabled then DisableExtendedHitbox() end
+        if State.GodModeEnabled then ToggleGodMode() end
+        if State.InstantPickupEnabled then DisableInstantPickup() end
+        if killAuraCon then ToggleKillAura(false) end
+    end)
+    
+    -- ✅ Остановка Trolling threads
+    pcall(function()
+        if State.OrbitThread then
+            task.cancel(State.OrbitThread)
+            State.OrbitThread = nil
+        end
+        if State.LoopFlingThread then
+            task.cancel(State.LoopFlingThread)
+            State.LoopFlingThread = nil
+        end
+        if State.BlockPathThread then
+            task.cancel(State.BlockPathThread)
+            State.BlockPathThread = nil
+        end
+        State.OrbitEnabled = false
+        State.LoopFlingEnabled = false
+        State.BlockPathEnabled = false
+    end)
+    
+    -- ✅ Очистка ESP
+    pcall(function()
+        for _, highlight in pairs(State.PlayerHighlights) do
+            if highlight and highlight.Parent then
+                highlight:Destroy()
+            end
         end
         State.PlayerHighlights = {}
-    end
+    end)
     
-    if State.GunCache then
-        for gunPart, espData in pairs(State.GunCache) do
-            pcall(function()
+    pcall(function()
+        for _, espData in pairs(State.GunCache) do
+            if espData then
                 if espData.highlight then espData.highlight:Destroy() end
                 if espData.billboard then espData.billboard:Destroy() end
-            end)
+            end
         end
         State.GunCache = {}
-    end
+    end)
     
-    if currentMapConnection then
-        currentMapConnection:Disconnect()
-        currentMapConnection = nil
-    end
-    currentMap = nil
+    -- ✅ Отключение Role Check Loop
+    pcall(function()
+        if State.RoleCheckLoop then
+            State.RoleCheckLoop:Disconnect()
+            State.RoleCheckLoop = nil
+        end
+    end)
     
+    -- ✅ Отключение Gun Tracking
+    pcall(function()
+        if currentMapConnection then
+            currentMapConnection:Disconnect()
+            currentMapConnection = nil
+        end
+        currentMap = nil
+    end)
+    
+    -- ✅ Очистка всех general connections
+    pcall(function()
+        for _, connection in ipairs(State.Connections) do
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end
+        State.Connections = {}
+    end)
+    
+    -- ✅ Очистка GodMode connections (отдельное хранилище)
+    pcall(function()
+        for _, connection in ipairs(State.GodModeConnections) do
+            if connection and connection.Connected then
+                connection:Disconnect()
+            end
+        end
+        State.GodModeConnections = {}
+    end)
+    
+    -- ✅ Восстановление character settings
+    pcall(function()
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.WalkSpeed = 16
+                humanoid.JumpPower = 50
+            end
+            
+            local ff = character:FindFirstChild("ForceField")
+            if ff then ff:Destroy() end
+        end
+        
+        LocalPlayer.CameraMaxZoomDistance = 128
+        
+        local camera = Workspace.CurrentCamera
+        if camera then
+            camera.FieldOfView = 70
+        end
+    end)
+    
+    -- ✅ Восстановление FallenPartsDestroyHeight
+    pcall(function()
+        workspace.FallenPartsDestroyHeight = State.FPDH
+    end)
+    
+    -- ✅ Очистка Keybinds
+    pcall(function()
+        for key, _ in pairs(State.Keybinds) do
+            State.Keybinds[key] = Enum.KeyCode.Unknown
+        end
+    end)
+    
+    -- ✅ Очистка UI State
+    State.ClickTPActive = false
+    State.ListeningForKeybind = nil
+    
+    -- ✅ Очистка Notifications
     State.NotificationQueue = {}
     State.CurrentNotification = nil
+    
+    -- ✅ Очистка Blacklist
     State.CoinBlacklist = {}
     
-    for bindName, _ in pairs(State.Keybinds) do
-        State.Keybinds[bindName] = Enum.KeyCode.Unknown
-    end
+    -- ✅ Очистка Role detection
+    State.prevMurd = nil
+    State.prevSher = nil
+    State.heroSent = false
+    State.roundStart = true
+    State.roundActive = false
     
-    if State.RoleCheckLoop then
-        pcall(function()
-            if type(State.RoleCheckLoop) == "thread" then
-                task.cancel(State.RoleCheckLoop)
-            elseif State.RoleCheckLoop.Disconnect then
-                State.RoleCheckLoop:Disconnect()
-            end
-        end)
-        State.RoleCheckLoop = nil
-    end
-    
-    if State.ViewClipEnabled then
-        pcall(function()
-            State.ViewClipEnabled = false
-            LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
-        end)
-    end
-    
-    State.OrbitEnabled = false
-    State.LoopFlingEnabled = false
-    State.BlockPathEnabled = false
-    State.AlreadyFlungPlayers = {}
-    
-    if State.InstantPickupThread then
-        task.cancel(State.InstantPickupThread)
-        State.InstantPickupThread = nil
-    end
-    State.InstantPickupEnabled = false
-    
-    if State.OrbitThread then task.cancel(State.OrbitThread) end
-    if State.LoopFlingThread then task.cancel(State.LoopFlingThread) end
-    if State.BlockPathThread then task.cancel(State.BlockPathThread) end
-    
-    if State.FPDH then
-        workspace.FallenPartsDestroyHeight = State.FPDH
-    end
-    
-    coinLabelCache = nil
-    lastCacheTime = 0
+    print("[FullShutdown] ✅ Complete!")
 end
 
 
@@ -1443,6 +1508,8 @@ end
 
 local shootMurderer
 local InstantKillAll
+local ToggleGodMode 
+
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
     if State.CoinFarmThread then
@@ -1458,6 +1525,13 @@ local function StartAutoFarm()
         print("[Auto Farm] 🚀 Запущен")
         if State.UndergroundMode then
             print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
+        end
+        
+        -- ✅ Включаем годмод при старте автофарма
+        if State.GodModeWithAutoFarm then
+            pcall(function()
+                ToggleGodMode()
+            end)
         end
         
         local noCoinsAttempts = 0
@@ -1483,7 +1557,6 @@ local function StartAutoFarm()
                 print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
-                -- ✅ Убираем левитацию при ожидании раунда
                 pcall(function()
                     UnfloatCharacter()
                 end)
@@ -1589,7 +1662,6 @@ local function StartAutoFarm()
                                     humanoidRootPart.CFrame = safeSpot + Vector3.new(0, 5, 0)
                                     print("[XP Farm] 📍 Телепортировался в безопасное место")
                                     
-                                    -- ✅ НОВОЕ: Включаем левитацию после телепорта
                                     task.wait(0.5)
                                     local floatSuccess = FloatCharacter()
                                     if floatSuccess then
@@ -1720,7 +1792,6 @@ local function StartAutoFarm()
                         break
                     end
                     
-                    -- ✅ Убираем левитацию перед ресетом
                     pcall(function()
                         UnfloatCharacter()
                     end)
@@ -1737,11 +1808,25 @@ local function StartAutoFarm()
                     
                     print("[Auto Farm] 🔄 Раунд полностью закончился! Делаю ресет...")
                     
+                    -- ✅ Выключаем годмод перед ресетом
+                    if State.GodModeWithAutoFarm then
+                        pcall(function()
+                            ToggleGodMode()
+                        end)
+                    end
+                    
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     
                     task.wait(3)
+                    
+                    -- ✅ Включаем годмод после респавна
+                    if State.GodModeWithAutoFarm then
+                        pcall(function()
+                            ToggleGodMode()
+                        end)
+                    end
                     
                     print("[Auto Farm] ⏳ Жду начала нового раунда...")
                     repeat
@@ -1760,16 +1845,29 @@ local function StartAutoFarm()
                 else
                     print("[Auto Farm] 🔄 XP Farm выключен - делаю быстрый ресет без ожидания конца раунда...")
                     
-                    -- ✅ Убираем левитацию перед ресетом
                     pcall(function()
                         UnfloatCharacter()
                     end)
+                    
+                    -- ✅ Выключаем годмод перед ресетом
+                    if State.GodModeWithAutoFarm then
+                        pcall(function()
+                            ToggleGodMode()
+                        end)
+                    end
                     
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     
                     task.wait(3)
+                    
+                    -- ✅ Включаем годмод после респавна
+                    if State.GodModeWithAutoFarm then
+                        pcall(function()
+                            ToggleGodMode()
+                        end)
+                    end
                     
                     print("[Auto Farm] ⏳ Жду конца текущего раунда...")
                     repeat
@@ -1800,13 +1898,41 @@ local function StartAutoFarm()
         
         pcall(function()
             DisableNoClip()
-            UnfloatCharacter()  -- ✅ Убираем левитацию при остановке
+            UnfloatCharacter()
+            
+            -- ✅ Выключаем годмод при остановке автофарма
+            if State.GodModeWithAutoFarm then
+                ToggleGodMode()
+            end
         end)
         
         State.CoinFarmThread = nil
         print("[Auto Farm] 🛑 Остановлен")
     end)
 end
+
+local function StopAutoFarm()
+    State.AutoFarmEnabled = false
+    
+    if State.CoinFarmThread then
+        task.cancel(State.CoinFarmThread)
+        State.CoinFarmThread = nil
+    end
+    
+    pcall(function()
+        DisableNoClip()
+        UnfloatCharacter()
+        
+        -- ✅ Выключаем годмод при остановке
+        if State.GodModeWithAutoFarm then
+            ToggleGodMode()
+        end
+    end)
+    
+    State.CoinBlacklist = {}
+    print("[Auto Farm] 🛑 Остановлен")
+end
+
 
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
@@ -2739,81 +2865,17 @@ local function EnableInstantPickup()
     State.InstantPickupEnabled = true
     
     State.InstantPickupThread = task.spawn(function()
-        
         while State.InstantPickupEnabled do
             local murderer = getMurder()
-            
-            -- ✅ Проверка: раунд активен?
-            if not murderer then
-                task.wait(2)
-                continue
-            end
-            
-            -- ✅ Проверка: мы мурдерер?
-            if murderer == LocalPlayer then
-                task.wait(1)
-                continue
-            end
-            
             local gun = getGun()
             local sheriff = getSheriff()
             
-            -- ✅ Проверка: пистолет лежит И нет шерифа?
-            if gun and not sheriff then   
-                local pickupSuccess = false
-                
-                for attempt = 1, 3 do
-                    -- ✅ Проверка: пистолет ещё существует?
-                    if not getGun() then
-                        pickupSuccess = true
-                        break
-                    end
-                    
-                    pcall(function()
-                        local character = LocalPlayer.Character
-                        if not character then return end
-                        
-                        local hrp = character:FindFirstChild("HumanoidRootPart")
-                        if not hrp then return end
-                        
-                        -- Телепорт к пистолету
-                        local gunCFrame = gun:IsA("BasePart") and gun.CFrame or gun.PrimaryPart.CFrame
-                        hrp.CFrame = gunCFrame + Vector3.new(0, 2, 0)
-                        
-                        -- firetouchinterest
-                        if firetouchinterest then
-                            firetouchinterest(hrp, gun, 0)
-                            task.wait(0.05)
-                            firetouchinterest(hrp, gun, 1)
-                        end
-                    end)
-                    
-                    task.wait(0.15)
-                    
-                    -- ✅ Проверка: пистолет подобран?
-                    if LocalPlayer.Character:FindFirstChild("Gun") or 
-                       LocalPlayer.Backpack:FindFirstChild("Gun") then
-                        pickupSuccess = true
-                        break
-                    end
-                end
-                
-                -- ✅ ЕСЛИ НЕ ПОДОБРАЛИ - ЖДЁМ НОВЫЙ РАУНД
-                if not pickupSuccess then
-                    
-                    -- Ждём окончания текущего раунда
-                    repeat
-                        task.wait(0.5)
-                    until getMurder() == nil or not State.InstantPickupEnabled
-                    
-                    -- Ждём начала нового раунда
-                    repeat
-                        task.wait(0.5)
-                    until getMurder() ~= nil or not State.InstantPickupEnabled
-                end
-            else
-                task.wait(0.2)
+            -- Если раунд идет, мы не мурдерер, пистолет есть и нет шерифа
+            if murderer and murderer ~= LocalPlayer and gun and not sheriff then
+                pickupGun()
             end
+            
+            task.wait(0.2)
         end
     end)
 end
