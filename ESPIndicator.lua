@@ -408,84 +408,86 @@ function ESPIndicator:allLabels()
 end
 
 function ESPIndicator:update()
-	local camera = workspace.CurrentCamera
-	local viewportSize = camera.ViewportSize
-	local centerX, centerY = viewportSize.X, viewportSize.Y
-	
-	for target, indicator in pairs(self.Indicators) do
-		local options = indicator.Options
-		local arrow = indicator.Arrow
-		local scaler = indicator.Scaler
-		
-		if not arrow or not scaler and self.Settings.ArrowShow then
-			self:Remove(target)
-			continue
-		end
-		
-		if not arrow then continue end
-		
-		local worldPosition
-		if target:IsA("Model") then
-			worldPosition = (target.PrimaryPart and target.PrimaryPart.Position) or target:GetModelCFrame().p
-		elseif target:IsA("BasePart") then
-			worldPosition = target.Position
-		else
-			continue
-		end
-		
-		local viewportPoint, onScreen = camera:WorldToViewportPoint(worldPosition)
-		local distance = (camera.CFrame.p - worldPosition).Magnitude
-		
-		local minDistance = options.ArrowMinDistance or self.Settings.ArrowMinDistance
-		local edgePadding = options.ArrowEdgePadding or self.Settings.ArrowEdgePadding
-		
-		if onScreen and distance > minDistance then
-			TweenService:Create(scaler, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 0}):Play()
-		else
-			TweenService:Create(scaler, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 1}):Play()
-			
-			local maxX, maxY = centerX - edgePadding / 2, centerY - edgePadding / 2
-			local cameraForward = camera.CFrame
-			local magnitude = math.sqrt(maxX^2 + maxY^2)
-			
-			local vectorToTarget = worldPosition - cameraForward.Position
-			local cameraRelativeVector = VectorToObjectSpace(vectorToTarget, cameraForward)
-			local direction = Vector2.new(cameraRelativeVector.X, cameraRelativeVector.Y).Unit
-			
-			local posX = math.clamp(viewportPoint.X, edgePadding, centerX - edgePadding)
-			local posY = math.clamp(viewportPoint.Y, edgePadding, centerY - edgePadding)
-			
-			if posX == viewportPoint.X and posY == viewportPoint.Y and onScreen then
-				TweenService:Create(scaler, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 0}):Play()
-			else
-				local offset
-				local newDirection = direction
-				
-				if math.abs(cameraRelativeVector.Y) > maxY / 2 then
-					newDirection = direction * math.abs(maxY / (2 * direction.Y))
-				else
-					newDirection = direction * math.abs(maxX / (2 * direction.X))
-				end
-				
-				local finalX = centerX / 2 + newDirection.X
-				local finalY = centerY / 2 - newDirection.Y
-				
-				local angle = math.atan2(direction.X, direction.Y)
-				
-				TweenService:Create(arrow, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Position = UDim2.fromOffset(finalX, finalY),
-					Rotation = math.deg(angle)
-				}):Play()
-			end
-		end
-		
-		if indicator.DistanceLabel then
-			indicator.DistanceLabel.Text = string.format("%dm", math.round(distance))
-			local arrowHeight = (options.ArrowSize and options.ArrowSize.Y.Offset or self.Settings.ArrowSize.Y.Offset) + 16
-			indicator.DistanceLabel.Position = UDim2.new(0.5, 0, 0, arrowHeight)
-		end
-	end
+    local camera = workspace.CurrentCamera
+    local viewportSize = camera.ViewportSize
+    local centerX, centerY = viewportSize.X, viewportSize.Y
+
+    for target, indicator in pairs(self.Indicators) do
+        local options = indicator.Options
+        local arrow = indicator.Arrow
+        local scaler = indicator.Scaler
+
+        if not arrow or not scaler and self.Settings.ArrowShow then
+            self:Remove(target)
+            continue
+        end
+
+        if not arrow then continue end
+
+        local worldPosition
+        if target:IsA("Model") then
+            worldPosition = (target.PrimaryPart and target.PrimaryPart.Position) or target:GetModelCFrame().p
+        elseif target:IsA("BasePart") then
+            worldPosition = target.Position
+        else
+            continue
+        end
+
+        local viewportPoint, onScreen = camera:WorldToViewportPoint(worldPosition)
+        local distance = (camera.CFrame.p - worldPosition).Magnitude
+
+        local minDistance = options.ArrowMinDistance or self.Settings.ArrowMinDistance
+        local edgePadding = options.ArrowEdgePadding or self.Settings.ArrowEdgePadding
+
+        -- ИСПРАВЛЕНИЕ: стрелка скрывается, когда объект НА ЭКРАНЕ и БЛИЖЕ minDistance
+        if onScreen and distance < minDistance then
+            TweenService:Create(scaler, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 0}):Play()
+        else
+            TweenService:Create(scaler, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 1}):Play()
+
+            local maxX, maxY = centerX - edgePadding / 2, centerY - edgePadding / 2
+            local cameraForward = camera.CFrame
+            local magnitude = math.sqrt(maxX^2 + maxY^2)
+
+            local vectorToTarget = worldPosition - cameraForward.Position
+            local cameraRelativeVector = VectorToObjectSpace(vectorToTarget, cameraForward)
+            local direction = Vector2.new(cameraRelativeVector.X, cameraRelativeVector.Y).Unit
+
+            local posX = math.clamp(viewportPoint.X, edgePadding, centerX - edgePadding)
+            local posY = math.clamp(viewportPoint.Y, edgePadding, centerY - edgePadding)
+
+            if posX == viewportPoint.X and posY == viewportPoint.Y and onScreen then
+                TweenService:Create(scaler, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 0}):Play()
+            else
+                local offset
+                local newDirection = direction
+
+                if math.abs(cameraRelativeVector.Y) > maxY / 2 then
+                    newDirection = direction * math.abs(maxY / (2 * direction.Y))
+                else
+                    newDirection = direction * math.abs(maxX / (2 * direction.X))
+                end
+
+                local finalX = centerX / 2 + newDirection.X
+                local finalY = centerY / 2 - newDirection.Y
+
+                local angle = math.atan2(direction.X, direction.Y)
+
+                TweenService:Create(arrow, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Position = UDim2.fromOffset(finalX, finalY),
+                    Rotation = math.deg(angle)
+                }):Play()
+            end
+        end
+
+        if indicator.DistanceLabel then
+            indicator.DistanceLabel.Text = string.format("%dm", math.round(distance))
+            local arrowHeight = (options.ArrowSize and options.ArrowSize.Y.Offset or self.Settings.ArrowSize.Y.Offset) + 16
+            indicator.DistanceLabel.Position = UDim2.new(0.5, 0, 0, arrowHeight)
+        end
+    end
 end
+
 
 function VectorToObjectSpace(vector, cframe)
 	return cframe:PointToObjectSpace(cframe.Position + vector)
