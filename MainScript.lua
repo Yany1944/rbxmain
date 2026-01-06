@@ -120,6 +120,7 @@ local State = {
     ExtendedHitboxSize = 15,
     ExtendedHitboxEnabled = false,
     KillAuraDistance = 2.5,
+    spawnAtPlayer = false,
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -174,6 +175,7 @@ local State = {
     -- ESP internals
     PlayerHighlights = {},
     GunCache = {},
+    FOVIndicators = {},
     
     -- System
     Connections = {},
@@ -2610,7 +2612,6 @@ local function StartRoleChecking()
 end
 
 
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 15: COMBAT FUNCTIONS (СТРОКИ 2351-2800)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -2645,59 +2646,98 @@ end
 
 -- knifeThrow() - Бросок ножа (по КУРСОРУ!)
 local function knifeThrow(silent)
-    -- Проверка: игрок убийца?
     local murderer = getMurder()
-    if murderer ~= LocalPlayer then 
+    if murderer ~= LocalPlayer then
         if not silent then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>",CONFIG.Colors.Text)
-        end
-        return 
-    end
-
-    if not LocalPlayer.Character:FindFirstChild("Knife") then
-        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
-        if LocalPlayer.Backpack:FindFirstChild("Knife") then
-            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.3)
-        else
-            if not silent then
-                ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the knife..?</font>",CONFIG.Colors.Text)
-            end
-            return
-        end
-    end
-    local knife = LocalPlayer.Character:FindFirstChild("Knife")
-    if not knife then
-        if not silent then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220, 220, 220)\">Knife not equipped</font>",CONFIG.Colors.Text)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not murderer.</font>", CONFIG.Colors.Text)
         end
         return
     end
 
+    -- ОПТИМИЗАЦИЯ: проверяем нож БЕЗ экипировки, если его нет
+    local knife = LocalPlayer.Character:FindFirstChild("Knife")
+    
+    if not knife then
+        -- Мгновенная экипировка БЕЗ task.wait()
+        if LocalPlayer.Backpack:FindFirstChild("Knife") then
+            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                -- EquipTool работает мгновенно - задержка не нужна
+                hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
+                -- Обновляем ссылку сразу
+                knife = LocalPlayer.Character:FindFirstChild("Knife")
+            end
+        end
+        
+        -- Финальная проверка
+        if not knife then
+            if not silent then
+                ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the knife..?</font>", CONFIG.Colors.Text)
+            end
+            return
+        end
+    end
+
     if not LocalPlayer.Character:FindFirstChild("RightHand") then
         if not silent then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
         end
         return
     end
 
     local mouse = LocalPlayer:GetMouse()
-    local targetPosition = mouse.Hit.Position
+    local spawnPosition
+    local targetPosition
     
+    -- Режим спавна рядом с игроком
+    if State.spawnAtPlayer then
+        local nearestPlayer = findNearestPlayer()
+        if nearestPlayer and nearestPlayer.Character then
+            local targetHRP = nearestPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if targetHRP then
+                -- Позади игрока на 4 studs, центр торса
+                local behindOffset = -targetHRP.CFrame.LookVector * 4
+                local upOffset = Vector3.new(0, 0.5, 0)
+                spawnPosition = targetHRP.Position + behindOffset + upOffset
+                
+                -- Вектор через центр HumanoidRootPart
+                local directionToTorso = (targetHRP.Position - spawnPosition).Unit
+                targetPosition = targetHRP.Position + (directionToTorso * 500)
+            else
+                spawnPosition = LocalPlayer.Character.RightHand.Position
+                targetPosition = mouse.Hit.Position
+            end
+        else
+            spawnPosition = LocalPlayer.Character.RightHand.Position
+            targetPosition = mouse.Hit.Position
+        end
+    else
+        -- Обычный бросок
+        spawnPosition = LocalPlayer.Character.RightHand.Position
+        targetPosition = mouse.Hit.Position
+    end
+
     if not targetPosition then
         if not silent then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220, 220, 220)\">No mouse position</font>", nil)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No target position</font>", nil)
         end
         return
     end
+
+    -- Аргументы для броска
     local argsThrowRemote = {
-        [1] = CFrame.new(LocalPlayer.Character.RightHand.Position),
-        [2] = CFrame.new(targetPosition)  -- Позиция мыши!
+        [1] = CFrame.new(spawnPosition),
+        [2] = CFrame.new(targetPosition)
     }
 
+    -- МГНОВЕННАЯ ОТПРАВКА на сервер
     local success, err = pcall(function()
         LocalPlayer.Character.Knife.Events.KnifeThrown:FireServer(unpack(argsThrowRemote))
     end)
+    
+    if not success and not silent then
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
+    end
 end
 
 local CanShootMurderer = true
@@ -4335,7 +4375,6 @@ end
     VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; end)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; end)
 
-
     local CombatTab = CreateTab("Combat")
    
     CombatTab:CreateSection("EXTENDED HITBOX")
@@ -4343,7 +4382,8 @@ end
     CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, 15, function(v) State.ExtendedHitboxSize = v; if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end, 1)
    
     CombatTab:CreateSection("MURDERER TOOLS")
-    CombatTab:CreateKeybindButton("Throw Knife to Nearest", "throwknife", "ThrowKnife")
+    CombatTab:CreateKeybindButton("Fast throw", "throwknife", "ThrowKnife")
+    CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", function(s) State.spawnAtPlayer = s end)
     CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", function(s) ToggleKillAura(s) end)
     CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
    
