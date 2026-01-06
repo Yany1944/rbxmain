@@ -233,25 +233,21 @@ local currentMap = nil
 
 -- CleanupMemory() - Очистка при респавне
 local function CleanupMemory()
-    -- highlights
     if State.PlayerHighlights then
-        for _, highlight in pairs(State.PlayerHighlights) do
-            if highlight and highlight.Parent then
-                pcall(function() highlight:Destroy() end)
-            end
+        for player, highlight in pairs(State.PlayerHighlights) do
+            pcall(function()
+                if highlight then highlight:Destroy() end
+            end)
         end
         State.PlayerHighlights = {}
     end
     
-    -- gun ESP
     if State.GunCache then
-        for _, espData in pairs(State.GunCache) do
-            if espData then
-                pcall(function()
-                    if espData.highlight then espData.highlight:Destroy() end
-                    if espData.billboard then espData.billboard:Destroy() end
-                end)
-            end
+        for gunPart, espData in pairs(State.GunCache) do
+            pcall(function()
+                if espData.highlight then espData.highlight:Destroy() end
+                if espData.billboard then espData.billboard:Destroy() end
+            end)
         end
         State.GunCache = {}
     end
@@ -265,8 +261,7 @@ local function CleanupMemory()
     State.NotificationQueue = {}
     State.CurrentNotification = nil
     State.CoinBlacklist = {}
-
--- Отключаем trolling
+    
     State.OrbitEnabled = false
     State.LoopFlingEnabled = false
     State.BlockPathEnabled = false
@@ -278,22 +273,20 @@ end
 
 local function FullShutdown()
     if State.PlayerHighlights then
-        for _, highlight in pairs(State.PlayerHighlights) do
-            if highlight and highlight.Parent then
-                pcall(function() highlight:Destroy() end)
-            end
+        for player, highlight in pairs(State.PlayerHighlights) do
+            pcall(function()
+                if highlight then highlight:Destroy() end
+            end)
         end
         State.PlayerHighlights = {}
     end
     
     if State.GunCache then
-        for _, espData in pairs(State.GunCache) do
-            if espData then
-                pcall(function()
-                    if espData.highlight then espData.highlight:Destroy() end
-                    if espData.billboard then espData.billboard:Destroy() end
-                end)
-            end
+        for gunPart, espData in pairs(State.GunCache) do
+            pcall(function()
+                if espData.highlight then espData.highlight:Destroy() end
+                if espData.billboard then espData.billboard:Destroy() end
+            end)
         end
         State.GunCache = {}
     end
@@ -312,7 +305,6 @@ local function FullShutdown()
         State.Keybinds[bindName] = Enum.KeyCode.Unknown
     end
     
-    -- RoleCheckLoop
     if State.RoleCheckLoop then
         pcall(function()
             if type(State.RoleCheckLoop) == "thread" then
@@ -324,19 +316,18 @@ local function FullShutdown()
         State.RoleCheckLoop = nil
     end
     
-    -- ViewClip
     if State.ViewClipEnabled then
         pcall(function()
             State.ViewClipEnabled = false
             LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
         end)
     end
-    -- Отключаем trolling
+    
     State.OrbitEnabled = false
     State.LoopFlingEnabled = false
     State.BlockPathEnabled = false
     State.AlreadyFlungPlayers = {}
-
+    
     if State.InstantPickupThread then
         task.cancel(State.InstantPickupThread)
         State.InstantPickupThread = nil
@@ -346,7 +337,7 @@ local function FullShutdown()
     if State.OrbitThread then task.cancel(State.OrbitThread) end
     if State.LoopFlingThread then task.cancel(State.LoopFlingThread) end
     if State.BlockPathThread then task.cancel(State.BlockPathThread) end
-
+    
     if State.FPDH then
         workspace.FallenPartsDestroyHeight = State.FPDH
     end
@@ -354,6 +345,8 @@ local function FullShutdown()
     coinLabelCache = nil
     lastCacheTime = 0
 end
+
+
 
 -- findNearestPlayer() - Поиск ближайшего игрока
 local function findNearestPlayer()
@@ -2071,8 +2064,7 @@ local function UpdatePlayerHighlight(player, role)
     if not player or player == LocalPlayer then return end
     
     local character = player.Character
-    if not character or not character.Parent then
-        -- Удаляем highlight если character пропал
+    if not character then
         if State.PlayerHighlights[player] then
             pcall(function()
                 State.PlayerHighlights[player]:Destroy()
@@ -2096,20 +2088,35 @@ local function UpdatePlayerHighlight(player, role)
         shouldShow = false
     end
     
-    -- Удаляем старый highlight
-    if State.PlayerHighlights[player] then
-        pcall(function()
-            State.PlayerHighlights[player]:Destroy()
-        end)
-        State.PlayerHighlights[player] = nil
+    if not shouldShow then
+        if State.PlayerHighlights[player] then
+            pcall(function()
+                State.PlayerHighlights[player].Enabled = false
+            end)
+        end
+        return
     end
     
-    -- Создаём новый highlight (ТОЛЬКО если нужно показывать)
-    if shouldShow then
-        local highlight = CreateHighlight(character, color)
-        if highlight then
-            highlight.Enabled = true
-            State.PlayerHighlights[player] = highlight
+    local existingHighlight = State.PlayerHighlights[player]
+    
+    if existingHighlight then
+        if existingHighlight.Parent and existingHighlight.Adornee == character then
+            existingHighlight.FillColor = color
+            existingHighlight.OutlineColor = color
+            existingHighlight.Enabled = true
+        else
+            pcall(function() existingHighlight:Destroy() end)
+            State.PlayerHighlights[player] = nil
+            
+            local newHighlight = CreateHighlight(character, color)
+            if newHighlight then
+                State.PlayerHighlights[player] = newHighlight
+            end
+        end
+    else
+        local newHighlight = CreateHighlight(character, color)
+        if newHighlight then
+            State.PlayerHighlights[player] = newHighlight
         end
     end
 end
@@ -2279,7 +2286,6 @@ local function StartRoleChecking()
         State.RoleCheckLoop = nil
     end
     
-    -- Очистка всех highlight перед началом
     for player, highlight in pairs(State.PlayerHighlights) do
         pcall(function()
             highlight:Destroy()
@@ -2289,16 +2295,13 @@ local function StartRoleChecking()
     
     State.RoleCheckLoop = RunService.Heartbeat:Connect(function()
         pcall(function()
-            -- ✅ ОПРЕДЕЛЯЕМ роли через функции (ТОЛЬКО ОДИН ВОЗВРАТ)
             local murder = getMurder()
             local sheriff = getSheriff()
             
-            -- ✅ СОЗДАЁМ ТАБЛИЦЫ ДЛЯ КАЖДОЙ РОЛИ (без дубликатов)
             local murderers = {}
             local sheriffs = {}
             local innocents = {}
             
-            -- ✅ РАСПРЕДЕЛЯЕМ игроков по ролям
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr == murder then
                     table.insert(murderers, plr)
@@ -2309,20 +2312,16 @@ local function StartRoleChecking()
                 end
             end
             
-            -- ✅ ОБНОВЛЯЕМ highlights
             for _, plr in ipairs(murderers) do
                 UpdatePlayerHighlight(plr, "Murder")
             end
-            
             for _, plr in ipairs(sheriffs) do
                 UpdatePlayerHighlight(plr, "Sheriff")
             end
-            
             for _, plr in ipairs(innocents) do
                 UpdatePlayerHighlight(plr, "Innocent")
             end
             
-            -- ✅ Определение начала раунда
             if murder and sheriff and State.roundStart then
                 State.roundActive = true
                 State.roundStart = false
@@ -2331,19 +2330,12 @@ local function StartRoleChecking()
                 State.heroSent = false
                 
                 if State.NotificationsEnabled then
-                    ShowNotification(
-                        "<font color=\"rgb(255, 85, 85)\">🔪 Murderer:</font> " .. murder.Name,
-                        CONFIG.Colors.Text
-                    )
+                    ShowNotification("<font color=\"rgb(255, 85, 85)\">🔪 Murderer:</font> " .. murder.Name, CONFIG.Colors.Text)
                     task.wait(0.1)
-                    ShowNotification(
-                        "<font color=\"rgb(50, 150, 255)\">👮 Sheriff:</font> " .. sheriff.Name,
-                        CONFIG.Colors.Text
-                    )
+                    ShowNotification("<font color=\"rgb(50, 150, 255)\">🔫 Sheriff:</font> " .. sheriff.Name, CONFIG.Colors.Text)
                 end
             end
             
-            -- ✅ Определение конца раунда
             if not murder and State.roundActive then
                 State.roundActive = false
                 State.roundStart = true
@@ -2356,16 +2348,12 @@ local function StartRoleChecking()
                 end
             end
             
-            -- ✅ Новый герой (Sheriff умер, кто-то подобрал пистолет)
             if sheriff and State.prevSher and sheriff ~= State.prevSher and murder and murder == State.prevMurd and not State.heroSent then
                 State.prevSher = sheriff
                 State.heroSent = true
                 
                 if State.NotificationsEnabled then
-                    ShowNotification(
-                        "<font color=\"rgb(50, 150, 255)\">New Sheriff:</font> " .. sheriff.Name,
-                        CONFIG.Colors.Text
-                    )
+                    ShowNotification("<font color=\"rgb(50, 150, 255)\">New Sheriff:</font> " .. sheriff.Name, CONFIG.Colors.Text)
                 end
             end
         end)
@@ -2373,6 +2361,7 @@ local function StartRoleChecking()
     
     table.insert(State.Connections, State.RoleCheckLoop)
 end
+
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -4519,11 +4508,44 @@ local inputBeganConnection = UserInputService.InputBegan:Connect(function(input,
     table.insert(State.Connections, mouseClickConnection)
 end
 
+Players.PlayerRemoving:Connect(function(player)
+    if State.PlayerHighlights[player] then
+        pcall(function()
+            State.PlayerHighlights[player]:Destroy()
+        end)
+        State.PlayerHighlights[player] = nil
+    end
+end)
 
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        task.wait(0.5)
+        if State.PlayerHighlights[player] then
+            pcall(function()
+                State.PlayerHighlights[player]:Destroy()
+            end)
+            State.PlayerHighlights[player] = nil
+        end
+    end)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        player.CharacterAdded:Connect(function(character)
+            task.wait(0.5)
+            if State.PlayerHighlights[player] then
+                pcall(function()
+                    State.PlayerHighlights[player]:Destroy()
+                end)
+                State.PlayerHighlights[player] = nil
+            end
+        end)
+    end
+end
 LocalPlayer.CharacterAdded:Connect(function()
+    CleanupMemory()
     task.wait(1)
     ApplyCharacterSettings()
-
 
     State.prevMurd = nil
     State.prevSher = nil
