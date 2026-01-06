@@ -417,10 +417,10 @@ function ESPIndicator:update()
         local arrow = indicator.Arrow
         local scaler = indicator.Scaler
 
-        if not arrow or not scaler and self.Settings.ArrowShow then
-            self:Remove(target)
-            continue
-        end
+		if (not arrow or not scaler) and self.Settings.ArrowShow then
+		    self:Remove(target)
+		    continue
+		end
 
         if not arrow then continue end
 
