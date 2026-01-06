@@ -442,7 +442,7 @@ function ESPIndicator:update()
         local edgePadding = options.ArrowEdgePadding or self.Settings.ArrowEdgePadding
 
         -- Скрываем стрелку если объект НА ЭКРАНЕ и БЛИЗКО
-        if onScreen and viewportPoint.Z > 0 and distance < minDistance then
+        if onScreen and viewportPoint.Z > 0 and distance > minDistance then
             TweenService:Create(scaler, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 0}):Play()
             continue
         end
