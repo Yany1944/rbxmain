@@ -129,23 +129,14 @@ local State = {
     CoinFarmThread = nil,
     CoinFarmFlySpeed = 22,
     CoinFarmDelay = 2,
-    FirstCoinCollected = false,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
     CoinBlacklist = {},
-    StartSessionCoins = 0,
-    CoinLabelCache = nil,
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
 
-    -- Optimization
-    MaxOptimizationEnabled = false,
-    OriginalFPSCap = nil,
-    OriginalVolume = nil,
-    HiddenObjects = nil,
     -- XP Farm
     XPFarmEnabled = false,
-    XPFarmThread = nil,
     
     -- Instant Pickup
     InstantPickupEnabled = false,
@@ -162,7 +153,6 @@ local State = {
     NoClipConnection = nil,
     NoClipRespawnConnection = nil,
     NoClipObjects = nil,
-    ClipEnabled = true,
     
     -- GodMode
     GodModeEnabled = false,
@@ -178,7 +168,6 @@ local State = {
     -- ESP internals
     PlayerHighlights = {},
     GunCache = {},
-    FOVIndicators = {},
     
     -- System
     Connections = {},
@@ -648,7 +637,6 @@ end
 -- БЛОК 7: ROLE DETECTION (СТРОКИ 611-660)
 -- ══════════════════════════════════════════════════════════════════════════════
 
-local AntiFlingEnabled = false
 local AntiFlingLastPos = Vector3.zero
 local FlingDetectionConnection = nil
 local FlingNeutralizerConnection = nil
@@ -688,8 +676,8 @@ end
 
 -- EnableAntiFling() - Включение защиты от флинга
 local function EnableAntiFling()
-    if AntiFlingEnabled then return end
-    AntiFlingEnabled = true
+    if State.AntiFlingEnabled then return end
+    State.AntiFlingEnabled = true
 
     FlingDetectionConnection = RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
@@ -764,7 +752,7 @@ end
 
 -- DisableAntiFling() - Отключение защиты
 local function DisableAntiFling()
-    AntiFlingEnabled = false
+    State.AntiFlingEnabled = false
     DetectedFlingers = {}
     
     if FlingDetectionConnection then
