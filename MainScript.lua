@@ -583,13 +583,6 @@ EnableMaxOptimization = function()
             sethiddenproperty(workspace, "StreamingTargetRadius", 64)
         end
     end)
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">AFK Mode:</font> <font color=\"rgb(168,228,160)\">ON</font> <font color=\"rgb(150,150,150)\">(No Render)</font>",
-            CONFIG.Colors.Green
-        )
-    end
 end
 
 DisableMaxOptimization = function()
@@ -664,13 +657,6 @@ DisableMaxOptimization = function()
             camera.FieldOfView = savedSettings.Camera.FieldOfView
         end
     end)
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">AFK Mode:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",
-            CONFIG.Colors.Red
-        )
-    end
 end
 
 local function EnableUIOnly()
@@ -678,13 +664,6 @@ local function EnableUIOnly()
     uiOnlyActive = true
     savedUIOnlyState = {}
     ApplyUIOptimization()
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">UI Only:</font> <font color=\"rgb(168,228,160)\">Hidden</font>",
-            CONFIG.Colors.Green
-        )
-    end
 end
 
 local function DisableUIOnly()
@@ -725,13 +704,6 @@ local function DisableUIOnly()
         end
         savedUIOnlyState = {}
     end)
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">UI Only:</font> <font color=\"rgb(255, 85, 85)\">Visible</font>",
-            CONFIG.Colors.Red
-        )
-    end
 end
 -- ==============================
 -- FPS BOOST FUNCTION
@@ -812,13 +784,6 @@ local function EnableFPSBoost()
             end)
         end)
     end)
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">FPS Boost:</font> <font color=\"rgb(168,228,160)\">Enabled</font>",
-            CONFIG.Colors.Green
-        )
-    end
 end
 
 
