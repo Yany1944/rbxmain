@@ -121,11 +121,13 @@ local State = {
     ExtendedHitboxEnabled = false,
     KillAuraDistance = 2.5,
     spawnAtPlayer = false,
+    CanShootMurderer = true,
+    ShootCooldown = 2.2,
     
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 23,
+    CoinFarmFlySpeed = 22,
     CoinFarmDelay = 2,
     FirstCoinCollected = false,
     UndergroundMode = false,
@@ -134,6 +136,7 @@ local State = {
     StartSessionCoins = 0,
     CoinLabelCache = nil,
     LastCacheTime = 0,
+    GodModeWithAutoFarm = true,
 
     -- Optimization
     MaxOptimizationEnabled = false,
@@ -217,7 +220,7 @@ local State = {
         ClickTP = Enum.KeyCode.Unknown,
         GodMode = Enum.KeyCode.Unknown,
         FlingPlayer = Enum.KeyCode.Unknown,
-        ThrowKnife = Enum.KeyCode.Unknown,
+        knifeThrow = Enum.KeyCode.Unknown,
         NoClip = Enum.KeyCode.Unknown,
         ShootMurderer = Enum.KeyCode.Unknown,
         PickupGun = Enum.KeyCode.Unknown,
@@ -1510,7 +1513,11 @@ end
 
 local shootMurderer
 local InstantKillAll
+local knifeThrow
 local ToggleGodMode 
+
+local spawnAtPlayerOriginalState = false
+local instantPickupWasEnabled = false
 
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
@@ -1522,20 +1529,29 @@ local function StartAutoFarm()
     if not State.AutoFarmEnabled then return end
     
     State.CoinBlacklist = {}
+    spawnAtPlayerOriginalState = State.spawnAtPlayer
+    instantPickupWasEnabled = State.InstantPickupEnabled
     
     State.CoinFarmThread = task.spawn(function()
         print("[Auto Farm] 🚀 Запущен")
         if State.UndergroundMode then
             print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
         end
-        
         -- ✅ Включаем годмод при старте автофарма
-        if State.GodModeWithAutoFarm then
+        if State.GodModeWithAutoFarm and not State.GodModeEnabled then
             pcall(function()
-                ToggleGodMode()
+                ToggleGodMode()  -- Включаем только если был выключен
             end)
+            print("[Auto Farm] 🛡️ GodMode автоматически включен")
         end
-        
+
+        if State.XPFarmEnabled and not State.InstantPickupEnabled then
+            pcall(function()
+                EnableInstantPickup()
+            end)
+            print("[Auto Farm] 🔫 InstantPickup автоматически включен для XP Farm")
+        end
+                
         local noCoinsAttempts = 0
         local maxNoCoinsAttempts = 4
         local lastTeleportTime = 0
@@ -1559,6 +1575,9 @@ local function StartAutoFarm()
                 print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
+                if State.spawnAtPlayer and not spawnAtPlayerOriginalState then
+                    State.spawnAtPlayer = false
+                end
                 pcall(function()
                     UnfloatCharacter()
                 end)
@@ -1678,58 +1697,123 @@ local function StartAutoFarm()
                                     local sheriff = getSheriff()
                                     
                                     if murderer == LocalPlayer then
-                                        print("[XP Farm] 🔪 Мы мурдерер! InstantKillAll...")
-                                        local success, error = pcall(function()
-                                            task.wait(0.5)
-                                            InstantKillAll()
-                                        end)
+                                        print("[XP Farm] 🔪 Мы мурдерер! Активирую knifeThrow...")
                                         
-                                        if success then
-                                            print("[XP Farm] ✅ InstantKillAll выполнен успешно!")
+                                        -- ✅ Включаем spawnAtPlayer если был выключен
+                                        if not State.spawnAtPlayer then
+                                            State.spawnAtPlayer = true
+                                            print("[XP Farm] ✅ spawnAtPlayer включен")
+                                        end
+                                        
+                                        -- ✅ Счётчик попыток knifeThrow
+                                        local throwAttempts = 0
+                                        local maxThrowAttempts = 30
+                                        local throwDelay = 1.5
+                                        
+                                        -- ✅ Цикл knifeThrow с ограничением попыток
+                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and throwAttempts < maxThrowAttempts do
+                                            local success, error = pcall(function()
+                                                knifeThrow(true)  -- true = silent mode
+                                            end)
+                                            
+                                            throwAttempts = throwAttempts + 1
+                                            
+                                            if success then
+                                                print("[XP Farm] 🔪 Нож брошен (" .. throwAttempts .. "/" .. maxThrowAttempts .. ")")
+                                            else
+                                                print("[XP Farm] ❌ Ошибка броска ножа: " .. tostring(error))
+                                            end
+                                            
+                                            task.wait(throwDelay)
+                                        end
+                                        
+                                        -- ✅ Fallback: если после 30 попыток раунд не завершился
+                                        if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
+                                            print("[XP Farm] ⚠️ knifeThrow не сработал за 30 попыток! Использую InstantKillAll...")
+                                            
+                                            local success, error = pcall(function()
+                                                InstantKillAll()
+                                            end)
+                                            
+                                            if success then
+                                                print("[XP Farm] ✅ InstantKillAll выполнен успешно!")
+                                            else
+                                                print("[XP Farm] ❌ InstantKillAll ошибка: " .. tostring(error))
+                                            end
                                         else
-                                            print("[XP Farm] ❌ InstantKillAll ошибка: " .. tostring(error))
+                                            print("[XP Farm] ✅ Раунд завершён через knifeThrow или XP Farm отключен")
                                         end
                                                                     
                                     elseif sheriff == LocalPlayer then
                                         print("[XP Farm] 🔫 Мы шериф, стреляем в мурдерера...")
-                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled do
+                                        
+                                        -- ✅ Сразу после закрепления - первый выстрел
+                                        pcall(function()
+                                            shootMurderer()
+                                        end)
+                                        print("[XP Farm] 🎯 Первый выстрел произведён")
+                                        task.wait(0.5)
+                                        
+                                        -- ✅ Стреляем пока раунд активен (getMurder() ~= nil)
+                                        -- Игнорируем состояние Humanoid.Health, потому что с годмодом оно ложное
+                                        local shootAttempts = 0
+                                        local maxShootAttempts = 50  -- Лимит попыток для безопасности
+                                        
+                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and shootAttempts < maxShootAttempts do
                                             character = LocalPlayer.Character
-                                            if not character then break end
-                                            
-                                            local murdererPlayer = getMurder()
-                                            if not murdererPlayer then 
-                                                print("[XP Farm] ✅ Мурдерер мёртв!")
+                                            if not character then 
+                                                print("[XP Farm] ⚠️ Персонаж исчез, прекращаю стрельбу")
                                                 break 
                                             end
                                             
+                                            local murdererPlayer = getMurder()
+                                            if not murdererPlayer then 
+                                                print("[XP Farm] ✅ Раунд завершён! Мурдерер мёртв.")
+                                                break 
+                                            end
+                                            
+                                            -- ✅ Проверяем существование персонажа мурдерера
                                             local murdererChar = murdererPlayer.Character
                                             if not murdererChar then 
+                                                print("[XP Farm] ⚠️ У мурдерера нет персонажа, жду...")
                                                 task.wait(0.5)
                                                 continue 
                                             end
                                             
-                                            local murdererHumanoid = murdererChar:FindFirstChildOfClass("Humanoid")
-                                            if murdererHumanoid and murdererHumanoid.Health <= 0 then
-                                                print("[XP Farm] ✅ Мурдерер умер!")
-                                                break
-                                            end
+                                            -- ✅ УБРАНА проверка Humanoid.Health (ложная с годмодом)
+                                            -- Просто стреляем пока getMurder() возвращает игрока
+                                            
+                                            shootAttempts = shootAttempts + 1
                                             
                                             pcall(function()
-                                                task.wait(0.5)
                                                 shootMurderer()
                                             end)
                                             
-                                            print("[XP Farm] 🎯 Выстрел произведён, жду результата...")
-                                            task.wait(2)
+                                            print("[XP Farm] 🎯 Выстрел #" .. shootAttempts .. " произведён")
+                                            task.wait(1.5)  -- Увеличена задержка для надёжности попаданий
                                         end
                                         
-                                        if not State.XPFarmEnabled then
+                                        -- ✅ Проверяем причину выхода из цикла
+                                        if getMurder() == nil then
+                                            print("[XP Farm] ✅ Мурдерер успешно убит! Раунд завершён.")
+                                        elseif shootAttempts >= maxShootAttempts then
+                                            print("[XP Farm] ⚠️ Достигнут лимит выстрелов (" .. maxShootAttempts .. "), прекращаю стрельбу")
+                                        elseif not State.XPFarmEnabled then
                                             print("[XP Farm] ⚠️ XP Farm был отключен во время стрельбы")
+                                        elseif not State.AutoFarmEnabled then
+                                            print("[XP Farm] ⚠️ Auto Farm был отключен во время стрельбы")
                                         end
                                     else
                                         print("[XP Farm] 👤 Инносент | Флинг мурдерера")
                                         
-                                        local flingAttempts = 0
+                                        -- ✅ Сразу после закрепления - первый флинг
+                                        pcall(function()
+                                            FlingMurderer()
+                                        end)
+                                        print("[XP Farm] 💫 Первый флинг выполнен")
+                                        task.wait(1)
+                                        
+                                        local flingAttempts = 1  -- Уже выполнили 1 флинг
                                         local maxFlingAttempts = 10
                                         
                                         while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and flingAttempts < maxFlingAttempts do
@@ -1811,23 +1895,35 @@ local function StartAutoFarm()
                     print("[Auto Farm] 🔄 Раунд полностью закончился! Делаю ресет...")
                     
                     -- ✅ Выключаем годмод перед ресетом
-                    if State.GodModeWithAutoFarm then
+                    if State.GodModeWithAutoFarm and State.GodModeEnabled then
                         pcall(function()
-                            ToggleGodMode()
+                            ToggleGodMode()  -- Выключаем
                         end)
+                        print("[Auto Farm] 🛡️ GodMode временно выключен перед ресетом")
                     end
-                    
+
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
-                    
+
                     task.wait(3)
-                    
+
                     -- ✅ Включаем годмод после респавна
-                    if State.GodModeWithAutoFarm then
-                        pcall(function()
-                            ToggleGodMode()
-                        end)
+                    if State.GodModeWithAutoFarm then  -- ✅ БЕЗ проверки State.GodModeEnabled!
+                        -- Ждём появления персонажа
+                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                        local humanoid = character:WaitForChild("Humanoid", 5)
+                        
+                        if humanoid then
+                            task.wait(1)  -- Даём серверу инициализировать персонажа
+                            
+                            if not State.GodModeEnabled then  -- ✅ ТЕПЕРЬ проверяем
+                                pcall(function()
+                                    ToggleGodMode()  -- Включаем
+                                end)
+                                print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
+                            end
+                        end
                     end
                     
                     print("[Auto Farm] ⏳ Жду начала нового раунда...")
@@ -1852,10 +1948,11 @@ local function StartAutoFarm()
                     end)
                     
                     -- ✅ Выключаем годмод перед ресетом
-                    if State.GodModeWithAutoFarm then
+                    if State.GodModeWithAutoFarm and State.GodModeEnabled then
                         pcall(function()
-                            ToggleGodMode()
+                            ToggleGodMode()  -- Выключаем только если был включен автофармом
                         end)
+                        print("[Auto Farm] 🛡️ GodMode автоматически выключен")
                     end
                     
                     ResetCharacter()
@@ -1865,10 +1962,11 @@ local function StartAutoFarm()
                     task.wait(3)
                     
                     -- ✅ Включаем годмод после респавна
-                    if State.GodModeWithAutoFarm then
+                    if State.GodModeWithAutoFarm and State.GodModeEnabled then
                         pcall(function()
-                            ToggleGodMode()
+                            ToggleGodMode()  -- Выключаем только если был включен автофармом
                         end)
+                        print("[Auto Farm] 🛡️ GodMode автоматически выключен")
                     end
                     
                     print("[Auto Farm] ⏳ Жду конца текущего раунда...")
@@ -1898,77 +1996,32 @@ local function StartAutoFarm()
             end
         end
         
-        pcall(function()
-            DisableNoClip()
-            UnfloatCharacter()
-            
-            -- ✅ Выключаем годмод при остановке автофарма
-            if State.GodModeWithAutoFarm then
-                ToggleGodMode()
-            end
-        end)
-        
         State.CoinFarmThread = nil
         print("[Auto Farm] 🛑 Остановлен")
     end)
 end
 
-local function StopAutoFarm()
-    State.AutoFarmEnabled = false
-    
-    if State.CoinFarmThread then
-        task.cancel(State.CoinFarmThread)
-        State.CoinFarmThread = nil
-    end
-    
-    pcall(function()
-        DisableNoClip()
-        UnfloatCharacter()
-        
-        -- ✅ Выключаем годмод при остановке
-        if State.GodModeWithAutoFarm then
-            ToggleGodMode()
-        end
-    end)
-    
-    State.CoinBlacklist = {}
-    print("[Auto Farm] 🛑 Остановлен")
-end
-
-
-local function StopAutoFarm()
-    State.AutoFarmEnabled = false
-    
-    if State.CoinFarmThread then
-        task.cancel(State.CoinFarmThread)
-        State.CoinFarmThread = nil
-    end
-    
-    pcall(function()
-        DisableNoClip()
-        UnfloatCharacter()  -- ✅ Убираем левитацию при остановке
-    end)
-    
-    State.CoinBlacklist = {}
-    print("[Auto Farm] 🛑 Остановлен")
-end
-
-
-
 -- ✅ ОБНОВЛЁННАЯ StopAutoFarm с правильным cleanup
 local function StopAutoFarm()
     State.AutoFarmEnabled = false
 
-    -- ✅ Сначала отключаем флаг, ПОТОМ отменяем поток
     if State.CoinFarmThread then
         task.cancel(State.CoinFarmThread)
         State.CoinFarmThread = nil
     end
 
-    -- ✅ Cleanup должен быть здесь (дублируется для надёжности)
     pcall(UnfloatCharacter)
     pcall(DisableNoClip)
     State.CoinBlacklist = {}
+    
+    State.spawnAtPlayer = spawnAtPlayerOriginalState
+    
+    -- ✅ ДОБАВИТЬ:
+    if State.XPFarmEnabled and State.InstantPickupEnabled and not instantPickupWasEnabled then
+        pcall(function()
+            DisableInstantPickup()
+        end)
+    end
 
     print("[Auto Farm] 🛑 Остановлен")
 end
@@ -2088,7 +2141,7 @@ SetupDamageBlocker = function()
 end
 
 -- ToggleGodMode() - Включение/отключение
-local function ToggleGodMode()
+ToggleGodMode = function()
     State.GodModeEnabled = not State.GodModeEnabled
     if State.GodModeEnabled then
         if State.NotificationsEnabled then
@@ -2645,7 +2698,7 @@ local function PlayEmote(emoteName)
 end
 
 -- knifeThrow() - Бросок ножа (по КУРСОРУ!)
-local function knifeThrow(silent)
+knifeThrow = function(silent)
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
         if not silent then
@@ -2740,132 +2793,135 @@ local function knifeThrow(silent)
     end
 end
 
-local CanShootMurderer = true
-
-shootMurderer = function()
-    if not CanShootMurderer then
-        return
-    end
-    
-    -- Проверка: ты шериф/герой?
-    local sheriff = nil
-    for _, p in pairs(Players:GetPlayers()) do
-        local items = p.Backpack
-        local character = p.Character
-        if (items and items:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
-            sheriff = p
-            break
+shootMurderer = function(silent)  -- ← ДОБАВЛЕН ПАРАМЕТР
+    -- Проверка кулдауна
+    if not State.CanShootMurderer then
+        if not silent then
+            ShowNotification("<font color=\"rgb(255, 165, 0)\">Wait </font><font color=\"rgb(220,220,220)\">Gun is on cooldown</font>", CONFIG.Colors.Text)
         end
-    end
-    
-    if sheriff ~= LocalPlayer then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Not sheriff/hero</font>", nil)
-        return  -- ✅ НЕ блокируем CanShootMurderer
-    end
-    
-    -- ✅ БЛОКИРОВКА ТОЛЬКО ПОСЛЕ ПРОВЕРКИ РОЛИ
-    CanShootMurderer = false
-    
-    -- Найти убийцу
-    local murderer = getMurder()
-    if not murderer then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No murderer found</font>", nil)
-        task.delay(1, function()
-            CanShootMurderer = true
-        end)
         return
     end
     
-    -- ✅ Экипировать пистолет С УВЕЛИЧЕННОЙ ЗАДЕРЖКОЙ
-    if not LocalPlayer.Character:FindFirstChild("Gun") then
-        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+    -- Проверка роли
+    local sheriff = getSheriff()
+    if sheriff ~= LocalPlayer then
+        if not silent then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not sheriff/hero.</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- Поиск убийцы
+    local murderer = getMurder()
+    if not murderer or not murderer.Character then
+        if not silent then
+            ShowNotification("<font color=\"rgb(255, 165, 0)\">Warning </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- МГНОВЕННАЯ ЭКИПИРОВКА ПИСТОЛЕТА БЕЗ ЗАДЕРЖЕК
+    local gun = LocalPlayer.Character:FindFirstChild("Gun")
+    
+    if not gun then
         if LocalPlayer.Backpack:FindFirstChild("Gun") then
-            hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
-            task.wait(0.5)  -- ✅ БЫЛО 0.3, СТАЛО 0.5
-        else
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun found</font>", nil)
-            task.delay(1, function()
-                CanShootMurderer = true
-            end)
+            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
+                gun = LocalPlayer.Character:FindFirstChild("Gun")
+            end
+        end
+        
+        if not gun then
+            if not silent then
+                ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the gun..?</font>", CONFIG.Colors.Text)
+            end
             return
         end
     end
     
-    -- ✅ ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: пистолет экипирован?
-    if not LocalPlayer.Character:FindFirstChild("Gun") then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Gun not equipped</font>", nil)
-        task.delay(1, function()
-            CanShootMurderer = true
-        end)
+    if not LocalPlayer.Character:FindFirstChild("RightHand") then
+        if not silent then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
+        end
         return
     end
     
-    local murdererHRP = murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart")
+    local spawnPosition
+    local targetPosition
+    local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
+    
     if not murdererHRP then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No murderer HRP</font>", nil)
-        task.delay(1, function()
-            CanShootMurderer = true
-        end)
+        if not silent then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">Murderer has no HRP</font>", nil)
+        end
         return
     end
     
-    -- ✅ УМНЫЙ ПРЕДИКТ С УЧЁТОМ БОКОВОГО ДВИЖЕНИЯ (ОСТАВЛЯЕМ КАК ЕСТЬ)
-    local velocity = murdererHRP.AssemblyLinearVelocity
-    local currentPos = murdererHRP.Position
-    local lookVector = murdererHRP.CFrame.LookVector
-    local rightVector = murdererHRP.CFrame.RightVector
-    
-    local forwardSpeed = velocity:Dot(lookVector)
-    local strafeSpeed = velocity:Dot(rightVector)
-    local totalSpeed = velocity.Magnitude
-    
-    local predictionTime = State.ShootPrediction
-    
-    if totalSpeed > 50 then
-        predictionTime = predictionTime * 1.2
-    elseif totalSpeed < 5 then
-        predictionTime = predictionTime * 0.6
-    end
-    
-    local lateralCompensation = rightVector * strafeSpeed * predictionTime * 0.8
-    local predictedPos = currentPos + (velocity * predictionTime) + lateralCompensation
-    
-    local chestOffset = Vector3.new(0, 0.5, 0)
-    local targetPos = predictedPos + chestOffset
-    
-    local shootDistance = 3
-    local shootFromPos
-    
-    if State.ShootDirection == "Behind" then
-        shootFromPos = predictedPos - (lookVector * shootDistance) + chestOffset
+    -- РЕЖИМ СПАВНА РЯДОМ С УБИЙЦЕЙ
+    if State.spawnAtPlayer then
+        -- Спавн позиция: позади убийцы на 4-5 studs
+        local behindOffset = -murdererHRP.CFrame.LookVector * 4.5
+        local upOffset = Vector3.new(0, 0.5, 0)
+        spawnPosition = murdererHRP.Position + behindOffset + upOffset
+        
+        -- Вектор направления через центр HumanoidRootPart
+        local directionToTorso = (murdererHRP.Position - spawnPosition).Unit
+        
+        -- Конечная точка: 500 studs для эффекта "пули"
+        targetPosition = murdererHRP.Position + (directionToTorso * 500)
     else
-        shootFromPos = predictedPos + (lookVector * shootDistance) + chestOffset
+        -- Обычный режим: из руки в торс убийцы
+        spawnPosition = LocalPlayer.Character.RightHand.Position
+        local directionToMurderer = (murdererHRP.Position - spawnPosition).Unit
+        targetPosition = murdererHRP.Position + (directionToMurderer * 500)
     end
     
-    local args = {
-        [1] = CFrame.new(shootFromPos),
-        [2] = CFrame.new(targetPos)
+    -- Аргументы для выстрела
+    local argsShootRemote = {
+        [1] = CFrame.new(spawnPosition),
+        [2] = CFrame.new(targetPosition)
     }
     
+    -- АКТИВИРУЕМ КУЛДАУН
+    State.CanShootMurderer = false
+    
+    -- МГНОВЕННАЯ ОТПРАВКА на сервер
     local success, err = pcall(function()
-        LocalPlayer.Character:WaitForChild("Gun"):WaitForChild("Shoot"):FireServer(unpack(args))
+        if gun:FindFirstChild("Events") and gun.Events:FindFirstChild("Shoot") then
+            gun.Events.Shoot:FireServer(unpack(argsShootRemote))
+        elseif gun:FindFirstChild("KnifeServer") then
+            gun.KnifeServer.ShootGun:FireServer(unpack(argsShootRemote))
+        else
+            -- Fallback: попробуй найти любой RemoteEvent
+            for _, child in pairs(gun:GetDescendants()) do
+                if child:IsA("RemoteEvent") and (child.Name:lower():find("shoot") or child.Name:lower():find("fire")) then
+                    child:FireServer(unpack(argsShootRemote))
+                    break
+                end
+            end
+        end
     end)
     
     if success then
-        ShowNotification(
-            "<font color=\"rgb(255, 85, 85)\">Shot fired: </font>" .. murderer.Name .. " [" .. State.ShootDirection .. "]",
-            CONFIG.Colors.Text
-        )
+        if not silent then
+            ShowNotification("<font color=\"rgb(85, 255, 85)\">Shot fired! </font><font color=\"rgb(220,220,220)\">Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
+        end
+        
+        -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
+        task.delay(State.ShootCooldown, function()
+            State.CanShootMurderer = true
+            if not silent then
+                ShowNotification("<font color=\"rgb(85, 255, 255)\">Ready </font><font color=\"rgb(220,220,220)\">You can shoot again</font>", CONFIG.Colors.Text)
+            end
+        end)
     else
-        ShowNotification(
-            "<font color=\"rgb(255, 85, 85)\">Shoot failed: </font>" .. tostring(err) .. "",
-            CONFIG.Colors.Text
-        )
+        -- Если ошибка - сбрасываем кулдаун
+        State.CanShootMurderer = true
+        if not silent then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
+        end
     end
-    
-    task.delay(1, function()
-        CanShootMurderer = true
-    end)
 end
 
 
@@ -2904,12 +2960,17 @@ local function EnableInstantPickup()
     State.InstantPickupEnabled = true
     
     State.InstantPickupThread = task.spawn(function()
+        
         while State.InstantPickupEnabled do
             local murderer = getMurder()
+            
+            -- Ждём начала раунда
             if not murderer then
                 task.wait(2)
                 continue
             end
+            
+            -- Если мы мурдерер - пропускаем
             if murderer == LocalPlayer then
                 task.wait(1)
                 continue
@@ -2917,22 +2978,58 @@ local function EnableInstantPickup()
             
             local gun = getGun()
             local sheriff = getSheriff()
+            
+            -- Пистолет есть и нет шерифа - пытаемся подобрать
             if gun and not sheriff then
+                local pickupSuccess = false
+                
+                -- ✅ 3 ПОПЫТКИ ПОДБОРА
                 for attempt = 1, 3 do
                     if not getGun() then
+                        pickupSuccess = true
                         break
                     end
                     pickupGun()
                     task.wait(0.15)
+                    
+                    -- Проверяем успех
                     if LocalPlayer.Character:FindFirstChild("Gun") or 
                        LocalPlayer.Backpack:FindFirstChild("Gun") then
+                        pickupSuccess = true
                         break
                     end
                 end
+                
+                -- ❌ ЕСЛИ НЕ ПОЛУЧИЛОСЬ - ЖДЁМ НОВЫЙ РАУНД
+                if not pickupSuccess then
+                    repeat
+                        task.wait(1)
+                        if not State.InstantPickupEnabled then
+                            return
+                        end
+                    until getMurder() == nil
+                    repeat
+                        task.wait(1)
+                        if not State.InstantPickupEnabled then
+                            return
+                        end
+                    until getMurder() ~= nil
+                    continue
+                end
             end
+            
             task.wait(0.2)
         end
     end)
+end
+
+local function DisableInstantPickup()
+    State.InstantPickupEnabled = false
+    
+    if State.InstantPickupThread then
+        task.cancel(State.InstantPickupThread)
+        State.InstantPickupThread = nil
+    end
 end
 
 
@@ -3017,8 +3114,6 @@ local function UpdateHitboxSize(newSize)
 end
 
 -- ToggleKillAura() - Kill Aura
-local killAuraCon = nil
-
 local killAuraCon = nil
 local anchoredPlayers = {}
 
@@ -4382,7 +4477,7 @@ end
     CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, 15, function(v) State.ExtendedHitboxSize = v; if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end, 1)
    
     CombatTab:CreateSection("MURDERER TOOLS")
-    CombatTab:CreateKeybindButton("Fast throw", "throwknife", "ThrowKnife")
+    CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
     CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", function(s) State.spawnAtPlayer = s end)
     CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", function(s) ToggleKillAura(s) end)
     CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
@@ -4427,7 +4522,7 @@ end
     FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent",  function(s) State.XPFarmEnabled = s if s then StartXPFarm() else StopXPFarm() end end)
    
     FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", function(s) State.UndergroundMode = s end)
-    FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, 23, function(v) State.CoinFarmFlySpeed = v end, 1)
+    FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, 22, function(v) State.CoinFarmFlySpeed = v end, 1)
     FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, 2.0, function(v) State.CoinFarmDelay = v end, 0.5)
     FarmTab:CreateToggle("Max Optimization", "Disables 3D rendering & all UI (except script) for AFK farming", function(s) State.MaxOptimizationEnabled = s if s then if State.AutoFarmEnabled then EnableMaxOptimization() else if State.NotificationsEnabled then ShowNotification("<font color=\"rgb(255, 170, 50)\">Warning:</font> <font color=\"rgb(220,220,220)\">Enable Auto Farm first!</font>", CONFIG.Colors.Orange ) end end else DisableMaxOptimization() end end)
 
@@ -4691,7 +4786,7 @@ local inputBeganConnection = UserInputService.InputBegan:Connect(function(input,
         end
         
         -- Actions
-        if input.KeyCode == State.Keybinds.ThrowKnife and State.Keybinds.ThrowKnife ~= Enum.KeyCode.Unknown then
+        if input.KeyCode == State.Keybinds.knifeThrow and State.Keybinds.knifeThrow ~= Enum.KeyCode.Unknown then
             pcall(function() knifeThrow(true) end)
         end
         
