@@ -1288,12 +1288,33 @@ local function WalkFlingStop(forced)
         State.WalkFlingConnection = nil 
     end
     
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if root then
-        root.AssemblyLinearVelocity = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-    end
+    -- Полный сброс физики персонажа
+    task.spawn(function()
+        local char = LocalPlayer.Character
+        if not char then return end
+        
+        -- Сбрасываем скорость ВСЕХ частей тела
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function()
+                    part.AssemblyLinearVelocity = Vector3.zero
+                    part.AssemblyAngularVelocity = Vector3.zero
+                    part.Velocity = Vector3.zero
+                    part.RotVelocity = Vector3.zero
+                end)
+            end
+        end
+        
+        -- Ждем несколько кадров для стабилизации
+        for i = 1, 3 do
+            RunService.Heartbeat:Wait()
+            local root = char:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+            end
+        end
+    end)
 end
 
 local function WalkFlingStart()
