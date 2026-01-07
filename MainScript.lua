@@ -115,8 +115,6 @@ local State = {
     ViewClipEnabled = false,
     
     -- Combat
-    ShootPrediction = 0.15,
-    ShootDirection = "Front",
     ExtendedHitboxSize = 15,
     ExtendedHitboxEnabled = false,
     KillAuraDistance = 2.5,
@@ -3148,7 +3146,7 @@ shootMurderer = function(silent)
         return
     end
     
-    -- МГНОВЕННАЯ ЭКИПИРОВКА ПИСТОЛЕТА БЕЗ ЗАДЕРЖЕК
+    -- МГНОВЕННАЯ ЭКИПИРОВКА ПИСТОЛЕТА (С фиксом репликации)
     local gun = LocalPlayer.Character:FindFirstChild("Gun")
     
     if not gun then
@@ -3156,6 +3154,8 @@ shootMurderer = function(silent)
             local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
             if hum then
                 hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
+                -- ВАЖНО: Микро-задержка, чтобы сервер успел понять, что оружие в руках
+                task.wait(0.03)
                 gun = LocalPlayer.Character:FindFirstChild("Gun")
             end
         end
@@ -3175,8 +3175,6 @@ shootMurderer = function(silent)
         return
     end
     
-    local spawnPosition
-    local targetPosition
     local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
     
     if not murdererHRP then
@@ -3186,48 +3184,58 @@ shootMurderer = function(silent)
         return
     end
     
-    -- РЕЖИМ СПАВНА РЯДОМ С УБИЙЦЕЙ
-    if State.spawnAtPlayer then
-        -- Спавн позиция: позади убийцы на 4-5 studs
-        local behindOffset = -murdererHRP.CFrame.LookVector * 4.5
-        local upOffset = Vector3.new(0, 0.5, 0)
-        spawnPosition = murdererHRP.Position + behindOffset + upOffset
-        
-        -- Вектор направления через центр HumanoidRootPart
-        local directionToTorso = (murdererHRP.Position - spawnPosition).Unit
-        
-        -- Конечная точка: 500 studs для эффекта "пули"
-        targetPosition = murdererHRP.Position + (directionToTorso * 500)
+    -- === НОВАЯ ЛОГИКА 100% ПОПАДАНИЯ (Counter-Movement) ===
+    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+    local pingValue = tonumber(ping:match("%d+")) or 50
+    local predictionTime = (pingValue / 1000) + 0.05
+    
+    local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+    local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
+    
+    local spawnPosition, targetPosition
+
+    if enemyVelocity.Magnitude > 2 then
+        -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
+        local moveDir = enemyVelocity.Unit
+        spawnPosition = predictedPos + (moveDir * 5)
+        targetPosition = predictedPos
     else
-        -- Обычный режим: из руки в торс убийцы
-        spawnPosition = LocalPlayer.Character.RightHand.Position
-        local directionToMurderer = (murdererHRP.Position - spawnPosition).Unit
-        targetPosition = murdererHRP.Position + (directionToMurderer * 500)
+        -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
+        local backDir = -murdererHRP.CFrame.LookVector
+        spawnPosition = predictedPos + (backDir * 3)
+        targetPosition = predictedPos
     end
     
-    -- Аргументы для выстрела
+    -- Аргументы для выстрела (Используем lookAt для правильного хитбокса пули)
     local argsShootRemote = {
-        [1] = CFrame.new(spawnPosition),
+        [1] = CFrame.lookAt(spawnPosition, targetPosition),
         [2] = CFrame.new(targetPosition)
     }
+    -- ========================================================
     
     -- АКТИВИРУЕМ КУЛДАУН
     State.CanShootMurderer = false
     
     -- МГНОВЕННАЯ ОТПРАВКА на сервер
     local success, err = pcall(function()
-        if gun:FindFirstChild("Events") and gun.Events:FindFirstChild("Shoot") then
-            gun.Events.Shoot:FireServer(unpack(argsShootRemote))
-        elseif gun:FindFirstChild("KnifeServer") then
-            gun.KnifeServer.ShootGun:FireServer(unpack(argsShootRemote))
-        else
-            -- Fallback: попробуй найти любой RemoteEvent
+        -- Оптимизированный поиск ремута
+        local remote = gun:FindFirstChild("Events") and gun.Events:FindFirstChild("Shoot")
+            or gun:FindFirstChild("KnifeServer") and gun.KnifeServer:FindFirstChild("ShootGun")
+            
+        if not remote then
+            -- Fallback
             for _, child in pairs(gun:GetDescendants()) do
                 if child:IsA("RemoteEvent") and (child.Name:lower():find("shoot") or child.Name:lower():find("fire")) then
-                    child:FireServer(unpack(argsShootRemote))
+                    remote = child
                     break
                 end
             end
+        end
+        
+        if remote then
+            remote:FireServer(unpack(argsShootRemote))
+        else
+            error("Remote not found")
         end
     end)
     
@@ -3251,6 +3259,7 @@ shootMurderer = function(silent)
         end
     end
 end
+
 
 
 -- pickupGun() - Подбор пистолета
@@ -4757,15 +4766,6 @@ end
    
     CombatTab:CreateSection("SHERIFF TOOLS")
     CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    CombatTab:CreateDropdown(
-    "Shoot Direction",
-    "Choose shooting angle",
-    {"Behind", "Front"},
-    "Front",
-    function(value)
-        State.ShootDirection = value
-    end)
-    CombatTab:CreateSlider("Prediction Time", "Adjust for moving targets (0.05-0.30)", 0.05, 0.30, 0.15, function(v) State.ShootPrediction = v end, 0.05)
     CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", function(s) if s then EnableInstantPickup() else DisableInstantPickup() end end)
     CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
     
