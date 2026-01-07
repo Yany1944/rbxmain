@@ -150,7 +150,6 @@ local State = {
     -- Walk Fling
     WalkFlingActive = false,
     WalkFlingConnection = nil,
-    WasAntiFlingActive = false,
     WalkFlingEnabledByUser = false,
     
     -- NoClip
@@ -1277,8 +1276,6 @@ local function FlingMurderer()
 end
 
 local function WalkFlingStop(forced)
-    -- forced = true означает "временная остановка" (например, при смерти), 
-    -- не меняем флаг State.WalkFlingEnabledByUser
     if not forced then
         State.WalkFlingEnabledByUser = false
     end
@@ -1291,109 +1288,108 @@ local function WalkFlingStop(forced)
         State.WalkFlingConnection = nil 
     end
     
-    if not forced then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Walk Fling</font><font color=\"rgb(220,220,220)\"> has been disabled.</font>", CONFIG.Colors.Text)
-    end
-    
-    -- Сброс
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if root then
         root.AssemblyLinearVelocity = Vector3.zero
         root.AssemblyAngularVelocity = Vector3.zero
     end
-
-    -- Возвращаем Антифлинг, только если это полное выключение
-    if not forced and State.WasAntiFlingActive then
-        State.WasAntiFlingActive = false
-        task.delay(0.2, function()
-            EnableAntiFling()
-            local char = LocalPlayer.Character
-            if char and char.PrimaryPart then
-                AntiFlingLastPos = char.PrimaryPart.Position
-            end
-        end)
-    end
 end
 
 local function WalkFlingStart()
-    -- Устанавливаем "намерение" пользователя
     State.WalkFlingEnabledByUser = true
-    
     if State.WalkFlingActive then return end
-    
-    -- Фикс Антифлинга
-    if State.AntiFlingEnabled then
-        State.WasAntiFlingActive = true
-        DisableAntiFling()
-    else
-        -- Не сбрасываем WasAntiFlingActive в false здесь, 
-        -- иначе при респавне он забудет вернуть антифлинг
-    end
     
     local char = LocalPlayer.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
+
+    -- === ЛОГИКА ПЕРЕВКЛЮЧЕНИЯ АНТИФЛИНГА ===
+    local wasAntiFlingOn = State.AntiFlingEnabled
     
-    State.WalkFlingActive = true
-    ShowNotification("<font color=\"rgb(85, 255, 85)\">Walk Fling</font><font color=\"rgb(220,220,220)\"> has been enabled.</font>", CONFIG.Colors.Text)
-    
+    if wasAntiFlingOn then
+        DisableAntiFling() -- 1. Выключаем антифлинг
+    end
+    -- ========================================
+
+    State.WalkFlingActive = true -- 2. Включаем флаг WalkFling
+
     local movel = 0.1
     
     State.WalkFlingConnection = RunService.Heartbeat:Connect(function()
-        -- 1. Проверка на смерть / отсутствие персонажа
-        if not root or not root.Parent or not root.Parent:FindFirstChild("Humanoid") or root.Parent.Humanoid.Health <= 0 then
-            -- Персонаж умер. Останавливаем цикл, но не выключаем "намерение"
-            WalkFlingStop(true) -- forced = true
+        -- ВАЖНО: Получаем СВЕЖУЮ ссылку каждый кадр
+        local currentChar = LocalPlayer.Character
+        local currentRoot = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
+        local currentHum = currentChar and currentChar:FindFirstChild("Humanoid")
+        
+        if not currentRoot or not currentHum or currentHum.Health <= 0 then
+            WalkFlingStop(true)
             return 
         end
         
-        -- 2. Если WalkFling был выключен извне
         if not State.WalkFlingActive then 
             WalkFlingStop()
             return 
         end
         
-        local vel = root.AssemblyLinearVelocity
+        local vel = currentRoot.AssemblyLinearVelocity
         
-        -- 3. ФИКС ДЕРГАНЬЯ: Применяем силу только если игрок движется
-        if vel.Magnitude > 2 then -- Если скорость > 2 (идем), то врубаем Флинг
-             root.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
-        else
-             -- Если стоим - просто держим физику в покое, чтобы не трясло
-             -- Ничего не делаем, или можно сбрасывать лишнюю инерцию
+        if vel.Magnitude > 2 then 
+            currentRoot.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
+            RunService.RenderStepped:Wait()
+            if not State.WalkFlingActive then return end
+            currentRoot.AssemblyLinearVelocity = vel
+            RunService.Stepped:Wait()
+            if not State.WalkFlingActive then return end
+            currentRoot.AssemblyLinearVelocity = vel + Vector3.new(0, movel, 0)
+            movel = -movel
         end
-        
-        RunService.RenderStepped:Wait()
-        if not State.WalkFlingActive then return end
-        
-        root.AssemblyLinearVelocity = vel
-        
-        RunService.Stepped:Wait()
-        if not State.WalkFlingActive then return end
-        
-        root.AssemblyLinearVelocity = vel + Vector3.new(0, movel, 0)
-        movel = -movel
     end)
+    
+    -- === ВКЛЮЧАЕМ АНТИФЛИНГ ОБРАТНО ===
+    if wasAntiFlingOn then
+        EnableAntiFling() -- 3. Включаем антифлинг после создания соединения
+    end
+    -- ===================================
 end
 
--- Авто-перезапуск после смерти
-LocalPlayer.CharacterAdded:Connect(function(newChar)
-    -- Ждем пока загрузится
-    task.wait(1)
+-- === АВТОМАТИЧЕСКИЙ ПЕРЕЗАПУСК ПРИ СМЕНЕ ПЕРСОНАЖА ===
+LocalPlayer.CharacterAdded:Connect(function(character)
     if State.WalkFlingEnabledByUser then
-        WalkFlingStart()
+        -- Принудительно останавливаем старое соединение
+        WalkFlingStop(true)
+        
+        -- Ждем HumanoidRootPart
+        local root = character:WaitForChild("HumanoidRootPart", 5)
+        local hum = character:WaitForChild("Humanoid", 5)
+        
+        if root and hum and hum.Health > 0 then
+            task.wait(0.1) -- Задержка для стабильности
+            WalkFlingStart() -- Просто вызываем Start с полной логикой
+        end
+    end
+end)
+
+-- Наблюдатель (запасной вариант)
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if State.WalkFlingEnabledByUser and not State.WalkFlingActive then
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+                WalkFlingStart()
+            end
+        end
     end
 end)
 
 ToggleWalkFling = function()
     if State.WalkFlingEnabledByUser then
-        WalkFlingStop() -- Обычное выключение
+        WalkFlingStop(false)
     else
         WalkFlingStart()
     end
 end
-
 
 -- FlingSheriff() - Флинг шерифа
 local function FlingSheriff()
@@ -3409,7 +3405,7 @@ local function pickupGun()
     -- Телепортируемся ближе к пистолету (0.5-1 стад достаточно)
     hrp.CFrame = gun.CFrame * CFrame.new(0, 0.5, 0)
     
-    task.wait(0.1)
+    task.wait(0.05)
     
     -- Возвращаемся с сохранением ориентации
     hrp.CFrame = previousCFrame
@@ -3890,44 +3886,56 @@ local function ServerHop()
     local TeleportService = game:GetService("TeleportService")
     local LocalPlayer = game:GetService("Players").LocalPlayer
     
-    task.spawn(function()
-        local success = pcall(function()
-            local url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
-                game.PlaceId
-            )
-            
-            local response = HttpService:JSONDecode(HttpService:GetAsync(url))
-            local servers = {}
-            
-            for _, server in ipairs(response.data) do
-                if server.id ~= game.JobId 
-                    and server.playing < server.maxPlayers 
-                    and server.playing > 0 
-                then
-                    table.insert(servers, server)
-                end
-            end
-            
-            if #servers > 0 then
-                table.sort(servers, function(a, b) 
-                    return a.playing < b.playing 
-                end)
-                
-                TeleportService:TeleportToPlaceInstance(
-                    game.PlaceId,
-                    servers[1].id,
-                    LocalPlayer
-                )
-            else
-                -- Fallback: обычный телепорт
-                TeleportService:Teleport(game.PlaceId, LocalPlayer)
-            end
+    -- Функция рекурсивного поиска
+    local function SearchAndTeleport(cursor)
+        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+        if cursor then
+            url = url .. "&cursor=" .. cursor
+        end
+        
+        -- Используем game:HttpGet (стандарт для эксплойтов)
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(url))
         end)
         
-        if not success then
-            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        if not success or not result or not result.data then 
+            return -- Ошибка запроса, просто выходим, чтобы не редждойниться случайно
         end
+        
+        local validServers = {}
+        
+        for _, server in ipairs(result.data) do
+            -- Строгая фильтрация
+            if server.playing < server.maxPlayers 
+               and server.playing > 0 
+               and server.id ~= game.JobId -- ГАРАНТИЯ, что это не текущий сервер
+            then
+                table.insert(validServers, server)
+            end
+        end
+        
+        if #validServers > 0 then
+            -- Если нашли сервера - прыгаем на первый (самый свободный из-за sortOrder=Asc)
+            -- Или можно взять случайный: validServers[math.random(1, #validServers)]
+            local target = validServers[1]
+            
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, target.id, LocalPlayer)
+        else
+            -- Если на этой странице нет подходящих серверов, чекаем следующую
+            if result.nextPageCursor then
+                -- Небольшая задержка, чтобы не спамить запросами
+                task.wait(0.1)
+                SearchAndTeleport(result.nextPageCursor)
+            else
+                -- Сервера закончились, ничего не делаем (лучше ничего, чем реджойн)
+                warn("Server Hop: No suitable servers found.")
+            end
+        end
+    end
+    
+    -- Запускаем поиск
+    task.spawn(function()
+        SearchAndTeleport(nil)
     end)
 end
 -- ══════════════════════════════════════════════════════════════════════════════
