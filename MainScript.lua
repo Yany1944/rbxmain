@@ -3258,7 +3258,7 @@ local function pickupGun()
     local gun = Workspace:FindFirstChild("GunDrop", true)
     
     if not gun then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>",CONFIG.Colors.Text)
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>", CONFIG.Colors.Text)
         return
     end
     
@@ -3266,16 +3266,26 @@ local function pickupGun()
     if not character then return end
     
     local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not hrp or not humanoid then return end
     
-    local previousPosition = hrp.CFrame + Vector3.new(0, 1, 0)
+    -- Сохраняем текущую позицию и ориентацию
+    local previousCFrame = hrp.CFrame
     
-    hrp.CFrame = gun.CFrame + Vector3.new(0, 2, 0)
+    -- Телепортируемся ближе к пистолету (0.5-1 стад достаточно)
+    hrp.CFrame = gun.CFrame * CFrame.new(0, 0.5, 0)
     
-    task.wait(0.08)
+    task.wait(0.1)
     
-    hrp.CFrame = previousPosition
-    ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>",CONFIG.Colors.Text)
+    -- Возвращаемся с сохранением ориентации
+    hrp.CFrame = previousCFrame
+    
+    -- Принудительно ставим персонажа в состояние стояния, чтобы избежать рагдолла
+    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    task.wait(0.05)
+    humanoid:ChangeState(Enum.HumanoidStateType.Running)
+    
+    ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
 end
 
 -- EnableInstantPickup - Включить автоподбор пистолета
