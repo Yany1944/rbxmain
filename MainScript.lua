@@ -122,7 +122,7 @@ local State = {
     KillAuraDistance = 2.5,
     spawnAtPlayer = false,
     CanShootMurderer = true,
-    ShootCooldown = 2.5,
+    ShootCooldown = 3,
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -137,6 +137,7 @@ local State = {
 
     -- XP Farm
     XPFarmEnabled = false,
+    AFKModeEnabled = false,
     
     -- Instant Pickup
     InstantPickupEnabled = false,
@@ -456,18 +457,370 @@ local function getPlayerByName(playerName)
     return nil
 end
 
+-- ==============================
+-- OPTIMIZATION MODULE
+-- ==============================
+local afkModeActive = false
+local fpsBoostActive = false
+local uiOnlyActive = false
+local savedUIState = {}
+local savedUIOnlyState = {}  -- ← ИСПРАВЛЕНО: было nil
+local savedSettings = {
+    Lighting = {},
+    Camera = {}
+}
+-- ==============================
+-- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+-- ==============================
 
-local uiVisibilityState = {}
-
--- EnableMaxOptimization - РАБОЧАЯ версия
-local function EnableMaxOptimization()
+-- Функция применения UI оптимизации
+local function ApplyUIOptimization()
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+        
+        local coreGuiTypes = {
+            Enum.CoreGuiType.PlayerList,
+            Enum.CoreGuiType.Health,
+            Enum.CoreGuiType.Backpack,
+            Enum.CoreGuiType.Chat,
+            Enum.CoreGuiType.EmotesMenu,
+            Enum.CoreGuiType.SelfView
+        }
+        
+        for _, guiType in ipairs(coreGuiTypes) do
+            StarterGui:SetCoreGuiEnabled(guiType, false)
+        end
+    end)
     
+    pcall(function()
+        StarterGui:SetCore("TopbarEnabled", false)
+    end)
+    
+    pcall(function()
+        local targetTable = afkModeActive and savedUIState or savedUIOnlyState
+        for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui ~= MainGui then
+                if not targetTable[gui] then
+                    targetTable[gui] = gui.Enabled
+                end
+                gui.Enabled = false
+            end
+        end
+    end)
 end
 
--- DisableMaxOptimization - Восстановление
-local function DisableMaxOptimization()
+-- ОБРАБОТЧИК РЕСПАВНА
+LocalPlayer.CharacterAdded:Connect(function(character)
+    task.wait(0.5)
     
+    if afkModeActive then
+        ApplyUIOptimization()
+        pcall(function()
+            RunService:Set3dRenderingEnabled(false)
+        end)
+    elseif uiOnlyActive then
+        ApplyUIOptimization()
+    end
+end)
+-- ==============================
+-- AFK MODE FUNCTIONS
+-- ==============================
+
+EnableMaxOptimization = function()
+    if afkModeActive then 
+        return 
+    end
+    
+    afkModeActive = true
+    
+    -- 1. ОТКЛЮЧЕНИЕ 3D РЕНДЕРИНГА
+    pcall(function()
+        RunService:Set3dRenderingEnabled(false)
+    end)
+    
+    -- 2. ПОЛНОЕ ОТКЛЮЧЕНИЕ ВСЕХ GUI
+    ApplyUIOptimization()
+    
+    -- 3. ОТКЛЮЧЕНИЕ ОСВЕЩЕНИЯ
+    pcall(function()
+        savedSettings.Lighting = {
+            GlobalShadows = Lighting.GlobalShadows,
+            Brightness = Lighting.Brightness,
+            Ambient = Lighting.Ambient,
+            OutdoorAmbient = Lighting.OutdoorAmbient,
+            FogEnd = Lighting.FogEnd,
+            Technology = Lighting.Technology
+        }
+        
+        Lighting.GlobalShadows = false
+        Lighting.Brightness = 0
+        Lighting.Ambient = Color3.new(0, 0, 0)
+        Lighting.OutdoorAmbient = Color3.new(0, 0, 0)
+        Lighting.FogEnd = 100
+        Lighting.Technology = Enum.Technology.Legacy
+        
+        for _, effect in pairs(Lighting:GetChildren()) do
+            if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
+                savedSettings.Lighting[effect.Name] = effect
+                effect.Parent = nil
+            end
+        end
+    end)
+    
+    -- 4. CAMERA OPTIMIZATION
+    pcall(function()
+        local camera = workspace.CurrentCamera
+        if camera then
+            savedSettings.Camera.FieldOfView = camera.FieldOfView
+            camera.FieldOfView = 50
+        end
+    end)
+    
+    -- 5. RENDER DISTANCE
+    pcall(function()
+        if sethiddenproperty then
+            sethiddenproperty(workspace, "StreamingMinRadius", 32)
+            sethiddenproperty(workspace, "StreamingTargetRadius", 64)
+        end
+    end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">AFK Mode:</font> <font color=\"rgb(168,228,160)\">ON</font> <font color=\"rgb(150,150,150)\">(No Render)</font>",
+            CONFIG.Colors.Green
+        )
+    end
 end
+
+DisableMaxOptimization = function()
+    if not afkModeActive then 
+        return 
+    end
+    
+    afkModeActive = false
+    
+    -- 1. ВКЛЮЧЕНИЕ 3D РЕНДЕРИНГА
+    pcall(function()
+        RunService:Set3dRenderingEnabled(true)
+    end)
+    
+    -- 2. ВОССТАНОВЛЕНИЕ GUI
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+        
+        task.wait(0.1)
+        
+        local coreGuiTypes = {
+            Enum.CoreGuiType.PlayerList,
+            Enum.CoreGuiType.Health,
+            Enum.CoreGuiType.Backpack,
+            Enum.CoreGuiType.Chat,
+            Enum.CoreGuiType.EmotesMenu,
+            Enum.CoreGuiType.SelfView
+        }
+        
+        for _, guiType in ipairs(coreGuiTypes) do
+            StarterGui:SetCoreGuiEnabled(guiType, true)
+        end
+    end)
+    
+    pcall(function()
+        StarterGui:SetCore("TopbarEnabled", true)
+    end)
+    
+    pcall(function()
+        for gui, wasEnabled in pairs(savedUIState) do
+            if gui and gui.Parent then
+                gui.Enabled = wasEnabled
+            end
+        end
+        savedUIState = {}
+    end)
+    
+    -- 3. ВОССТАНОВЛЕНИЕ ОСВЕЩЕНИЯ
+    pcall(function()
+        if savedSettings.Lighting.GlobalShadows ~= nil then
+            Lighting.GlobalShadows = savedSettings.Lighting.GlobalShadows
+            Lighting.Brightness = savedSettings.Lighting.Brightness
+            Lighting.Ambient = savedSettings.Lighting.Ambient
+            Lighting.OutdoorAmbient = savedSettings.Lighting.OutdoorAmbient
+            Lighting.FogEnd = savedSettings.Lighting.FogEnd
+            Lighting.Technology = savedSettings.Lighting.Technology
+            
+            for name, effect in pairs(savedSettings.Lighting) do
+                if typeof(effect) == "Instance" then
+                    effect.Parent = Lighting
+                end
+            end
+            
+            savedSettings.Lighting = {}
+        end
+    end)
+    
+    -- 4. ВОССТАНОВЛЕНИЕ КАМЕРЫ
+    pcall(function()
+        local camera = workspace.CurrentCamera
+        if camera and savedSettings.Camera.FieldOfView then
+            camera.FieldOfView = savedSettings.Camera.FieldOfView
+        end
+    end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">AFK Mode:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",
+            CONFIG.Colors.Red
+        )
+    end
+end
+
+local function EnableUIOnly()
+    if uiOnlyActive then return end
+    uiOnlyActive = true
+    savedUIOnlyState = {}
+    ApplyUIOptimization()
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">UI Only:</font> <font color=\"rgb(168,228,160)\">Hidden</font>",
+            CONFIG.Colors.Green
+        )
+    end
+end
+
+local function DisableUIOnly()
+    if not uiOnlyActive then return end
+    uiOnlyActive = false
+    
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+        
+        task.wait(0.1)
+        
+        local coreGuiTypes = {
+            Enum.CoreGuiType.PlayerList,
+            Enum.CoreGuiType.Health,
+            Enum.CoreGuiType.Backpack,
+            Enum.CoreGuiType.Chat,
+            Enum.CoreGuiType.EmotesMenu,
+            Enum.CoreGuiType.SelfView
+        }
+        
+        for _, guiType in ipairs(coreGuiTypes) do
+            StarterGui:SetCoreGuiEnabled(guiType, true)
+        end
+    end)
+    
+    pcall(function()
+        StarterGui:SetCore("TopbarEnabled", true)
+    end)
+    
+    pcall(function()
+        -- ИСПРАВЛЕНО: проверка на пустую таблицу
+        if savedUIOnlyState and next(savedUIOnlyState) ~= nil then
+            for gui, wasEnabled in pairs(savedUIOnlyState) do
+                if gui and gui.Parent then
+                    gui.Enabled = wasEnabled
+                end
+            end
+        end
+        savedUIOnlyState = {}
+    end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">UI Only:</font> <font color=\"rgb(255, 85, 85)\">Visible</font>",
+            CONFIG.Colors.Red
+        )
+    end
+end
+-- ==============================
+-- FPS BOOST FUNCTION
+-- ==============================
+
+local function EnableFPSBoost()
+    if fpsBoostActive then
+        return
+    end
+    
+    fpsBoostActive = true
+    
+    -- 1. TERRAIN OPTIMIZATION
+    pcall(function()
+        local Terrain = workspace:FindFirstChildOfClass('Terrain')
+        if Terrain then
+            Terrain.WaterWaveSize = 0
+            Terrain.WaterWaveSpeed = 0
+            Terrain.WaterReflectance = 0
+            Terrain.WaterTransparency = 0
+        end
+    end)
+    
+    -- 2. LIGHTING OPTIMIZATION
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        
+        for _, effect in pairs(Lighting:GetChildren()) do
+            if effect:IsA("BlurEffect") 
+                or effect:IsA("SunRaysEffect") 
+                or effect:IsA("ColorCorrectionEffect") 
+                or effect:IsA("BloomEffect") 
+                or effect:IsA("DepthOfFieldEffect") 
+            then
+                effect.Enabled = false
+            end
+        end
+    end)
+    
+    -- 3. RENDER QUALITY
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+    
+    -- 4. MATERIALS & EFFECTS CLEANUP
+    pcall(function()
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("UnionOperation") then
+                v.Material = Enum.Material.SmoothPlastic
+                v.Reflectance = 0
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                v.Transparency = 1
+            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+                v.Enabled = false
+            elseif v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then
+                v.Enabled = false
+            end
+        end
+    end)
+    
+    -- 5. AUTO-CLEANUP NEW EFFECTS
+    workspace.DescendantAdded:Connect(function(child)
+        if not fpsBoostActive then return end
+        
+        task.spawn(function()
+            pcall(function()
+                if child:IsA('ForceField') 
+                    or child:IsA('Sparkles') 
+                    or child:IsA('Smoke') 
+                    or child:IsA('Fire') 
+                then
+                    task.wait()
+                    child:Destroy()
+                elseif child:IsA('ParticleEmitter') or child:IsA('Trail') then
+                    child.Enabled = false
+                end
+            end)
+        end)
+    end)
+    
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">FPS Boost:</font> <font color=\"rgb(168,228,160)\">Enabled</font>",
+            CONFIG.Colors.Green
+        )
+    end
+end
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 5: CHARACTER FUNCTIONS (СТРОКИ 411-470)
@@ -2759,7 +3112,7 @@ knifeThrow = function(silent)
             local targetHRP = nearestPlayer.Character:FindFirstChild("HumanoidRootPart")
             if targetHRP then
                 -- Позади игрока на studs, центр торса
-                local behindOffset = -targetHRP.CFrame.LookVector * 2
+                local behindOffset = -targetHRP.CFrame.LookVector * 4
                 local upOffset = Vector3.new(0, 0.5, 0)
                 spawnPosition = targetHRP.Position + behindOffset + upOffset
                 
@@ -3428,127 +3781,43 @@ local function ServerHop()
     local TeleportService = game:GetService("TeleportService")
     local LocalPlayer = game:GetService("Players").LocalPlayer
     
-    local currentPing = GetCurrentPing()
-    print(("[Server Hop] 📡 Текущий пинг: %d ms"):format(currentPing))
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(255,170,50)\">Поиск...</font>",
-            CONFIG.Colors.Orange
-        )
-    end
-    
     task.spawn(function()
-        local success, result = pcall(function()
-            local currentJobId = game.JobId
-            local bestServers = {}
-            local cursor = ""
-            local maxPages = 3
-            local pagesChecked = 0
-            
-            repeat
-                pagesChecked = pagesChecked + 1
-                
-                local url = string.format(
-                    "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
-                    game.PlaceId,
-                    cursor ~= "" and ("&cursor=" .. cursor) or ""
-                )
-                
-                local response = HttpService:GetAsync(url)
-                local data = HttpService:JSONDecode(response)
-                
-                print(("[Server Hop] 📄 Страница %d: %d серверов"):format(pagesChecked, #data.data))
-                
-                for _, server in ipairs(data.data) do
-                    if server.id == currentJobId then
-                        continue
-                    end
-                    
-                    if server.playing < 1 or server.playing >= server.maxPlayers then
-                        continue
-                    end
-                    
-                    if server.playing > 10 then
-                        continue
-                    end
-                    
-                    local ping = server.ping or 999
-                    local players = server.playing
-                    
-                    -- ✅ РАСЧЁТ SCORE (меньше = лучше)
-                    local score = 0
-                    
-                    -- Приоритет #1: Количество игроков
-                    if players >= 1 and players <= 3 then
-                        score = score - 30
-                    elseif players >= 4 and players <= 6 then
-                        score = score - 15
-                    elseif players >= 7 and players <= 10 then
-                        score = score + 5
-                    end
-                    
-                    -- Приоритет #2: Ping (прямо пропорционально)
-                    if ping > 0 and ping < 999 then
-                        score = score + (ping / 10)
-                    end
-                    
-                    table.insert(bestServers, {
-                        id = server.id,
-                        players = players,
-                        maxPlayers = server.maxPlayers,
-                        ping = ping,
-                        score = score
-                    })
-                end
-                
-                cursor = data.nextPageCursor or ""
-                
-                if #bestServers >= 20 then
-                    break
-                end
-                
-            until cursor == "" or pagesChecked >= maxPages
-            
-            if #bestServers == 0 then
-                print("[Server Hop] ⚠️ Подходящие серверы не найдены")
-                return Rejoin()
-            end
-            
-            table.sort(bestServers, function(a, b)
-                return a.score < b.score
-            end)
-            
-            local best = bestServers[1]
-            
-            print(("[Server Hop] ✅ Лучший: %dp | Ping: %d | Score: %.1f"):format(
-                best.players,
-                best.ping,
-                best.score
-            ))
-            
-            if State.NotificationsEnabled then
-                ShowNotification(
-                    string.format(
-                        "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(168,228,160)\">%dp | %dms</font>",
-                        best.players,
-                        best.ping > 0 and best.ping or currentPing
-                    ),
-                    CONFIG.Colors.Green
-                )
-            end
-            
-            TeleportService:TeleportToPlaceInstance(
-                game.PlaceId,
-                best.id,
-                LocalPlayer
+        local success = pcall(function()
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
+                game.PlaceId
             )
+            
+            local response = HttpService:JSONDecode(HttpService:GetAsync(url))
+            local servers = {}
+            
+            for _, server in ipairs(response.data) do
+                if server.id ~= game.JobId 
+                    and server.playing < server.maxPlayers 
+                    and server.playing > 0 
+                then
+                    table.insert(servers, server)
+                end
+            end
+            
+            if #servers > 0 then
+                table.sort(servers, function(a, b) 
+                    return a.playing < b.playing 
+                end)
+                
+                TeleportService:TeleportToPlaceInstance(
+                    game.PlaceId,
+                    servers[1].id,
+                    LocalPlayer
+                )
+            else
+                -- Fallback: обычный телепорт
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end
         end)
         
         if not success then
-            warn("[Server Hop] ❌ Ошибка:", result)
-            print("[Server Hop] Fallback: Rejoin...")
-            Rejoin()
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
         end
     end)
 end
@@ -4498,7 +4767,7 @@ end
     VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; end)
     VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; end)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; end)
-
+    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", function(enabled) State.UIOnlyEnabled = enabled if enabled then EnableUIOnly() else DisableUIOnly() end end)
     local CombatTab = CreateTab("Combat")
    
     CombatTab:CreateSection("EXTENDED HITBOX")
@@ -4528,7 +4797,6 @@ end
 
 
     local FarmTab = CreateTab("Farming")
-   
     FarmTab:CreateSection("AUTO FARM")
     FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", function(s)
         State.AutoFarmEnabled = s
@@ -4553,9 +4821,10 @@ end
     FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", function(s) State.UndergroundMode = s end)
     FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, 22, function(v) State.CoinFarmFlySpeed = v end, 1)
     FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, 2.0, function(v) State.CoinFarmDelay = v end, 0.5)
-    FarmTab:CreateToggle("Max Optimization", "Disables 3D rendering & all UI (except script) for AFK farming", function(s) State.MaxOptimizationEnabled = s if s then if State.AutoFarmEnabled then EnableMaxOptimization() else if State.NotificationsEnabled then ShowNotification("<font color=\"rgb(255, 170, 50)\">Warning:</font> <font color=\"rgb(220,220,220)\">Enable Auto Farm first!</font>", CONFIG.Colors.Orange ) end end else DisableMaxOptimization() end end)
-
-
+    FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", function(enabled) State.AFKModeEnabled = enabled if enabled then EnableMaxOptimization() else DisableMaxOptimization() end end)
+    FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, function()
+    EnableFPSBoost()
+end)
 
     local FunTab = CreateTab("Fun")
    
