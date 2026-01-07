@@ -146,6 +146,12 @@ local State = {
     IsFlingInProgress = false,
     SelectedPlayerForFling = nil,
     OldPos = nil,
+
+    -- Walk Fling
+    WalkFlingActive = false,
+    WalkFlingConnection = nil,
+    WasAntiFlingActive = false,
+    WalkFlingEnabledByUser = false,
     
     -- NoClip
     NoClipEnabled = false,
@@ -1269,6 +1275,125 @@ local function FlingMurderer()
     
     FlingPlayer(murderer)
 end
+
+local function WalkFlingStop(forced)
+    -- forced = true означает "временная остановка" (например, при смерти), 
+    -- не меняем флаг State.WalkFlingEnabledByUser
+    if not forced then
+        State.WalkFlingEnabledByUser = false
+    end
+
+    if not State.WalkFlingActive then return end
+    State.WalkFlingActive = false
+    
+    if State.WalkFlingConnection then 
+        State.WalkFlingConnection:Disconnect() 
+        State.WalkFlingConnection = nil 
+    end
+    
+    if not forced then
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Walk Fling</font><font color=\"rgb(220,220,220)\"> has been disabled.</font>", CONFIG.Colors.Text)
+    end
+    
+    -- Сброс
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if root then
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+
+    -- Возвращаем Антифлинг, только если это полное выключение
+    if not forced and State.WasAntiFlingActive then
+        State.WasAntiFlingActive = false
+        task.delay(0.2, function()
+            EnableAntiFling()
+            local char = LocalPlayer.Character
+            if char and char.PrimaryPart then
+                AntiFlingLastPos = char.PrimaryPart.Position
+            end
+        end)
+    end
+end
+
+local function WalkFlingStart()
+    -- Устанавливаем "намерение" пользователя
+    State.WalkFlingEnabledByUser = true
+    
+    if State.WalkFlingActive then return end
+    
+    -- Фикс Антифлинга
+    if State.AntiFlingEnabled then
+        State.WasAntiFlingActive = true
+        DisableAntiFling()
+    else
+        -- Не сбрасываем WasAntiFlingActive в false здесь, 
+        -- иначе при респавне он забудет вернуть антифлинг
+    end
+    
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    State.WalkFlingActive = true
+    ShowNotification("<font color=\"rgb(85, 255, 85)\">Walk Fling</font><font color=\"rgb(220,220,220)\"> has been enabled.</font>", CONFIG.Colors.Text)
+    
+    local movel = 0.1
+    
+    State.WalkFlingConnection = RunService.Heartbeat:Connect(function()
+        -- 1. Проверка на смерть / отсутствие персонажа
+        if not root or not root.Parent or not root.Parent:FindFirstChild("Humanoid") or root.Parent.Humanoid.Health <= 0 then
+            -- Персонаж умер. Останавливаем цикл, но не выключаем "намерение"
+            WalkFlingStop(true) -- forced = true
+            return 
+        end
+        
+        -- 2. Если WalkFling был выключен извне
+        if not State.WalkFlingActive then 
+            WalkFlingStop()
+            return 
+        end
+        
+        local vel = root.AssemblyLinearVelocity
+        
+        -- 3. ФИКС ДЕРГАНЬЯ: Применяем силу только если игрок движется
+        if vel.Magnitude > 2 then -- Если скорость > 2 (идем), то врубаем Флинг
+             root.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
+        else
+             -- Если стоим - просто держим физику в покое, чтобы не трясло
+             -- Ничего не делаем, или можно сбрасывать лишнюю инерцию
+        end
+        
+        RunService.RenderStepped:Wait()
+        if not State.WalkFlingActive then return end
+        
+        root.AssemblyLinearVelocity = vel
+        
+        RunService.Stepped:Wait()
+        if not State.WalkFlingActive then return end
+        
+        root.AssemblyLinearVelocity = vel + Vector3.new(0, movel, 0)
+        movel = -movel
+    end)
+end
+
+-- Авто-перезапуск после смерти
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    -- Ждем пока загрузится
+    task.wait(1)
+    if State.WalkFlingEnabledByUser then
+        WalkFlingStart()
+    end
+end)
+
+ToggleWalkFling = function()
+    if State.WalkFlingEnabledByUser then
+        WalkFlingStop() -- Обычное выключение
+    else
+        WalkFlingStart()
+    end
+end
+
 
 -- FlingSheriff() - Флинг шерифа
 local function FlingSheriff()
@@ -4812,7 +4937,7 @@ end)
    
     FunTab:CreateSection("ANTI-FLING")
     FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(s) if s then EnableAntiFling() else DisableAntiFling() end end)
-   
+    FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", function(s) if s then WalkFlingStart() else WalkFlingStop() end end)
     FunTab:CreateSection("FLING PLAYER")
     FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
     FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
