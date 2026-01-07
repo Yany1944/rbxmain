@@ -3419,7 +3419,7 @@ local function pickupGun()
     
     -- Используем firetouchinterest - никакого телепорта
     firetouchinterest(hrp, gun, 0)
-    task.wait(0.05)
+    task.wait(0.02)
     firetouchinterest(hrp, gun, 1)
     
     ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
