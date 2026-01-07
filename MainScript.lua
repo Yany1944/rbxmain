@@ -122,7 +122,7 @@ local State = {
     KillAuraDistance = 2.5,
     spawnAtPlayer = false,
     CanShootMurderer = true,
-    ShootCooldown = 2.2,
+    ShootCooldown = 2.5,
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -404,7 +404,6 @@ local function FullShutdown()
     
     print("[FullShutdown] ✅ Complete!")
 end
-
 
 
 -- findNearestPlayer() - Поиск ближайшего игрока
@@ -1086,8 +1085,8 @@ end
 local coinLabelCache = nil
 local lastCacheTime = 0
 
--- GetCollectedCoinsCount() - Получение кол-ва монет
 local function GetCollectedCoinsCount()
+    -- УРОВЕНЬ 1: Проверка кэша (2 секунды)
     if coinLabelCache and coinLabelCache.Parent and (tick() - lastCacheTime) < 2 then
         local success, value = pcall(function()
             return tonumber(coinLabelCache.Text) or 0
@@ -1096,7 +1095,8 @@ local function GetCollectedCoinsCount()
             return value
         end
     end
-    
+
+    -- УРОВЕНЬ 2: Попытка прямого пути с pcall защитой
     local success, coins = pcall(function()
         local label = LocalPlayer.PlayerGui
             :FindFirstChild("MainGUI")
@@ -1107,7 +1107,7 @@ local function GetCollectedCoinsCount()
             :FindFirstChild("CurrencyFrame")
             :FindFirstChild("Icon")
             :FindFirstChild("Coins")
-        
+
         if label then
             coinLabelCache = label
             lastCacheTime = tick()
@@ -1115,17 +1115,18 @@ local function GetCollectedCoinsCount()
         end
         return 0
     end)
-    
-    if success and coins >= 0 then
+
+    if success and coins > 0 then
         return coins
     end
-    
+
+    -- УРОВЕНЬ 3: Fallback - GetDescendants поиск максимального значения
     local maxValue = 0
     pcall(function()
         for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
             if gui:IsA("TextLabel") and gui.Name == "Coins" then
                 local path = gui:GetFullName()
-                if path:match("CurrencyFrame%.Icon%.Coins$") then
+                if path:match("CurrencyFrame.Icon.Coins") then
                     local value = tonumber(gui.Text) or 0
                     if value > maxValue then
                         maxValue = value
@@ -1136,8 +1137,25 @@ local function GetCollectedCoinsCount()
             end
         end
     end)
-    
+
     return maxValue
+end
+
+local function AddCoinToBlacklist(coin)
+    State.CoinBlacklist[coin] = true
+end
+
+-- ✅ Очистка между раундами
+local function CleanupCoinBlacklist()
+    print("[Auto Farm] 🧹 Очистка CoinBlacklist...")
+    local cleaned = 0
+    for coin, _ in pairs(State.CoinBlacklist) do
+        if not coin.Parent then
+            State.CoinBlacklist[coin] = nil
+            cleaned = cleaned + 1
+        end
+    end
+    print(("[Auto Farm] 🧹 Удалено %d мёртвых ссылок"):format(cleaned))
 end
 
 -- ResetCharacter() - Ресет с сохранением GodMode
@@ -1382,14 +1400,13 @@ local function FindSafeAFKSpot()
     return hrp.CFrame * CFrame.new(0, 300, 0)
 end
 
--- FindNearestCoin() - Поиск ближайшей монеты
 local function FindNearestCoin()
     local character = LocalPlayer.Character
     if not character then return nil end
-    
+
     local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
     if not humanoidRootPart then return nil end
-    
+
     local closestCoin = nil
     local closestDistance = math.huge
     local hrpPosition = humanoidRootPart.Position
@@ -1401,19 +1418,19 @@ local function FindNearestCoin()
             coinContainer = map:FindFirstChild("CoinContainer")
         end
     end)
-    
+
     local searchRoot = coinContainer or Workspace
-    
+
     for _, coin in ipairs(searchRoot:GetDescendants()) do
         if coin:IsA("BasePart") 
-           and coin.Name == "Coin_Server" 
+           and coin.Name == "Coin_Server"
            and coin:FindFirstChildWhichIsA("TouchTransmitter") 
            and not State.CoinBlacklist[coin] then
-            
+
             local coinVisual = coin:FindFirstChild("CoinVisual")
             if coinVisual and coinVisual.Transparency == 0 then
                 local distance = (coin.Position - hrpPosition).Magnitude
-                
+
                 if distance < closestDistance then
                     closestDistance = distance
                     closestCoin = coin
@@ -1421,7 +1438,7 @@ local function FindNearestCoin()
             end
         end
     end
-    
+
     return closestCoin
 end
 
@@ -1623,7 +1640,7 @@ local function StartAutoFarm()
                                     print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
                                 end
                                 
-                                State.CoinBlacklist[coin] = true
+                                AddCoinToBlacklist(coin)
                             end
                         else
                             if State.UndergroundMode then
@@ -1641,7 +1658,7 @@ local function StartAutoFarm()
                                 print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
                             end
                             
-                            State.CoinBlacklist[coin] = true
+                            AddCoinToBlacklist(coin)
                         end
                     end)
                 end
@@ -1695,7 +1712,7 @@ local function StartAutoFarm()
                                         
                                         -- ✅ Счётчик попыток knifeThrow
                                         local throwAttempts = 0
-                                        local maxThrowAttempts = 30
+                                        local maxThrowAttempts = 1
                                         local throwDelay = 1.5
                                         
                                         -- ✅ Цикл knifeThrow с ограничением попыток
@@ -1717,7 +1734,7 @@ local function StartAutoFarm()
                                         
                                         -- ✅ Fallback: если после 30 попыток раунд не завершился
                                         if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
-                                            print("[XP Farm] ⚠️ knifeThrow не сработал за 30 попыток! Использую InstantKillAll...")
+                                            print("[XP Farm] ⚠️ knifeThrow не сработал за 10 попыток! Использую InstantKillAll...")
                                             
                                             local success, error = pcall(function()
                                                 InstantKillAll()
@@ -1733,64 +1750,58 @@ local function StartAutoFarm()
                                         end
                                                                     
                                     elseif sheriff == LocalPlayer then
-                                        print("[XP Farm] 🔫 Мы шериф, стреляем в мурдерера...")
-                                        
-                                        -- ✅ Сразу после закрепления - первый выстрел
-                                        pcall(function()
-                                            shootMurderer()
-                                        end)
-                                        print("[XP Farm] 🎯 Первый выстрел произведён")
-                                        task.wait(0.5)
-                                        
-                                        -- ✅ Стреляем пока раунд активен (getMurder() ~= nil)
-                                        -- Игнорируем состояние Humanoid.Health, потому что с годмодом оно ложное
-                                        local shootAttempts = 0
-                                        local maxShootAttempts = 50  -- Лимит попыток для безопасности
-                                        
-                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and shootAttempts < maxShootAttempts do
-                                            character = LocalPlayer.Character
-                                            if not character then 
-                                                print("[XP Farm] ⚠️ Персонаж исчез, прекращаю стрельбу")
-                                                break 
+                                            print("[XP Farm] 🔫 Мы шериф, стреляем в мурдерера...")
+                                            
+                                            local shootAttempts = 0
+                                            local maxShootAttempts = 30
+
+                                            while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and shootAttempts < maxShootAttempts do
+                                                character = LocalPlayer.Character
+                                                if not character then 
+                                                    print("[XP Farm] ⚠️ Персонаж исчез, прекращаю стрельбу")
+                                                    break 
+                                                end
+                                                
+                                                local murdererPlayer = getMurder()
+                                                if not murdererPlayer then 
+                                                    print("[XP Farm] ✅ Раунд завершён! Мурдерер мёртв.")
+                                                    break 
+                                                end
+                                                
+                                                -- ✅ Проверяем существование персонажа мурдерера
+                                                local murdererChar = murdererPlayer.Character
+                                                if not murdererChar then 
+                                                    print("[XP Farm] ⚠️ У мурдерера нет персонажа, жду...")
+                                                    task.wait(0.5)
+                                                    continue 
+                                                end
+                                                
+                                                -- ✅ Стреляем только если кулдаун готов
+                                                if State.CanShootMurderer then
+                                                    shootAttempts = shootAttempts + 1
+                                                    
+                                                    pcall(function()
+                                                        shootMurderer(true) -- ✅ тихий режим, без спама уведомлениями
+                                                    end)
+                                                    
+                                                    print("[XP Farm] 🎯 Выстрел #" .. shootAttempts .. " произведён")
+                                                    task.wait(State.ShootCooldown + 0.1) -- ✅ учитываем реальный кулдаун с запасом
+                                                else
+                                                    -- Кулдаун ещё идёт – немного ждём
+                                                    task.wait(0.5)
+                                                end
                                             end
-                                            
-                                            local murdererPlayer = getMurder()
-                                            if not murdererPlayer then 
-                                                print("[XP Farm] ✅ Раунд завершён! Мурдерер мёртв.")
-                                                break 
+
+                                            -- ✅ Проверяем причину выхода из цикла
+                                            if getMurder() == nil then
+                                                print("[XP Farm] ✅ Мурдерер успешно убит! Раунд завершён.")
+                                            elseif shootAttempts >= maxShootAttempts then
+                                                print("[XP Farm] ⚠️ Достигнут лимит выстрелов (" .. maxShootAttempts .. "), прекращаю стрельбу")
+                                            elseif not State.XPFarmEnabled then
+                                                print("[XP Farm] ⚠️ XP Farm был отключен во время стрельбы")
+                                            elseif not State.AutoFarmEnabled then
+                                                print("[XP Farm] ⚠️ Auto Farm был отключен во время стрельбы")
                                             end
-                                            
-                                            -- ✅ Проверяем существование персонажа мурдерера
-                                            local murdererChar = murdererPlayer.Character
-                                            if not murdererChar then 
-                                                print("[XP Farm] ⚠️ У мурдерера нет персонажа, жду...")
-                                                task.wait(0.5)
-                                                continue 
-                                            end
-                                            
-                                            -- ✅ УБРАНА проверка Humanoid.Health (ложная с годмодом)
-                                            -- Просто стреляем пока getMurder() возвращает игрока
-                                            
-                                            shootAttempts = shootAttempts + 1
-                                            
-                                            pcall(function()
-                                                shootMurderer()
-                                            end)
-                                            
-                                            print("[XP Farm] 🎯 Выстрел #" .. shootAttempts .. " произведён")
-                                            task.wait(1.5)  -- Увеличена задержка для надёжности попаданий
-                                        end
-                                        
-                                        -- ✅ Проверяем причину выхода из цикла
-                                        if getMurder() == nil then
-                                            print("[XP Farm] ✅ Мурдерер успешно убит! Раунд завершён.")
-                                        elseif shootAttempts >= maxShootAttempts then
-                                            print("[XP Farm] ⚠️ Достигнут лимит выстрелов (" .. maxShootAttempts .. "), прекращаю стрельбу")
-                                        elseif not State.XPFarmEnabled then
-                                            print("[XP Farm] ⚠️ XP Farm был отключен во время стрельбы")
-                                        elseif not State.AutoFarmEnabled then
-                                            print("[XP Farm] ⚠️ Auto Farm был отключен во время стрельбы")
-                                        end
                                     else
                                         print("[XP Farm] 👤 Инносент | Флинг мурдерера")
                                         
@@ -1871,6 +1882,7 @@ local function StartAutoFarm()
                     end)
                     
                     print("[Auto Farm] 🎉 Мурдерер мёртв! Жду официального окончания раунда...")
+                    CleanupCoinBlacklist()
                     task.wait(5)
                     
                     if getMurder() ~= nil then
@@ -1930,11 +1942,11 @@ local function StartAutoFarm()
                     
                 else
                     print("[Auto Farm] 🔄 XP Farm выключен - делаю быстрый ресет без ожидания конца раунда...")
-                    
+                    CleanupCoinBlacklist()
                     pcall(function()
                         UnfloatCharacter()
                     end)
-                    
+
                     -- ✅ Выключаем годмод перед ресетом
                     if State.GodModeWithAutoFarm and State.GodModeEnabled then
                         pcall(function()
@@ -1942,41 +1954,51 @@ local function StartAutoFarm()
                         end)
                         print("[Auto Farm] 🛡️ GodMode автоматически выключен")
                     end
-                    
+
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
-                    
+
                     task.wait(3)
-                    
-                    -- ✅ Включаем годмод после респавна
-                    if State.GodModeWithAutoFarm and State.GodModeEnabled then
-                        pcall(function()
-                            ToggleGodMode()  -- Выключаем только если был включен автофармом
-                        end)
-                        print("[Auto Farm] 🛡️ GodMode автоматически выключен")
+
+                    -- ✅ ИСПРАВЛЕННЫЙ КОД: Включаем годмод после респавна
+                    if State.GodModeWithAutoFarm then  -- ✅ БЕЗ проверки State.GodModeEnabled!
+                        -- Ждём появления персонажа
+                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                        local humanoid = character:WaitForChild("Humanoid", 5)
+
+                        if humanoid then
+                            task.wait(1)  -- Даём серверу инициализировать персонажа
+
+                            if not State.GodModeEnabled then  -- ✅ ТЕПЕРЬ проверяем
+                                pcall(function()
+                                    ToggleGodMode()  -- Включаем
+                                end)
+                                print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
+                            end
+                        end
                     end
-                    
+
                     print("[Auto Farm] ⏳ Жду конца текущего раунда...")
                     repeat
                         task.wait(1)
                     until getMurder() == nil or not State.AutoFarmEnabled
-                    
+
                     if not State.AutoFarmEnabled then
                         print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания")
                         break
                     end
-                    
+
                     print("[Auto Farm] ⏳ Раунд закончился, жду начала нового раунда...")
                     repeat
                         task.wait(1)
                     until getMurder() ~= nil or not State.AutoFarmEnabled
-                    
+
                     if not State.AutoFarmEnabled then
                         print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания нового раунда")
                         break
                     end
-                    
+
                     print("[Auto Farm] ✅ Новый раунд начался! Сбрасываю счётчики и продолжаю фарм...")
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
@@ -2736,8 +2758,8 @@ knifeThrow = function(silent)
         if nearestPlayer and nearestPlayer.Character then
             local targetHRP = nearestPlayer.Character:FindFirstChild("HumanoidRootPart")
             if targetHRP then
-                -- Позади игрока на 4 studs, центр торса
-                local behindOffset = -targetHRP.CFrame.LookVector * 4
+                -- Позади игрока на studs, центр торса
+                local behindOffset = -targetHRP.CFrame.LookVector * 2
                 local upOffset = Vector3.new(0, 0.5, 0)
                 spawnPosition = targetHRP.Position + behindOffset + upOffset
                 
@@ -2849,7 +2871,7 @@ shootMurderer = function(silent)  -- ← ДОБАВЛЕН ПАРАМЕТР
     -- РЕЖИМ СПАВНА РЯДОМ С УБИЙЦЕЙ
     if State.spawnAtPlayer then
         -- Спавн позиция: позади убийцы на 4-5 studs
-        local behindOffset = -murdererHRP.CFrame.LookVector * 4.5
+        local behindOffset = -murdererHRP.CFrame.LookVector * 2
         local upOffset = Vector3.new(0, 0.5, 0)
         spawnPosition = murdererHRP.Position + behindOffset + upOffset
         
@@ -3384,7 +3406,6 @@ local function SetupAntiAFK()
     end)
 end
 
--- Rejoin() - TeleportToPlaceInstance(PlaceId, JobId)
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 
@@ -3402,21 +3423,17 @@ local function Rejoin()
     end)
 end
 
-local function GetCurrentPing()
-    local success, ping = pcall(function()
-        return math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
-    end)
-    return success and ping or 999
-end
-
--- ServerHop - Максимально быстрый выбор сервера
 local function ServerHop()
     local HttpService = game:GetService("HttpService")
     local TeleportService = game:GetService("TeleportService")
+    local LocalPlayer = game:GetService("Players").LocalPlayer
+    
+    local currentPing = GetCurrentPing()
+    print(("[Server Hop] 📡 Текущий пинг: %d ms"):format(currentPing))
     
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(255,170,50)\">Searching...</font>",
+            "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(255,170,50)\">Поиск...</font>",
             CONFIG.Colors.Orange
         )
     end
@@ -3425,88 +3442,112 @@ local function ServerHop()
         local success, result = pcall(function()
             local currentJobId = game.JobId
             local bestServers = {}
+            local cursor = ""
+            local maxPages = 3
+            local pagesChecked = 0
             
-            -- Получаем список друзей параллельно (не ждём результат)
-            local friendsMap = {}
-            task.spawn(function()
-                pcall(function()
-                    local friends = LocalPlayer:GetFriendsOnline(200)
-                    for _, friend in ipairs(friends) do
-                        friendsMap[friend.PlaceId] = true
-                    end
-                end)
-            end)
-            
-            -- Загружаем ТОЛЬКО первую страницу серверов (100 серверов)
-            local url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
-                game.PlaceId
-            )
-            
-            local response = game:HttpGet(url)
-            local data = HttpService:JSONDecode(response)
-            
-            -- Быстрая фильтрация и сортировка в один проход
-            for _, server in ipairs(data.data) do
-                -- Фильтр: не текущий, не полный, не пустой, оптимальное кол-во игроков
-                if server.id ~= currentJobId and 
-                   server.playing >= 1 and 
-                   server.playing <= 10 and  -- Только серверы с 1-10 игроками
-                   server.playing < server.maxPlayers then
-                    
-                    -- Вычисляем score сразу при вставке
-                    local score = server.playing
-                    
-                    -- Оптимальный диапазон: 2-8 игроков
-                    if server.playing >= 2 and server.playing <= 8 then
-                        score = score - 3
+            repeat
+                pagesChecked = pagesChecked + 1
+                
+                local url = string.format(
+                    "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
+                    game.PlaceId,
+                    cursor ~= "" and ("&cursor=" .. cursor) or ""
+                )
+                
+                local response = HttpService:GetAsync(url)
+                local data = HttpService:JSONDecode(response)
+                
+                print(("[Server Hop] 📄 Страница %d: %d серверов"):format(pagesChecked, #data.data))
+                
+                for _, server in ipairs(data.data) do
+                    if server.id == currentJobId then
+                        continue
                     end
                     
-                    -- Штраф за 1 игрока (может быть нестабильный сервер)
-                    if server.playing == 1 then
-                        score = score + 2
+                    if server.playing < 1 or server.playing >= server.maxPlayers then
+                        continue
+                    end
+                    
+                    if server.playing > 10 then
+                        continue
+                    end
+                    
+                    local ping = server.ping or 999
+                    local players = server.playing
+                    
+                    -- ✅ РАСЧЁТ SCORE (меньше = лучше)
+                    local score = 0
+                    
+                    -- Приоритет #1: Количество игроков
+                    if players >= 1 and players <= 3 then
+                        score = score - 30
+                    elseif players >= 4 and players <= 6 then
+                        score = score - 15
+                    elseif players >= 7 and players <= 10 then
+                        score = score + 5
+                    end
+                    
+                    -- Приоритет #2: Ping (прямо пропорционально)
+                    if ping > 0 and ping < 999 then
+                        score = score + (ping / 10)
                     end
                     
                     table.insert(bestServers, {
-                        server = server,
+                        id = server.id,
+                        players = players,
+                        maxPlayers = server.maxPlayers,
+                        ping = ping,
                         score = score
                     })
                 end
-            end
+                
+                cursor = data.nextPageCursor or ""
+                
+                if #bestServers >= 20 then
+                    break
+                end
+                
+            until cursor == "" or pagesChecked >= maxPages
             
-            -- Проверка наличия серверов
             if #bestServers == 0 then
-                print("[Server Hop] Подходящие серверы не найдены, Rejoin...")
+                print("[Server Hop] ⚠️ Подходящие серверы не найдены")
                 return Rejoin()
             end
             
-            -- Быстрая сортировка по score
             table.sort(bestServers, function(a, b)
                 return a.score < b.score
             end)
             
-            -- Берём ПЕРВЫЙ лучший сервер (никаких случайностей)
-            local targetServer = bestServers[1].server
+            local best = bestServers[1]
             
-            print("[Server Hop] ✅ Подключение: " .. targetServer.playing .. "/" .. targetServer.maxPlayers .. " игроков")
+            print(("[Server Hop] ✅ Лучший: %dp | Ping: %d | Score: %.1f"):format(
+                best.players,
+                best.ping,
+                best.score
+            ))
             
             if State.NotificationsEnabled then
                 ShowNotification(
-                    "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(168,228,160)\">Joining (" .. targetServer.playing .. "p)</font>",
+                    string.format(
+                        "<font color=\"rgb(220,220,220)\">Server Hop: </font><font color=\"rgb(168,228,160)\">%dp | %dms</font>",
+                        best.players,
+                        best.ping > 0 and best.ping or currentPing
+                    ),
                     CONFIG.Colors.Green
                 )
             end
             
-            -- Мгновенный телепорт (без задержек)
             TeleportService:TeleportToPlaceInstance(
                 game.PlaceId,
-                targetServer.id,
+                best.id,
                 LocalPlayer
             )
         end)
         
         if not success then
-            warn("[Server Hop] Ошибка:", result)
+            warn("[Server Hop] ❌ Ошибка:", result)
+            print("[Server Hop] Fallback: Rejoin...")
             Rejoin()
         end
     end)
