@@ -3111,7 +3111,7 @@ knifeThrow = function(silent)
         if nearestPlayer and nearestPlayer.Character then
             local targetHRP = nearestPlayer.Character:FindFirstChild("HumanoidRootPart")
             if targetHRP then
-                -- Позади игрока на studs, центр торса
+                -- Позади игрока на 4 studs, центр торса
                 local behindOffset = -targetHRP.CFrame.LookVector * 4
                 local upOffset = Vector3.new(0, 0.5, 0)
                 spawnPosition = targetHRP.Position + behindOffset + upOffset
@@ -3156,7 +3156,7 @@ knifeThrow = function(silent)
     end
 end
 
-shootMurderer = function(silent)  -- ← ДОБАВЛЕН ПАРАМЕТР
+shootMurderer = function(silent)
     -- Проверка кулдауна
     if not State.CanShootMurderer then
         if not silent then
@@ -3224,7 +3224,7 @@ shootMurderer = function(silent)  -- ← ДОБАВЛЕН ПАРАМЕТР
     -- РЕЖИМ СПАВНА РЯДОМ С УБИЙЦЕЙ
     if State.spawnAtPlayer then
         -- Спавн позиция: позади убийцы на 4-5 studs
-        local behindOffset = -murdererHRP.CFrame.LookVector * 2
+        local behindOffset = -murdererHRP.CFrame.LookVector * 4.5
         local upOffset = Vector3.new(0, 0.5, 0)
         spawnPosition = murdererHRP.Position + behindOffset + upOffset
         
