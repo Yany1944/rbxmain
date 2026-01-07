@@ -2171,7 +2171,7 @@ local function StartAutoFarm()
                                         -- ✅ Счётчик попыток knifeThrow
                                         local throwAttempts = 0
                                         local maxThrowAttempts = 1
-                                        local throwDelay = 1.5
+                                        local throwDelay = 3
                                         
                                         -- ✅ Цикл knifeThrow с ограничением попыток
                                         while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and throwAttempts < maxThrowAttempts do
@@ -3165,7 +3165,6 @@ local function PlayEmote(emoteName)
     end)
 end
 
--- knifeThrow() - Бросок ножа (по КУРСОРУ!)
 knifeThrow = function(silent)
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
@@ -3260,6 +3259,7 @@ knifeThrow = function(silent)
         ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
     end
 end
+
 
 shootMurderer = function(silent)
     -- Проверка кулдауна
@@ -3402,8 +3402,6 @@ shootMurderer = function(silent)
     end
 end
 
-
-
 -- pickupGun() - Подбор пистолета
 local function pickupGun()
     local gun = Workspace:FindFirstChild("GunDrop", true)
@@ -3417,24 +3415,12 @@ local function pickupGun()
     if not character then return end
     
     local hrp = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChild("Humanoid")
-    if not hrp or not humanoid then return end
+    if not hrp then return end
     
-    -- Сохраняем текущую позицию и ориентацию
-    local previousCFrame = hrp.CFrame
-    
-    -- Телепортируемся ближе к пистолету (0.5-1 стад достаточно)
-    hrp.CFrame = gun.CFrame * CFrame.new(0, 0.5, 0)
-    
+    -- Используем firetouchinterest - никакого телепорта
+    firetouchinterest(hrp, gun, 0)
     task.wait(0.05)
-    
-    -- Возвращаемся с сохранением ориентации
-    hrp.CFrame = previousCFrame
-    
-    -- Принудительно ставим персонажа в состояние стояния, чтобы избежать рагдолла
-    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-    task.wait(0.05)
-    humanoid:ChangeState(Enum.HumanoidStateType.Running)
+    firetouchinterest(hrp, gun, 1)
     
     ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
 end
@@ -5082,7 +5068,7 @@ end)
     end)
 
     TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), function()
-        State.OrbitRadius = 3
+        State.OrbitRadius = 2 
         State.OrbitSpeed = 15
         State.OrbitHeight = 0
         State.OrbitTilt = 30
