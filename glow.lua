@@ -184,7 +184,7 @@ local isBinding = false
 local isLoaded = false
 local keybindListEnabled = false
 local keybindListFrame = nil
-local isAdmin = (LP.UserId == 10198515386 or LP.UserId == 10136987698)
+local isAdmin = (LP.UserId == 6163487250 or LP.UserId == 982594515)
 
 local voidHighlight = Instance.new("Part")
 voidHighlight.Name = "VoidHighlight"
