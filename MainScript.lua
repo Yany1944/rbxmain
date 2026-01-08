@@ -172,6 +172,7 @@ local State = {
     -- ESP internals
     PlayerHighlights = {},
     GunCache = {},
+    CurrentGunDrop = nil,
 
     -- Ping chams
     PingChamsEnabled = false,
@@ -3726,6 +3727,7 @@ local function SetupGunTracking()
             
             -- ✅ УВЕДОМЛЕНИЕ о выпадении пистолета
             if gun and gun ~= previousGun then
+                State.CurrentGunDrop = gun
                 if State.NotificationsEnabled then
                     ShowNotification(
                         "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
@@ -4138,13 +4140,12 @@ local function pickupGun()
     
     -- Используем firetouchinterest - никакого телепорта
     firetouchinterest(hrp, gun, 0)
-    task.wait(0.02)
+    task.wait(0.1)
     firetouchinterest(hrp, gun, 1)
     
     ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
 end
 
--- EnableInstantPickup - Включить автоподбор пистолета
 local function EnableInstantPickup()
     if State.InstantPickupThread then
         task.cancel(State.InstantPickupThread)
@@ -4153,38 +4154,43 @@ local function EnableInstantPickup()
     
     State.InstantPickupEnabled = true
     
+    -- ✅ ИСПОЛЬЗУЕМ ГЛОБАЛЬНУЮ ПЕРЕМЕННУЮ
+    local lastAttemptedGun = nil
+    
     State.InstantPickupThread = task.spawn(function()
-        
         while State.InstantPickupEnabled do
             local murderer = getMurder()
             
-            -- Ждём начала раунда
             if not murderer then
                 task.wait(2)
+                lastAttemptedGun = nil
                 continue
             end
             
-            -- Если мы мурдерер - пропускаем
             if murderer == LocalPlayer then
                 task.wait(1)
                 continue
             end
             
-            local gun = getGun()
+            local gun = State.CurrentGunDrop  -- ✅ ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЙ
             local sheriff = getSheriff()
             
-            -- Пистолет есть и нет шерифа - пытаемся подобрать
-            if gun and not sheriff then
+            -- ✅ НОВЫЙ ПИСТОЛЕТ (который мы ещё не пробовали)
+            if gun and not sheriff and gun ~= lastAttemptedGun then
+                
+                -- Проверяем, уже подобран?
+                if LocalPlayer.Character:FindFirstChild("Gun") or 
+                   LocalPlayer.Backpack:FindFirstChild("Gun") then
+                    lastAttemptedGun = gun
+                    continue
+                end
+                
                 local pickupSuccess = false
                 
-                -- ✅ 3 ПОПЫТКИ ПОДБОРА
+                -- ✅ 3 ПОПЫТКИ
                 for attempt = 1, 3 do
-                    if not getGun() then
-                        pickupSuccess = true
-                        break
-                    end
                     pickupGun()
-                    task.wait(0.15)
+                    task.wait(0.3)
                     
                     -- Проверяем успех
                     if LocalPlayer.Character:FindFirstChild("Gun") or 
@@ -4192,44 +4198,47 @@ local function EnableInstantPickup()
                         pickupSuccess = true
                         break
                     end
+                    
+                    -- Пистолет исчез
+                    if State.CurrentGunDrop ~= gun then
+                        break
+                    end
                 end
                 
-                -- ❌ ЕСЛИ НЕ ПОЛУЧИЛОСЬ - ЖДЁМ НОВЫЙ РАУНД
+                -- ✅ ЗАПОМИНАЕМ ЭТОТ ЭКЗЕМПЛЯР
+                lastAttemptedGun = gun
+                
+                -- ❌ НЕ ПОЛУЧИЛОСЬ - ЖДЁМ НОВОГО
                 if not pickupSuccess then
                     repeat
-                        task.wait(1)
+                        task.wait(0.2)
                         if not State.InstantPickupEnabled then
                             return
                         end
-                    until getMurder() == nil
-                    repeat
-                        task.wait(1)
-                        if not State.InstantPickupEnabled then
-                            return
+                        
+                        -- Выходим, когда появится НОВЫЙ пистолет
+                        if State.CurrentGunDrop and State.CurrentGunDrop ~= lastAttemptedGun then
+                            break
                         end
-                    until getMurder() ~= nil
-                    continue
+                        
+                        -- Или когда старый исчезнет
+                        if not State.CurrentGunDrop then
+                            break
+                        end
+                        
+                    until false
                 end
             end
             
-            task.wait(0.2)
+            task.wait(0.2)  -- Уменьшил для быстрой реакции
         end
     end)
 end
 
+
 local function DisableInstantPickup()
     State.InstantPickupEnabled = false
     
-    if State.InstantPickupThread then
-        task.cancel(State.InstantPickupThread)
-        State.InstantPickupThread = nil
-    end
-end
-
-
--- DisableInstantPickup - Отключить автоподбор пистолета
-local function DisableInstantPickup()
-    State.InstantPickupEnabled = false
     if State.InstantPickupThread then
         task.cancel(State.InstantPickupThread)
         State.InstantPickupThread = nil
