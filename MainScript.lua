@@ -172,6 +172,20 @@ local State = {
     -- ESP internals
     PlayerHighlights = {},
     GunCache = {},
+
+    -- Ping chams
+    PingChamsEnabled = false,
+    PingChamsBuffer = {},
+    PingChamsRTT = 0.2,
+    PingChamsLastPingUpdate = 0,
+    PingChamsPingBuf = {},
+    PingChamsGhostModel = nil,
+    PingChamsGhostPart = nil,
+    PingChamsGUI = nil,
+    PingChamsGuiAnchor = nil,
+    PingChamsGhostClone = nil,
+    PingChamsGhostMap = {},
+    PingChamsRenderConn = nil,
     
     -- System
     Connections = {},
@@ -223,6 +237,447 @@ local State = {
 
 local currentMapConnection = nil
 local currentMap = nil
+
+-- ============= PING CHAMS SYSTEM =============
+local PINGCHAMS_BUFFERMAXSECONDS = 3.0
+local PINGCHAMS_PINGUPDATEINTERVAL = 0.2
+local Accent = Color3.fromRGB(220, 145, 230)
+
+local PINGCHAMS_SETTINGS = {
+    material = Enum.Material.ForceField,
+    rttMultiplier = 0.5,
+    serverPhysicsDelay = 0.050,
+    clientInterpolation = 0.033,
+    extraSafety = 0.010,
+}
+
+local function PingChams_median(tbl)
+    if not tbl or type(tbl) ~= "table" or #tbl == 0 then return nil end
+    local copy = {}
+    for i = 1, #tbl do copy[i] = tbl[i] end
+    table.sort(copy)
+    local n = #copy
+    return n % 2 == 1 and copy[(n+1)/2] or (copy[n/2] + copy[n/2+1]) * 0.5
+end
+
+local function PingChams_pushPing(sec)
+    table.insert(State.PingChamsPingBuf, sec)
+    if #State.PingChamsPingBuf > 20 then
+        table.remove(State.PingChamsPingBuf, 1)
+    end
+end
+
+local function PingChams_probePingMsStats()
+    local ms
+    local okPS, ps = pcall(function() return game:GetService("Stats").PerformanceStats end)
+    if okPS and ps and typeof(ps.Ping) == "number" and ps.Ping > 0 then
+        ms = ps.Ping
+    end
+    if not ms then
+        local okItem, item = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"] end)
+        if okItem and item then
+            local okStr, s = pcall(function() return item:GetValueString() end)
+            if okStr and s and tonumber(s) then
+                ms = tonumber(s)
+            else
+                local okVal, v = pcall(function() return item:GetValue() end)
+                if okVal and typeof(v) == "number" then ms = v end
+            end
+        end
+    end
+    return ms
+end
+
+local function PingChams_updatePing()
+    local now = tick()
+    if now - State.PingChamsLastPingUpdate < PINGCHAMS_PINGUPDATEINTERVAL then return end
+    State.PingChamsLastPingUpdate = now
+    
+    local ms = PingChams_probePingMsStats()
+    if ms then
+        local sec = math.clamp(ms * 0.001, 0.002, 1.0)
+        PingChams_pushPing(sec)
+        local med = PingChams_median(State.PingChamsPingBuf)
+        local alpha = #State.PingChamsPingBuf >= 5 and 0.25 or 0.5
+        if med then
+            State.PingChamsRTT = State.PingChamsRTT * (1 - alpha) + med * alpha
+        else
+            State.PingChamsRTT = sec
+        end
+    end
+end
+
+local function PingChams_sizeFromCharacter(char)
+    if not char then return Vector3.new(4,6,2) end
+    local ok, size = pcall(function() return char:GetExtentsSize() end)
+    if ok and size then
+        return Vector3.new(math.max(2, size.X), math.max(3, size.Y), math.max(1, size.Z))
+    end
+    return Vector3.new(4,6,2)
+end
+
+local function PingChams_collectRigParts(char)
+    local parts = {}
+    if not char then return parts end
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
+            table.insert(parts, d)
+        end
+    end
+    return parts
+end
+
+local function PingChams_getRootPart(char)
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart") or 
+           char:FindFirstChild("Torso") or 
+           char:FindFirstChild("UpperTorso") or 
+           char:FindFirstChild("LowerTorso")
+end
+
+local function PingChams_clearGhostClone()
+    State.PingChamsGhostMap = {}
+    if State.PingChamsGhostClone then
+        pcall(function() State.PingChamsGhostClone:Destroy() end)
+        State.PingChamsGhostClone = nil
+    end
+end
+
+local function PingChams_rebuildGhostClone(char, col, trans)
+    PingChams_clearGhostClone()
+    State.PingChamsGhostClone = Instance.new("Model")
+    State.PingChamsGhostClone.Name = "GhostClone"
+    State.PingChamsGhostClone.Parent = State.PingChamsGhostModel
+    
+    local parts = PingChams_collectRigParts(char)
+    for _, src in ipairs(parts) do
+        local gp
+        if src:IsA("MeshPart") or src:IsA("Part") then
+            gp = src:Clone()
+            for _, d in ipairs(gp:GetDescendants()) do
+                if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("Motor6D") then
+                    pcall(function() d:Destroy() end)
+                end
+            end
+            gp.Size = gp.Size * 1.03
+        else
+            gp = Instance.new("Part")
+            gp.Size = src.Size * 1.03
+        end
+        
+        gp.Name = "Ghost_"..src.Name
+        gp.Anchored = true
+        gp.CanCollide = false
+        gp.CanQuery = false
+        gp.CanTouch = false
+        gp.CastShadow = false
+        gp.Material = PINGCHAMS_SETTINGS.material
+        gp.Color = col
+        gp.Transparency = trans
+        gp.Parent = State.PingChamsGhostClone
+        
+        State.PingChamsGhostMap[src.Name] = gp
+    end
+end
+
+local function PingChams_ensureGhost()
+    if not State.PingChamsGhostModel then
+        State.PingChamsGhostModel = Instance.new("Model")
+        State.PingChamsGhostModel.Name = "ServerApproxGhost"
+        State.PingChamsGhostModel.Parent = workspace
+    end
+    
+    if not State.PingChamsGhostPart then
+        State.PingChamsGhostPart = Instance.new("Part")
+        State.PingChamsGhostPart.Name = "ServerApproxPart"
+        State.PingChamsGhostPart.Anchored = true
+        State.PingChamsGhostPart.CanCollide = false
+        State.PingChamsGhostPart.CanQuery = false
+        State.PingChamsGhostPart.CanTouch = false
+        State.PingChamsGhostPart.Transparency = 1
+        State.PingChamsGhostPart.Size = PingChams_sizeFromCharacter(LocalPlayer.Character)
+        State.PingChamsGhostPart.Parent = State.PingChamsGhostModel
+    end
+    
+    if not State.PingChamsGuiAnchor then
+        State.PingChamsGuiAnchor = Instance.new("Part")
+        State.PingChamsGuiAnchor.Name = "GuiAnchor"
+        State.PingChamsGuiAnchor.Anchored = true
+        State.PingChamsGuiAnchor.CanCollide = false
+        State.PingChamsGuiAnchor.CanQuery = false
+        State.PingChamsGuiAnchor.CanTouch = false
+        State.PingChamsGuiAnchor.Transparency = 1
+        State.PingChamsGuiAnchor.Size = Vector3.new(1, 1, 1)
+        State.PingChamsGuiAnchor.Parent = State.PingChamsGhostModel
+    end
+    
+    if not State.PingChamsGUI then
+        State.PingChamsGUI = Instance.new("BillboardGui")
+        State.PingChamsGUI.Name = "PingInfo"
+        State.PingChamsGUI.Size = UDim2.new(0, 180, 0, 30)
+        State.PingChamsGUI.Adornee = State.PingChamsGuiAnchor
+        State.PingChamsGUI.StudsOffset = Vector3.new(0, 0.7, 0)
+        State.PingChamsGUI.AlwaysOnTop = true
+        State.PingChamsGUI.Parent = State.PingChamsGhostModel
+        
+        local lbl = Instance.new("TextLabel")
+        lbl.Name = "Label"
+        lbl.BackgroundTransparency = 1
+        lbl.Size = UDim2.new(1,0,1,0)
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextScaled = false
+        lbl.TextSize = 14
+        lbl.TextColor3 = Accent
+        lbl.Text = "Ping -- ms"
+        lbl.TextStrokeTransparency = 0
+        lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+        lbl.Parent = State.PingChamsGUI
+    end
+end
+
+local function PingChams_captureOffsets(char, root)
+    local map = {}
+    if not char or not root then return map end
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("BasePart") and d ~= root then
+            pcall(function()
+                map[d.Name] = root.CFrame:ToObjectSpace(d.CFrame)
+            end)
+        end
+    end
+    return map
+end
+
+local function PingChams_pushSample(tClient, char)
+    local root = PingChams_getRootPart(char)
+    if not root then return end
+    
+    local offsets = PingChams_captureOffsets(char, root)
+    local vel = Vector3.new()
+    
+    local ok1, v = pcall(function() return root.AssemblyLinearVelocity end)
+    if ok1 and typeof(v) == "Vector3" then vel = v end
+    
+    table.insert(State.PingChamsBuffer, {
+        t = tClient,
+        cf = root.CFrame,
+        offsets = offsets,
+        vel = vel
+    })
+    
+    local cutoff = tClient - PINGCHAMS_BUFFERMAXSECONDS
+    while #State.PingChamsBuffer > 0 and State.PingChamsBuffer[1].t < cutoff do
+        table.remove(State.PingChamsBuffer, 1)
+    end
+end
+
+local function PingChams_lerpCFrame(a, b, alpha)
+    local pos = a.Position:Lerp(b.Position, alpha)
+    local ax, ay, az = a:ToOrientation()
+    local bx, by, bz = b:ToOrientation()
+    local dx = math.atan2(math.sin(bx - ax), math.cos(bx - ax))
+    local dy = math.atan2(math.sin(by - ay), math.cos(by - ay))
+    local dz = math.atan2(math.sin(bz - az), math.cos(bz - az))
+    local rx = ax + dx * alpha
+    local ry = ay + dy * alpha
+    local rz = az + dz * alpha
+    return CFrame.new(pos) * CFrame.fromOrientation(rx, ry, rz)
+end
+
+local function PingChams_sampleAtClientTime(target)
+    if #State.PingChamsBuffer == 0 then return nil end
+    
+    for i = 1, #State.PingChamsBuffer do
+        local s = State.PingChamsBuffer[i]
+        if s.t >= target then
+            local p = State.PingChamsBuffer[math.max(i-1, 1)]
+            local n = s
+            
+            if p.t == n.t then
+                return {root = p.cf, offsets = p.offsets}
+            end
+            
+            local alpha = math.clamp((target - p.t) / (n.t - p.t), 0, 1)
+            local cf = PingChams_lerpCFrame(p.cf, n.cf, alpha)
+            local offsets = {}
+            
+            if p.offsets or n.offsets then
+                for name, aOff in pairs(p.offsets or {}) do
+                    local bOff = n.offsets and n.offsets[name] or aOff
+                    offsets[name] = PingChams_lerpCFrame(aOff, bOff, alpha)
+                end
+                for name, bOff in pairs(n.offsets or {}) do
+                    if not offsets[name] then
+                        local aOff = p.offsets and p.offsets[name] or bOff
+                        offsets[name] = PingChams_lerpCFrame(aOff, bOff, alpha)
+                    end
+                end
+            end
+            
+            return {root = cf, offsets = offsets}
+        end
+    end
+    
+    local last = State.PingChamsBuffer[#State.PingChamsBuffer]
+    return {root = last.cf, offsets = last.offsets}
+end
+
+local function StartPingChams()
+    if State.PingChamsRenderConn then return end
+    
+    State.PingChamsRenderConn = RunService.RenderStepped:Connect(function()
+        pcall(function()
+            if not State.PingChamsEnabled then return end
+            
+            PingChams_updatePing()
+            PingChams_ensureGhost()
+            
+            local char = LocalPlayer.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    if not State.PingChamsGhostModel or State.PingChamsGhostClone == nil then
+                        PingChams_rebuildGhostClone(char, Accent, 0.6)
+                    end
+                    PingChams_pushSample(tick(), char)
+                end
+                
+                if State.PingChamsGhostPart then
+                    local sz = PingChams_sizeFromCharacter(char)
+                    State.PingChamsGhostPart.Size = sz
+                end
+            end
+            
+            local oneWayLatency = State.PingChamsRTT * 0.5
+            local serverPhysicsDelay = 0.050
+            local clientBuffer = 0.020
+            local totalDelay = oneWayLatency + serverPhysicsDelay + clientBuffer
+            local sampleDelay = math.clamp(totalDelay, 0.06, 0.9)
+            
+            local now = tick()
+            local samplePast = PingChams_sampleAtClientTime(now - sampleDelay)
+            
+            if not State.PingChamsGhostClone and LocalPlayer.Character then
+                PingChams_rebuildGhostClone(LocalPlayer.Character, Accent, 0.6)
+            end
+            
+            if samplePast and samplePast.root then
+                local rootPast = samplePast.root
+                
+                local lastSmoothT = _G.GhostPastSmoothT or tick()
+                local nowT = tick()
+                local dtSmooth = math.max(0.0001, nowT - lastSmoothT)
+                local smoothAlpha = math.clamp(dtSmooth * 10, 0.12, 0.55)
+                _G.GhostPastSmooth = _G.GhostPastSmooth or rootPast
+                _G.GhostPastSmooth = PingChams_lerpCFrame(_G.GhostPastSmooth, rootPast, smoothAlpha)
+                _G.GhostPastSmoothT = nowT
+                
+                if State.PingChamsGhostPart then
+                    State.PingChamsGhostPart.CFrame = _G.GhostPastSmooth
+                end
+                
+                if State.PingChamsGuiAnchor then
+                    local yOffset = State.PingChamsGhostPart and (State.PingChamsGhostPart.Size.Y / 2 + 0.5) or 3.5
+                    local guiPos = _G.GhostPastSmooth.Position + Vector3.new(0, yOffset, 0)
+                    State.PingChamsGuiAnchor.CFrame = CFrame.new(guiPos)
+                end
+                
+                local lpRoot = PingChams_getRootPart(LocalPlayer.Character)
+                local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                local speedMeas = lpRoot and lpRoot.AssemblyLinearVelocity.Magnitude or 0
+                local speedIntent = 0
+                if hum and hum.MoveDirection.Magnitude > 0.01 then
+                    speedIntent = hum.MoveDirection.Magnitude * (hum.WalkSpeed or 16)
+                end
+                local speed = math.max(speedMeas, speedIntent)
+                
+                local transPast = math.clamp(0.9 - math.min(speed / 16, 1) * 0.65, 0.2, 1)
+                
+                local lastFadeT = _G.GhostPastTransT or tick()
+                local nowFadeT = tick()
+                local dt = math.max(0.0001, nowFadeT - lastFadeT)
+                local a = math.clamp(dt * 5.0, 0.05, 0.5)
+                _G.GhostPastTransSm = _G.GhostPastTransSm or transPast
+                _G.GhostPastTransSm = _G.GhostPastTransSm + (transPast - _G.GhostPastTransSm) * a
+                _G.GhostPastTransT = nowFadeT
+                
+                for name, gp in pairs(State.PingChamsGhostMap) do
+                    local off = samplePast.offsets and samplePast.offsets[name]
+                    gp.Color = Accent
+                    gp.Transparency = _G.GhostPastTransSm
+                    gp.Material = PINGCHAMS_SETTINGS.material
+                    if off then
+                        gp.CFrame = _G.GhostPastSmooth * off
+                    end
+                end
+                
+                if State.PingChamsGUI and State.PingChamsGUI:FindFirstChild("Label") then
+                    local realBacktrack = totalDelay * 1000
+                    State.PingChamsGUI.Label.Text = string.format("Backtrack: %.0f ms | Ping: %.0f ms", realBacktrack, State.PingChamsRTT * 1000)
+                    State.PingChamsGUI.Label.TextColor3 = Accent
+                    
+                    local vis = math.clamp((speed - 14) / 1, 0, 1)
+                    local targetTT = 1 - vis
+                    
+                    local lastTT = _G.GhostTextTransT or tick()
+                    local nowTT = tick()
+                    local dtTT = math.max(0.0001, nowTT - lastTT)
+                    local aTT = math.clamp(dtTT * 3, 0.03, 0.25)
+                    _G.GhostTextTransSm = _G.GhostTextTransSm or targetTT
+                    _G.GhostTextTransSm = _G.GhostTextTransSm + (targetTT - _G.GhostTextTransSm) * aTT
+                    _G.GhostTextTransT = nowTT
+                    
+                    State.PingChamsGUI.Label.TextTransparency = _G.GhostTextTransSm
+                    State.PingChamsGUI.Label.TextStrokeTransparency = _G.GhostTextTransSm
+                    State.PingChamsGUI.Enabled = _G.GhostTextTransSm < 0.995
+                end
+            else
+                for _, gp in pairs(State.PingChamsGhostMap) do
+                    gp.Transparency = 1
+                end
+            end
+            
+            if not State.PingChamsEnabled then
+                if State.PingChamsGUI and State.PingChamsGUI:FindFirstChild("Label") then
+                    State.PingChamsGUI.Label.Visible = false
+                end
+                for _, gp in pairs(State.PingChamsGhostMap) do
+                    gp.Transparency = 1
+                end
+            end
+        end)
+    end)
+end
+
+local function StopPingChams()
+    if State.PingChamsRenderConn then
+        State.PingChamsRenderConn:Disconnect()
+        State.PingChamsRenderConn = nil
+    end
+    if State.PingChamsGUI then
+        pcall(function() State.PingChamsGUI:Destroy() end)
+        State.PingChamsGUI = nil
+    end
+    if State.PingChamsGuiAnchor then
+        pcall(function() State.PingChamsGuiAnchor:Destroy() end)
+        State.PingChamsGuiAnchor = nil
+    end
+    if State.PingChamsGhostModel then
+        pcall(function() State.PingChamsGhostModel:Destroy() end)
+        State.PingChamsGhostModel = nil
+        State.PingChamsGhostClone = nil
+    end
+    State.PingChamsGhostMap = {}
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    pcall(function()
+        if State.PingChamsGhostPart and LocalPlayer.Character then
+            State.PingChamsGhostPart.Size = PingChams_sizeFromCharacter(LocalPlayer.Character)
+        end
+    end)
+end)
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -4891,7 +5346,9 @@ end
     VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; end)
     VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; end)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; end)
+    VisualsTab:CreateSection("Misc")
     VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", function(enabled) State.UIOnlyEnabled = enabled if enabled then EnableUIOnly() else DisableUIOnly() end end)
+    VisualsTab:CreateToggle("Ping Chams", "Show server-side position", function(s) State.PingChamsEnabled = s if s then StartPingChams() else StopPingChams() end end)
     local CombatTab = CreateTab("Combat")
    
     CombatTab:CreateSection("EXTENDED HITBOX")
