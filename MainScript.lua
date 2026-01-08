@@ -2340,15 +2340,13 @@ end
 local function ResetCharacter()
     print("[Auto Farm] 🔄 Делаю ресет...")
     
-    -- Сохраняем статус GodMode
     local wasGodModeEnabled = State.GodModeEnabled
     
-    -- Отключаем GodMode перед ресетом
     if wasGodModeEnabled then
         print("[Auto Farm] 🛡️ GodMode был включен, временно отключаю...")
         State.GodModeEnabled = false
         
-        -- Отключаем все connections
+        -- ✅ Отключаем ВСЕ connections
         if healthConnection then
             healthConnection:Disconnect()
             healthConnection = nil
@@ -2367,7 +2365,7 @@ local function ResetCharacter()
                 connection:Disconnect()
             end
         end
-        State.GodModeConnections = {}
+        State.GodModeConnections = {}  -- ✅ Очищаем таблицу
         
         -- Возвращаем нормальное здоровье
         local character = LocalPlayer.Character
@@ -2401,34 +2399,49 @@ local function ResetCharacter()
     -- ✅ ЖДЁМ НОВОГО ПЕРСОНАЖА
     if wasGodModeEnabled then
         task.spawn(function()
-            -- Ждём появления персонажа
+            -- ✅ ВАЖНО: проверяем что автофарм всё ещё работает
+            if not State.AutoFarmEnabled then
+                print("[Auto Farm] ⚠️ Автофарм выключен, прерываю восстановление GodMode")
+                return
+            end
+            
             local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+            
+            -- ✅ Проверка ещё раз перед восстановлением
+            if not State.AutoFarmEnabled then
+                return
+            end
+            
             print("[Auto Farm] ⏳ Новый персонаж появился, жду Humanoid...")
             
-            -- ✅ ЖДЁМ HUMANOID
             local humanoid = character:WaitForChild("Humanoid", 10)
             if not humanoid then
                 print("[Auto Farm] ⚠️ Humanoid не найден за 10 секунд!")
                 return
             end
             
-            -- ✅ ДОПОЛНИТЕЛЬНАЯ ЗАДЕРЖКА
+            -- ✅ Финальная проверка
+            if not State.AutoFarmEnabled then
+                return
+            end
+            
             task.wait(0.5)
             
             print("[Auto Farm] 🛡️ Humanoid найден, восстанавливаю GodMode...")
             
-            -- Восстанавливаем GodMode
             State.GodModeEnabled = true
             
-            if ApplyGodMode then
-                ApplyGodMode()
+            if ApplyGodMode then ApplyGodMode() end
+            if SetupHealthProtection then SetupHealthProtection() end
+            if SetupDamageBlocker then SetupDamageBlocker() end
+            
+            -- ✅ Очищаем старые connections перед созданием новых
+            for _, connection in ipairs(State.GodModeConnections) do
+                if connection and connection.Connected then
+                    connection:Disconnect()
+                end
             end
-            if SetupHealthProtection then
-                SetupHealthProtection()
-            end
-            if SetupDamageBlocker then
-                SetupDamageBlocker()
-            end
+            State.GodModeConnections = {}
             
             -- HP monitoring
             local godModeConnection = RunService.Heartbeat:Connect(function()
@@ -3206,17 +3219,20 @@ local function StopAutoFarm()
 
     pcall(UnfloatCharacter)
     pcall(DisableNoClip)
-    State.CoinBlacklist = {}
     
+    -- ✅ ДОБАВЛЕНО: очистка кэша
+    coinLabelCache = nil
+    lastCacheTime = 0
+    
+    State.CoinBlacklist = {}
     State.spawnAtPlayer = spawnAtPlayerOriginalState
     
-    -- ✅ ДОБАВИТЬ:
     if not instantPickupWasEnabled and State.InstantPickupEnabled then
         pcall(function()
             DisableInstantPickup()
         end)
-        print("[Auto Farm] 🔫 InstantPickup автоматически выключен")
     end
+
     print("[Auto Farm] 🛑 Остановлен")
 end
 
@@ -5954,7 +5970,7 @@ end)
         end
     end)
 
-    local UtilityTab = CreateTab("Hop")
+    local UtilityTab = CreateTab("Server")
    
     UtilityTab:CreateSection("SERVER MANAGEMENT")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, function() Rejoin() end)
