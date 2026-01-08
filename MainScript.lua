@@ -541,8 +541,7 @@ local function StartPingChams()
             if char then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
-                    -- ЕДИНСТВЕННОЕ место создания клона
-                    if not State.PingChamsGhostClone then
+                    if not State.PingChamsGhostModel or State.PingChamsGhostClone == nil then
                         PingChams_rebuildGhostClone(char, Accent, 0.6)
                     end
                     PingChams_pushSample(tick(), char)
@@ -563,7 +562,9 @@ local function StartPingChams()
             local now = tick()
             local samplePast = PingChams_sampleAtClientTime(now - sampleDelay)
             
-            -- УДАЛЕНО дублирующее создание клона
+            if not State.PingChamsGhostClone and LocalPlayer.Character then
+                PingChams_rebuildGhostClone(LocalPlayer.Character, Accent, 0.6)
+            end
             
             if samplePast and samplePast.root then
                 local rootPast = samplePast.root
