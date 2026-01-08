@@ -541,7 +541,8 @@ local function StartPingChams()
             if char then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
-                    if not State.PingChamsGhostModel or State.PingChamsGhostClone == nil then
+                    -- ЕДИНСТВЕННОЕ место создания клона
+                    if not State.PingChamsGhostClone then
                         PingChams_rebuildGhostClone(char, Accent, 0.6)
                     end
                     PingChams_pushSample(tick(), char)
@@ -562,9 +563,7 @@ local function StartPingChams()
             local now = tick()
             local samplePast = PingChams_sampleAtClientTime(now - sampleDelay)
             
-            if not State.PingChamsGhostClone and LocalPlayer.Character then
-                PingChams_rebuildGhostClone(LocalPlayer.Character, Accent, 0.6)
-            end
+            -- УДАЛЕНО дублирующее создание клона
             
             if samplePast and samplePast.root then
                 local rootPast = samplePast.root
@@ -708,7 +707,7 @@ local function CreateTracer(startPos, endPos, duration)
     beam.FaceCamera = true
     beam.LightEmission = 1
     beam.LightInfluence = 0
-    beam.Brightness = 10
+    beam.Brightness = 5
     beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
     beam.TextureMode = Enum.TextureMode.Stretch
     beam.TextureSpeed = 0
@@ -723,8 +722,8 @@ local function CreateTracer(startPos, endPos, duration)
     
     table.insert(State.TracersList, {beam = beam, att0 = attachment0, att1 = attachment1, time = tick()})
     
-    task.delay(duration or 0.8, function()
-        local fadeTime = 0.3
+    task.delay(duration or 0.3, function()
+        local fadeTime = 0.1
         local startTime = tick()
         local startTrans = 0
         local startBrightness = 5
@@ -782,6 +781,7 @@ end
 local function CreateTracerFromTool(tool)
     if not State.BulletTracersEnabled then return end
     if not tool or not tool:IsA("Tool") then return end
+    local TRACER_COUNT = 4
     
     -- Проверка cooldown
     local currentTime = tick()
@@ -801,8 +801,9 @@ local function CreateTracerFromTool(tool)
     
     local maxDistance = 500
     local hitPos = PerformRaycast(origin, direction, maxDistance)
-    
-    CreateTracer(origin, hitPos, 0.8)
+    for i = 1, TRACER_COUNT do
+        CreateTracer(origin, hitPos, 0.8)
+    end
 end
 
 local toolConnections = {}
