@@ -2677,7 +2677,8 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         
-        if alpha >= 0.5 and not collectionAttempted then
+        -- ✅ Вызываем firetouchinterest на 80% полёта (раньше чем монета телепортируется)
+        if alpha >= 0.85 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
                 task.spawn(function()
@@ -2690,9 +2691,14 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
         
         task.wait()
     end
+    if State.UndergroundMode then
+        local finalCFrame = CFrame.new(humanoidRootPart.Position) * CFrame.Angles(math.rad(90), 0, 0)
+        humanoidRootPart.CFrame = finalCFrame
+    end
     
     return true
 end
+
 
 local shootMurderer
 local InstantKillAll
@@ -3205,12 +3211,12 @@ local function StopAutoFarm()
     State.spawnAtPlayer = spawnAtPlayerOriginalState
     
     -- ✅ ДОБАВИТЬ:
-    if State.XPFarmEnabled and State.InstantPickupEnabled and not instantPickupWasEnabled then
+    if not instantPickupWasEnabled and State.InstantPickupEnabled then
         pcall(function()
             DisableInstantPickup()
         end)
+        print("[Auto Farm] 🔫 InstantPickup автоматически выключен")
     end
-
     print("[Auto Farm] 🛑 Остановлен")
 end
 
@@ -5838,14 +5844,7 @@ end)
     FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), function() FlingMurderer() end)
     FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), function() FlingSheriff() end)
 
-
-    local UtilityTab = CreateTab("Utility")
-   
-    UtilityTab:CreateSection("SERVER MANAGEMENT")
-    UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, function() Rejoin() end)
-    UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), function() ServerHop() end)
-
-    local TrollingTab = CreateTab("Trolling")
+    local TrollingTab = CreateTab("Troll")
 
     TrollingTab:CreateSection("🎯 SELECT TARGET")
     TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
@@ -5954,6 +5953,12 @@ end)
             ShowNotification("<font color=\"rgb(200, 100, 200)\">💫 Chaotic Spin</font>", Color3.fromRGB(200, 100, 200))
         end
     end)
+
+    local UtilityTab = CreateTab("Hop")
+   
+    UtilityTab:CreateSection("SERVER MANAGEMENT")
+    UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, function() Rejoin() end)
+    UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), function() ServerHop() end)
 
 
 local footer = Create("TextLabel", {
