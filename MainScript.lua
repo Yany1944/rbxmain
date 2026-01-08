@@ -186,6 +186,11 @@ local State = {
     PingChamsGhostClone = nil,
     PingChamsGhostMap = {},
     PingChamsRenderConn = nil,
+
+    -- Tracers
+    BulletTracersEnabled = false,
+    TracersList = {},
+    LastTracerTime = 0,
     
     -- System
     Connections = {},
@@ -678,6 +683,263 @@ LocalPlayer.CharacterAdded:Connect(function()
         end
     end)
 end)
+
+-- ============= BULLET/KNIFE TRACERS =============
+local TracersAccent = Color3.fromRGB(220, 145, 230)
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
+
+local function CreateTracer(startPos, endPos, duration)
+    if not State.BulletTracersEnabled then return end
+    
+    local attachment0 = Instance.new("Attachment")
+    attachment0.WorldPosition = startPos
+    attachment0.Parent = workspace.Terrain
+    
+    local attachment1 = Instance.new("Attachment")
+    attachment1.WorldPosition = endPos
+    attachment1.Parent = workspace.Terrain
+    
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Color = ColorSequence.new(TracersAccent)
+    beam.FaceCamera = true
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Brightness = 10
+    beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    beam.TextureMode = Enum.TextureMode.Stretch
+    beam.TextureSpeed = 0
+    beam.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    beam.Width0 = 0.3
+    beam.Width1 = 0.3
+    beam.ZOffset = 0.1
+    beam.Parent = attachment0
+    
+    table.insert(State.TracersList, {beam = beam, att0 = attachment0, att1 = attachment1, time = tick()})
+    
+    task.delay(duration or 0.8, function()
+        local fadeTime = 0.3
+        local startTime = tick()
+        local startTrans = 0
+        local startBrightness = 5
+        
+        while tick() - startTime < fadeTime do
+            local alpha = (tick() - startTime) / fadeTime
+            local trans = startTrans + (1 - startTrans) * alpha
+            beam.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, trans),
+                NumberSequenceKeypoint.new(1, trans)
+            })
+            beam.Brightness = startBrightness * (1 - alpha)
+            task.wait()
+        end
+        
+        pcall(function()
+            beam:Destroy()
+            attachment0:Destroy()
+            attachment1:Destroy()
+        end)
+        
+        for i, v in ipairs(State.TracersList) do
+            if v.beam == beam then
+                table.remove(State.TracersList, i)
+                break
+            end
+        end
+    end)
+end
+
+local function GetShootOrigin(tool)
+    if not tool then return nil end
+    local handle = tool:FindFirstChild("Handle")
+    if handle then
+        return handle.Position
+    end
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        return hrp.Position + Vector3.new(0, 1.5, 0)
+    end
+    return nil
+end
+
+local function PerformRaycast(origin, direction, maxDistance)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    
+    local raycastResult = workspace:Raycast(origin, direction * maxDistance, RayParams)
+    if raycastResult then
+        return raycastResult.Position
+    else
+        return origin + (direction * maxDistance)
+    end
+end
+
+local function CreateTracerFromTool(tool)
+    if not State.BulletTracersEnabled then return end
+    if not tool or not tool:IsA("Tool") then return end
+    
+    -- Проверка cooldown
+    local currentTime = tick()
+    if currentTime - State.LastTracerTime < State.ShootCooldown then
+        return
+    end
+    State.LastTracerTime = currentTime
+    
+    local origin = GetShootOrigin(tool)
+    if not origin then return end
+    
+    local mouse = LocalPlayer:GetMouse()
+    if not mouse then return end
+    
+    local targetPos = mouse.Hit.Position
+    local direction = (targetPos - origin).Unit
+    
+    local maxDistance = 500
+    local hitPos = PerformRaycast(origin, direction, maxDistance)
+    
+    CreateTracer(origin, hitPos, 0.8)
+end
+
+local toolConnections = {}
+local inputConnection = nil
+
+-- Проверка, является ли инструмент ножом
+local function IsKnifeTool(tool)
+    if not tool then return false end
+    local name = tool.Name:lower()
+    return name:find("knife") or name:find("blade") or tool:FindFirstChild("Stab")
+end
+
+-- Для пистолета (Sheriff) - ЛКМ через Tool.Activated
+local function SetupGunTracers(tool)
+    if IsKnifeTool(tool) then return end
+    
+    local conn = tool.Activated:Connect(function()
+        CreateTracerFromTool(tool)
+    end)
+    toolConnections[tool] = conn
+end
+
+-- Для ножа - клавиши E и кастомная
+local function SetupKnifeTracers()
+    if inputConnection then
+        inputConnection:Disconnect()
+    end
+    
+    inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if not State.BulletTracersEnabled then return end
+        
+        local char = LocalPlayer.Character
+        if not char then return end
+        
+        local equippedTool = char:FindFirstChildOfClass("Tool")
+        if not equippedTool or not IsKnifeTool(equippedTool) then return end
+        
+        -- E или кастомная клавиша из настроек
+        local knifeThrowKey = State.knifeThrow or Enum.KeyCode.E
+        
+        if input.KeyCode == Enum.KeyCode.E or input.KeyCode == knifeThrowKey then
+            CreateTracerFromTool(equippedTool)
+        end
+    end)
+end
+
+local function SetupToolTracers(character)
+    if not character then return end
+    
+    for _, conn in pairs(toolConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    toolConnections = {}
+    
+    local function connectTool(tool)
+        if not tool:IsA("Tool") then return end
+        if toolConnections[tool] then return end
+        
+        -- Только для пистолета
+        if not IsKnifeTool(tool) then
+            SetupGunTracers(tool)
+        end
+    end
+    
+    for _, tool in ipairs(character:GetChildren()) do
+        connectTool(tool)
+    end
+    
+    character.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            task.wait(0.1)
+            connectTool(child)
+        end
+    end)
+    
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        for _, tool in ipairs(backpack:GetChildren()) do
+            connectTool(tool)
+        end
+        
+        backpack.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then
+                task.wait(0.1)
+                connectTool(child)
+            end
+        end)
+    end
+    
+    -- Настройка отслеживания клавиш для ножа
+    SetupKnifeTracers()
+end
+
+local function CleanupTracers()
+    for _, conn in pairs(toolConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    toolConnections = {}
+    
+    if inputConnection then
+        inputConnection:Disconnect()
+        inputConnection = nil
+    end
+    
+    for _, tracer in ipairs(State.TracersList) do
+        pcall(function()
+            tracer.beam:Destroy()
+            tracer.att0:Destroy()
+            tracer.att1:Destroy()
+        end)
+    end
+    State.TracersList = {}
+end
+
+local function ToggleBulletTracers(enabled)
+    State.BulletTracersEnabled = enabled
+    
+    if enabled then
+        if LocalPlayer.Character then
+            SetupToolTracers(LocalPlayer.Character)
+        end
+    else
+        CleanupTracers()
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    task.wait(0.5)
+    if State.BulletTracersEnabled then
+        SetupToolTracers(character)
+    end
+end)
+
+if LocalPlayer.Character then
+    SetupToolTracers(LocalPlayer.Character)
+end
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -4344,62 +4606,208 @@ local function Rejoin()
 end
 
 local function ServerHop()
+    -- ═══════════════════════════════════════════════════════════
+    -- SERVER HOP SYSTEM v2.0 - Enhanced with file tracking
+    -- ═══════════════════════════════════════════════════════════
+
     local HttpService = game:GetService("HttpService")
     local TeleportService = game:GetService("TeleportService")
-    local LocalPlayer = game:GetService("Players").LocalPlayer
-    
-    -- Функция рекурсивного поиска
-    local function SearchAndTeleport(cursor)
-        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        if cursor then
-            url = url .. "&cursor=" .. cursor
+
+    local CONFIG_SH = {
+        FILE_NAME = "server-hop-cache.json",
+        MIN_PLAYERS = 1,
+        MAX_PLAYERS_PERCENT = 0.9,
+        FETCH_LIMIT = 100,
+        MAX_PAGES = 5,
+        TELEPORT_RETRY = 3
+    }
+
+    local visitedServers = {}
+    local currentHour = os.date("!*t").hour
+
+    -- Загрузка кэша
+    local function InitializeCache()
+        local success, data = pcall(function()
+            return HttpService:JSONDecode(readfile(CONFIG_SH.FILE_NAME))
+        end)
+
+        if success and data then
+            if data.hour and data.hour == currentHour and data.servers then
+                visitedServers = data.servers
+                return
+            end
         end
-        
-        -- Используем game:HttpGet (стандарт для эксплойтов)
+
+        visitedServers = {}
+        pcall(function()
+            writefile(CONFIG_SH.FILE_NAME, HttpService:JSONEncode({
+                hour = currentHour,
+                servers = {}
+            }))
+        end)
+    end
+
+    -- Сохранение кэша
+    local function SaveCache()
+        pcall(function()
+            writefile(CONFIG_SH.FILE_NAME, HttpService:JSONEncode({
+                hour = currentHour,
+                servers = visitedServers
+            }))
+        end)
+    end
+
+    -- Проверка посещённого сервера
+    local function IsServerVisited(jobId)
+        for _, id in ipairs(visitedServers) do
+            if id == jobId then return true end
+        end
+        return false
+    end
+
+    -- Получение серверов
+    local function FetchServers(cursor)
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=%d",
+            game.PlaceId,
+            CONFIG_SH.FETCH_LIMIT
+        )
+
+        if cursor then url = url .. "&cursor=" .. cursor end
+
         local success, result = pcall(function()
             return HttpService:JSONDecode(game:HttpGet(url))
         end)
-        
-        if not success or not result or not result.data then 
-            return -- Ошибка запроса, просто выходим, чтобы не редждойниться случайно
-        end
-        
-        local validServers = {}
-        
-        for _, server in ipairs(result.data) do
-            -- Строгая фильтрация
-            if server.playing < server.maxPlayers 
-               and server.playing > 0 
-               and server.id ~= game.JobId -- ГАРАНТИЯ, что это не текущий сервер
-            then
-                table.insert(validServers, server)
-            end
-        end
-        
-        if #validServers > 0 then
-            -- Если нашли сервера - прыгаем на первый (самый свободный из-за sortOrder=Asc)
-            -- Или можно взять случайный: validServers[math.random(1, #validServers)]
-            local target = validServers[1]
-            
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, target.id, LocalPlayer)
-        else
-            -- Если на этой странице нет подходящих серверов, чекаем следующую
-            if result.nextPageCursor then
-                -- Небольшая задержка, чтобы не спамить запросами
-                task.wait(0.1)
-                SearchAndTeleport(result.nextPageCursor)
-            else
-                -- Сервера закончились, ничего не делаем (лучше ничего, чем реджойн)
-                warn("Server Hop: No suitable servers found.")
-            end
-        end
+
+        return success and result or nil
     end
-    
-    -- Запускаем поиск
-    task.spawn(function()
-        SearchAndTeleport(nil)
+
+    -- Оценка сервера
+    local function CalculateScore(playing, maxPlayers)
+        local fillRatio = playing / maxPlayers
+        local score = (1 - fillRatio) * 100
+
+        if playing >= 2 and playing <= 6 then
+            score = score + 50
+        end
+
+        return score
+    end
+
+    -- Фильтрация серверов
+    local function FilterServers(serverList)
+        local validServers = {}
+
+        for _, server in ipairs(serverList) do
+            local jobId = server.id
+            local playing = server.playing
+            local maxPlayers = server.maxPlayers
+
+            local isNotCurrentServer = jobId ~= game.JobId
+            local isNotVisited = not IsServerVisited(jobId)
+            local hasPlayers = playing >= CONFIG_SH.MIN_PLAYERS
+            local notFull = playing < (maxPlayers * CONFIG_SH.MAX_PLAYERS_PERCENT)
+
+            if isNotCurrentServer and isNotVisited and hasPlayers and notFull then
+                table.insert(validServers, {
+                    id = jobId,
+                    playing = playing,
+                    maxPlayers = maxPlayers,
+                    score = CalculateScore(playing, maxPlayers)
+                })
+            end
+        end
+
+        return validServers
+    end
+
+    -- Телепортация
+    local function TeleportToServer(jobId)
+        for attempt = 1, CONFIG_SH.TELEPORT_RETRY do
+            local success = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
+            end)
+
+            if success then
+                table.insert(visitedServers, jobId)
+                SaveCache()
+                return true
+            else
+                task.wait(2)
+            end
+        end
+
+        return false
+    end
+
+    -- Основная логика
+    InitializeCache()
+
+    local allServers = {}
+    local cursor = nil
+    local pagesScanned = 0
+
+    repeat
+        local result = FetchServers(cursor)
+
+        if not result or not result.data then
+            if State.NotificationsEnabled then
+                ShowNotification(
+                    "<font color=\"rgb(255, 85, 85)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Failed to fetch servers</font>",
+                    CONFIG.Colors.Text
+                )
+            end
+            break
+        end
+
+        local filtered = FilterServers(result.data)
+
+        for _, server in ipairs(filtered) do
+            table.insert(allServers, server)
+        end
+
+        cursor = result.nextPageCursor
+        pagesScanned = pagesScanned + 1
+
+        if #allServers >= 20 then break end
+
+        task.wait(0.1)
+
+    until not cursor or pagesScanned >= CONFIG_SH.MAX_PAGES
+
+    if #allServers == 0 then
+        if State.NotificationsEnabled then
+            ShowNotification(
+                "<font color=\"rgb(255, 85, 85)\">ServerHop: </font><font color=\"rgb(220,220,220)\">No suitable servers found</font>",
+                CONFIG.Colors.Text
+            )
+        end
+        return
+    end
+
+    -- Сортировка и выбор
+    table.sort(allServers, function(a, b)
+        return a.score > b.score
     end)
+
+    local topCount = math.min(3, #allServers)
+    local selectedServer = allServers[math.random(1, topCount)]
+
+    if State.NotificationsEnabled then
+        ShowNotification(
+            string.format(
+                "<font color=\"rgb(85, 255, 120)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Joining %d/%d players (Score: %.0f)</font>",
+                selectedServer.playing,
+                selectedServer.maxPlayers,
+                selectedServer.score
+            ),
+            CONFIG.Colors.Text
+        )
+    end
+
+    TeleportToServer(selectedServer.id)
 end
+
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 19: UI HELPER FUNCTIONS (СТРОКИ 3201-3450)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -5346,11 +5754,13 @@ end
     VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; end)
     VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; end)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; end)
+
     VisualsTab:CreateSection("Misc")
     VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", function(enabled) State.UIOnlyEnabled = enabled if enabled then EnableUIOnly() else DisableUIOnly() end end)
     VisualsTab:CreateToggle("Ping Chams", "Show server-side position", function(s) State.PingChamsEnabled = s if s then StartPingChams() else StopPingChams() end end)
+    VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", function(s) ToggleBulletTracers(s) end)
+
     local CombatTab = CreateTab("Combat")
-   
     CombatTab:CreateSection("EXTENDED HITBOX")
     CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", function(s) if s then EnableExtendedHitbox() else DisableExtendedHitbox() end end)
     CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, 15, function(v) State.ExtendedHitboxSize = v; if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end, 1)
