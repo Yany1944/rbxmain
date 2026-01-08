@@ -4162,7 +4162,7 @@ local function EnableInstantPickup()
             local murderer = getMurder()
             
             if not murderer then
-                task.wait(2)
+                task.wait(0.5)
                 lastAttemptedGun = nil
                 continue
             end
@@ -4190,7 +4190,7 @@ local function EnableInstantPickup()
                 -- ✅ 3 ПОПЫТКИ
                 for attempt = 1, 3 do
                     pickupGun()
-                    task.wait(0.3)
+                    task.wait(0.5)
                     
                     -- Проверяем успех
                     if LocalPlayer.Character:FindFirstChild("Gun") or 
@@ -4230,7 +4230,7 @@ local function EnableInstantPickup()
                 end
             end
             
-            task.wait(0.2)  -- Уменьшил для быстрой реакции
+            task.wait(0.1)  -- Уменьшил для быстрой реакции
         end
     end)
 end
