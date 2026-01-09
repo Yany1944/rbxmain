@@ -449,8 +449,12 @@ return function(env)
                     Parent = toggleBg
                 })
                 AddCorner(toggleCircle, 20)
-
-                local state = false
+                local state = State[handlerKey] == true  -- читаем начальное состояние
+                local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
+                local targetPos   = state and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
+                toggleBg.BackgroundColor3 = targetColor
+                toggleCircle.Position = targetPos
+            
                 TrackConnection(toggleBg.MouseButton1Click:Connect(function()
                     state = not state
                     local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
@@ -1018,7 +1022,7 @@ return function(env)
 
         CombatTab:CreateSection("SHERIFF TOOLS")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup")
+local ipToggle = CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup") State.UIElements.InstantPickupToggle = ipToggle
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
 
         local FarmTab = CreateTab("Farming")
