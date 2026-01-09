@@ -8,6 +8,7 @@ return function(deps)
     local State          = deps.State
     local TrackConnection = deps.TrackConnection
     local ShowNotification = deps.ShowNotification
+    local LocalPlayer = Players.LocalPlayer
 
     local ESP = {}
 
