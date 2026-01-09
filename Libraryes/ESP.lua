@@ -25,6 +25,23 @@ return function(deps)
     -- 5) StartRoleChecking
     ----------------------------------------------------------------
 
+    local currentMapConnection = nil
+    local currentMap = nil
+    
+    local function getMap()
+        for _, v in ipairs(Workspace:GetChildren()) do
+        if v:FindFirstChild("CoinContainer") then
+            return v
+        end
+    end
+        return nil
+    end
+    
+    local function getGun()
+        local map = getMap()
+    if not map then return nil end
+        return map:FindFirstChild("GunDrop")
+    end
     -- CreateHighlight() - Создание Highlight
     local function CreateHighlight(adornee, color)
         if not adornee or not adornee.Parent then return nil end
