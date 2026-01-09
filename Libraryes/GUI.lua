@@ -1044,6 +1044,7 @@ local ipToggle = CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun w
         FunTab:CreateSection("ANTI-FLING")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling")
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
+        
         FunTab:CreateSection("FLING PLAYER")
         FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
         FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
