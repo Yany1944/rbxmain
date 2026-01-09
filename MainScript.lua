@@ -241,8 +241,70 @@ local State = {
     }
 }
 
+local ScriptAlive = true
+
+local function TrackConnection(conn)
+    if conn then
+        table.insert(State.Connections, conn)
+    end
+    return conn
+end
+
+local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/ESP.lua"))()({
+    Players = Players,
+    Workspace = Workspace,
+    RunService = RunService,
+    CONFIG = CONFIG,
+    State = State,
+    TrackConnection = function(conn)
+        if conn then table.insert(State.Connections, conn) end
+        return conn
+    end,
+    ShowNotification = ShowNotification
+})
+
+    -- getMurder() - Поиск убийцы
+local function getMurder()
+    for _, plr in ipairs(Players:GetPlayers()) do
+    local character = plr.Character
+        local backpack = plr:FindFirstChild("Backpack")
+        
+        if (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife")) then
+            return plr
+        end
+    end
+    return nil
+end
+
+    -- getSheriff() - Поиск шерифа
+local function getSheriff()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        local backpack = plr:FindFirstChild("Backpack")
+        if (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun")) then
+            return plr
+        end
+    end
+    return nil
+end
+
 local currentMapConnection = nil
 local currentMap = nil
+
+local function getMap()
+    for _, v in ipairs(Workspace:GetChildren()) do
+    if v:FindFirstChild("CoinContainer") then
+        return v
+    end
+end
+    return nil
+end
+
+local function getGun()
+    local map = getMap()
+if not map then return nil end
+return map:FindFirstChild("GunDrop")
+end
 
 -- ============= PING CHAMS SYSTEM =============
 local PINGCHAMS_BUFFERMAXSECONDS = 3.0
@@ -676,14 +738,15 @@ local function StopPingChams()
     State.PingChamsGhostMap = {}
 end
 
-LocalPlayer.CharacterAdded:Connect(function()
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     pcall(function()
         if State.PingChamsGhostPart and LocalPlayer.Character then
             State.PingChamsGhostPart.Size = PingChams_sizeFromCharacter(LocalPlayer.Character)
         end
     end)
-end)
+end))
+
 
 -- ============= BULLET/KNIFE TRACERS =============
 local TracersAccent = Color3.fromRGB(220, 145, 230)
@@ -875,12 +938,13 @@ local function SetupToolTracers(character)
         connectTool(tool)
     end
     
-    character.ChildAdded:Connect(function(child)
+    local charConn = character.ChildAdded:Connect(function(child)
         if child:IsA("Tool") then
             task.wait(0.1)
             connectTool(child)
         end
     end)
+    TrackConnection(charConn)
     
     local backpack = LocalPlayer:FindFirstChild("Backpack")
     if backpack then
@@ -888,17 +952,30 @@ local function SetupToolTracers(character)
             connectTool(tool)
         end
         
-        backpack.ChildAdded:Connect(function(child)
+        local backpackConn = backpack.ChildAdded:Connect(function(child)
             if child:IsA("Tool") then
                 task.wait(0.1)
                 connectTool(child)
             end
         end)
+        TrackConnection(backpackConn)
     end
     
     -- Настройка отслеживания клавиш для ножа
     SetupKnifeTracers()
 end
+
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
+    task.wait(0.5)
+    if State.BulletTracersEnabled then
+        SetupToolTracers(character)
+    end
+end))
+
+if LocalPlayer.Character then
+    SetupToolTracers(LocalPlayer.Character)
+end
+
 
 local function CleanupTracers()
     for _, conn in pairs(toolConnections) do
@@ -951,29 +1028,6 @@ end
 
 -- CleanupMemory() - Очистка при респавне
 local function CleanupMemory()
-    -- Очистка highlights
-    if State.PlayerHighlights then
-        for _, highlight in pairs(State.PlayerHighlights) do
-            if highlight and highlight.Parent then
-                pcall(function() highlight:Destroy() end)
-            end
-        end
-        State.PlayerHighlights = {}
-    end
-
-    -- Очистка gun ESP (только визуальные объекты)
-    if State.GunCache then
-        for _, espData in pairs(State.GunCache) do
-            if espData then
-                pcall(function()
-                    if espData.highlight then espData.highlight:Destroy() end
-                    if espData.billboard then espData.billboard:Destroy() end
-                end)
-            end
-        end
-        State.GunCache = {}
-    end
-    
     -- Очистка очереди уведомлений (безопасно)
     State.NotificationQueue = {}
     State.CurrentNotification = nil
@@ -998,6 +1052,9 @@ local function FullShutdown()
         if killAuraCon then ToggleKillAura(false) end
     end)
     
+    pcall(function() ESP.Cleanup() end)
+    pcall(function() GUI.Cleanup() end)
+
     -- ✅ Остановка Trolling threads
     pcall(function()
         if State.OrbitThread then
@@ -1016,44 +1073,7 @@ local function FullShutdown()
         State.LoopFlingEnabled = false
         State.BlockPathEnabled = false
     end)
-    
-    -- ✅ Очистка ESP
-    pcall(function()
-        for _, highlight in pairs(State.PlayerHighlights) do
-            if highlight and highlight.Parent then
-                highlight:Destroy()
-            end
-        end
-        State.PlayerHighlights = {}
-    end)
-    
-    pcall(function()
-        for _, espData in pairs(State.GunCache) do
-            if espData then
-                if espData.highlight then espData.highlight:Destroy() end
-                if espData.billboard then espData.billboard:Destroy() end
-            end
-        end
-        State.GunCache = {}
-    end)
-    
-    -- ✅ Отключение Role Check Loop
-    pcall(function()
-        if State.RoleCheckLoop then
-            State.RoleCheckLoop:Disconnect()
-            State.RoleCheckLoop = nil
-        end
-    end)
-    
-    -- ✅ Отключение Gun Tracking
-    pcall(function()
-        if currentMapConnection then
-            currentMapConnection:Disconnect()
-            currentMapConnection = nil
-        end
-        currentMap = nil
-    end)
-    
+
     -- ✅ Очистка всех general connections
     pcall(function()
         for _, connection in ipairs(State.Connections) do
@@ -1125,7 +1145,22 @@ local function FullShutdown()
     State.heroSent = false
     State.roundStart = true
     State.roundActive = false
+    pcall(function()
+        if State.UIElements.NotificationGui then
+            State.UIElements.NotificationGui:Destroy()
+            State.UIElements.NotificationGui = nil
+            State.UIElements.NotificationContainer = nil
+        end
+
+        for name, ui in pairs(State.UIElements) do
+            if typeof(ui) == "Instance" and ui.Parent then
+                ui:Destroy()
+            end
+            State.UIElements[name] = nil
+        end
+    end)
     
+    ScriptAlive = false
     print("[FullShutdown] ✅ Complete!")
 end
 
@@ -1432,6 +1467,8 @@ end
 -- FPS BOOST FUNCTION
 -- ==============================
 
+local fpsBoostDescendantConn
+
 local function EnableFPSBoost()
     if fpsBoostActive then
         return
@@ -1489,7 +1526,7 @@ local function EnableFPSBoost()
     end)
     
     -- 5. AUTO-CLEANUP NEW EFFECTS
-    workspace.DescendantAdded:Connect(function(child)
+    fpsBoostDescendantConn = workspace.DescendantAdded:Connect(function(child)
         if not fpsBoostActive then return end
         
         task.spawn(function()
@@ -1507,7 +1544,10 @@ local function EnableFPSBoost()
             end)
         end)
     end)
+    
+    TrackConnection(fpsBoostDescendantConn)
 end
+
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -1683,43 +1723,12 @@ local FlingNeutralizerConnection = nil
 local DetectedFlingers = {}
 local FlingBlockedNotified = false
 
--- getMurder() - Поиск убийцы
-local function getMurder()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        local backpack = plr:FindFirstChild("Backpack")
-        
-        if (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife")) then
-            return plr
-        end
-    end
-    return nil
-end
-
--- getSheriff() - Поиск шерифа
-local function getSheriff()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        local backpack = plr:FindFirstChild("Backpack")
-        
-        if (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun")) then
-            return plr
-        end
-    end
-    return nil
-end
-
-
--- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 8: ANTI-FLING (СТРОКИ 661-790)
--- ══════════════════════════════════════════════════════════════════════════════
-
 -- EnableAntiFling() - Включение защиты от флинга
 local function EnableAntiFling()
     if State.AntiFlingEnabled then return end
     State.AntiFlingEnabled = true
 
-    FlingDetectionConnection = RunService.Heartbeat:Connect(function()
+    FlingDetectionConnection = TrackConnection(RunService.Heartbeat:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
                 local primaryPart = player.Character.PrimaryPart
@@ -1747,10 +1756,10 @@ local function EnableAntiFling()
                 end
             end
         end
-    end)
+    end))
     
 
-    FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
+    FlingNeutralizerConnection = TrackConnection(RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if character and character.PrimaryPart then
             local primaryPart = character.PrimaryPart
@@ -1784,7 +1793,7 @@ local function EnableAntiFling()
                 AntiFlingLastPos = primaryPart.Position
             end
         end
-    end)
+    end))
     
     table.insert(State.Connections, FlingDetectionConnection)
     table.insert(State.Connections, FlingNeutralizerConnection)
@@ -2113,8 +2122,9 @@ end)
 
 -- Наблюдатель (запасной вариант)
 task.spawn(function()
-    while true do
+    while ScriptAlive do
         task.wait(1)
+        if not ScriptAlive then break end
         if State.WalkFlingEnabledByUser and not State.WalkFlingActive then
             local char = LocalPlayer.Character
             if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
@@ -2195,7 +2205,8 @@ local function EnableNoClip()
     
     State.NoClipObjects = NoClipObjects
     
-    State.NoClipRespawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
+    State.NoClipRespawnConnection = TrackConnection(LocalPlayer.CharacterAdded:Connect(function(newChar)
+
         task.wait(0.15)
         
         table.clear(NoClipObjects)
@@ -2205,13 +2216,13 @@ local function EnableNoClip()
                 table.insert(NoClipObjects, obj)
             end
         end
-    end)
+    end))
     
-    State.NoClipConnection = RunService.Stepped:Connect(function()
+    State.NoClipConnection = TrackConnection(RunService.Stepped:Connect(function()
         for i = 1, #NoClipObjects do
             NoClipObjects[i].CanCollide = false
         end
-    end)
+    end))
     
     if State.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220,220,220)\">Noclip: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
@@ -2746,13 +2757,6 @@ local function StartAutoFarm()
             end)
             print("[Auto Farm] 🛡️ GodMode автоматически включен")
         end
-
-        if State.XPFarmEnabled and not State.InstantPickupEnabled then
-            pcall(function()
-                EnableInstantPickup()
-            end)
-            print("[Auto Farm] 🔫 InstantPickup автоматически включен для XP Farm")
-        end
                 
         local noCoinsAttempts = 0
         local maxNoCoinsAttempts = 4
@@ -3226,12 +3230,6 @@ local function StopAutoFarm()
     
     State.CoinBlacklist = {}
     State.spawnAtPlayer = spawnAtPlayerOriginalState
-    
-    if not instantPickupWasEnabled and State.InstantPickupEnabled then
-        pcall(function()
-            DisableInstantPickup()
-        end)
-    end
 
     print("[Auto Farm] 🛑 Остановлен")
 end
@@ -3439,10 +3437,12 @@ end
 -- RigidOrbitPlayer() - Орбита вокруг игрока
 local function RigidOrbitPlayer(targetName, enabled)
     if enabled then
+        print(targetName, "Orbit/Loop/Block start")
         State.OrbitAngle = 0
         
         State.OrbitThread = task.spawn(function()
             while State.OrbitEnabled do
+                print("loop step")
                 pcall(function()
                     local target = getPlayerByName(targetName)
                     if target and target.Character then
@@ -3550,332 +3550,6 @@ local function PendulumBlockPath(targetName, enabled)
         end
     end
 end
-
--- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 14: ESP SYSTEM (СТРОКИ 2051-2350)
--- ══════════════════════════════════════════════════════════════════════════════
-
--- CreateHighlight() - Создание Highlight
-local function CreateHighlight(adornee, color)
-    if not adornee or not adornee.Parent then return nil end
-
-    local highlight = Instance.new("Highlight")
-    highlight.Adornee = adornee
-    highlight.FillColor = color
-    highlight.FillTransparency = 0.8
-    highlight.OutlineColor = color
-    highlight.OutlineTransparency = 0.3
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Enabled = true
-    highlight.Parent = adornee
-    return highlight
-end
-
--- UpdatePlayerHighlight() - Обновление ESP игрока
-local function UpdatePlayerHighlight(player, role)
-    if not player or player == LocalPlayer then return end
-    
-    local character = player.Character
-    if not character then
-        if State.PlayerHighlights[player] then
-            pcall(function()
-                State.PlayerHighlights[player]:Destroy()
-            end)
-            State.PlayerHighlights[player] = nil
-        end
-        return
-    end
-    
-    local color, shouldShow
-    if role == "Murder" then
-        color = CONFIG.Colors.Murder
-        shouldShow = State.MurderESP
-    elseif role == "Sheriff" then
-        color = CONFIG.Colors.Sheriff
-        shouldShow = State.SheriffESP
-    elseif role == "Innocent" then
-        color = CONFIG.Colors.Innocent
-        shouldShow = State.InnocentESP
-    else
-        shouldShow = false
-    end
-    
-    if not shouldShow then
-        if State.PlayerHighlights[player] then
-            pcall(function()
-                State.PlayerHighlights[player].Enabled = false
-            end)
-        end
-        return
-    end
-    
-    local existingHighlight = State.PlayerHighlights[player]
-    
-    if existingHighlight then
-        if existingHighlight.Parent and existingHighlight.Adornee == character then
-            existingHighlight.FillColor = color
-            existingHighlight.OutlineColor = color
-            existingHighlight.Enabled = true
-        else
-            pcall(function() existingHighlight:Destroy() end)
-            State.PlayerHighlights[player] = nil
-            
-            local newHighlight = CreateHighlight(character, color)
-            if newHighlight then
-                State.PlayerHighlights[player] = newHighlight
-            end
-        end
-    else
-        local newHighlight = CreateHighlight(character, color)
-        if newHighlight then
-            State.PlayerHighlights[player] = newHighlight
-        end
-    end
-end
-
--- getMap() - Поиск карты
-local function getMap()
-    for _, v in ipairs(Workspace:GetChildren()) do
-        if v:FindFirstChild("CoinContainer") then
-            return v
-        end
-    end
-    return nil
-end
-
--- getGun() - Поиск пистолета
-local function getGun()
-    local map = getMap()
-    if not map then return nil end
-    return map:FindFirstChild("GunDrop")
-end
-
--- CreateGunESP() - Создание Gun ESP
-local function CreateGunESP(gunPart)
-    if not gunPart or not gunPart:IsA("BasePart") then return end
-    
-    if not gunPart.Parent then
-        if State.GunCache[gunPart] then
-            RemoveGunESP(gunPart)
-        end
-        return
-    end
-    
-    if State.GunCache[gunPart] then
-        RemoveGunESP(gunPart)
-    end
-    
-    -- ✅ ЗОЛОТИСТЫЙ Highlight
-    local highlight = Instance.new("Highlight")
-    highlight.Adornee = gunPart
-    highlight.FillColor = Color3.fromRGB(255, 200, 50)  -- Золотистый
-    highlight.FillTransparency = 0.5
-    highlight.OutlineColor = Color3.fromRGB(255, 200, 50)
-    highlight.OutlineTransparency = 0
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Enabled = State.GunESP
-    highlight.Parent = gunPart
-    
-    -- ✅ КРАСИВЫЙ текст
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "GunESPLabel"
-    billboard.Adornee = gunPart
-    billboard.Size = UDim2.new(0, 140, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-    billboard.AlwaysOnTop = true
-    billboard.Parent = gunPart
-    
-    local label = Instance.new("TextLabel")
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.Text = "GUN"
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)  -- Белый текст
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 12
-    label.TextStrokeTransparency = 0.6  -- Сильная обводка
-    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    label.Parent = billboard
-    
-    State.GunCache[gunPart] = {
-        highlight = highlight,
-        billboard = billboard
-    }
-end
-
--- RemoveGunESP() - Удаление Gun ESP
-local function RemoveGunESP(gunPart)
-    if not gunPart or not State.GunCache[gunPart] then return end
-    
-    local espData = State.GunCache[gunPart]
-    
-    pcall(function()
-        if espData.highlight then
-            espData.highlight:Destroy()
-        end
-        if espData.billboard then
-            espData.billboard:Destroy()
-        end
-    end)
-    
-    State.GunCache[gunPart] = nil
-end
-
--- UpdateGunESPVisibility() - Обновление видимости
-local function UpdateGunESPVisibility()
-    for gunPart, espData in pairs(State.GunCache) do
-        if espData.highlight then
-            espData.highlight.Enabled = State.GunESP
-        end
-        if espData.billboard then
-            espData.billboard.Enabled = State.GunESP
-        end
-    end
-end
-
--- SetupGunTracking() - Heartbeat для Gun ESP
-local previousGun = nil
-
-local function SetupGunTracking()
-    -- Отключаем старые connections
-    if currentMapConnection then
-        currentMapConnection:Disconnect()
-        currentMapConnection = nil
-    end
-    
-    -- ✅ HEARTBEAT для постоянной проверки
-    currentMapConnection = RunService.Heartbeat:Connect(function()
-        pcall(function()
-            local gun = getGun()
-            
-            -- ✅ УВЕДОМЛЕНИЕ о выпадении пистолета
-            if gun and gun ~= previousGun then
-                State.CurrentGunDrop = gun
-                if State.NotificationsEnabled then
-                    ShowNotification(
-                        "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
-                        CONFIG.Colors.Gun
-                    )
-                end
-                previousGun = gun
-            end
-            
-            -- Если пистолет исчез (подобрали)
-            if not gun and previousGun then
-                previousGun = nil
-            end
-            
-            -- Если пистолет есть
-            if gun and State.GunESP then
-                -- Создаём ESP если его нет
-                if not State.GunCache[gun] then
-                    CreateGunESP(gun)
-                else
-                    -- Обновляем видимость
-                    local espData = State.GunCache[gun]
-                    if espData.highlight then
-                        espData.highlight.Enabled = State.GunESP
-                    end
-                end
-            end
-            
-            -- Очистка старых ESP (пистолет был подобран)
-            for cachedGun, espData in pairs(State.GunCache) do
-                if cachedGun ~= gun or not gun then
-                    RemoveGunESP(cachedGun)
-                end
-            end
-        end)
-    end)
-    
-    table.insert(State.Connections, currentMapConnection)
-end
-
--- StartRoleChecking() - Heartbeat для Role ESP
-local function StartRoleChecking()
-    if State.RoleCheckLoop then
-        pcall(function()
-            State.RoleCheckLoop:Disconnect()
-        end)
-        State.RoleCheckLoop = nil
-    end
-    
-    for player, highlight in pairs(State.PlayerHighlights) do
-        pcall(function()
-            highlight:Destroy()
-        end)
-        State.PlayerHighlights[player] = nil
-    end
-    
-    State.RoleCheckLoop = RunService.Heartbeat:Connect(function()
-        pcall(function()
-            local murder = getMurder()
-            local sheriff = getSheriff()
-            
-            local murderers = {}
-            local sheriffs = {}
-            local innocents = {}
-            
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr == murder then
-                    table.insert(murderers, plr)
-                elseif plr == sheriff then
-                    table.insert(sheriffs, plr)
-                else
-                    table.insert(innocents, plr)
-                end
-            end
-            
-            for _, plr in ipairs(murderers) do
-                UpdatePlayerHighlight(plr, "Murder")
-            end
-            for _, plr in ipairs(sheriffs) do
-                UpdatePlayerHighlight(plr, "Sheriff")
-            end
-            for _, plr in ipairs(innocents) do
-                UpdatePlayerHighlight(plr, "Innocent")
-            end
-            
-            if murder and sheriff and State.roundStart then
-                State.roundActive = true
-                State.roundStart = false
-                State.prevMurd = murder
-                State.prevSher = sheriff
-                State.heroSent = false
-                
-                if State.NotificationsEnabled then
-                    ShowNotification("<font color=\"rgb(255, 85, 85)\">🔪 Murderer:</font> " .. murder.Name, CONFIG.Colors.Text)
-                    task.wait(0.1)
-                    ShowNotification("<font color=\"rgb(50, 150, 255)\">🔫 Sheriff:</font> " .. sheriff.Name, CONFIG.Colors.Text)
-                end
-            end
-            
-            if not murder and State.roundActive then
-                State.roundActive = false
-                State.roundStart = true
-                State.prevMurd = nil
-                State.prevSher = nil
-                State.heroSent = false
-                
-                if State.NotificationsEnabled then
-                    ShowNotification("<font color=\"rgb(220, 220, 220)\">Round ended</font>", CONFIG.Colors.Text)
-                end
-            end
-            
-            if sheriff and State.prevSher and sheriff ~= State.prevSher and murder and murder == State.prevMurd and not State.heroSent then
-                State.prevSher = sheriff
-                State.heroSent = true
-                
-                if State.NotificationsEnabled then
-                    ShowNotification("<font color=\"rgb(50, 150, 255)\">New Sheriff:</font> " .. sheriff.Name, CONFIG.Colors.Text)
-                end
-            end
-        end)
-    end)
-    
-    table.insert(State.Connections, State.RoleCheckLoop)
-end
-
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 15: COMBAT FUNCTIONS (СТРОКИ 2351-2800)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -4226,11 +3900,7 @@ local function EnableInstantPickup()
                         break
                     end
                 end
-                
-                -- ✅ ЗАПОМИНАЕМ ЭТОТ ЭКЗЕМПЛЯР
                 lastAttemptedGun = gun
-                
-                -- ❌ НЕ ПОЛУЧИЛОСЬ - ЖДЁМ НОВОГО
                 if not pickupSuccess then
                     repeat
                         task.wait(0.2)
@@ -4841,1354 +4511,171 @@ local function ServerHop()
     TeleportToServer(selectedServer.id)
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 19: UI HELPER FUNCTIONS (СТРОКИ 3201-3450)
--- ══════════════════════════════════════════════════════════════════════════════
-
--- Create() - Универсальный конструктор
-local function Create(className, properties, children)
-    local obj = Instance.new(className)
-    for k, v in pairs(properties or {}) do
-        obj[k] = v
+-- СНАЧАЛА объявляем функции
+local function HandleEmoteInput(input)
+    if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then
+        PlayEmote("sit")
+    elseif input.KeyCode == State.Keybinds.Dab and State.Keybinds.Dab ~= Enum.KeyCode.Unknown then
+        PlayEmote("dab")
+    elseif input.KeyCode == State.Keybinds.Zen and State.Keybinds.Zen ~= Enum.KeyCode.Unknown then
+        PlayEmote("zen")
+    elseif input.KeyCode == State.Keybinds.Ninja and State.Keybinds.Ninja ~= Enum.KeyCode.Unknown then
+        PlayEmote("ninja")
+    elseif input.KeyCode == State.Keybinds.Floss and State.Keybinds.Floss ~= Enum.KeyCode.Unknown then
+        PlayEmote("floss")
     end
-    for _, child in ipairs(children or {}) do
-        child.Parent = obj
-    end
-    return obj
 end
 
--- AddCorner() - UICorner
-local function AddCorner(parent, radius)
-    return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
-end
-
--- AddStroke() - UIStroke
-local function AddStroke(parent, thickness, color, transparency)
-    return Create("UIStroke", {
-        Thickness = thickness or 1,
-        Color = color or CONFIG.Colors.Stroke,
-        Transparency = transparency or 0.5,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        Parent = parent
-    })
-end
-
-
--- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 20: UI CREATION (СТРОКИ 3451-5200+)
--- ══════════════════════════════════════════════════════════════════════════════
-
-local function CreateUI()
-    for _, child in ipairs(CoreGui:GetChildren()) do
-        if child.Name == "MM2_ESP_UI" then child:Destroy() end
+local function HandleActionInput(input)
+    if input.KeyCode == State.Keybinds.knifeThrow and State.Keybinds.knifeThrow ~= Enum.KeyCode.Unknown then
+        pcall(function() knifeThrow(true) end)
     end
 
-
-    local gui = Create("ScreenGui", {
-        Name = "MM2_ESP_UI",
-        Parent = CoreGui
-    })
-    State.UIElements.MainGui = gui
-
-
-    local mainFrame = Create("Frame", {
-        Name = "MainFrame",
-        BackgroundColor3 = CONFIG.Colors.Background,
-        Position = UDim2.new(0.5, -225, 0.5, -325),
-        Size = UDim2.new(0, 450, 0, 650),
-        ClipsDescendants = false,
-        Active = true,
-        Draggable = true,
-        Parent = gui
-    })
-    AddCorner(mainFrame, 12)
-    AddStroke(mainFrame, 2, CONFIG.Colors.Accent, 0.8)
-
-
-    local header = Create("Frame", {
-        Name = "Header",
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Size = UDim2.new(1, 0, 0, 40),
-        Parent = mainFrame
-    })
-    AddCorner(header, 12)
-
-
-    local titleLabel = Create("TextLabel", {
-        Text = "MM2 <font color=\"rgb(128, 0, 128)\">for my кошичка жена!</font>",
-        --Text = "MM2 ESP <font color=\"rgb(90,140,255)\">v6.0 Tabs</font>",
-        RichText = true,
-        Font = Enum.Font.GothamBold,
-        TextSize = 16,
-        TextColor3 = CONFIG.Colors.Text,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 0),
-        Size = UDim2.new(0.8, 0, 1, 0),
-        Parent = header
-    })
-
-
-    local closeButton = Create("TextButton", {
-        Text = "X",
-        Font = Enum.Font.GothamMedium,
-        TextSize = 24,
-        TextColor3 = CONFIG.Colors.TextDark,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(1, -35, 0, 0),
-        Size = UDim2.new(0, 35, 0, 40),
-        Parent = header
-    })
-
-
-    local tabContainer = Create("ScrollingFrame", {
-        Name = "TabContainer",
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 10, 0, 45),
-        Size = UDim2.new(1, -20, 0, 35),
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        ScrollBarThickness = 0,
-        Parent = mainFrame
-    })
-   
-    local tabLayout = Create("UIListLayout", {
-        FillDirection = Enum.FillDirection.Horizontal,
-        Padding = UDim.new(0, 5),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Parent = tabContainer
-    })
-
-
-    tabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        tabContainer.CanvasSize = UDim2.new(0, tabLayout.AbsoluteContentSize.X + 10, 0, 0)
-    end)
-
-
-    local pagesContainer = Create("Frame", {
-        Name = "PagesContainer",
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 90),
-        Size = UDim2.new(1, -30, 1, -115),
-        Parent = mainFrame
-    })
-
-
-    local Tabs = {}
-    local currentTab = nil
-
-
-    local function CreateTab(name)
-        local tabBtn = Create("TextButton", {
-            Text = name,
-            Font = Enum.Font.GothamBold,
-            TextSize = 13,
-            TextColor3 = CONFIG.Colors.TextDark,
-            BackgroundColor3 = CONFIG.Colors.Section,
-            Size = UDim2.new(0, 0, 1, 0),
-            AutoButtonColor = false,
-            Parent = tabContainer
-        })
-        AddCorner(tabBtn, 6)
-       
-        local textWidth = game:GetService("TextService"):GetTextSize(name, 13, Enum.Font.GothamBold, Vector2.new(999, 35)).X
-        tabBtn.Size = UDim2.new(0, textWidth + 20, 1, 0)
-
-
-        local page = Create("ScrollingFrame", {
-            Name = name .. "Page",
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 1, 0),
-            CanvasSize = UDim2.new(0, 0, 0, 0),
-            ScrollBarThickness = 6,
-            ScrollBarImageColor3 = CONFIG.Colors.Accent,
-            Visible = false,
-            Parent = pagesContainer
-        })
-
-
-        local pageLayout = Create("UIListLayout", {
-            Padding = UDim.new(0, 12),
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Parent = page
-        })
-
-
-        pageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            page.CanvasSize = UDim2.new(0, 0, 0, pageLayout.AbsoluteContentSize.Y + 20)
-        end)
-
-
-        local function Activate()
-            if State.UIElements.OpenDropdowns then
-                for _, closeFunc in ipairs(State.UIElements.OpenDropdowns) do
-                    pcall(closeFunc)
-                end
-            end
-            if currentTab then
-                TweenService:Create(currentTab.Btn, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Section, TextColor3 = CONFIG.Colors.TextDark}):Play()
-                currentTab.Page.Visible = false
-            end
-            currentTab = {Btn = tabBtn, Page = page}
-            TweenService:Create(tabBtn, TweenInfo.new(0.2), {BackgroundColor3 = CONFIG.Colors.Accent, TextColor3 = CONFIG.Colors.Text}):Play()
-            page.Visible = true
-        end
-
-
-        tabBtn.MouseButton1Click:Connect(Activate)
-
-
-        if #Tabs == 0 then
-            Activate()
-        end
-        table.insert(Tabs, {Btn = tabBtn, Page = page})
-
-
-        local TabFunctions = {}
-
-
-        function TabFunctions:CreateSection(title)
-            Create("TextLabel", {
-                Text = title,
-                Font = Enum.Font.GothamBold,
-                TextSize = 13,
-                TextColor3 = CONFIG.Colors.TextDark,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 22),
-                Parent = page
-            })
-        end
-
-    function TabFunctions:CreateDropdown(title, desc, options, default, callback)
-    local card = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Size = UDim2.new(1, 0, 0, 60),
-        Parent = page
-    })
-    AddCorner(card, 8)
-    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-    
-    Create("TextLabel", {
-        Text = title,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 14,
-        TextColor3 = CONFIG.Colors.Text,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 10),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-    
-    Create("TextLabel", {
-        Text = desc,
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        TextColor3 = CONFIG.Colors.TextDark,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 30),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-    
-    local dropdown = Create("TextButton", {
-        Text = default .. " ▼",
-        Font = Enum.Font.GothamMedium,
-        TextSize = 11,
-        TextColor3 = CONFIG.Colors.Text,
-        BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-        Position = UDim2.new(1, -110, 0.5, -12),
-        Size = UDim2.new(0, 95, 0, 24),
-        AutoButtonColor = false,
-        ZIndex = 5,
-        Parent = card
-    })
-    AddCorner(dropdown, 6)
-    AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
-    
-    local dropdownFrame = Create("ScrollingFrame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Position = UDim2.new(0, 0, 0, 0),
-        Size = UDim2.new(0, 95, 0, 0),
-        Visible = false,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        ScrollBarThickness = 4,
-        ScrollBarImageColor3 = CONFIG.Colors.Accent,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ClipsDescendants = false,
-        ZIndex = 1000,
-        Parent = mainFrame
-    })
-    AddCorner(dropdownFrame, 6)
-    AddStroke(dropdownFrame, 1, CONFIG.Colors.Accent, 0.6)
-    
-    local listLayout = Create("UIListLayout", {
-        Padding = UDim.new(0, 2),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Parent = dropdownFrame
-    })
-    
-    for _, option in ipairs(options) do
-        local optionBtn = Create("TextButton", {
-            Text = option,
-            Font = Enum.Font.Gotham,
-            TextSize = 10,
-            TextColor3 = CONFIG.Colors.Text,
-            BackgroundColor3 = Color3.fromRGB(50, 50, 55),
-            Size = UDim2.new(1, 0, 0, 25),
-            AutoButtonColor = false,
-            ZIndex = 1001,
-            Parent = dropdownFrame
-        })
-        AddCorner(optionBtn, 4)
-        
-        optionBtn.MouseButton1Click:Connect(function()
-            dropdown.Text = option .. " ▼"
-            callback(option)
-            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-                Size = UDim2.new(0, 95, 0, 0)
-            }):Play()
-            task.wait(0.2)
-            dropdownFrame.Visible = false
-        end)
-        
-        optionBtn.MouseEnter:Connect(function()
-            TweenService:Create(optionBtn, TweenInfo.new(0.15), {BackgroundColor3 = CONFIG.Colors.Accent}):Play()
-        end)
-        
-        optionBtn.MouseLeave:Connect(function()
-            TweenService:Create(optionBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 55)}):Play()
-        end)
-    end
-    
-    dropdown.MouseButton1Click:Connect(function()
-        dropdownFrame.Visible = not dropdownFrame.Visible
-        
-        if dropdownFrame.Visible then
-            local dropdownAbsPos = dropdown.AbsolutePosition
-            local dropdownAbsSize = dropdown.AbsoluteSize
-            local mainFramePos = mainFrame.AbsolutePosition
-            
-            local calculatedHeight = math.min(100, #options * 27)
-            
-            dropdownFrame.Position = UDim2.new(
-                0, dropdownAbsPos.X - mainFramePos.X,
-                0, dropdownAbsPos.Y - mainFramePos.Y + dropdownAbsSize.Y + 5
-            )
-            
-            dropdownFrame.Size = UDim2.new(0, 95, 0, 0)
-            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0, 95, 0, calculatedHeight)
-            }):Play()
-        else
-            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-                Size = UDim2.new(0, 95, 0, 0)
-            }):Play()
-            task.wait(0.2)
-            dropdownFrame.Visible = false
-        end
-    end)
-    
-    return dropdown
-end
-
-
-
-        function TabFunctions:CreateToggle(title, desc, callback)
-            local card = Create("Frame", {
-                BackgroundColor3 = CONFIG.Colors.Section,
-                Size = UDim2.new(1, 0, 0, 60),
-                Parent = page
-            })
-            AddCorner(card, 8)
-            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-   
-            Create("TextLabel", {
-                Text = title,
-                Font = Enum.Font.GothamMedium,
-                TextSize = 14,
-                TextColor3 = CONFIG.Colors.Text,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 15, 0, 10),
-                Size = UDim2.new(0, 250, 0, 20),
-                Parent = card
-            })
-   
-            Create("TextLabel", {
-                Text = desc,
-                Font = Enum.Font.Gotham,
-                TextSize = 11,
-                TextColor3 = CONFIG.Colors.TextDark,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 15, 0, 30),
-                Size = UDim2.new(0, 250, 0, 20),
-                Parent = card
-            })
-   
-            local toggleBg = Create("TextButton", {
-                Text = "",
-                BackgroundColor3 = Color3.fromRGB(50, 50, 55),
-                Position = UDim2.new(1, -60, 0.5, -12),
-                Size = UDim2.new(0, 44, 0, 24),
-                AutoButtonColor = false,
-                Parent = card
-            })
-            AddCorner(toggleBg, 24)
-   
-            local toggleCircle = Create("Frame", {
-                BackgroundColor3 = CONFIG.Colors.Text,
-                Position = UDim2.new(0, 2, 0.5, -10),
-                Size = UDim2.new(0, 20, 0, 20),
-                Parent = toggleBg
-            })
-            AddCorner(toggleCircle, 20)
-   
-            local state = false
-            toggleBg.MouseButton1Click:Connect(function()
-                state = not state
-                local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
-                local targetPos = state and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
-   
-                TweenService:Create(toggleBg, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
-                TweenService:Create(toggleCircle, TweenInfo.new(0.2), {Position = targetPos}):Play()
-   
-                callback(state)
-            end)
-            return toggleBg
-        end
-
-
-        function TabFunctions:CreateInputField(title, desc, defaultValue, callback)
-            local card = Create("Frame", {
-                BackgroundColor3 = CONFIG.Colors.Section,
-                Size = UDim2.new(1, 0, 0, 60),
-                Parent = page
-            })
-            AddCorner(card, 8)
-            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-   
-            Create("TextLabel", {
-                Text = title,
-                Font = Enum.Font.GothamMedium,
-                TextSize = 14,
-                TextColor3 = CONFIG.Colors.Text,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 15, 0, 10),
-                Size = UDim2.new(0, 250, 0, 20),
-                Parent = card
-            })
-   
-            Create("TextLabel", {
-                Text = desc,
-                Font = Enum.Font.Gotham,
-                TextSize = 11,
-                TextColor3 = CONFIG.Colors.TextDark,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 15, 0, 30),
-                Size = UDim2.new(0, 250, 0, 20),
-                Parent = card
-            })
-   
-            local inputBox = Create("TextBox", {
-                Text = tostring(defaultValue),
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = CONFIG.Colors.Text,
-                BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-                Position = UDim2.new(1, -80, 0.5, -12),
-                Size = UDim2.new(0, 65, 0, 24),
-                PlaceholderText = "Value",
-                ClearTextOnFocus = false,
-                Parent = card
-            })
-            AddCorner(inputBox, 6)
-            AddStroke(inputBox, 1, CONFIG.Colors.Accent, 0.6)
-   
-            inputBox.FocusLost:Connect(function(enterPressed)
-                local value = tonumber(inputBox.Text)
-                if value then
-                    callback(value)
-                else
-                    inputBox.Text = tostring(defaultValue)
-                end
-            end)
-        end
-
-
-        function TabFunctions:CreateSlider(title, description, min, max, default, callback, step)
-            step = step or 1
-            local card = Create("Frame", {
-                BackgroundColor3 = CONFIG.Colors.Section,
-                Size = UDim2.new(1, 0, 0, 70),
-                Parent = page
-            })
-            AddCorner(card, 8)
-            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-   
-            Create("TextLabel", {
-                Text = title,
-                Font = Enum.Font.GothamMedium,
-                TextSize = 14,
-                TextColor3 = CONFIG.Colors.Text,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 15, 0, 10),
-                Size = UDim2.new(0, 250, 0, 20),
-                Parent = card
-            })
-   
-            Create("TextLabel", {
-                Text = description,
-                Font = Enum.Font.Gotham,
-                TextSize = 11,
-                TextColor3 = CONFIG.Colors.TextDark,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 15, 0, 30),
-                Size = UDim2.new(0, 250, 0, 20),
-                Parent = card
-            })
-   
-            local sliderBg = Create("Frame", {
-                BackgroundColor3 = Color3.fromRGB(40, 40, 45),
-                Position = UDim2.new(0, 15, 0, 50),
-                Size = UDim2.new(1, -95, 0, 6),
-                Parent = card
-            })
-            AddCorner(sliderBg, 3)
-   
-            local sliderFill = Create("Frame", {
-                BackgroundColor3 = CONFIG.Colors.Accent,
-                Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
-                Parent = sliderBg
-            })
-            AddCorner(sliderFill, 3)
-   
-            local sliderButton = Create("TextButton", {
-                Text = "",
-                BackgroundColor3 = CONFIG.Colors.Text,
-                Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8),
-                Size = UDim2.new(0, 16, 0, 16),
-                AutoButtonColor = false,
-                Parent = sliderBg
-            })
-            AddCorner(sliderButton, 16)
-   
-            local valueLabel = Create("TextLabel", {
-                Text = step >= 1 and string.format("%d", default) or string.format("%.2f", default),
-                Font = Enum.Font.GothamBold,
-                TextSize = 12,
-                TextColor3 = CONFIG.Colors.Accent,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(1, -65, 0, 8),
-                Size = UDim2.new(0, 50, 0, 20),
-                TextXAlignment = Enum.TextXAlignment.Right,
-                Parent = card
-            })
-   
-            local dragging = false
-            local function updateSlider(input)
-                local pos = sliderBg.AbsolutePosition.X
-                local size = sliderBg.AbsoluteSize.X
-                local mouseX = input.Position.X
-               
-                local alpha = math.clamp((mouseX - pos) / size, 0, 1)
-                local value = min + (alpha * (max - min))
-               
-                value = math.floor(value / step + 0.5) * step
-                value = math.clamp(value, min, max)
-               
-                local normalizedValue = (value - min) / (max - min)
-                sliderFill.Size = UDim2.new(normalizedValue, 0, 1, 0)
-                sliderButton.Position = UDim2.new(normalizedValue, -8, 0.5, -8)
-               
-                if step >= 1 then
-                    valueLabel.Text = string.format("%d", value)
-                else
-                    valueLabel.Text = string.format("%.2f", value)
-                end
-               
-                callback(value)
-            end
-   
-            sliderButton.MouseButton1Down:Connect(function() dragging = true end)
-            sliderBg.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    dragging = true
-                    updateSlider(input)
-                end
-            end)
-            UserInputService.InputChanged:Connect(function(input)
-                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                    updateSlider(input)
-                end
-            end)
-            UserInputService.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-            end)
-        end
-
-
-        function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
-            local card = Create("Frame", {
-                BackgroundColor3 = CONFIG.Colors.Section,
-                Size = UDim2.new(1, 0, 0, 50),
-                Parent = page
-            })
-            AddCorner(card, 8)
-            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-   
-            Create("TextLabel", {
-                Text = title,
-                Font = Enum.Font.GothamMedium,
-                TextSize = 14,
-                TextColor3 = CONFIG.Colors.Text,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 15, 0, 0),
-                Size = UDim2.new(0, 200, 1, 0),
-                Parent = card
-            })
-   
-            local bindButton = Create("TextButton", {
-                Name = keybindKey .. "_Button",  -- ✅ ДОБАВЬТЕ ЭТО
-                Text = State.Keybinds[keybindKey] ~= Enum.KeyCode.Unknown and State.Keybinds[keybindKey].Name or "Not Bound",
-                Font = Enum.Font.GothamMedium,
-                TextSize = 12,
-                TextColor3 = CONFIG.Colors.Text,
-                BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-                Position = UDim2.new(1, -110, 0.5, -15),
-                Size = UDim2.new(0, 95, 0, 30),
-                AutoButtonColor = false,
-                Parent = card
-            })
-            AddCorner(bindButton, 6)
-            AddStroke(bindButton, 1, CONFIG.Colors.Accent, 0.6)
-
-            State.UIElements[keybindKey .. "_Button"] = bindButton
-            
-            bindButton.MouseButton1Click:Connect(function()
-                bindButton.Text = "Press Key..."
-                State.ListeningForKeybind = {key = keybindKey, button = bindButton}
-            end)
-           
-            return bindButton
-        end
-
-
-
-function TabFunctions:CreatePlayerDropdown(title, desc)
-    local card = Create("Frame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Size = UDim2.new(1, 0, 0, 60),
-        Parent = page
-    })
-    AddCorner(card, 8)
-    AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
-    Create("TextLabel", {
-        Text = title,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 14,
-        TextColor3 = CONFIG.Colors.Text,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 10),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-
-    Create("TextLabel", {
-        Text = desc,
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        TextColor3 = CONFIG.Colors.TextDark,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 15, 0, 30),
-        Size = UDim2.new(0, 250, 0, 20),
-        Parent = card
-    })
-
-    local dropdown = Create("TextButton", {
-        Text = "Select Player ▼",
-        Font = Enum.Font.GothamMedium,
-        TextSize = 11,
-        TextColor3 = CONFIG.Colors.Text,
-        BackgroundColor3 = Color3.fromRGB(45, 45, 50),
-        Position = UDim2.new(1, -180, 0.5, -12),
-        Size = UDim2.new(0, 165, 0, 24),
-        AutoButtonColor = false,
-        ZIndex = 5,
-        Parent = card
-    })
-    AddCorner(dropdown, 6)
-    AddStroke(dropdown, 1, CONFIG.Colors.Accent, 0.6)
-
-    local dropdownFrame = Create("ScrollingFrame", {
-        BackgroundColor3 = CONFIG.Colors.Section,
-        Position = UDim2.new(0, 0, 0, 0),
-        Size = UDim2.new(0, 165, 0, 0),
-        Visible = false,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        ScrollBarThickness = 4,
-        ScrollBarImageColor3 = CONFIG.Colors.Accent,
-        ClipsDescendants = true,
-        BorderSizePixel = 0,
-        ZIndex = 1000,
-        Parent = mainFrame
-    })
-    AddCorner(dropdownFrame, 6)
-    AddStroke(dropdownFrame, 1, CONFIG.Colors.Accent, 0.6)
-
-    local listLayout = Create("UIListLayout", {
-        Padding = UDim.new(0, 2),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Parent = dropdownFrame
-    })
-
-    -- ✅ ФУНКЦИЯ ЗАКРЫТИЯ ДРОПДАУНА
-    local function closeDropdown()
-        if dropdownFrame.Visible then
-            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-                Size = UDim2.new(0, 165, 0, 0)
-            }):Play()
-            task.wait(0.2)
-            dropdownFrame.Visible = false
-        end
+    if input.KeyCode == State.Keybinds.InstantKillAll and State.Keybinds.InstantKillAll ~= Enum.KeyCode.Unknown then
+        pcall(function() InstantKillAll() end)
     end
 
-    local function updatePlayerList()
-        for _, child in ipairs(dropdownFrame:GetChildren()) do
-            if child:IsA("TextButton") then
-                child:Destroy()
-            end
-        end
-        
-        local players = getAllPlayers()
-        
-        if #players == 0 then
-            Create("TextLabel", {
-                Text = "No players",
-                Font = Enum.Font.Gotham,
-                TextSize = 11,
-                TextColor3 = CONFIG.Colors.TextDark,
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, -10, 0, 25),
-                ZIndex = 1001,
-                Parent = dropdownFrame
-            })
-            dropdownFrame.CanvasSize = UDim2.new(0, 0, 0, 30)
-            return
-        end
-        
-        local buttonHeight = 28
-        local buttonSpacing = 2
-        local totalHeight = #players * (buttonHeight + buttonSpacing) + 5
-        
-        dropdownFrame.CanvasSize = UDim2.new(0, 0, 0, totalHeight)
-        
-        for i, playerName in ipairs(players) do
-            local pb = Create("TextButton", {
-                Text = playerName,
-                Font = Enum.Font.Gotham,
-                TextSize = 11,
-                TextColor3 = CONFIG.Colors.Text,
-                BackgroundColor3 = Color3.fromRGB(50, 50, 55),
-                Size = UDim2.new(1, -10, 0, buttonHeight),
-                Position = UDim2.new(0, 5, 0, 0),
-                AutoButtonColor = false,
-                ZIndex = 1001,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                Parent = dropdownFrame
-            })
-            AddCorner(pb, 4)
-            
-            local padding = Instance.new("UIPadding")
-            padding.PaddingLeft = UDim.new(0, 8)
-            padding.Parent = pb
-            
-            pb.MouseButton1Click:Connect(function()
-                State.SelectedPlayerForFling = playerName
-                dropdown.Text = (#playerName > 12 and playerName:sub(1, 12) .. "..." or playerName)
-                closeDropdown()
-            end)
-            
-            pb.MouseEnter:Connect(function()
-                TweenService:Create(pb, TweenInfo.new(0.15), {
-                    BackgroundColor3 = CONFIG.Colors.Accent
-                }):Play()
-            end)
-            
-            pb.MouseLeave:Connect(function()
-                TweenService:Create(pb, TweenInfo.new(0.15), {
-                    BackgroundColor3 = Color3.fromRGB(50, 50, 55)
-                }):Play()
-            end)
-        end
+    if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
+        pcall(function() shootMurderer() end)
     end
 
-    dropdown.MouseButton1Click:Connect(function()
-        dropdownFrame.Visible = not dropdownFrame.Visible
-        
-        if dropdownFrame.Visible then
-            updatePlayerList()
-            
-            local dropdownAbsPos = dropdown.AbsolutePosition
-            local dropdownAbsSize = dropdown.AbsoluteSize
-            local mainFramePos = mainFrame.AbsolutePosition
-            
-            local playerCount = #getAllPlayers()
-            local maxHeight = 150
-            local calculatedHeight = math.min(maxHeight, math.max(30, playerCount * 30))
-            
-            dropdownFrame.Position = UDim2.new(
-                0, dropdownAbsPos.X - mainFramePos.X,
-                0, dropdownAbsPos.Y - mainFramePos.Y + dropdownAbsSize.Y + 5
-            )
-            
-            dropdownFrame.Size = UDim2.new(0, 165, 0, 0)
-            TweenService:Create(dropdownFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0, 165, 0, calculatedHeight)
-            }):Play()
-        else
-            closeDropdown()
-        end
-    end)
-
-    -- ✅ НОВОЕ: Закрытие при клике мимо
-    local clickOutsideConnection = UserInputService.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and dropdownFrame.Visible then
-            local mousePos = UserInputService:GetMouseLocation()
-            local framePos = dropdownFrame.AbsolutePosition
-            local frameSize = dropdownFrame.AbsoluteSize
-            local dropdownPos = dropdown.AbsolutePosition
-            local dropdownSize = dropdown.AbsoluteSize
-            
-            -- Проверяем, клик вне дропдауна и вне кнопки
-            local outsideFrame = mousePos.X < framePos.X or mousePos.X > framePos.X + frameSize.X or
-                                 mousePos.Y < framePos.Y or mousePos.Y > framePos.Y + frameSize.Y
-            
-            local outsideButton = mousePos.X < dropdownPos.X or mousePos.X > dropdownPos.X + dropdownSize.X or
-                                  mousePos.Y < dropdownPos.Y or mousePos.Y > dropdownPos.Y + dropdownSize.Y
-            
-            if outsideFrame and outsideButton then
-                closeDropdown()
-            end
-        end
-    end)
-    
-    table.insert(State.Connections, clickOutsideConnection)
-    
-    -- ✅ НОВОЕ: Сохраняем ссылку на функцию закрытия для других событий
-    if not State.UIElements.OpenDropdowns then
-        State.UIElements.OpenDropdowns = {}
-    end
-    table.insert(State.UIElements.OpenDropdowns, closeDropdown)
-    
-    Players.PlayerAdded:Connect(function()
-        if dropdownFrame.Visible then
-            updatePlayerList()
-        end
-    end)
-    
-    Players.PlayerRemoving:Connect(function()
-        if dropdownFrame.Visible then
-            updatePlayerList()
-        end
-    end)
-    
-    return dropdown
-end
-
-
-        function TabFunctions:CreateButton(title, buttonText, color, callback)
-            local card = Create("Frame", {
-                BackgroundColor3 = CONFIG.Colors.Section,
-                Size = UDim2.new(1, 0, 0, 50),
-                Parent = page
-            })
-            AddCorner(card, 8)
-            AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-   
-            local button = Create("TextButton", {
-                Text = buttonText,
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = CONFIG.Colors.Text,
-                BackgroundColor3 = color or CONFIG.Colors.Accent,
-                Position = UDim2.new(0, 15, 0.5, -15),
-                Size = UDim2.new(1, -30, 0, 30),
-                AutoButtonColor = false,
-                Parent = card
-            })
-            AddCorner(button, 6)
-   
-            button.MouseButton1Click:Connect(callback)
-           
-            button.MouseEnter:Connect(function()
-                local hoverColor = Color3.fromRGB(
-                    math.min(255, color.R * 255 + 20),
-                    math.min(255, color.G * 255 + 20),
-                    math.min(255, color.B * 255 + 20)
-                )
-                TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = hoverColor}):Play()
-            end)
-           
-            button.MouseLeave:Connect(function()
-                TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = color}):Play()
-            end)
-           
-            return button
-        end
-
-
-        return TabFunctions
+    if input.KeyCode == State.Keybinds.PickupGun and State.Keybinds.PickupGun ~= Enum.KeyCode.Unknown then
+        pcall(function() pickupGun() end)
     end
 
-
-    -- ═══════════════════════════════════════════════════════════════
-    --              СОЗДАНИЕ ВКЛАДОК И РАСПРЕДЕЛЕНИЕ ФУНКЦИЙ
-    -- ═══════════════════════════════════════════════════════════════
-
-
-    local MainTab = CreateTab("Main")
-   
-    MainTab:CreateSection("CHARACTER SETTINGS")
-    MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, ApplyWalkSpeed)
-    MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, ApplyJumpPower)
-    MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, ApplyMaxCameraZoom)
-   
-    MainTab:CreateSection("CAMERA")
-    MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, function(v) pcall(function() ApplyFOV(v) end) end)
-    MainTab:CreateToggle("ViewClip", "Camera clips through walls", function(s) if s then EnableViewClip() else DisableViewClip() end end)
-   
-    MainTab:CreateSection("TELEPORT & MOVEMENT")
-    MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
-    MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
-   
-    MainTab:CreateSection("GODMODE")
-    MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
-
-
-    local VisualsTab = CreateTab("Visuals")
-   
-    VisualsTab:CreateSection("NOTIFICATIONS")
-    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", function(s) State.NotificationsEnabled = s end)
-   
-    VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", function(s) State.GunESP = s; end)
-    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", function(s) State.MurderESP = s; end)
-    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", function(s) State.SheriffESP = s; end)
-    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", function(s) State.InnocentESP = s; end)
-
-    VisualsTab:CreateSection("Misc")
-    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", function(enabled) State.UIOnlyEnabled = enabled if enabled then EnableUIOnly() else DisableUIOnly() end end)
-    VisualsTab:CreateToggle("Ping Chams", "Show server-side position", function(s) State.PingChamsEnabled = s if s then StartPingChams() else StopPingChams() end end)
-    VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", function(s) ToggleBulletTracers(s) end)
-
-    local CombatTab = CreateTab("Combat")
-    CombatTab:CreateSection("EXTENDED HITBOX")
-    CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", function(s) if s then EnableExtendedHitbox() else DisableExtendedHitbox() end end)
-    CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, 15, function(v) State.ExtendedHitboxSize = v; if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end, 1)
-   
-    CombatTab:CreateSection("MURDERER TOOLS")
-    CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
-    CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", function(s) State.spawnAtPlayer = s end)
-    CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", function(s) ToggleKillAura(s) end)
-    CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
-   
-    CombatTab:CreateSection("SHERIFF TOOLS")
-    CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", function(s) if s then EnableInstantPickup() else DisableInstantPickup() end end)
-    CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
-    
-
-
-    local FarmTab = CreateTab("Farming")
-    FarmTab:CreateSection("AUTO FARM")
-    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", function(s)
-        State.AutoFarmEnabled = s
-        if s then
-            State.CoinBlacklist = {}
-            State.StartSessionCoins = GetCollectedCoinsCount()
-            ShowNotification(
-                "Auto Farm: <font color=\"rgb(85, 255, 120)\">ON</font>",
-                CONFIG.Colors.Text
-            )
-            StartAutoFarm()
-        else
-            StopAutoFarm()
-            ShowNotification(
-            "Auto Farm: <font color=\"rgb(255, 85, 85)\">OFF</font>",
-            CONFIG.Colors.Text
-        )
-        end
-    end)
-    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent",  function(s) State.XPFarmEnabled = s if s then StartXPFarm() else StopXPFarm() end end)
-   
-    FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", function(s) State.UndergroundMode = s end)
-    FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, 22, function(v) State.CoinFarmFlySpeed = v end, 1)
-    FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, 2.0, function(v) State.CoinFarmDelay = v end, 0.5)
-    FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", function(enabled) State.AFKModeEnabled = enabled if enabled then EnableMaxOptimization() else DisableMaxOptimization() end end)
-    FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, function()
-    EnableFPSBoost()
-end)
-
-    local FunTab = CreateTab("Fun")
-   
-    FunTab:CreateSection("ANIMATION KEYBINDS")
-    FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
-    FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
-    FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
-    FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
-    FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
-   
-    FunTab:CreateSection("ANTI-FLING")
-    FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", function(s) if s then EnableAntiFling() else DisableAntiFling() end end)
-    FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", function(s) if s then WalkFlingStart() else WalkFlingStop() end end)
-    FunTab:CreateSection("FLING PLAYER")
-    FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
-    FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
-    FunTab:CreateSection("FLING ROLE")
-    FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), function() FlingMurderer() end)
-    FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), function() FlingSheriff() end)
-
-    local TrollingTab = CreateTab("Troll")
-
-    TrollingTab:CreateSection("🎯 SELECT TARGET")
-    TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
-
-    TrollingTab:CreateSection("💀 TROLLING MODES")
-
-    TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", function(s)
-        State.OrbitEnabled = s
-        if State.SelectedPlayerForFling then
-            RigidOrbitPlayer(State.SelectedPlayerForFling, s)
-            if s and State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 200, 50)\">🌀 Orbiting " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
-            end
-        else
-            if s and State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
-            end
-            State.OrbitEnabled = false
-        end
-    end)
-
-    TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", function(s)
-        State.LoopFlingEnabled = s
-        if State.SelectedPlayerForFling then
-            SimpleLoopFling(State.SelectedPlayerForFling, s)
-            if s and State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 200, 50)\">💥 Loop Flinging " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
-            end
-        else
-            if s and State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
-            end
-            State.LoopFlingEnabled = false
-        end
-    end)
-
-    TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", function(s)
-        State.BlockPathEnabled = s
-        if State.SelectedPlayerForFling then
-            PendulumBlockPath(State.SelectedPlayerForFling, s)
-            if s and State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 200, 50)\">🚧 Blocking " .. State.SelectedPlayerForFling .. "</font>", CONFIG.Colors.Orange)
-            end
-        else
-            if s and State.NotificationsEnabled then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">❌ Select target first!</font>", CONFIG.Colors.Red)
-            end
-            State.BlockPathEnabled = false
-        end
-    end)
-
-    TrollingTab:CreateSection("⚙️ ORBIT SETTINGS")
-
-    TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, 5, function(v)
-        State.OrbitRadius = v
-    end, 0.5)
-
-    TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, 3, function(v)
-        State.OrbitSpeed = v
-    end, 0.5)
-
-    TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, 0, function(v)
-        State.OrbitHeight = v
-    end, 1)
-
-    TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, 0, function(v)
-        State.OrbitTilt = v
-    end, 5)
-
-    -- Block Path Settings
-    TrollingTab:CreateSection("⚙️ BLOCK PATH SETTINGS")
-
-    TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, 0.1, function(v)
-        State.BlockPathSpeed = v
-    end, 0.05)
-
-    -- Orbit Presets
-    TrollingTab:CreateSection("⚡ ORBIT PRESETS")
-
-    TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), function()
-        State.OrbitRadius = 4
-        State.OrbitSpeed = 10
-        State.OrbitHeight = 0
-        State.OrbitTilt = 0
-        if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 170, 50)\">⚡ Fast Spin</font>", CONFIG.Colors.Orange)
-        end
-    end)
-
-    TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), function()
-        State.OrbitRadius = 5
-        State.OrbitSpeed = 5
-        State.OrbitHeight = 0
-        State.OrbitTilt = 90
-        if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">🎢 Vertical Loop</font>", CONFIG.Colors.Red)
-        end
-    end)
-
-    TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), function()
-        State.OrbitRadius = 2 
-        State.OrbitSpeed = 15
-        State.OrbitHeight = 0
-        State.OrbitTilt = 30
-        if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(200, 100, 200)\">💫 Chaotic Spin</font>", Color3.fromRGB(200, 100, 200))
-        end
-    end)
-
-    local UtilityTab = CreateTab("Server")
-   
-    UtilityTab:CreateSection("SERVER MANAGEMENT")
-    UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, function() Rejoin() end)
-    UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), function() ServerHop() end)
-
-
-local footer = Create("TextLabel", {
-    Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
-    Font = Enum.Font.Gotham,
-    TextSize = 11,
-    TextColor3 = CONFIG.Colors.TextDark,
-    BackgroundTransparency = 1,
-    Position = UDim2.new(0.5, -110, 1, -25),
-    Size = UDim2.new(0, 220, 0, 20),
-    Parent = mainFrame
-})
-
-
-closeButton.MouseButton1Click:Connect(function()
-    print("[Shutdown] Starting cleanup...")
-    
-    -- Закрыть все открытые дропдауны
-    if State.UIElements.OpenDropdowns then
-        for _, closeFunc in ipairs(State.UIElements.OpenDropdowns) do
-            pcall(closeFunc)
-        end
-        State.UIElements.OpenDropdowns = {}
+    if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
+        State.ClickTPActive = true
     end
 
-    -- Выключаем все активные режимы
-    if State.AutoFarmEnabled then
-        StopAutoFarm()
-    end
-    if State.NoClipEnabled then
-        DisableNoClip()
-    end
-    if State.AntiFlingEnabled then
-        DisableAntiFling()
-    end
-    if State.ExtendedHitboxEnabled then
-        DisableExtendedHitbox()
-    end
-    if State.GodModeEnabled then
+    if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
         ToggleGodMode()
     end
-    if State.ViewClipEnabled then
-        DisableViewClip()
-    end
-    
-    if killAuraCon then
-        ToggleKillAura(false)
-    end
 
-    -- Очистка ESP / gun / coin / keybinds
-    FullShutdown()
-
-    -- Отключение всех общих соединений
-    for i, connection in ipairs(State.Connections) do
-        pcall(function()
-            if connection and connection.Disconnect then
-                connection:Disconnect()
-            end
-        end)
-    end
-    State.Connections = {}
-
-    if gui then pcall(function() gui:Destroy() end) end
-    if State.UIElements.NotificationGui then
-        pcall(function() State.UIElements.NotificationGui:Destroy() end)
-        State.UIElements.NotificationGui = nil
-        State.UIElements.NotificationContainer = nil
-    end
-
-    if oldWarn then warn = oldWarn end
-    if oldError then error = oldError end
-
-    -- Финальный флаг
-    getgenv().MM2_ESP_Script = false
-    print("[Shutdown] ✅ Complete! All connections cleared.")
-end)
-
-
-
-closeButton.MouseEnter:Connect(function()
-    TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.Red}):Play()
-end)
-closeButton.MouseLeave:Connect(function()
-    TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
-end)
-
-local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
-        if not processed and input.KeyCode == CONFIG.HideKey then
-            mainFrame.Visible = not mainFrame.Visible
-        end
-        
-        if processed then return end
-        
-        -- Обработка keybinds
-        if State.ListeningForKeybind and input.UserInputType == Enum.UserInputType.Keyboard then
-            local key = input.KeyCode
-            local bindData = State.ListeningForKeybind
-            
-            if key == Enum.KeyCode.Delete or key == Enum.KeyCode.Backspace then
-                ClearKeybind(bindData.key, bindData.button)
-                State.ListeningForKeybind = nil
-                return
-            end
-            
-            SetKeybind(bindData.key, key, bindData.button)
-            State.ListeningForKeybind = nil
-            return
-        end
-        
-        -- Emotes
-        if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then
-            PlayEmote("sit")
-        elseif input.KeyCode == State.Keybinds.Dab and State.Keybinds.Dab ~= Enum.KeyCode.Unknown then
-            PlayEmote("dab")
-        elseif input.KeyCode == State.Keybinds.Zen and State.Keybinds.Zen ~= Enum.KeyCode.Unknown then
-            PlayEmote("zen")
-        elseif input.KeyCode == State.Keybinds.Ninja and State.Keybinds.Ninja ~= Enum.KeyCode.Unknown then
-            PlayEmote("ninja")
-        elseif input.KeyCode == State.Keybinds.Floss and State.Keybinds.Floss ~= Enum.KeyCode.Unknown then
-            PlayEmote("floss")
-        end
-        
-        -- Actions
-        if input.KeyCode == State.Keybinds.knifeThrow and State.Keybinds.knifeThrow ~= Enum.KeyCode.Unknown then
-            pcall(function() knifeThrow(true) end)
-        end
-        
-        if input.KeyCode == State.Keybinds.InstantKillAll and State.Keybinds.InstantKillAll ~= Enum.KeyCode.Unknown then
-            pcall(function() InstantKillAll() end)
-        end
-        
-        if input.KeyCode == State.Keybinds.ShootMurderer and State.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
-            pcall(function() shootMurderer() end)
-        end
-        
-        if input.KeyCode == State.Keybinds.PickupGun and State.Keybinds.PickupGun ~= Enum.KeyCode.Unknown then
-            pcall(function() pickupGun() end)
-        end
-        
-        if input.KeyCode == State.Keybinds.ClickTP and State.Keybinds.ClickTP ~= Enum.KeyCode.Unknown then
-            State.ClickTPActive = true
-        end
-        
-        if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
-            ToggleGodMode()
-        end
-        
-        if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
-            if State.SelectedPlayerForFling then
-                local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
-                if targetPlayer and targetPlayer.Character then
-                    pcall(function() FlingPlayer(targetPlayer) end)
-                end
+    if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
+        if State.SelectedPlayerForFling then
+            local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
+            if targetPlayer and targetPlayer.Character then
+                pcall(function() FlingPlayer(targetPlayer) end)
             end
         end
-        
-        if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
-            if State.NoClipEnabled then
-                DisableNoClip()
+    end
+
+    if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
+        if State.NoClipEnabled then
+            DisableNoClip()
+        else
+            EnableNoClip()
+        end
+    end
+end
+
+-- А ТЕПЕРЬ создаём GUI с Handlers
+local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
+    CONFIG = CONFIG,
+    State = State,
+    Players = Players,
+    CoreGui = CoreGui,
+    TweenService = TweenService,
+    UserInputService = UserInputService,
+    LocalPlayer = LocalPlayer,
+    TrackConnection = function(conn)
+        if conn then table.insert(State.Connections, conn) end
+        return conn
+    end,
+    ShowNotification = ShowNotification,
+    Handlers = {
+        -- Character
+        ApplyWalkSpeed = ApplyWalkSpeed,
+        ApplyJumpPower = ApplyJumpPower,
+        ApplyMaxCameraZoom = ApplyMaxCameraZoom,
+        ApplyFOV = function(v) pcall(function() ApplyFOV(v) end) end,
+        ViewClip = function(on) if on then EnableViewClip() else DisableViewClip() end end,
+
+        -- Notifications toggle
+        NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
+
+        -- ESP
+        GunESP = function(on) ESP.SetFlags({GunESP = on}) end,
+        MurderESP = function(on) ESP.SetFlags({MurderESP = on}) end,
+        SheriffESP = function(on) ESP.SetFlags({SheriffESP = on}) end,
+        InnocentESP = function(on) ESP.SetFlags({InnocentESP = on}) end,
+
+        -- Visuals
+        UIOnly = function(on) State.UIOnlyEnabled = on if on then EnableUIOnly() else DisableUIOnly() end end,
+        PingChams = function(on) State.PingChamsEnabled = on if on then StartPingChams() else StopPingChams() end end,
+        BulletTracers = ToggleBulletTracers,
+
+        -- Combat
+        ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
+        ExtendedHitboxSize = function(v) State.ExtendedHitboxSize = v if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end,
+        SpawnAtPlayer = function(on) State.spawnAtPlayer = on end,
+        KillAura = ToggleKillAura,
+        InstantPickup = function(on) if on then EnableInstantPickup() else DisableInstantPickup() end end,
+
+        -- Farming
+        AutoFarm = function(on)
+            State.AutoFarmEnabled = on
+            if on then
+                State.CoinBlacklist = {}
+                State.StartSessionCoins = GetCollectedCoinsCount()
+                ShowNotification("Auto Farm: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
+                StartAutoFarm()
             else
-                EnableNoClip()
+                StopAutoFarm()
+                ShowNotification("Auto Farm: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
             end
-        end
-    end)
-    table.insert(State.Connections, inputBeganConnection)
+        end,
+        XPFarm = function(on) State.XPFarmEnabled = on if on then StartXPFarm() else StopXPFarm() end end,
+        UndergroundMode = function(on) State.UndergroundMode = on end,
+        CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
+        CoinFarmDelay = function(v) State.CoinFarmDelay = v end,
+        AFKMode = function(on) State.AFKModeEnabled = on if on then EnableMaxOptimization() else DisableMaxOptimization() end end,
+        FPSBoost = EnableFPSBoost,
 
-    local inputEndedConnection = UserInputService.InputEnded:Connect(function(input)
-        if input.KeyCode == State.Keybinds.ClickTP then
-            State.ClickTPActive = false
-        end
-    end)
-    table.insert(State.Connections, inputEndedConnection)
+        -- AntiFling / WalkFling
+        AntiFling = function(on) if on then EnableAntiFling() else DisableAntiFling() end end,
+        WalkFling = function(on) if on then WalkFlingStart() else WalkFlingStop() end end,
 
-    local mouse = LocalPlayer:GetMouse()
-    local mouseClickConnection = mouse.Button1Down:Connect(function()
-        if State.ClickTPActive then TeleportToMouse() end
-    end)
-    table.insert(State.Connections, mouseClickConnection)
-end
+        FlingMurderer = FlingMurderer,
+        FlingSheriff  = FlingSheriff,
 
-Players.PlayerRemoving:Connect(function(player)
-    if State.PlayerHighlights[player] then
-        pcall(function()
-            State.PlayerHighlights[player]:Destroy()
-        end)
-        State.PlayerHighlights[player] = nil
-    end
-end)
+        -- Orbit / Troll
+        Orbit = function(on) State.OrbitEnabled = on RigidOrbitPlayer(State.SelectedPlayerForFling, on) end,
+        LoopFling = function(on) State.LoopFlingEnabled = on SimpleLoopFling(State.SelectedPlayerForFling, on) end,
+        BlockPath = function(on) State.BlockPathEnabled = on PendulumBlockPath(State.SelectedPlayerForFling, on) end,
+        OrbitRadius = function(v) State.OrbitRadius = v end,
+        OrbitSpeed = function(v) State.OrbitSpeed = v end,
+        OrbitHeight = function(v) State.OrbitHeight = v end,
+        OrbitTilt = function(v) State.OrbitTilt = v end,
+        BlockPathSpeed = function(v) State.BlockPathSpeed = v end,
+        OrbitPresetFastSpin = function() State.OrbitRadius = 4; State.OrbitSpeed = 10; State.OrbitHeight = 0; State.OrbitTilt = 0 end,
+        OrbitPresetVerticalLoop = function() State.OrbitRadius = 5; State.OrbitSpeed = 5; State.OrbitHeight = 0; State.OrbitTilt = 90 end,
+        OrbitPresetChaoticSpin = function() State.OrbitRadius = 2; State.OrbitSpeed = 15; State.OrbitHeight = 0; State.OrbitTilt = 30 end,
 
-Players.PlayerAdded:Connect(function(player)
-    player.CharacterAdded:Connect(function(character)
-        task.wait(0.5)
-        if State.PlayerHighlights[player] then
-            pcall(function()
-                State.PlayerHighlights[player]:Destroy()
-            end)
-            State.PlayerHighlights[player] = nil
-        end
-    end)
-end)
+        -- Server
+        Rejoin = Rejoin,
+        ServerHop = ServerHop,
 
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        player.CharacterAdded:Connect(function(character)
-            task.wait(0.5)
-            if State.PlayerHighlights[player] then
-                pcall(function()
-                    State.PlayerHighlights[player]:Destroy()
-                end)
-                State.PlayerHighlights[player] = nil
+        -- Keybind system / input
+        ClearKeybind = ClearKeybind,
+        SetKeybind = SetKeybind,
+        OnInputEmotes = function(input) HandleEmoteInput(input) end,
+        OnInputActions = function(input) HandleActionInput(input) end,
+        OnInputEnded = function(input)
+            if input.KeyCode == State.Keybinds.ClickTP then
+                State.ClickTPActive = false
             end
-        end)
-    end
-end
+        end,
+        OnMouseClick = function()
+            if State.ClickTPActive then TeleportToMouse() end
+        end,
+
+        Shutdown = function() FullShutdown() end,
+    }
+})
+
+GUI.Init()
+---------
 LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
     task.wait(1)
@@ -6205,20 +4692,15 @@ end)
 --                      ЗАПУСК СКРИПТА
 -- ═══════════════════════════════════════════════════════════════
 
-CreateUI()
 CreateNotificationUI()
 ApplyCharacterSettings()
 
--- ✅ Применяем FOV
 pcall(function()
     ApplyFOV(State.CameraFOV)
 end)
 
-SetupGunTracking()
-StartRoleChecking()
-SetupAntiAFK()
+ESP.Init()
 
--- выводим в консоль
 print("╔════════════════════════════════════════════╗")
 print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
 print("║   Press [" .. CONFIG.HideKey.Name .. "] to toggle GUI               ║")
