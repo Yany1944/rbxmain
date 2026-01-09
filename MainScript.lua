@@ -249,63 +249,6 @@ local function TrackConnection(conn)
     end
     return conn
 end
-
-local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/ESP.lua"))()({
-    Players = Players,
-    Workspace = Workspace,
-    RunService = RunService,
-    CONFIG = CONFIG,
-    State = State,
-    TrackConnection = function(conn)
-        if conn then table.insert(State.Connections, conn) end
-        return conn
-    end,
-    ShowNotification = ShowNotification
-})
-
-    -- getMurder() - Поиск убийцы
-local function getMurder()
-    for _, plr in ipairs(Players:GetPlayers()) do
-    local character = plr.Character
-        local backpack = plr:FindFirstChild("Backpack")
-        
-        if (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife")) then
-            return plr
-        end
-    end
-    return nil
-end
-
-    -- getSheriff() - Поиск шерифа
-local function getSheriff()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        local backpack = plr:FindFirstChild("Backpack")
-        if (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun")) then
-            return plr
-        end
-    end
-    return nil
-end
-
-local currentMapConnection = nil
-local currentMap = nil
-
-local function getMap()
-    for _, v in ipairs(Workspace:GetChildren()) do
-    if v:FindFirstChild("CoinContainer") then
-        return v
-    end
-end
-    return nil
-end
-
-local function getGun()
-    local map = getMap()
-if not map then return nil end
-return map:FindFirstChild("GunDrop")
-end
-
 -- ============= PING CHAMS SYSTEM =============
 local PINGCHAMS_BUFFERMAXSECONDS = 3.0
 local PINGCHAMS_PINGUPDATEINTERVAL = 0.2
@@ -1039,8 +982,7 @@ end
 
 local function FullShutdown()
     print("[FullShutdown] Starting complete cleanup...")
-    
-    -- ✅ Остановка всех активных фич
+
     pcall(function()
         if State.AutoFarmEnabled then StopAutoFarm() end
         if State.XPFarmEnabled then StopXPFarm() end
@@ -1051,8 +993,35 @@ local function FullShutdown()
         if State.InstantPickupEnabled then DisableInstantPickup() end
         if killAuraCon then ToggleKillAura(false) end
     end)
-    
-    pcall(function() ESP.Cleanup() end)
+
+    pcall(function()
+        -- гасим Role ESP
+        if State.RoleCheckLoop then
+            State.RoleCheckLoop:Disconnect()
+            State.RoleCheckLoop = nil
+        end
+
+        -- уничтожаем хайлайты игроков
+        for player, highlight in pairs(State.PlayerHighlights) do
+            pcall(function()
+                if highlight and highlight.Parent then
+                    highlight:Destroy()
+                end
+            end)
+            State.PlayerHighlights[player] = nil
+        end
+
+        -- очищаем Gun ESP
+        for _, espData in pairs(State.GunCache) do
+            pcall(function()
+                if espData.highlight then espData.highlight:Destroy() end
+                if espData.billboard then espData.billboard:Destroy() end
+            end)
+        end
+        State.GunCache = {}
+        State.CurrentGunDrop = nil
+    end)
+
     pcall(function() GUI.Cleanup() end)
 
     -- ✅ Остановка Trolling threads
@@ -1548,8 +1517,6 @@ local function EnableFPSBoost()
     TrackConnection(fpsBoostDescendantConn)
 end
 
-
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 5: CHARACTER FUNCTIONS (СТРОКИ 411-470)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -1712,9 +1679,371 @@ local function ShowNotification(richText, defaultColor)
     end)
 end
 
+----------------------------------------------------------------
+-- ESP: роли + GunESP
+----------------------------------------------------------------
+
+-- CreateHighlight() - создание Highlight для персонажа
+local function CreateHighlight(adornee, color)
+    if not adornee or not adornee.Parent then return nil end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = adornee
+    highlight.FillColor = color
+    highlight.FillTransparency = 0.8
+    highlight.OutlineColor = color
+    highlight.OutlineTransparency = 0.3
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Enabled = true
+    highlight.Parent = adornee
+
+    return highlight
+end
+
+-- UpdatePlayerHighlight() - обновление ESP игрока
+local function UpdatePlayerHighlight(player, role)
+    if not player or player == LocalPlayer then return end
+
+    local character = player.Character
+    if not character then
+        if State.PlayerHighlights[player] then
+            pcall(function()
+                State.PlayerHighlights[player]:Destroy()
+            end)
+            State.PlayerHighlights[player] = nil
+        end
+        return
+    end
+
+    local color, shouldShow
+
+    if role == "Murder" then
+        color      = CONFIG.Colors.Murder
+        shouldShow = State.MurderESP
+    elseif role == "Sheriff" then
+        color      = CONFIG.Colors.Sheriff
+        shouldShow = State.SheriffESP
+    elseif role == "Innocent" then
+        color      = CONFIG.Colors.Innocent
+        shouldShow = State.InnocentESP
+    else
+        shouldShow = false
+    end
+
+    if not shouldShow then
+        if State.PlayerHighlights[player] then
+            pcall(function()
+                State.PlayerHighlights[player].Enabled = false
+            end)
+        end
+        return
+    end
+
+    local existingHighlight = State.PlayerHighlights[player]
+
+    if existingHighlight then
+        if existingHighlight.Parent and existingHighlight.Adornee == character then
+            existingHighlight.FillColor    = color
+            existingHighlight.OutlineColor = color
+            existingHighlight.Enabled      = true
+        else
+            pcall(function()
+                existingHighlight:Destroy()
+            end)
+            State.PlayerHighlights[player] = nil
+
+            local newHighlight = CreateHighlight(character, color)
+            if newHighlight then
+                State.PlayerHighlights[player] = newHighlight
+            end
+        end
+    else
+        local newHighlight = CreateHighlight(character, color)
+        if newHighlight then
+            State.PlayerHighlights[player] = newHighlight
+        end
+    end
+end
+
+-- getMurder() / getSheriff()
+local function getMurder()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        local backpack  = plr:FindFirstChild("Backpack")
+
+        if (character and character:FindFirstChild("Knife"))
+            or (backpack and backpack:FindFirstChild("Knife")) then
+            return plr
+        end
+    end
+    return nil
+end
+
+local function getSheriff()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        local backpack  = plr:FindFirstChild("Backpack")
+
+        if (character and character:FindFirstChild("Gun"))
+            or (backpack and backpack:FindFirstChild("Gun")) then
+            return plr
+        end
+    end
+    return nil
+end
+
+-- Role ESP loop
+local function StartRoleChecking()
+    if State.RoleCheckLoop then
+        pcall(function()
+            State.RoleCheckLoop:Disconnect()
+        end)
+        State.RoleCheckLoop = nil
+    end
+
+    for player, highlight in pairs(State.PlayerHighlights) do
+        pcall(function()
+            highlight:Destroy()
+        end)
+        State.PlayerHighlights[player] = nil
+    end
+
+    State.RoleCheckLoop = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            local murder  = getMurder()
+            local sheriff = getSheriff()
+
+            local murderers = {}
+            local sheriffs  = {}
+            local innocents = {}
+
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr == murder then
+                    table.insert(murderers, plr)
+                elseif plr == sheriff then
+                    table.insert(sheriffs, plr)
+                else
+                    table.insert(innocents, plr)
+                end
+            end
+
+            for _, plr in ipairs(murderers) do
+                UpdatePlayerHighlight(plr, "Murder")
+            end
+            for _, plr in ipairs(sheriffs) do
+                UpdatePlayerHighlight(plr, "Sheriff")
+            end
+            for _, plr in ipairs(innocents) do
+                UpdatePlayerHighlight(plr, "Innocent")
+            end
+
+            if murder and sheriff and State.roundStart then
+                State.roundActive = true
+                State.roundStart  = false
+                State.prevMurd    = murder
+                State.prevSher    = sheriff
+                State.heroSent    = false
+
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(255, 85, 85)\">🔪 Murderer:</font> " .. murder.Name,
+                        CONFIG.Colors.Text
+                    )
+                    task.wait(0.1)
+                    ShowNotification(
+                        "<font color=\"rgb(50, 150, 255)\">🔫 Sheriff:</font> " .. sheriff.Name,
+                        CONFIG.Colors.Text
+                    )
+                end
+            end
+
+            if not murder and State.roundActive then
+                State.roundActive = false
+                State.roundStart  = true
+                State.prevMurd    = nil
+                State.prevSher    = nil
+                State.heroSent    = false
+
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(220, 220, 220)\">Round ended</font>",
+                        CONFIG.Colors.Text
+                    )
+                end
+            end
+
+            if sheriff
+                and State.prevSher
+                and sheriff ~= State.prevSher
+                and murder
+                and murder == State.prevMurd
+                and not State.heroSent then
+
+                State.prevSher = sheriff
+                State.heroSent = true
+
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(50, 150, 255)\">New Sheriff:</font> " .. sheriff.Name,
+                        CONFIG.Colors.Text
+                    )
+                end
+            end
+        end)
+    end)
+
+    table.insert(State.Connections, State.RoleCheckLoop)
+end
+
+----------------------------------------------------------------
+-- Gun ESP + уведомление
+----------------------------------------------------------------
+
+local currentMapConnection = nil
+local currentMap = nil
+local previousGun = nil
+
+local function getMap()
+    for _, v in ipairs(Workspace:GetChildren()) do
+        if v:FindFirstChild("CoinContainer") then
+            return v
+        end
+    end
+    return nil
+end
+
+local function getGun()
+    local map = getMap()
+    if not map then return nil end
+    return map:FindFirstChild("GunDrop")
+end
+
+local function CreateGunESP(gunPart)
+    if not gunPart or not gunPart:IsA("BasePart") then return end
+
+    if not gunPart.Parent then
+        if State.GunCache[gunPart] then
+            RemoveGunESP(gunPart)
+        end
+        return
+    end
+
+    if State.GunCache[gunPart] then
+        RemoveGunESP(gunPart)
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee            = gunPart
+    highlight.FillColor          = CONFIG.Colors.Gun
+    highlight.FillTransparency   = 0.5
+    highlight.OutlineColor       = CONFIG.Colors.Gun
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Enabled            = State.GunESP
+    highlight.Parent             = gunPart
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name       = "GunESPLabel"
+    billboard.Adornee    = gunPart
+    billboard.Size       = UDim2.new(0, 140, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent      = gunPart
+
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size                   = UDim2.new(1, 0, 1, 0)
+    label.Text                   = "GUN"
+    label.TextColor3             = Color3.fromRGB(255, 255, 255)
+    label.Font                   = Enum.Font.GothamBold
+    label.TextSize               = 12
+    label.TextStrokeTransparency = 0.6
+    label.TextStrokeColor3       = Color3.fromRGB(0, 0, 0)
+    label.Parent                 = billboard
+
+    State.GunCache[gunPart] = {
+        highlight = highlight,
+        billboard = billboard
+    }
+end
+
+local function RemoveGunESP(gunPart)
+    if not gunPart or not State.GunCache[gunPart] then return end
+
+    local espData = State.GunCache[gunPart]
+
+    pcall(function()
+        if espData.highlight then
+            espData.highlight:Destroy()
+        end
+        if espData.billboard then
+            espData.billboard:Destroy()
+        end
+    end)
+
+    State.GunCache[gunPart] = nil
+end
+
+local function UpdateGunESPVisibility()
+    for gunPart, espData in pairs(State.GunCache) do
+        if espData.highlight then
+            espData.highlight.Enabled = State.GunESP
+        end
+        if espData.billboard then
+            espData.billboard.Enabled = State.GunESP
+        end
+    end
+end
+
+local function SetupGunTracking()
+    if currentMapConnection then
+        currentMapConnection:Disconnect()
+        currentMapConnection = nil
+    end
+
+    currentMapConnection = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            local gun = getGun()
+
+            if gun and gun ~= previousGun then
+                State.CurrentGunDrop = gun
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
+                        CONFIG.Colors.Gun
+                    )
+                end
+                previousGun = gun
+            end
+
+            if not gun and previousGun then
+                previousGun = nil
+            end
+
+            if gun and State.GunESP then
+                if not State.GunCache[gun] then
+                    CreateGunESP(gun)
+                else
+                    local espData = State.GunCache[gun]
+                    if espData.highlight then
+                        espData.highlight.Enabled = State.GunESP
+                    end
+                end
+            end
+
+            for cachedGun, _ in pairs(State.GunCache) do
+                if cachedGun ~= gun or not gun then
+                    RemoveGunESP(cachedGun)
+                end
+            end
+        end)
+    end)
+
+    table.insert(State.Connections, currentMapConnection)
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 7: ROLE DETECTION (СТРОКИ 611-660)
+-- БЛОК 7: Fling (СТРОКИ 611-660)
 -- ══════════════════════════════════════════════════════════════════════════════
 
 local AntiFlingLastPos = Vector3.zero
@@ -4595,10 +4924,10 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
 
         -- ESP
-        GunESP = function(on) ESP.SetFlags({GunESP = on}) end,
-        MurderESP = function(on) ESP.SetFlags({MurderESP = on}) end,
-        SheriffESP = function(on) ESP.SetFlags({SheriffESP = on}) end,
-        InnocentESP = function(on) ESP.SetFlags({InnocentESP = on}) end,
+        GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() end,
+        MurderESP = function(on) State.MurderESP = on end,
+        SheriffESP = function(on) State.SheriffESP = on end,
+        InnocentESP = function(on) State.InnocentESP = on end,
 
         -- Visuals
         UIOnly = function(on) State.UIOnlyEnabled = on if on then EnableUIOnly() else DisableUIOnly() end end,
@@ -4699,7 +5028,8 @@ pcall(function()
     ApplyFOV(State.CameraFOV)
 end)
 
-ESP.Init()
+StartRoleChecking()
+SetupGunTracking()
 
 print("╔════════════════════════════════════════════╗")
 print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
