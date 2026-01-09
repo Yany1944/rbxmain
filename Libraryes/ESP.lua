@@ -1,14 +1,16 @@
 -- ESP.lua
 
 return function(deps)
-    local Players        = deps.Players
-    local Workspace      = deps.Workspace
-    local RunService     = deps.RunService
-    local CONFIG         = deps.CONFIG
-    local State          = deps.State
+    local Players = deps.Players
+    local Workspace = deps.Workspace
+    local RunService = deps.RunService
+    local CONFIG = deps.CONFIG
+    local State = deps.State
     local TrackConnection = deps.TrackConnection
     local ShowNotification = deps.ShowNotification
+    
     local LocalPlayer = Players.LocalPlayer
+
 
     local ESP = {}
 
