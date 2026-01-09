@@ -1,17 +1,17 @@
 -- GUI.lua
 -- Библиотека GUI для MM2 скрипта
 
-return function(deps)
-    local CONFIG           = deps.CONFIG
-    local State            = deps.State
-    local Players          = deps.Players
-    local CoreGui          = deps.CoreGui
-    local TweenService     = deps.TweenService
-    local UserInputService = deps.UserInputService
-    local LocalPlayer      = deps.LocalPlayer
-    local TrackConnection  = deps.TrackConnection
-    local ShowNotification = deps.ShowNotification or function() end
-    local Handlers         = deps.Handlers or {}
+return function(env)
+    local CONFIG = env.CONFIG
+    local State = env.State
+    local Players = env.Players
+    local CoreGui = env.CoreGui
+    local TweenService = env.TweenService
+    local UserInputService = env.UserInputService
+    local LocalPlayer = env.LocalPlayer
+    local TrackConnection = env.TrackConnection
+    local ShowNotification = env.ShowNotification
+    local Handlers = env.Handlers
 
     local GUI = {}
 
