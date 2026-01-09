@@ -5,7 +5,7 @@
 --if game.PlaceId ~= 142823291 then return end
 
 -- Loadstring Emotes (строка 3)
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Emotes.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
 
 -- Game.Loaded проверка (строка 5-7)
 if not game:IsLoaded() then game.Loaded:Wait() end
