@@ -25,32 +25,6 @@ return function(deps)
     -- 5) StartRoleChecking
     ----------------------------------------------------------------
 
-    -- getMurder() - Поиск убийцы
-    local function getMurder()
-        for _, plr in ipairs(Players:GetPlayers()) do
-            local character = plr.Character
-            local backpack = plr:FindFirstChild("Backpack")
-            
-            if (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife")) then
-                return plr
-            end
-        end
-        return nil
-    end
-
-    -- getSheriff() - Поиск шерифа
-    local function getSheriff()
-        for _, plr in ipairs(Players:GetPlayers()) do
-            local character = plr.Character
-            local backpack = plr:FindFirstChild("Backpack")
-            
-            if (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun")) then
-                return plr
-            end
-        end
-        return nil
-    end
-
     -- CreateHighlight() - Создание Highlight
     local function CreateHighlight(adornee, color)
         if not adornee or not adornee.Parent then return nil end
@@ -128,25 +102,6 @@ return function(deps)
         end
     end
 
-    -- Пример заглушки, сюда вставляешь твой код:
-    local currentMapConnection = nil
-    local previousGun = nil
-
-    local function getMap()
-        for _, v in ipairs(Workspace:GetChildren()) do
-        if v:FindFirstChild("CoinContainer") then
-            return v
-        end
-    end
-    return nil
-    end
-
-    local function getGun()
-        local map = getMap()
-    if not map then return nil end
-    return map:FindFirstChild("GunDrop")
-    end
-
     local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
     
@@ -194,79 +149,6 @@ return function(deps)
         highlight = highlight,
         billboard = billboard
     }
-    end
-
-    local function RemoveGunESP(gunPart)
-    if not gunPart or not State.GunCache[gunPart] then return end
-    
-    local espData = State.GunCache[gunPart]
-    
-    pcall(function()
-        if espData.highlight then
-            espData.highlight:Destroy()
-        end
-        if espData.billboard then
-            espData.billboard:Destroy()
-        end
-    end)
-    
-    State.GunCache[gunPart] = nil
-    end
-
-    local function UpdateGunESPVisibility()
-    for gunPart, espData in pairs(State.GunCache) do
-        if espData.highlight then
-            espData.highlight.Enabled = State.GunESP
-        end
-        if espData.billboard then
-            espData.billboard.Enabled = State.GunESP
-        end
-    end
-    end
-
-    local function SetupGunTracking()
-    if currentMapConnection then
-        currentMapConnection:Disconnect()
-        currentMapConnection = nil
-    end
-    currentMapConnection = RunService.Heartbeat:Connect(function()
-        pcall(function()
-            local gun = getGun()
-            if gun and gun ~= previousGun then
-                State.CurrentGunDrop = gun
-                if State.NotificationsEnabled then
-                    ShowNotification(
-                        "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
-                        CONFIG.Colors.Gun
-                    )
-                end
-                previousGun = gun
-            end
-            
-            if not gun and previousGun then
-                previousGun = nil
-            end
-
-            if gun and State.GunESP then
-                if not State.GunCache[gun] then
-                    CreateGunESP(gun)
-                else
-                    local espData = State.GunCache[gun]
-                    if espData.highlight then
-                        espData.highlight.Enabled = State.GunESP
-                    end
-                end
-            end
-
-            for cachedGun, espData in pairs(State.GunCache) do
-                if cachedGun ~= gun or not gun then
-                    RemoveGunESP(cachedGun)
-                end
-            end
-        end)
-    end)
-    
-    table.insert(State.Connections, currentMapConnection)
     end
 
     local function StartRoleChecking()
