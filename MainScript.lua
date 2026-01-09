@@ -3766,12 +3766,8 @@ end
 -- RigidOrbitPlayer() - Орбита вокруг игрока
 local function RigidOrbitPlayer(targetName, enabled)
     if enabled then
-        print(targetName, "Orbit/Loop/Block start")
         State.OrbitAngle = 0
-        
         State.OrbitThread = task.spawn(function()
-            while State.OrbitEnabled do
-                print("loop step")
                 pcall(function()
                     local target = getPlayerByName(targetName)
                     if target and target.Character then
