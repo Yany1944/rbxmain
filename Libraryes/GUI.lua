@@ -1018,7 +1018,7 @@ return function(env)
 
         CombatTab:CreateSection("SHERIFF TOOLS")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-local ipToggle = CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup") State.UIElements.InstantPickupToggle = ipToggle
+        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
 
         local FarmTab = CreateTab("Farming")
