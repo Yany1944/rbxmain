@@ -10,7 +10,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs
 -- Game.Loaded проверка (строка 5-7)
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- Защита от повторного запуска (строка 9-12)
+-- Защита от повторного запуска (строка 9-12)   
 if getgenv().MM2_ESP_Script then return end
 getgenv().MM2_ESP_Script = true
 
@@ -3820,7 +3820,7 @@ local function SimpleLoopFling(targetName, enabled)
                         FlingPlayer(target)
                     end
                 end)
-                task.wait(3)
+                task.wait(5)
             end
         end)
     else
@@ -5023,9 +5023,10 @@ ApplyCharacterSettings()
 pcall(function()
     ApplyFOV(State.CameraFOV)
 end)
-
+SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
+
 
 --print("╔════════════════════════════════════════════╗")
 --print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
