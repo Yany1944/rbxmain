@@ -972,7 +972,6 @@ return function(env)
         ----------------------------------------------------------------
 
         local MainTab = CreateTab("Main")
-
         MainTab:CreateSection("CHARACTER SETTINGS")
         MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, "ApplyWalkSpeed")
         MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, "ApplyJumpPower")
@@ -983,42 +982,26 @@ return function(env)
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip")
 
         MainTab:CreateSection("TELEPORT & MOVEMENT")
-        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
 
         MainTab:CreateSection("GODMODE")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
         local VisualsTab = CreateTab("Visuals")
-
         VisualsTab:CreateSection("NOTIFICATIONS")
         VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled")
-
-        VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-        VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP")
-        VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP")
-        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP")
-        VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP")
-
         VisualsTab:CreateSection("Misc")
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
-        VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
-        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
 
         local CombatTab = CreateTab("Combat")
-        CombatTab:CreateSection("EXTENDED HITBOX")
-        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
-        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
-
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
         CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
-        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
         CombatTab:CreateSection("SHERIFF TOOLS")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-local ipToggle = CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup") State.UIElements.InstantPickupToggle = ipToggle
+        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
 
         local FarmTab = CreateTab("Farming")
@@ -1033,48 +1016,13 @@ local ipToggle = CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun w
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
         local FunTab = CreateTab("Fun")
-
-        FunTab:CreateSection("ANIMATION KEYBINDS")
-        FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
-        FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
-        FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
-        FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
-        FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
-
         FunTab:CreateSection("ANTI-FLING")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling")
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
         
-        FunTab:CreateSection("FLING PLAYER")
-        FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
-        FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
         FunTab:CreateSection("FLING ROLE")
         FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
         FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
-
-        local TrollingTab = CreateTab("Troll")
-
-        TrollingTab:CreateSection("SELECT TARGET")
-        TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
-
-        TrollingTab:CreateSection("TROLLING MODES")
-        TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
-        TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
-        TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
-
-        TrollingTab:CreateSection("ORBIT SETTINGS")
-        TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
-        TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
-        TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
-        TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
-
-        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
-        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
-
-        TrollingTab:CreateSection("ORBIT PRESETS")
-        TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
-        TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
-        TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
 
         local UtilityTab = CreateTab("Server")
         UtilityTab:CreateSection("SERVER MANAGEMENT")
@@ -1130,10 +1078,8 @@ local ipToggle = CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun w
                 return
             end
 
-            -- Эмоты
             callHandler("OnInputEmotes", input)
 
-            -- Actions (knifeThrow, shootMurderer, PickupGun, ClickTP, GodMode toggle, FlingPlayer, NoClip)
             callHandler("OnInputActions", input)
         end)
         table.insert(State.Connections, inputBeganConnection)
