@@ -967,16 +967,195 @@ return function(env)
             return TabFunctions
         end
 
+        ----------------------------------------------------------------
+        -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
+        ----------------------------------------------------------------
+
+        local MainTab = CreateTab("Main")
+
+        MainTab:CreateSection("CHARACTER SETTINGS")
+        MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, "ApplyWalkSpeed")
+        MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, "ApplyJumpPower")
+        MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, "ApplyMaxCameraZoom")
+
+        MainTab:CreateSection("CAMERA")
+        MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
+        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip")
+
+        MainTab:CreateSection("TELEPORT & MOVEMENT")
+        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+        MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
+
+        MainTab:CreateSection("GODMODE")
+        MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
+
+        local VisualsTab = CreateTab("Visuals")
+
+        VisualsTab:CreateSection("NOTIFICATIONS")
+        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled")
+
+        VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
+        VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP")
+        VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP")
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP")
+        VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP")
+
+        VisualsTab:CreateSection("Misc")
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+        VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
+        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+
+        local CombatTab = CreateTab("Combat")
+        CombatTab:CreateSection("EXTENDED HITBOX")
+        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
+        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
+
+        CombatTab:CreateSection("MURDERER TOOLS")
+        CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
+        CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
+        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+        CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
+
+        CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
+local ipToggle = CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup") State.UIElements.InstantPickupToggle = ipToggle
+        CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+
+        local FarmTab = CreateTab("Farming")
+        FarmTab:CreateSection("AUTO FARM")
+        FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm")
+        FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm")
+
+        FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode")
+        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+        FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
+        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
+
+        local FunTab = CreateTab("Fun")
+
+        FunTab:CreateSection("ANIMATION KEYBINDS")
+        FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
+        FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
+        FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
+        FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
+        FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
+
+        FunTab:CreateSection("ANTI-FLING")
+        FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling")
+        FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
+        
+        FunTab:CreateSection("FLING PLAYER")
+        FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
+        FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
+        FunTab:CreateSection("FLING ROLE")
+        FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
+        FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
+
+        local TrollingTab = CreateTab("Troll")
+
+        TrollingTab:CreateSection("SELECT TARGET")
+        TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
+
+        TrollingTab:CreateSection("TROLLING MODES")
+        TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
+        TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
+        TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
+
+        TrollingTab:CreateSection("ORBIT SETTINGS")
+        TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
+        TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
+        TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
+        TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
+
+        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
+        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
+
+        TrollingTab:CreateSection("ORBIT PRESETS")
+        TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
+        TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
+        TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
+
+        local UtilityTab = CreateTab("Server")
+        UtilityTab:CreateSection("SERVER MANAGEMENT")
+        UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
+        UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+
+        local footer = Create("TextLabel", {
+            Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = CONFIG.Colors.TextDark,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0.5, -110, 1, -25),
+            Size = UDim2.new(0, 220, 0, 20),
+            Parent = mainFrame
+        })
+
+        ----------------------------------------------------------------
+        -- Кнопка закрытия и обработка инпута (клавиши / клик по GUI)
+        ----------------------------------------------------------------
+
+        closeButton.MouseButton1Click:Connect(function()
+            callHandler("Shutdown")
+        end)
+
+        closeButton.MouseEnter:Connect(function()
+            TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.Red}):Play()
+        end)
+        closeButton.MouseLeave:Connect(function()
+            TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
+        end)
+
+        local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
+            if not processed and input.KeyCode == CONFIG.HideKey then
+                mainFrame.Visible = not mainFrame.Visible
+            end
+
+            if processed then return end
+
+            -- Листенер на выбор кейбинда
+            if State.ListeningForKeybind and input.UserInputType == Enum.UserInputType.Keyboard then
+                local key = input.KeyCode
+                local bindData = State.ListeningForKeybind
+
+                if key == Enum.KeyCode.Delete or key == Enum.KeyCode.Backspace then
+                    callHandler("ClearKeybind", bindData.key, bindData.button)
+                    State.ListeningForKeybind = nil
+                    return
+                end
+
+                callHandler("SetKeybind", bindData.key, key, bindData.button)
+                State.ListeningForKeybind = nil
+                return
+            end
+
+            -- Эмоты
+            callHandler("OnInputEmotes", input)
+
+            -- Actions (knifeThrow, shootMurderer, PickupGun, ClickTP, GodMode toggle, FlingPlayer, NoClip)
+            callHandler("OnInputActions", input)
+        end)
+        table.insert(State.Connections, inputBeganConnection)
+
+        local inputEndedConnection = UserInputService.InputEnded:Connect(function(input)
+            callHandler("OnInputEnded", input)
+        end)
+        table.insert(State.Connections, inputEndedConnection)
+
+        local mouse = LocalPlayer:GetMouse()
+        local mouseClickConnection = mouse.Button1Down:Connect(function()
+            callHandler("OnMouseClick")
+        end)
+        table.insert(State.Connections, mouseClickConnection)
+    end
+
     ----------------------------------------------------------------
     -- ПУБЛИЧНЫЙ API
     ----------------------------------------------------------------
 
     function GUI.Init()
         CreateUI()
-    end
-
-    function GUI.CreateTab(name)
-        return CreateTab(name)
     end
 
     function GUI.Cleanup()
