@@ -5104,49 +5104,32 @@ pcall(function()
 end)
 SetupAntiAFK()
 StartRoleChecking()
-SetupGunTracking()
 if AUTOEXEC_ENABLED then
     task.spawn(function()
         task.wait(2)
         pcall(function()
-            -- Auto Farm
             State.AutoFarmEnabled = true
             State.UndergroundMode = true
             StartAutoFarm()
             
-            task.wait(0.5)
-            
-            -- XP Farm
+            task.wait(0.1)
             State.XPFarmEnabled = true
             StartXPFarm()
             
-            task.wait(0.5)
-            
-            -- Instant Pickup
+            task.wait(0.1)
             EnableInstantPickup()
             
-            task.wait(0.5)
-            
-            -- Anti-Fling
+            task.wait(0.1)
             EnableAntiFling()
             
-            task.wait(0.5)
-            
-            -- Auto Rejoin
+            task.wait(0.1)
             HandleAutoRejoin(true)
             
-            task.wait(0.5)
-            
-            -- Auto Reconnect
+            task.wait(0.1)
             HandleAutoReconnect(true)
             
-            task.wait(0.5)
-            
-            -- FPS Boost
+            task.wait(0.1)
             EnableFPSBoost()
-            
-            task.wait(0.5)
-            
         end)
     end)
 end
