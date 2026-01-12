@@ -1030,10 +1030,11 @@ return function(env)
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateToggle("Auto reconnect (farm)","Переподключаться каждые 25 минут после завершения раунда",false,"FarmAutoReconnect")
+        FarmTab:CreateInputField("Reconnect interval","Интервал в минутах (по умолчанию 25)",25,"FarmReconnectMinutes")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
         local FunTab = CreateTab("Fun")
-
         FunTab:CreateSection("ANIMATION KEYBINDS")
         FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
         FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
@@ -1053,7 +1054,6 @@ return function(env)
         FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
 
         local TrollingTab = CreateTab("Troll")
-
         TrollingTab:CreateSection("SELECT TARGET")
         TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
 
@@ -1080,6 +1080,7 @@ return function(env)
         UtilityTab:CreateSection("SERVER MANAGEMENT")
         UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
         UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+        UtilityTab:CreateToggle("Auto Rejoin on kick","Автоматический rejoin при вылете",true,"ServerAutoRejoin")
 
         local footer = Create("TextLabel", {
             Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
