@@ -3089,10 +3089,12 @@ local function StartAutoFarm()
     instantPickupWasEnabled = State.InstantPickupEnabled
     
     State.CoinFarmThread = task.spawn(function()
+        local allowFly = false  -- ✅ Флаг для переключения ТП → Полёт
         --print("[Auto Farm] 🚀 Запущен")
         if State.UndergroundMode then
             --print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
         end
+
         -- ✅ Включаем годмод при старте автофарма
         if State.GodModeWithAutoFarm and not State.GodModeEnabled then
             pcall(function()
@@ -3124,6 +3126,7 @@ local function StartAutoFarm()
                 --print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
+                allowFly = false
                 if State.spawnAtPlayer and not spawnAtPlayerOriginalState then
                     State.spawnAtPlayer = false
                 end
@@ -3153,7 +3156,7 @@ local function StartAutoFarm()
                     noCoinsAttempts = 0
                     
                     pcall(function()
-                        if currentCoins < 1 then
+                        if not allowFly then  -- ✅ Вместо проверки currentCoins < 1
                             local currentTime = tick()
                             local timeSinceLastTP = currentTime - lastTeleportTime
                             
@@ -3185,6 +3188,7 @@ local function StartAutoFarm()
                                 end
                                 
                                 AddCoinToBlacklist(coin)
+                                allowFly = true
                             end
                         else
                             if State.UndergroundMode then
@@ -3483,6 +3487,7 @@ local function StartAutoFarm()
                     --print("[Auto Farm] ✅ Новый раунд начался! Сбрасываю счётчики и продолжаю фарм...")
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
+                    allowFly = false
                     
                 else
                     --print("[Auto Farm] 🔄 XP Farm выключен - делаю быстрый ресет без ожидания конца раунда...")
@@ -3502,6 +3507,7 @@ local function StartAutoFarm()
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
+                    allowFly = false
 
                     task.wait(3)
 
