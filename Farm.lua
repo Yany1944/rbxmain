@@ -5106,63 +5106,50 @@ SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
 if AUTOEXEC_ENABLED then
-    -- Автоматическое закрытие промпта "Join Friend"
+    -- Автоматическое нажатие кнопки "Play" при появлении меню друзей
     task.spawn(function()
         pcall(function()
-            local CoreGui = game:GetService("CoreGui")
-            local promptGui = CoreGui:WaitForChild("RobloxPromptGui", 5)
+            local Players = game:GetService("Players")
+            local LocalPlayer = Players.LocalPlayer
             
-            if promptGui then
-                local promptOverlay = promptGui:FindFirstChild("promptOverlay")
-                
-                if promptOverlay then
-                    -- Ищем существующий промпт
-                    for _, prompt in pairs(promptOverlay:GetChildren()) do
-                        if prompt:IsA("Frame") and prompt.Name ~= "ErrorPrompt" then
-                            -- Ищем кнопку "Cancel" или "No"
-                            local function findButton(parent, name)
-                                for _, child in pairs(parent:GetDescendants()) do
-                                    if child:IsA("TextButton") then
-                                        local text = child.Text:lower()
-                                        if text:find(name) or text:find("no") or text:find("cancel") then
-                                            return child
-                                        end
-                                    end
-                                end
-                            end
-                            
-                            local cancelButton = findButton(prompt, "cancel")
-                            if cancelButton then
-                                -- Симулируем клик
-                                for _, connection in pairs(getconnections(cancelButton.MouseButton1Click)) do
-                                    connection:Fire()
-                                end
-                                print("[AutoExec] Friend join prompt auto-closed")
+            -- Ждём появления PlayerGui
+            local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+            
+            if playerGui then
+                -- Ищем GUI с кнопкой Play
+                local function findPlayButton()
+                    for _, gui in pairs(playerGui:GetDescendants()) do
+                        if gui:IsA("TextButton") then
+                            local text = gui.Text:lower()
+                            if text == "play" or text:find("play") then
+                                return gui
                             end
                         end
                     end
-                    
-                    -- Следим за новыми промптами
-                    promptOverlay.ChildAdded:Connect(function(prompt)
-                        task.wait(0.1)
-                        if prompt:IsA("Frame") and prompt.Name ~= "ErrorPrompt" then
-                            local function findButton(parent, name)
-                                for _, child in pairs(parent:GetDescendants()) do
-                                    if child:IsA("TextButton") then
-                                        local text = child.Text:lower()
-                                        if text:find(name) or text:find("no") or text:find("cancel") then
-                                            return child
-                                        end
-                                    end
-                                end
-                            end
-                            
-                            local cancelButton = findButton(prompt, "cancel")
-                            if cancelButton then
-                                for _, connection in pairs(getconnections(cancelButton.MouseButton1Click)) do
+                    return nil
+                end
+                
+                -- Проверяем существующие GUI
+                task.wait(0.5)
+                local playButton = findPlayButton()
+                
+                if playButton then
+                    -- Нажимаем кнопку Play
+                    for _, connection in pairs(getconnections(playButton.MouseButton1Click)) do
+                        connection:Fire()
+                    end
+                    print("[AutoExec] Auto-clicked 'Play' button (friend join menu bypassed)")
+                else
+                    -- Следим за появлением новых GUI
+                    playerGui.DescendantAdded:Connect(function(descendant)
+                        if descendant:IsA("TextButton") then
+                            local text = descendant.Text:lower()
+                            if text == "play" or text:find("play") then
+                                task.wait(0.3)
+                                for _, connection in pairs(getconnections(descendant.MouseButton1Click)) do
                                     connection:Fire()
                                 end
-                                print("[AutoExec] Friend join prompt auto-closed")
+                                print("[AutoExec] Auto-clicked 'Play' button (friend join menu bypassed)")
                             end
                         end
                     end)
