@@ -129,13 +129,20 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 21,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
     CoinBlacklist = {},
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
+
+    -- Auto Rejoin & Reconnect
+    AutoRejoinEnabled = false,
+    AutoReconnectEnabled = false,
+    ReconnectInterval = 25 * 60, -- 25 минут в секундах
+    TimeSinceLastActivity = 0,
+    ReconnectThread = nil,
 
     -- XP Farm
     XPFarmEnabled = false,
@@ -1045,6 +1052,11 @@ local function FullShutdown()
         State.OrbitEnabled = false
         State.LoopFlingEnabled = false
         State.BlockPathEnabled = false
+    end)
+
+    pcall(function()
+        if State.AutoRejoinEnabled then HandleAutoRejoin(false) end
+        if State.AutoReconnectEnabled then HandleAutoReconnect(false) end
     end)
 
     -- ✅ Очистка всех general connections
@@ -4889,6 +4901,138 @@ local function HandleActionInput(input)
     end
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- AUTO REJOIN & AUTO RECONNECT
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Auto Rejoin on Disconnect
+local function HandleAutoRejoin(enabled)
+    State.AutoRejoinEnabled = enabled
+    
+    if enabled then
+        task.spawn(function()
+            repeat task.wait() until game.CoreGui:FindFirstChild('RobloxPromptGui')
+            
+            local promptOverlay = game.CoreGui.RobloxPromptGui.promptOverlay
+            local connection
+            
+            connection = promptOverlay.ChildAdded:Connect(function(prompt)
+                if State.AutoRejoinEnabled and prompt.Name == 'ErrorPrompt' then
+                    task.wait(0.5)
+                    Rejoin()
+                end
+            end)
+            
+            getgenv().AutoRejoinConnection = connection
+            TrackConnection(connection)
+        end)
+    else
+        if getgenv().AutoRejoinConnection then
+            getgenv().AutoRejoinConnection:Disconnect()
+            getgenv().AutoRejoinConnection = nil
+        end
+    end
+end
+
+-- Auto Reconnect (Timer)
+local function ResetActivityTimer()
+    State.TimeSinceLastActivity = 0
+end
+
+local function HandleAutoReconnect(enabled)
+    State.AutoReconnectEnabled = enabled
+    
+    if enabled then
+        State.TimeSinceLastActivity = 0
+        
+        -- Input detection для сброса таймера
+        local inputConnection = UserInputService.InputBegan:Connect(function()
+            if State.AutoReconnectEnabled then
+                ResetActivityTimer()
+            end
+        end)
+        
+        -- Movement detection
+        local moveConnection
+        if LocalPlayer.Character then
+            local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                moveConnection = humanoid.Running:Connect(function(speed)
+                    if State.AutoReconnectEnabled and speed > 0 then
+                        ResetActivityTimer()
+                    end
+                end)
+            end
+        end
+        
+        getgenv().AutoReconnectInputConnection = inputConnection
+        getgenv().AutoReconnectMoveConnection = moveConnection
+        
+        TrackConnection(inputConnection)
+        if moveConnection then TrackConnection(moveConnection) end
+        
+        -- Главный таймер
+        State.ReconnectThread = task.spawn(function()
+            while State.AutoReconnectEnabled and task.wait(1) do
+                State.TimeSinceLastActivity = State.TimeSinceLastActivity + 1
+                
+                local currentInterval = tonumber(ScriptSettings.FarmReconnectMinutes) or 25
+                local intervalSeconds = currentInterval * 60
+                
+                if State.TimeSinceLastActivity >= intervalSeconds then
+                    if State.NotificationsEnabled then
+                        ShowNotification(
+                            "<font color=\"rgb(220,220,220)\">Auto Reconnect after " .. currentInterval .. " min</font>",
+                            CONFIG.Colors.Text
+                        )
+                    end
+                    task.wait(1)
+                    Rejoin()
+                    break
+                end
+            end
+        end)
+        
+    else
+        -- Отключение
+        if getgenv().AutoReconnectInputConnection then
+            getgenv().AutoReconnectInputConnection:Disconnect()
+            getgenv().AutoReconnectInputConnection = nil
+        end
+        if getgenv().AutoReconnectMoveConnection then
+            getgenv().AutoReconnectMoveConnection:Disconnect()
+            getgenv().AutoReconnectMoveConnection = nil
+        end
+        if State.ReconnectThread then
+            task.cancel(State.ReconnectThread)
+            State.ReconnectThread = nil
+        end
+        State.TimeSinceLastActivity = 0
+    end
+end
+
+-- Respawn handler для Auto Reconnect
+LocalPlayer.CharacterAdded:Connect(function(character)
+    if State.AutoReconnectEnabled then
+        task.wait(0.5)
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            local moveConnection = humanoid.Running:Connect(function(speed)
+                if State.AutoReconnectEnabled and speed > 0 then
+                    ResetActivityTimer()
+                end
+            end)
+            
+            if getgenv().AutoReconnectMoveConnection then
+                getgenv().AutoReconnectMoveConnection:Disconnect()
+            end
+            getgenv().AutoReconnectMoveConnection = moveConnection
+            TrackConnection(moveConnection)
+        end
+    end
+end)
+
+
 -- А ТЕПЕРЬ создаём GUI с Handlers
 local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
@@ -4975,6 +5119,8 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         -- Server
         Rejoin = Rejoin,
         ServerHop = ServerHop,
+        HandleAutoRejoin = HandleAutoRejoin,
+        HandleAutoReconnect = HandleAutoReconnect,
         
         -- Keybind system / input
         ClearKeybind = ClearKeybind,
