@@ -5203,6 +5203,9 @@ task.spawn(function()
         
         -- Auto Reconnect
         HandleAutoReconnect(true)
+
+		EnableFPSBoost()
+		task.wait(0.5)
         
         -- Одно общее уведомление вместо 6 отдельных
         if State.NotificationsEnabled then
