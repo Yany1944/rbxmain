@@ -4934,7 +4934,6 @@ local function HandleAutoRejoin(enabled)
     end
 end
 
--- Auto Reconnect (Timer)
 local function ResetActivityTimer()
     State.TimeSinceLastActivity = 0
 end
@@ -4976,13 +4975,14 @@ local function HandleAutoReconnect(enabled)
             while State.AutoReconnectEnabled and task.wait(1) do
                 State.TimeSinceLastActivity = State.TimeSinceLastActivity + 1
                 
-                local currentInterval = tonumber(ScriptSettings.FarmReconnectMinutes) or 25
-                local intervalSeconds = currentInterval * 60
+                -- ИСПРАВЛЕНИЕ: используем напрямую State.ReconnectInterval
+                local intervalSeconds = State.ReconnectInterval or (25 * 60)
+                local intervalMinutes = math.floor(intervalSeconds / 60)
                 
                 if State.TimeSinceLastActivity >= intervalSeconds then
                     if State.NotificationsEnabled then
                         ShowNotification(
-                            "<font color=\"rgb(220,220,220)\">Auto Reconnect after " .. currentInterval .. " min</font>",
+                            "<font color=\"rgb(220,220,220)\">Auto Reconnect after " .. intervalMinutes .. " min</font>",
                             CONFIG.Colors.Text
                         )
                     end
