@@ -4934,8 +4934,16 @@ local function HandleAutoRejoin(enabled)
     end
 end
 
+-- Функция для установки интервала из input field
+local function SetReconnectInterval(minutes)
+    local mins = tonumber(minutes) or 25
+    State.ReconnectInterval = mins * 60 -- конвертируем в секунды
+    print("[Auto Reconnect] Interval set to " .. mins .. " minutes (" .. State.ReconnectInterval .. " seconds)")
+end
+
 local function ResetActivityTimer()
     State.TimeSinceLastActivity = 0
+    print("[Auto Reconnect] Activity detected - timer reset")
 end
 
 local function HandleAutoReconnect(enabled)
@@ -4943,6 +4951,7 @@ local function HandleAutoReconnect(enabled)
     
     if enabled then
         State.TimeSinceLastActivity = 0
+        print("[Auto Reconnect] ENABLED - Interval: " .. (State.ReconnectInterval or (25*60)) .. " seconds")
         
         -- Input detection для сброса таймера
         local inputConnection = UserInputService.InputBegan:Connect(function()
@@ -4970,30 +4979,49 @@ local function HandleAutoReconnect(enabled)
         TrackConnection(inputConnection)
         if moveConnection then TrackConnection(moveConnection) end
         
-        -- Главный таймер
+        -- Главный таймер с debug
         State.ReconnectThread = task.spawn(function()
+            local lastPrintTime = 0
+            
             while State.AutoReconnectEnabled and task.wait(1) do
                 State.TimeSinceLastActivity = State.TimeSinceLastActivity + 1
                 
-                -- ИСПРАВЛЕНИЕ: используем напрямую State.ReconnectInterval
                 local intervalSeconds = State.ReconnectInterval or (25 * 60)
                 local intervalMinutes = math.floor(intervalSeconds / 60)
                 
+                -- Debug print каждые 10 секунд
+                if tick() - lastPrintTime >= 10 then
+                    print(string.format("[Auto Reconnect] Timer: %d/%d seconds (%.1f/%.1f min)", 
+                        State.TimeSinceLastActivity, 
+                        intervalSeconds,
+                        State.TimeSinceLastActivity / 60,
+                        intervalMinutes
+                    ))
+                    lastPrintTime = tick()
+                end
+                
                 if State.TimeSinceLastActivity >= intervalSeconds then
+                    print("[Auto Reconnect] TRIGGERING REJOIN - Interval reached!")
+                    
                     if State.NotificationsEnabled then
                         ShowNotification(
                             "<font color=\"rgb(220,220,220)\">Auto Reconnect after " .. intervalMinutes .. " min</font>",
                             CONFIG.Colors.Text
                         )
                     end
+                    
                     task.wait(1)
                     Rejoin()
                     break
                 end
             end
+            
+            print("[Auto Reconnect] Thread stopped")
         end)
         
     else
+        print("[Auto Reconnect] DISABLED")
+        
         -- Отключение
         if getgenv().AutoReconnectInputConnection then
             getgenv().AutoReconnectInputConnection:Disconnect()
@@ -5012,7 +5040,7 @@ local function HandleAutoReconnect(enabled)
 end
 
 -- Respawn handler для Auto Reconnect
-LocalPlayer.CharacterAdded:Connect(function(character)
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
     if State.AutoReconnectEnabled then
         task.wait(0.5)
         local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -5030,7 +5058,7 @@ LocalPlayer.CharacterAdded:Connect(function(character)
             TrackConnection(moveConnection)
         end
     end
-end)
+end))
 
 
 -- А ТЕПЕРЬ создаём GUI с Handlers
@@ -5121,6 +5149,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         ServerHop = ServerHop,
         HandleAutoRejoin = HandleAutoRejoin,
         HandleAutoReconnect = HandleAutoReconnect,
+        SetReconnectInterval = SetReconnectInterval,
         
         -- Keybind system / input
         ClearKeybind = ClearKeybind,
@@ -5216,8 +5245,6 @@ task.spawn(function()
         end
     end)
 end)
-
-
 
 --print("╔════════════════════════════════════════════╗")
 --print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
