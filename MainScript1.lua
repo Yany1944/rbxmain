@@ -127,32 +127,33 @@ local State = {
     ShootCooldown = 3,
     
     -- Auto Farm
-    AutoFarmEnabled = true,
+    AutoFarmEnabled = false,
     CoinFarmThread = nil,
     CoinFarmFlySpeed = 21,
     CoinFarmDelay = 2,
-    UndergroundMode = true,
+    UndergroundMode = false,
     UndergroundOffset = 2.5,
     CoinBlacklist = {},
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
 
+    -- Auto Rejoin & Reconnect
+    AutoRejoinEnabled = false,
+    AutoReconnectEnabled = false,
+    ReconnectInterval = 25 * 60, -- 25 минут в секундах
+    TimeSinceLastActivity = 0,
+    ReconnectThread = nil,
+
     -- XP Farm
-    XPFarmEnabled = true,
+    XPFarmEnabled = false,
     AFKModeEnabled = false,
-    
-    -- Server / Farm reconnect
-    AutoRejoinOnKick = true,
-    AutoReconnectFarm = true,
-    FarmReconnectInterval = 20 * 60,
-    LastFarmReconnect = tick(),
 
     -- Instant Pickup
-    InstantPickupEnabled = true,
+    InstantPickupEnabled = false,
     InstantPickupThread = nil,
     
     -- Anti-Fling
-    AntiFlingEnabled = true,
+    AntiFlingEnabled = false,
     IsFlingInProgress = false,
     SelectedPlayerForFling = nil,
     OldPos = nil,
@@ -1051,6 +1052,11 @@ local function FullShutdown()
         State.OrbitEnabled = false
         State.LoopFlingEnabled = false
         State.BlockPathEnabled = false
+    end)
+
+    pcall(function()
+        if State.AutoRejoinEnabled then HandleAutoRejoin(false) end
+        if State.AutoReconnectEnabled then HandleAutoReconnect(false) end
     end)
 
     -- ✅ Очистка всех general connections
@@ -3101,19 +3107,6 @@ local function StartAutoFarm()
         local lastTeleportTime = 0
         
         while State.AutoFarmEnabled do
-            if State.AutoReconnectFarm then
-                local currentTime = tick()
-                if currentTime - State.LastFarmReconnect >= State.FarmReconnectInterval then
-                    pcall(function()
-                        ShowNotification("Auto Reconnect: Rejoining server...", CONFIG.Colors.Orange)
-                    end)
-                    task.wait(1)
-                    pcall(function()
-                        TeleportService:Teleport(game.PlaceId, LocalPlayer)
-                    end)
-                    return
-                end
-            end
             local character = LocalPlayer.Character
             if not character then 
                 task.wait(0.5)
@@ -4650,64 +4643,6 @@ local function Rejoin()
     end)
 end
 
-local lastAutoRejoin = 0
-
-local function SetupAutoRejoin()
-    local TeleportService = game:GetService("TeleportService")
-    local Players = game:GetService("Players")
-    
-    -- Обработчик кика
-    game:GetService("CoreGui").RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
-        if child.Name == "ErrorPrompt" and child:FindFirstChild("MessageArea") and child.MessageArea:FindFirstChild("ErrorFrame") then
-            if State.AutoRejoinOnKick then
-                task.wait(0.5)
-                TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
-            end
-        end
-    end)
-    
-    -- Обработчик дисконнекта
-    game:GetService("GuiService").ErrorMessageChanged:Connect(function()
-        if State.AutoRejoinOnKick then
-            task.wait(0.5)
-            TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
-        end
-    end)
-end
-
--- Запускаем
-pcall(SetupAutoRejoin)
-
-local function IsRoundCompletelyFinished()
-    return not State.roundActive
-end
-
-task.spawn(function()
-    while ScriptAlive do
-        task.wait(5)
-
-        if not State.AutoReconnectFarm then
-            continue
-        end
-        if not State.AutoFarmEnabled and not State.XPFarmEnabled then
-            continue
-        end
-
-        local now = tick()
-        if now - (State.LastFarmReconnect or 0) < (State.FarmReconnectInterval or 1500) then
-            continue
-        end
-
-        if not IsRoundCompletelyFinished() then
-            continue
-        end
-
-        State.LastFarmReconnect = tick()
-        Rejoin()
-    end
-end)
-
-
 local function ServerHop()
     -- ═══════════════════════════════════════════════════════════
     -- SERVER HOP SYSTEM v2.0 - Enhanced with file tracking
@@ -4966,6 +4901,138 @@ local function HandleActionInput(input)
     end
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- AUTO REJOIN & AUTO RECONNECT
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Auto Rejoin on Disconnect
+local function HandleAutoRejoin(enabled)
+    State.AutoRejoinEnabled = enabled
+    
+    if enabled then
+        task.spawn(function()
+            repeat task.wait() until game.CoreGui:FindFirstChild('RobloxPromptGui')
+            
+            local promptOverlay = game.CoreGui.RobloxPromptGui.promptOverlay
+            local connection
+            
+            connection = promptOverlay.ChildAdded:Connect(function(prompt)
+                if State.AutoRejoinEnabled and prompt.Name == 'ErrorPrompt' then
+                    task.wait(0.5)
+                    Rejoin()
+                end
+            end)
+            
+            getgenv().AutoRejoinConnection = connection
+            TrackConnection(connection)
+        end)
+    else
+        if getgenv().AutoRejoinConnection then
+            getgenv().AutoRejoinConnection:Disconnect()
+            getgenv().AutoRejoinConnection = nil
+        end
+    end
+end
+
+-- Auto Reconnect (Timer)
+local function ResetActivityTimer()
+    State.TimeSinceLastActivity = 0
+end
+
+local function HandleAutoReconnect(enabled)
+    State.AutoReconnectEnabled = enabled
+    
+    if enabled then
+        State.TimeSinceLastActivity = 0
+        
+        -- Input detection для сброса таймера
+        local inputConnection = UserInputService.InputBegan:Connect(function()
+            if State.AutoReconnectEnabled then
+                ResetActivityTimer()
+            end
+        end)
+        
+        -- Movement detection
+        local moveConnection
+        if LocalPlayer.Character then
+            local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                moveConnection = humanoid.Running:Connect(function(speed)
+                    if State.AutoReconnectEnabled and speed > 0 then
+                        ResetActivityTimer()
+                    end
+                end)
+            end
+        end
+        
+        getgenv().AutoReconnectInputConnection = inputConnection
+        getgenv().AutoReconnectMoveConnection = moveConnection
+        
+        TrackConnection(inputConnection)
+        if moveConnection then TrackConnection(moveConnection) end
+        
+        -- Главный таймер
+        State.ReconnectThread = task.spawn(function()
+            while State.AutoReconnectEnabled and task.wait(1) do
+                State.TimeSinceLastActivity = State.TimeSinceLastActivity + 1
+                
+                local currentInterval = tonumber(ScriptSettings.FarmReconnectMinutes) or 25
+                local intervalSeconds = currentInterval * 60
+                
+                if State.TimeSinceLastActivity >= intervalSeconds then
+                    if State.NotificationsEnabled then
+                        ShowNotification(
+                            "<font color=\"rgb(220,220,220)\">Auto Reconnect after " .. currentInterval .. " min</font>",
+                            CONFIG.Colors.Text
+                        )
+                    end
+                    task.wait(1)
+                    Rejoin()
+                    break
+                end
+            end
+        end)
+        
+    else
+        -- Отключение
+        if getgenv().AutoReconnectInputConnection then
+            getgenv().AutoReconnectInputConnection:Disconnect()
+            getgenv().AutoReconnectInputConnection = nil
+        end
+        if getgenv().AutoReconnectMoveConnection then
+            getgenv().AutoReconnectMoveConnection:Disconnect()
+            getgenv().AutoReconnectMoveConnection = nil
+        end
+        if State.ReconnectThread then
+            task.cancel(State.ReconnectThread)
+            State.ReconnectThread = nil
+        end
+        State.TimeSinceLastActivity = 0
+    end
+end
+
+-- Respawn handler для Auto Reconnect
+LocalPlayer.CharacterAdded:Connect(function(character)
+    if State.AutoReconnectEnabled then
+        task.wait(0.5)
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            local moveConnection = humanoid.Running:Connect(function(speed)
+                if State.AutoReconnectEnabled and speed > 0 then
+                    ResetActivityTimer()
+                end
+            end)
+            
+            if getgenv().AutoReconnectMoveConnection then
+                getgenv().AutoReconnectMoveConnection:Disconnect()
+            end
+            getgenv().AutoReconnectMoveConnection = moveConnection
+            TrackConnection(moveConnection)
+        end
+    end
+end)
+
+
 -- А ТЕПЕРЬ создаём GUI с Handlers
 local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
@@ -5027,17 +5094,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
         CoinFarmDelay = function(v) State.CoinFarmDelay = v end,
         AFKMode = function(on) State.AFKModeEnabled = on if on then EnableMaxOptimization() else DisableMaxOptimization() end end,
-        FarmAutoReconnect = function(on)
-            State.AutoReconnectFarm = on
-            if on and (not State.LastFarmReconnect or State.LastFarmReconnect == 0) then
-                State.LastFarmReconnect = tick()
-            end
-        end,
-
-        FarmReconnectMinutes = function(minutes)
-            local m = tonumber(minutes) or 25
-            State.FarmReconnectInterval = math.max(60, m * 60)
-        end,
         FPSBoost = EnableFPSBoost,
 
         -- AntiFling / WalkFling
@@ -5063,25 +5119,9 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         -- Server
         Rejoin = Rejoin,
         ServerHop = ServerHop,
-        HandleAutoRejoin = function(on)
-                State.AutoRejoinOnKick = on
-                if on then
-                    ShowNotification("Auto Rejoin: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Green)
-                else
-                    ShowNotification("Auto Rejoin: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Red)
-                end
-            end,
-
-            HandleAutoReconnect = function(on)
-                State.AutoReconnectFarm = on
-                if on then
-                    State.LastFarmReconnect = tick()
-                    ShowNotification("Auto Reconnect Farm: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Green)
-                else
-                    ShowNotification("Auto Reconnect Farm: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Red)
-                end
-            end,
-
+        HandleAutoRejoin = HandleAutoRejoin,
+        HandleAutoReconnect = HandleAutoReconnect,
+        
         -- Keybind system / input
         ClearKeybind = ClearKeybind,
         SetKeybind = SetKeybind,
@@ -5127,6 +5167,53 @@ end)
 SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
+
+task.spawn(function()
+    task.wait(2)
+    pcall(function()
+        -- Auto Farm
+        State.AutoFarmEnabled = true
+        State.UndergroundMode = true
+        State.CoinBlacklist = {}
+        State.StartSessionCoins = GetCollectedCoinsCount()
+        StartAutoFarm()
+        
+        task.wait(0.5) -- Задержка между уведомлениями
+        
+        -- XP Farm
+        State.XPFarmEnabled = true
+        StartXPFarm()
+        
+        task.wait(0.5)
+        
+        -- Instant Pickup
+        EnableInstantPickup()
+        
+        task.wait(0.5)
+        
+        -- Anti-Fling
+        EnableAntiFling()
+        
+        task.wait(0.5)
+        
+        -- Auto Rejoin
+        HandleAutoRejoin(true)
+        
+        task.wait(0.5)
+        
+        -- Auto Reconnect
+        HandleAutoReconnect(true)
+        
+        -- Одно общее уведомление вместо 6 отдельных
+        if State.NotificationsEnabled then
+            ShowNotification(
+                "<font color=\"rgb(85,255,120)\">AutoExec Complete!</font> All features enabled",
+                CONFIG.Colors.Green
+            )
+        end
+    end)
+end)
+
 
 
 --print("╔════════════════════════════════════════════╗")
