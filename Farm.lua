@@ -3,7 +3,7 @@
 -- ══════════════════════════════════════════════════════════════════════════════
 
 --if game.PlaceId ~= 142823291 then return end
-
+local AUTOEXEC_ENABLED = true
 -- Loadstring Emotes (строка 3)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
 
@@ -141,7 +141,6 @@ local State = {
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
     ReconnectInterval = 25 * 60, -- 25 минут в секундах
-    TimeSinceLastActivity = 0,
     ReconnectThread = nil,
 
     -- XP Farm
@@ -4934,132 +4933,42 @@ local function HandleAutoRejoin(enabled)
     end
 end
 
--- Функция для установки интервала из input field
+-- Константа для дефолтного интервала
+local DEFAULT_INTERVAL = 25 * 60
+
+-- Функция для установки интервала
 local function SetReconnectInterval(minutes)
     local mins = tonumber(minutes) or 25
-    State.ReconnectInterval = mins * 60 -- конвертируем в секунды
-    print("[Auto Reconnect] Interval set to " .. mins .. " minutes (" .. State.ReconnectInterval .. " seconds)")
-end
-
-local function ResetActivityTimer()
-    State.TimeSinceLastActivity = 0
-    print("[Auto Reconnect] Activity detected - timer reset")
+    State.ReconnectInterval = mins * 60
+    print(string.format("[Auto Reconnect] Interval: %d min (%d sec)", mins, State.ReconnectInterval))
 end
 
 local function HandleAutoReconnect(enabled)
     State.AutoReconnectEnabled = enabled
     
     if enabled then
-        State.TimeSinceLastActivity = 0
-        print("[Auto Reconnect] ENABLED - Interval: " .. (State.ReconnectInterval or (25*60)) .. " seconds")
+        local interval = State.ReconnectInterval or DEFAULT_INTERVAL
         
-        -- Input detection для сброса таймера
-        local inputConnection = UserInputService.InputBegan:Connect(function()
-            if State.AutoReconnectEnabled then
-                ResetActivityTimer()
-            end
-        end)
-        
-        -- Movement detection
-        local moveConnection
-        if LocalPlayer.Character then
-            local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                moveConnection = humanoid.Running:Connect(function(speed)
-                    if State.AutoReconnectEnabled and speed > 0 then
-                        ResetActivityTimer()
-                    end
-                end)
-            end
-        end
-        
-        getgenv().AutoReconnectInputConnection = inputConnection
-        getgenv().AutoReconnectMoveConnection = moveConnection
-        
-        TrackConnection(inputConnection)
-        if moveConnection then TrackConnection(moveConnection) end
-        
-        -- Главный таймер с debug
         State.ReconnectThread = task.spawn(function()
-            local lastPrintTime = 0
+            local elapsed = 0
             
-            while State.AutoReconnectEnabled and task.wait(1) do
-                State.TimeSinceLastActivity = State.TimeSinceLastActivity + 1
+            while State.AutoReconnectEnabled do
+                task.wait(1)
+                elapsed += 1
                 
-                local intervalSeconds = State.ReconnectInterval or (25 * 60)
-                local intervalMinutes = math.floor(intervalSeconds / 60)
-                
-                -- Debug print каждые 10 секунд
-                if tick() - lastPrintTime >= 10 then
-                    print(string.format("[Auto Reconnect] Timer: %d/%d seconds (%.1f/%.1f min)", 
-                        State.TimeSinceLastActivity, 
-                        intervalSeconds,
-                        State.TimeSinceLastActivity / 60,
-                        intervalMinutes
-                    ))
-                    lastPrintTime = tick()
-                end
-                
-                if State.TimeSinceLastActivity >= intervalSeconds then
-                    print("[Auto Reconnect] TRIGGERING REJOIN - Interval reached!")
-                    
-                    if State.NotificationsEnabled then
-                        ShowNotification(
-                            "<font color=\"rgb(220,220,220)\">Auto Reconnect after " .. intervalMinutes .. " min</font>",
-                            CONFIG.Colors.Text
-                        )
-                    end
-                    
-                    task.wait(1)
+                if elapsed >= interval then
                     Rejoin()
-                    break
+                    return
                 end
             end
-            
-            print("[Auto Reconnect] Thread stopped")
         end)
-        
     else
-        print("[Auto Reconnect] DISABLED")
-        
-        -- Отключение
-        if getgenv().AutoReconnectInputConnection then
-            getgenv().AutoReconnectInputConnection:Disconnect()
-            getgenv().AutoReconnectInputConnection = nil
-        end
-        if getgenv().AutoReconnectMoveConnection then
-            getgenv().AutoReconnectMoveConnection:Disconnect()
-            getgenv().AutoReconnectMoveConnection = nil
-        end
         if State.ReconnectThread then
             task.cancel(State.ReconnectThread)
             State.ReconnectThread = nil
         end
-        State.TimeSinceLastActivity = 0
     end
 end
-
--- Respawn handler для Auto Reconnect
-TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
-    if State.AutoReconnectEnabled then
-        task.wait(0.5)
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            local moveConnection = humanoid.Running:Connect(function(speed)
-                if State.AutoReconnectEnabled and speed > 0 then
-                    ResetActivityTimer()
-                end
-            end)
-            
-            if getgenv().AutoReconnectMoveConnection then
-                getgenv().AutoReconnectMoveConnection:Disconnect()
-            end
-            getgenv().AutoReconnectMoveConnection = moveConnection
-            TrackConnection(moveConnection)
-        end
-    end
-end))
-
 
 -- А ТЕПЕРЬ создаём GUI с Handlers
 local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
@@ -5196,56 +5105,53 @@ end)
 SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
-
-task.spawn(function()
-    task.wait(2)
-    pcall(function()
-        -- Auto Farm
-        State.AutoFarmEnabled = true
-        State.UndergroundMode = true
-        State.CoinBlacklist = {}
-        State.StartSessionCoins = GetCollectedCoinsCount()
-        StartAutoFarm()
-        
-        task.wait(0.5) -- Задержка между уведомлениями
-        
-        -- XP Farm
-        State.XPFarmEnabled = true
-        StartXPFarm()
-        
-        task.wait(0.5)
-        
-        -- Instant Pickup
-        EnableInstantPickup()
-        
-        task.wait(0.5)
-        
-        -- Anti-Fling
-        EnableAntiFling()
-        
-        task.wait(0.5)
-        
-        -- Auto Rejoin
-        HandleAutoRejoin(true)
-        
-        task.wait(0.5)
-        
-        -- Auto Reconnect
-        HandleAutoReconnect(true)
-
-		EnableFPSBoost()
-		task.wait(0.5)
-        
-        -- Одно общее уведомление вместо 6 отдельных
-        if State.NotificationsEnabled then
-            ShowNotification(
-                "<font color=\"rgb(85,255,120)\">AutoExec Complete!</font> All features enabled",
-                CONFIG.Colors.Green
-            )
-        end
+if AUTOEXEC_ENABLED then
+    task.spawn(function()
+        task.wait(2)
+        pcall(function()
+            -- Auto Farm
+            State.AutoFarmEnabled = true
+            State.UndergroundMode = true
+            State.CoinBlacklist = {}
+            State.StartSessionCoins = GetCollectedCoinsCount()
+            StartAutoFarm()
+            
+            task.wait(0.5)
+            
+            -- XP Farm
+            State.XPFarmEnabled = true
+            StartXPFarm()
+            
+            task.wait(0.5)
+            
+            -- Instant Pickup
+            EnableInstantPickup()
+            
+            task.wait(0.5)
+            
+            -- Anti-Fling
+            EnableAntiFling()
+            
+            task.wait(0.5)
+            
+            -- Auto Rejoin
+            HandleAutoRejoin(true)
+            
+            task.wait(0.5)
+            
+            -- Auto Reconnect
+            HandleAutoReconnect(true)
+            
+            task.wait(0.5)
+            
+            -- FPS Boost
+            EnableFPSBoost()
+            
+            task.wait(0.5)
+            
+        end)
     end)
-end)
-
+end
 --print("╔════════════════════════════════════════════╗")
 --print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
 --print("║   Press [" .. CONFIG.HideKey.Name .. "] to toggle GUI               ║")
