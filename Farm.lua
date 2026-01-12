@@ -5136,6 +5136,9 @@ if AUTOEXEC_ENABLED then
             
             task.wait(0.1)
             EnableFPSBoost()
+            
+            task.wait(0.1)
+            EnableUIOnly()
         end)
     end)
 end
