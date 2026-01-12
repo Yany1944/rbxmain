@@ -5112,33 +5112,27 @@ if AUTOEXEC_ENABLED then
             
             local function clickPlayButton()
                 for _, gui in pairs(playerGui:GetDescendants()) do
+                    -- ТОЛЬКО Play, НЕ Join!
                     if gui:IsA("TextButton") and gui.Text == "Play" and gui.Visible then
-                        pcall(function()
-                            firesignal(gui.MouseButton1Click)
-                        end)
-                        pcall(function()
-                            gui.MouseButton1Click:Fire()
-                        end)
+                        pcall(function() firesignal(gui.MouseButton1Click) end)
+                        pcall(function() gui.MouseButton1Click:Fire() end)
                         return true
                     end
                 end
                 return false
             end
             
-            task.wait(0.5)
-            -- ВАЖНО: Вызываем функцию!
+            task.wait(1)
             if not clickPlayButton() then
-                playerGui.DescendantAdded:Connect(function(descendant)
-                    if descendant:IsA("TextButton") and descendant.Text == "Play" then
-                        task.wait(0.2)
-                        pcall(function()
-                            firesignal(descendant.MouseButton1Click)
-                        end)
-                        pcall(function()
-                            descendant.MouseButton1Click:Fire()
-                        end)
-                    end
-                end)
+                task.wait(2)
+                if not clickPlayButton() then
+                    playerGui.DescendantAdded:Connect(function(descendant)
+                        if descendant:IsA("TextButton") and descendant.Text == "Play" then
+                            task.wait(0.3)
+                            pcall(function() firesignal(descendant.MouseButton1Click) end)
+                        end
+                    end)
+                end
             end
         end)
     end)
