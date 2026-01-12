@@ -5104,9 +5104,7 @@ pcall(function()
 end)
 SetupAntiAFK()
 StartRoleChecking()
-SetupGunTracking()
 if AUTOEXEC_ENABLED then
-    -- Автоклик кнопки Play (friend join menu)
     task.spawn(function()
         pcall(function()
             local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui", 10)
@@ -5115,9 +5113,12 @@ if AUTOEXEC_ENABLED then
             local function clickPlayButton()
                 for _, gui in pairs(playerGui:GetDescendants()) do
                     if gui:IsA("TextButton") and gui.Text == "Play" and gui.Visible then
-                        for _, connection in pairs(getconnections(gui.MouseButton1Click)) do
-                            connection:Fire()
-                        end
+                        pcall(function()
+                            firesignal(gui.MouseButton1Click)
+                        end)
+                        pcall(function()
+                            gui.MouseButton1Click:Fire()
+                        end)
                         return true
                     end
                 end
@@ -5125,13 +5126,17 @@ if AUTOEXEC_ENABLED then
             end
             
             task.wait(0.5)
+            -- ВАЖНО: Вызываем функцию!
             if not clickPlayButton() then
                 playerGui.DescendantAdded:Connect(function(descendant)
                     if descendant:IsA("TextButton") and descendant.Text == "Play" then
                         task.wait(0.2)
-                        for _, connection in pairs(getconnections(descendant.MouseButton1Click)) do
-                            connection:Fire()
-                        end
+                        pcall(function()
+                            firesignal(descendant.MouseButton1Click)
+                        end)
+                        pcall(function()
+                            descendant.MouseButton1Click:Fire()
+                        end)
                     end
                 end)
             end
