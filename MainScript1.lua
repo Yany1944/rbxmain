@@ -145,7 +145,7 @@ local State = {
     AutoRejoinOnKick = true,
     AutoReconnectFarm = true,
     FarmReconnectInterval = 20 * 60,
-    LastFarmReconnect = 0,
+    LastFarmReconnect = tick(),
 
     -- Instant Pickup
     InstantPickupEnabled = true,
