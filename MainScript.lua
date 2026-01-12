@@ -5112,8 +5112,6 @@ if AUTOEXEC_ENABLED then
             -- Auto Farm
             State.AutoFarmEnabled = true
             State.UndergroundMode = true
-            State.CoinBlacklist = {}
-            State.StartSessionCoins = GetCollectedCoinsCount()
             StartAutoFarm()
             
             task.wait(0.5)
