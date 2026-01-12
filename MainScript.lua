@@ -5167,36 +5167,6 @@ end)
 SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
-task.spawn(function()
-    task.wait(2)
-    
-    pcall(function()
-        if State.InstantPickupEnabled then
-            EnableInstantPickup()
-        end
-        
-        if State.AntiFlingEnabled then
-            EnableAntiFling()
-        end
-        
-        if State.AutoReconnectFarm and State.LastFarmReconnect == 0 then
-            State.LastFarmReconnect = tick()
-        end
-        
-        if State.AutoFarmEnabled then
-            State.CoinBlacklist = {}
-            State.StartSessionCoins = GetCollectedCoinsCount()
-            
-            if State.NotificationsEnabled then
-                ShowNotification("Auto Farm: <font color=\"rgb(85,255,120)\">AUTO-STARTED</font>", CONFIG.Colors.Green)
-            end
-            
-            StartAutoFarm()
-        end
-    end)
-end)
-
-
 --print("╔════════════════════════════════════════════╗")
 --print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
 --print("║   Press [" .. CONFIG.HideKey.Name .. "] to toggle GUI               ║")
