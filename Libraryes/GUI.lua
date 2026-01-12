@@ -1030,7 +1030,7 @@ return function(env)
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-        FarmTab:CreateToggle("Auto reconnect (farm)","Переподключаться каждые 25 минут после завершения раунда",false,"FarmAutoReconnect")
+        FarmTab:CreateToggle("Auto Reconnect (Farm)","Reconnect every 25 min during autofarm to avoid AFK kick","HandleAutoReconnect")
         FarmTab:CreateInputField("Reconnect interval","Интервал в минутах (по умолчанию 25)",25,"FarmReconnectMinutes")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
@@ -1080,7 +1080,7 @@ return function(env)
         UtilityTab:CreateSection("SERVER MANAGEMENT")
         UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
         UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
-        UtilityTab:CreateToggle("Auto Rejoin on kick","Автоматический rejoin при вылете",true,"ServerAutoRejoin")
+        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin")
 
         local footer = Create("TextLabel", {
             Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
