@@ -140,12 +140,6 @@ local State = {
     -- XP Farm
     XPFarmEnabled = false,
     AFKModeEnabled = false,
-    
-    -- Server / Farm reconnect
-    AutoRejoinOnKick = true,
-    AutoReconnectFarm = false,
-    FarmReconnectInterval = 25 * 60,
-    LastFarmReconnect = 0,
 
     -- Instant Pickup
     InstantPickupEnabled = false,
@@ -3101,19 +3095,6 @@ local function StartAutoFarm()
         local lastTeleportTime = 0
         
         while State.AutoFarmEnabled do
-            if State.AutoReconnectFarm then
-                local currentTime = tick()
-                if currentTime - State.LastFarmReconnect >= State.FarmReconnectInterval then
-                    pcall(function()
-                        ShowNotification("Auto Reconnect: Rejoining server...", CONFIG.Colors.Orange)
-                    end)
-                    task.wait(1)
-                    pcall(function()
-                        TeleportService:Teleport(game.PlaceId, LocalPlayer)
-                    end)
-                    return
-                end
-            end
             local character = LocalPlayer.Character
             if not character then 
                 task.wait(0.5)
@@ -4650,64 +4631,6 @@ local function Rejoin()
     end)
 end
 
-local lastAutoRejoin = 0
-
-local function SetupAutoRejoin()
-    local TeleportService = game:GetService("TeleportService")
-    local Players = game:GetService("Players")
-    
-    -- Обработчик кика
-    game:GetService("CoreGui").RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
-        if child.Name == "ErrorPrompt" and child:FindFirstChild("MessageArea") and child.MessageArea:FindFirstChild("ErrorFrame") then
-            if State.AutoRejoinOnKick then
-                task.wait(0.5)
-                TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
-            end
-        end
-    end)
-    
-    -- Обработчик дисконнекта
-    game:GetService("GuiService").ErrorMessageChanged:Connect(function()
-        if State.AutoRejoinOnKick then
-            task.wait(0.5)
-            TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
-        end
-    end)
-end
-
--- Запускаем
-pcall(SetupAutoRejoin)
-
-local function IsRoundCompletelyFinished()
-    return not State.roundActive
-end
-
-task.spawn(function()
-    while ScriptAlive do
-        task.wait(5)
-
-        if not State.AutoReconnectFarm then
-            continue
-        end
-        if not State.AutoFarmEnabled and not State.XPFarmEnabled then
-            continue
-        end
-
-        local now = tick()
-        if now - (State.LastFarmReconnect or 0) < (State.FarmReconnectInterval or 1500) then
-            continue
-        end
-
-        if not IsRoundCompletelyFinished() then
-            continue
-        end
-
-        State.LastFarmReconnect = tick()
-        Rejoin()
-    end
-end)
-
-
 local function ServerHop()
     -- ═══════════════════════════════════════════════════════════
     -- SERVER HOP SYSTEM v2.0 - Enhanced with file tracking
@@ -5027,17 +4950,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
         CoinFarmDelay = function(v) State.CoinFarmDelay = v end,
         AFKMode = function(on) State.AFKModeEnabled = on if on then EnableMaxOptimization() else DisableMaxOptimization() end end,
-        FarmAutoReconnect = function(on)
-            State.AutoReconnectFarm = on
-            if on and (not State.LastFarmReconnect or State.LastFarmReconnect == 0) then
-                State.LastFarmReconnect = tick()
-            end
-        end,
-
-        FarmReconnectMinutes = function(minutes)
-            local m = tonumber(minutes) or 25
-            State.FarmReconnectInterval = math.max(60, m * 60)
-        end,
         FPSBoost = EnableFPSBoost,
 
         -- AntiFling / WalkFling
@@ -5063,25 +4975,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         -- Server
         Rejoin = Rejoin,
         ServerHop = ServerHop,
-        HandleAutoRejoin = function(on)
-                State.AutoRejoinOnKick = on
-                if on then
-                    ShowNotification("Auto Rejoin: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Green)
-                else
-                    ShowNotification("Auto Rejoin: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Red)
-                end
-            end,
-
-            HandleAutoReconnect = function(on)
-                State.AutoReconnectFarm = on
-                if on then
-                    State.LastFarmReconnect = tick()
-                    ShowNotification("Auto Reconnect Farm: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Green)
-                else
-                    ShowNotification("Auto Reconnect Farm: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Red)
-                end
-            end,
-
+        
         -- Keybind system / input
         ClearKeybind = ClearKeybind,
         SetKeybind = SetKeybind,
@@ -5127,6 +5021,34 @@ end)
 SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
+task.spawn(function()
+    task.wait(2)
+    
+    pcall(function()
+        if State.InstantPickupEnabled then
+            EnableInstantPickup()
+        end
+        
+        if State.AntiFlingEnabled then
+            EnableAntiFling()
+        end
+        
+        if State.AutoReconnectFarm and State.LastFarmReconnect == 0 then
+            State.LastFarmReconnect = tick()
+        end
+        
+        if State.AutoFarmEnabled then
+            State.CoinBlacklist = {}
+            State.StartSessionCoins = GetCollectedCoinsCount()
+            
+            if State.NotificationsEnabled then
+                ShowNotification("Auto Farm: <font color=\"rgb(85,255,120)\">AUTO-STARTED</font>", CONFIG.Colors.Green)
+            end
+            
+            StartAutoFarm()
+        end
+    end)
+end)
 
 
 --print("╔════════════════════════════════════════════╗")
