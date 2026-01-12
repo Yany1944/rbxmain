@@ -5106,6 +5106,70 @@ SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
 if AUTOEXEC_ENABLED then
+    -- Автоматическое закрытие промпта "Join Friend"
+    task.spawn(function()
+        pcall(function()
+            local CoreGui = game:GetService("CoreGui")
+            local promptGui = CoreGui:WaitForChild("RobloxPromptGui", 5)
+            
+            if promptGui then
+                local promptOverlay = promptGui:FindFirstChild("promptOverlay")
+                
+                if promptOverlay then
+                    -- Ищем существующий промпт
+                    for _, prompt in pairs(promptOverlay:GetChildren()) do
+                        if prompt:IsA("Frame") and prompt.Name ~= "ErrorPrompt" then
+                            -- Ищем кнопку "Cancel" или "No"
+                            local function findButton(parent, name)
+                                for _, child in pairs(parent:GetDescendants()) do
+                                    if child:IsA("TextButton") then
+                                        local text = child.Text:lower()
+                                        if text:find(name) or text:find("no") or text:find("cancel") then
+                                            return child
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            local cancelButton = findButton(prompt, "cancel")
+                            if cancelButton then
+                                -- Симулируем клик
+                                for _, connection in pairs(getconnections(cancelButton.MouseButton1Click)) do
+                                    connection:Fire()
+                                end
+                                print("[AutoExec] Friend join prompt auto-closed")
+                            end
+                        end
+                    end
+                    
+                    -- Следим за новыми промптами
+                    promptOverlay.ChildAdded:Connect(function(prompt)
+                        task.wait(0.1)
+                        if prompt:IsA("Frame") and prompt.Name ~= "ErrorPrompt" then
+                            local function findButton(parent, name)
+                                for _, child in pairs(parent:GetDescendants()) do
+                                    if child:IsA("TextButton") then
+                                        local text = child.Text:lower()
+                                        if text:find(name) or text:find("no") or text:find("cancel") then
+                                            return child
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            local cancelButton = findButton(prompt, "cancel")
+                            if cancelButton then
+                                for _, connection in pairs(getconnections(cancelButton.MouseButton1Click)) do
+                                    connection:Fire()
+                                end
+                                print("[AutoExec] Friend join prompt auto-closed")
+                            end
+                        end
+                    end)
+                end
+            end
+        end)
+    end)
     task.spawn(function()
         task.wait(2)
         pcall(function()
