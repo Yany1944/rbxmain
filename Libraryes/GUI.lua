@@ -1031,7 +1031,7 @@ return function(env)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
         FarmTab:CreateToggle("Auto Reconnect (Farm)","Reconnect every 25 min during autofarm to avoid AFK kick","HandleAutoReconnect")
-        FarmTab:CreateInputField("Reconnect interval","Интервал в минутах (по умолчанию 25)",25,"SetReconnectInterval")
+        FarmTab:CreateInputField("Reconnect interval","Интервал в минутах (по умолчанию 25)", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
         local FunTab = CreateTab("Fun")
