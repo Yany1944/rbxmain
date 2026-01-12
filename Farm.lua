@@ -5106,98 +5106,63 @@ SetupAntiAFK()
 StartRoleChecking()
 SetupGunTracking()
 if AUTOEXEC_ENABLED then
-    -- Автоматическое нажатие кнопки "Play" при появлении меню друзей
+    -- Автоклик кнопки Play (friend join menu)
     task.spawn(function()
         pcall(function()
-            local Players = game:GetService("Players")
-            local LocalPlayer = Players.LocalPlayer
+            local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui", 10)
+            if not playerGui then return end
             
-            -- Ждём появления PlayerGui
-            local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+            local function clickPlayButton()
+                for _, gui in pairs(playerGui:GetDescendants()) do
+                    if gui:IsA("TextButton") and gui.Text == "Play" and gui.Visible then
+                        for _, connection in pairs(getconnections(gui.MouseButton1Click)) do
+                            connection:Fire()
+                        end
+                        return true
+                    end
+                end
+                return false
+            end
             
-            if playerGui then
-                -- Ищем GUI с кнопкой Play
-                local function findPlayButton()
-                    for _, gui in pairs(playerGui:GetDescendants()) do
-                        if gui:IsA("TextButton") then
-                            local text = gui.Text:lower()
-                            if text == "play" or text:find("play") then
-                                return gui
-                            end
+            task.wait(0.5)
+            if not clickPlayButton() then
+                playerGui.DescendantAdded:Connect(function(descendant)
+                    if descendant:IsA("TextButton") and descendant.Text == "Play" then
+                        task.wait(0.2)
+                        for _, connection in pairs(getconnections(descendant.MouseButton1Click)) do
+                            connection:Fire()
                         end
                     end
-                    return nil
-                end
-                
-                -- Проверяем существующие GUI
-                task.wait(0.5)
-                local playButton = findPlayButton()
-                
-                if playButton then
-                    -- Нажимаем кнопку Play
-                    for _, connection in pairs(getconnections(playButton.MouseButton1Click)) do
-                        connection:Fire()
-                    end
-                    print("[AutoExec] Auto-clicked 'Play' button (friend join menu bypassed)")
-                else
-                    -- Следим за появлением новых GUI
-                    playerGui.DescendantAdded:Connect(function(descendant)
-                        if descendant:IsA("TextButton") then
-                            local text = descendant.Text:lower()
-                            if text == "play" or text:find("play") then
-                                task.wait(0.3)
-                                for _, connection in pairs(getconnections(descendant.MouseButton1Click)) do
-                                    connection:Fire()
-                                end
-                                print("[AutoExec] Auto-clicked 'Play' button (friend join menu bypassed)")
-                            end
-                        end
-                    end)
-                end
+                end)
             end
         end)
     end)
+    
     task.spawn(function()
         task.wait(2)
         pcall(function()
-            -- Auto Farm
             State.AutoFarmEnabled = true
             State.UndergroundMode = true
             StartAutoFarm()
             
-            task.wait(0.5)
-            
-            -- XP Farm
+            task.wait(0.1)
             State.XPFarmEnabled = true
             StartXPFarm()
             
-            task.wait(0.5)
-            
-            -- Instant Pickup
+            task.wait(0.1)
             EnableInstantPickup()
             
-            task.wait(0.5)
-            
-            -- Anti-Fling
+            task.wait(0.1)
             EnableAntiFling()
             
-            task.wait(0.5)
-            
-            -- Auto Rejoin
+            task.wait(0.1)
             HandleAutoRejoin(true)
             
-            task.wait(0.5)
-            
-            -- Auto Reconnect
+            task.wait(0.1)
             HandleAutoReconnect(true)
             
-            task.wait(0.5)
-            
-            -- FPS Boost
+            task.wait(0.1)
             EnableFPSBoost()
-            
-            task.wait(0.5)
-            
         end)
     end)
 end
