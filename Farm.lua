@@ -5110,12 +5110,19 @@ if AUTOEXEC_ENABLED then
             local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui", 10)
             if not playerGui then return end
             
+            local VIM = game:GetService("VirtualInputManager")
+            
             local function clickPlayButton()
                 for _, gui in pairs(playerGui:GetDescendants()) do
-                    -- ТОЛЬКО Play, НЕ Join!
                     if gui:IsA("TextButton") and gui.Text == "Play" and gui.Visible then
-                        pcall(function() firesignal(gui.MouseButton1Click) end)
-                        pcall(function() gui.MouseButton1Click:Fire() end)
+                        local centerX = gui.AbsolutePosition.X + (gui.AbsoluteSize.X / 2)
+                        local centerY = gui.AbsolutePosition.Y + (gui.AbsoluteSize.Y / 2)
+                        
+                        pcall(function()
+                            VIM:SendMouseButtonEvent(centerX, centerY, 0, true, game, 0)
+                            task.wait(0.05)
+                            VIM:SendMouseButtonEvent(centerX, centerY, 0, false, game, 0)
+                        end)
                         return true
                     end
                 end
@@ -5129,7 +5136,13 @@ if AUTOEXEC_ENABLED then
                     playerGui.DescendantAdded:Connect(function(descendant)
                         if descendant:IsA("TextButton") and descendant.Text == "Play" then
                             task.wait(0.3)
-                            pcall(function() firesignal(descendant.MouseButton1Click) end)
+                            local centerX = descendant.AbsolutePosition.X + (descendant.AbsoluteSize.X / 2)
+                            local centerY = descendant.AbsolutePosition.Y + (descendant.AbsoluteSize.Y / 2)
+                            pcall(function()
+                                VIM:SendMouseButtonEvent(centerX, centerY, 0, true, game, 0)
+                                task.wait(0.05)
+                                VIM:SendMouseButtonEvent(centerX, centerY, 0, false, game, 0)
+                            end)
                         end
                     end)
                 end
