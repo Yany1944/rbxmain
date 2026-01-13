@@ -206,7 +206,7 @@ local State = {
     Connections = {},
     UIElements = {},
     RoleCheckLoop = nil,
-    FPDH = workspace.FallenPartsDestroyHeight,
+    FPDH = Workspace.FallenPartsDestroyHeight,
     
     -- UI State
     ClickTPActive = false,
@@ -279,8 +279,9 @@ local colRgb = Color3.fromRGB
 -- СИСТЕМА ИГРОКОВ ДЛЯ АИМБОТА
 -- ========================================
 local clientChar = LocalPlayer.Character
+local clientMouse = LocalPlayer:GetMouse()
 local clientRoot, clientHumanoid
-local clientCamera = workspace.CurrentCamera or workspace:FindFirstChildOfClass('Camera')
+local clientCamera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass('Camera')
 local clientTeam = LocalPlayer.Team
 
 local function GetRootPart(character)
@@ -319,8 +320,8 @@ end
 TrackConnection(LocalPlayer.CharacterAdded:Connect(updateCharacter))
 updateCharacter()
 
-TrackConnection(workspace:GetPropertyChangedSignal('CurrentCamera'):Connect(function()
-    clientCamera = workspace.CurrentCamera or workspace:FindFirstChildOfClass('Camera')
+TrackConnection(Workspace:GetPropertyChangedSignal('CurrentCamera'):Connect(function()
+    clientCamera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass('Camera')
 end))
 
 TrackConnection(LocalPlayer:GetPropertyChangedSignal('Team'):Connect(function()
@@ -407,7 +408,7 @@ State.AimbotConfig = {
     AliveCheck = true,
     DistanceCheck = false,
     FovCheck = false,
-    TeamCheck = true,
+    TeamCheck = false,
     VisibilityCheck = false,
 
     LockOn = false,
@@ -469,7 +470,7 @@ local function StartAimbot()
 
     FovCircleOutline = drawNew('Circle')
     FovCircleOutline.NumSides = 40
-    FovCircleOutline.Thickness = 4
+    FovCircleOutline.Thickness = 2
     FovCircleOutline.Visible = State.AimbotConfig.FovCheck
     FovCircleOutline.Radius = State.AimbotConfig.Fov
     FovCircleOutline.Color = colRgb(0, 0, 0)
@@ -521,7 +522,7 @@ local function StartAimbot()
             local origin = clientRoot.Position
             local direction = (root.Position - origin)
 
-            local rayResult = workspace:Raycast(origin, direction, rayParams)
+            local rayResult = Workspace:Raycast(origin, direction, rayParams)
 
             if not rayResult then return true end
             return rayResult.Instance:IsDescendantOf(root.Parent)
@@ -586,7 +587,7 @@ local function StartAimbot()
         NextTarget = function(mp)
             local FinalTarget, FinalVec2, FinalVec3
             local BestPriority = -999999
-            local MousePosition = mp or vec2(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+            local MousePosition = mp or vec2(clientMouse.X, clientMouse.Y)
             local CameraPos = clientCamera.CFrame.Position
 
             AimbotTarget = nil
@@ -629,7 +630,7 @@ local function StartAimbot()
         NextTarget = function(mp)
             local FinalTarget, FinalVec2, FinalVec3
             local BestPriority = -999999
-            local MousePosition = mp or vec2(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+            local MousePosition = mp or vec2(clientMouse.X, clientMouse.Y)  -- ✅ ИЗМЕНИТЬ
             local CameraPos = clientCamera.CFrame.Position
 
             AimbotTarget = nil
@@ -703,11 +704,8 @@ local function StartAimbot()
             end
 
             -- ИСПРАВЛЕНИЕ: Проверяем видимость GUI MM2 скрипта, а не MainFrame из исходного аимбота
-            if State.UIElements.MainGui and CoreGui:FindFirstChild("MM2_ESP_UI") then
-                local mainGui = CoreGui:FindFirstChild("MM2_ESP_UI")
-                if mainGui and mainGui:FindFirstChild("MainFrame") then
-                    if mainGui.MainFrame.Visible then return end
-                end
+            if State.UIElements.MainFrame and State.UIElements.MainFrame.Visible then 
+                return 
             end
 
             local target, position = NextTarget(cachedMousePos)
@@ -766,7 +764,10 @@ local function StartAimbot()
             if position then
                 local delta = position - cachedMousePos
                 delta *= State.AimbotConfig.Deltatime and ((1 - State.AimbotConfig.Smoothness) * dt * 75) or (1 - State.AimbotConfig.Smoothness)
-                mousemoverel(delta.X, delta.Y)
+                
+                if mousemoverel then
+                    mousemoverel(delta.X, delta.Y)
+                end
             end
         end)
     end
@@ -803,7 +804,6 @@ _G.StartAimbot = StartAimbot
 _G.StopAimbot = StopAimbot
 
 end -- конец проверки _G.AIMBOT_LOADED
-
 
 -- ============= PING CHAMS SYSTEM =============
 local PINGCHAMS_BUFFERMAXSECONDS = 3.0
@@ -951,7 +951,7 @@ local function PingChams_ensureGhost()
     if not State.PingChamsGhostModel then
         State.PingChamsGhostModel = Instance.new("Model")
         State.PingChamsGhostModel.Name = "ServerApproxGhost"
-        State.PingChamsGhostModel.Parent = workspace
+        State.PingChamsGhostModel.Parent = Workspace
     end
     
     if not State.PingChamsGhostPart then
@@ -1258,11 +1258,11 @@ local function CreateTracer(startPos, endPos, duration)
     
     local attachment0 = Instance.new("Attachment")
     attachment0.WorldPosition = startPos
-    attachment0.Parent = workspace.Terrain
+    attachment0.Parent = Workspace.Terrain
     
     local attachment1 = Instance.new("Attachment")
     attachment1.WorldPosition = endPos
-    attachment1.Parent = workspace.Terrain
+    attachment1.Parent = Workspace.Terrain
     
     local beam = Instance.new("Beam")
     beam.Attachment0 = attachment0
@@ -1334,7 +1334,7 @@ end
 local function PerformRaycast(origin, direction, maxDistance)
     RayParams.FilterDescendantsInstances = {LocalPlayer.Character}
     
-    local raycastResult = workspace:Raycast(origin, direction * maxDistance, RayParams)
+    local raycastResult = Workspace:Raycast(origin, direction * maxDistance, RayParams)
     if raycastResult then
         return raycastResult.Position
     else
@@ -1649,7 +1649,7 @@ local function FullShutdown()
     
     -- ✅ Восстановление FallenPartsDestroyHeight
     pcall(function()
-        workspace.FallenPartsDestroyHeight = State.FPDH
+        Workspace.FallenPartsDestroyHeight = State.FPDH
     end)
     
     -- ✅ Очистка Keybinds
@@ -1858,7 +1858,7 @@ EnableMaxOptimization = function()
     
     -- 4. CAMERA OPTIMIZATION
     pcall(function()
-        local camera = workspace.CurrentCamera
+        local camera = Workspace.CurrentCamera
         if camera then
             savedSettings.Camera.FieldOfView = camera.FieldOfView
             camera.FieldOfView = 50
@@ -1868,8 +1868,8 @@ EnableMaxOptimization = function()
     -- 5. RENDER DISTANCE
     pcall(function()
         if sethiddenproperty then
-            sethiddenproperty(workspace, "StreamingMinRadius", 32)
-            sethiddenproperty(workspace, "StreamingTargetRadius", 64)
+            sethiddenproperty(Workspace, "StreamingMinRadius", 32)
+            sethiddenproperty(Workspace, "StreamingTargetRadius", 64)
         end
     end)
 end
@@ -1941,7 +1941,7 @@ DisableMaxOptimization = function()
     
     -- 4. ВОССТАНОВЛЕНИЕ КАМЕРЫ
     pcall(function()
-        local camera = workspace.CurrentCamera
+        local camera = Workspace.CurrentCamera
         if camera and savedSettings.Camera.FieldOfView then
             camera.FieldOfView = savedSettings.Camera.FieldOfView
         end
@@ -2009,7 +2009,7 @@ local function EnableFPSBoost()
     
     -- 1. TERRAIN OPTIMIZATION
     pcall(function()
-        local Terrain = workspace:FindFirstChildOfClass('Terrain')
+        local Terrain = Workspace:FindFirstChildOfClass('Terrain')
         if Terrain then
             Terrain.WaterWaveSize = 0
             Terrain.WaterWaveSpeed = 0
@@ -2042,7 +2042,7 @@ local function EnableFPSBoost()
     
     -- 4. MATERIALS & EFFECTS CLEANUP
     pcall(function()
-        for _, v in pairs(workspace:GetDescendants()) do
+        for _, v in pairs(Workspace:GetDescendants()) do
             if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("UnionOperation") then
                 v.Material = Enum.Material.SmoothPlastic
                 v.Reflectance = 0
@@ -2057,7 +2057,7 @@ local function EnableFPSBoost()
     end)
     
     -- 5. AUTO-CLEANUP NEW EFFECTS
-    fpsBoostDescendantConn = workspace.DescendantAdded:Connect(function(child)
+    fpsBoostDescendantConn = Workspace.DescendantAdded:Connect(function(child)
         if not fpsBoostActive then return end
         
         task.spawn(function()
@@ -2762,8 +2762,8 @@ local function FlingPlayer(playerToFling)
         return
     end
 
-    workspace.CurrentCamera.CameraSubject = targetPart
-    workspace.FallenPartsDestroyHeight = 0/0
+    Workspace.CurrentCamera.CameraSubject = targetPart
+    Workspace.FallenPartsDestroyHeight = 0/0
 
     local BV = Instance.new("BodyVelocity")
     BV.Name = "EpixVel"
@@ -2842,7 +2842,7 @@ local function FlingPlayer(playerToFling)
 
     BV:Destroy()
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-    workspace.CurrentCamera.CameraSubject = Humanoid
+    Workspace.CurrentCamera.CameraSubject = Humanoid
 
     if State.OldPos then
         repeat
@@ -2860,7 +2860,7 @@ local function FlingPlayer(playerToFling)
         until (RootPart.Position - State.OldPos.p).Magnitude < 25
     end
 
-    workspace.FallenPartsDestroyHeight = State.FPDH
+    Workspace.FallenPartsDestroyHeight = State.FPDH
     
     State.IsFlingInProgress = false
     if antiFlingWasEnabled then
@@ -5630,9 +5630,13 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         -- AIMBOT HANDLERS (добавить в Handlers = {})
         AimbotEnabled = function(value)
             if value then
-                StartAimbot() -- строка 5633 
+                if _G.StartAimbot then
+                    _G.StartAimbot()
+                end
             else
-                StopAimbot()
+                if _G.StopAimbot then
+                    _G.StopAimbot()
+                end
             end
             State.AimbotConfig.Enabled = value
         end,
@@ -5704,8 +5708,8 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         AimbotMethod = function(value)
             State.AimbotConfig.Method = value
             if State.AimbotConfig.Enabled then
-                StopAimbot()
-                StartAimbot()
+                if _G.StopAimbot then _G.StopAimbot() end
+                if _G.StartAimbot then _G.StartAimbot() end
             end
         end,
 
