@@ -451,7 +451,7 @@ State.AimbotConfig = {
 
     Distance = 2000,
     Fov = 50,
-    PredictionValue = 0.05,
+    PredictionValue = 0.03,
     Smoothness = 3.5,
     VerticalOffset = 0.7,
 
