@@ -989,6 +989,34 @@ return function(env)
         MainTab:CreateSection("GODMODE")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
+        MainTab:CreateSection("AIMBOT")
+        MainTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled")
+        
+        MainTab:CreateSection("TARGETING CHECKS")
+        MainTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck")
+        MainTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck")
+        MainTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck")
+        MainTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck")
+        MainTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
+        
+        MainTab:CreateSection("ADVANCED OPTIONS")
+        MainTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn")
+        MainTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction")
+        MainTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
+        
+        MainTab:CreateSection("TARGETING VALUES")
+        MainTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 100)
+        MainTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
+        MainTab:CreateSlider("Smoothness", "Aim smoothness (0-100)", 0, 100, State.AimbotConfig.Smoothness * 100, "AimbotSmoothness", 5)
+        
+        MainTab:CreateSection("PREDICTION & OFFSET")
+        MainTab:CreateSlider("Prediction", "Movement prediction strength (0-100)", 0, 100, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 5)
+        MainTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 10)
+        
+        MainTab:CreateSection("METHOD & ACTIVATION")
+        MainTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
+        MainTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+
         local VisualsTab = CreateTab("Visuals")
 
         VisualsTab:CreateSection("NOTIFICATIONS")
