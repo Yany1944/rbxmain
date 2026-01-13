@@ -5847,7 +5847,7 @@ local VisualsTab = GUI.CreateTab("Visuals")
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
 
     VisualsTab:CreateSection("Misc")
-    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", AUTOEXEC_ENABLED)
     VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
     VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
 
@@ -5865,21 +5865,21 @@ local CombatTab = GUI.CreateTab("Combat")
 
     CombatTab:CreateSection("SHERIFF TOOLS")
     CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup")
+    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", AUTOEXEC_ENABLED)
     CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
 
 local FarmTab = GUI.CreateTab("Farming")
 
     FarmTab:CreateSection("AUTO FARM")
-    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm")
-    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm")
+    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", AUTOEXEC_ENABLED)
+    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", AUTOEXEC_ENABLED)
 
     FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
     FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
     FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
     FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-    FarmTab:CreateToggle("Auto Reconnect (Farm)","Reconnect every 25 min during autofarm to avoid AFK kick","HandleAutoReconnect")
-    FarmTab:CreateInputField("Reconnect interval","Интервал в минутах (по умолчанию 25)", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+    FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", AUTOEXEC_ENABLED)
+    FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
     FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
 local FunTab = GUI.CreateTab("Fun")
@@ -5964,31 +5964,8 @@ if AUTOEXEC_ENABLED then
     task.spawn(function()
         task.wait(2)
         pcall(function()
-            State.AutoFarmEnabled = true
-            State.UndergroundMode = true
-            StartAutoFarm()
-            
-            task.wait(0.1)
-            State.XPFarmEnabled = true
-            StartXPFarm()
-            
-            task.wait(0.1)
-            EnableInstantPickup()
-            
-            task.wait(0.1)
-            EnableAntiFling()
-            
-            task.wait(0.1)
-            HandleAutoRejoin(true)
-            
-            task.wait(0.1)
-            HandleAutoReconnect(true)
-            
             task.wait(0.1)
             EnableFPSBoost()
-            
-            task.wait(0.1)
-            UIOnly(true)
         end)
     end)
 end
