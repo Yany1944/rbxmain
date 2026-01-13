@@ -5630,7 +5630,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         -- AIMBOT HANDLERS (добавить в Handlers = {})
         AimbotEnabled = function(value)
             if value then
-                StartAimbot()
+                StartAimbot() -- строка 5633 
             else
                 StopAimbot()
             end
@@ -5730,7 +5730,7 @@ local MainTab = GUI.CreateTab("Main")
 
     MainTab:CreateSection("CAMERA")
     MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
-    MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",true)
+    MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
 
     MainTab:CreateSection("TELEPORT & MOVEMENT")
     MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
@@ -5745,9 +5745,9 @@ local MainTab = GUI.CreateTab("Main")
     MainTab:CreateSection("TARGETING CHECKS")
     MainTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
     MainTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
-    MainTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck")
+    MainTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",false)
     MainTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
-    MainTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck",)
+    MainTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
     MainTab:CreateSection("ADVANCED OPTIONS")
     MainTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn")
@@ -5770,13 +5770,13 @@ local MainTab = GUI.CreateTab("Main")
 local VisualsTab = GUI.CreateTab("Visuals")
 
     VisualsTab:CreateSection("NOTIFICATIONS")
-    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled")
+    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",true)
 
     VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP")
-    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP")
-    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP")
-    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP")
+    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",true)
+    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",true)
+    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
+    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
 
     VisualsTab:CreateSection("Misc")
     VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
@@ -5806,7 +5806,7 @@ local FarmTab = GUI.CreateTab("Farming")
     FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm")
     FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm")
 
-    FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode")
+    FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
     FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
     FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
     FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
