@@ -12,7 +12,7 @@ return function(env)
     local TrackConnection = env.TrackConnection
     local ShowNotification = env.ShowNotification
     local Handlers = env.Handlers
-    local BACK_TRANSPARENCY = 0
+    local BACK_TRANSPARENCY = 0.10
 
     local GUI = {}
 
