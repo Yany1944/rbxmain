@@ -12,6 +12,7 @@ return function(env)
     local TrackConnection = env.TrackConnection
     local ShowNotification = env.ShowNotification
     local Handlers = env.Handlers
+    local BACK_TRANSPARENCY = 0.15
 
     local GUI = {}
 
@@ -86,6 +87,7 @@ return function(env)
         local mainFrame = Create("Frame", {
             Name = "MainFrame",
             BackgroundColor3 = CONFIG.Colors.Background,
+            BackgroundTransparency = BACK_TRANSPARENCY,
             Position = UDim2.new(0.5, -225, 0.5, -325),
             Size = UDim2.new(0, 450, 0, 650),
             ClipsDescendants = false,
@@ -99,6 +101,7 @@ return function(env)
         local header = Create("Frame", {
             Name = "Header",
             BackgroundColor3 = CONFIG.Colors.Section,
+            BackgroundTransparency = BACK_TRANSPARENCY,
             Size = UDim2.new(1, 0, 0, 40),
             Parent = mainFrame
         })
@@ -182,6 +185,7 @@ return function(env)
                 TextSize = 13,
                 TextColor3 = CONFIG.Colors.TextDark,
                 BackgroundColor3 = CONFIG.Colors.Section,
+                BackgroundTransparency = BACK_TRANSPARENCY,
                 Size = UDim2.new(0, 0, 1, 0),
                 AutoButtonColor = false,
                 Parent = tabContainer
@@ -265,6 +269,7 @@ return function(env)
             function TabFunctions:CreateDropdown(title, desc, options, default, handlerKey)
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
                     Parent = page
                 })
@@ -301,6 +306,7 @@ return function(env)
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(1, -110, 0.5, -12),
                     Size = UDim2.new(0, 95, 0, 24),
                     AutoButtonColor = false,
@@ -312,6 +318,7 @@ return function(env)
 
                 local dropdownFrame = Create("ScrollingFrame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(0, 0, 0, 0),
                     Size = UDim2.new(0, 95, 0, 0),
                     Visible = false,
@@ -343,6 +350,7 @@ return function(env)
                         TextSize = 10,
                         TextColor3 = CONFIG.Colors.Text,
                         BackgroundColor3 = Color3.fromRGB(50, 50, 55),
+                        BackgroundTransparency = BACK_TRANSPARENCY,
                         Size = UDim2.new(1, 0, 0, 25),
                         AutoButtonColor = false,
                         ZIndex = 1001,
@@ -416,6 +424,7 @@ return function(env)
             
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
                     Parent = page
                 })
@@ -450,6 +459,7 @@ return function(env)
                 local toggleBg = Create("TextButton", {
                     Text = "",
                     BackgroundColor3 = default and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55),
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(1, -60, 0.5, -12),
                     Size = UDim2.new(0, 44, 0, 24),
                     AutoButtonColor = false,
@@ -460,6 +470,7 @@ return function(env)
                 -- УЛУЧШЕНИЕ: Начальная позиция круга зависит от default
                 local toggleCircle = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Text,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = default and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10),
                     Size = UDim2.new(0, 20, 0, 20),
                     Parent = toggleBg
@@ -494,6 +505,7 @@ return function(env)
             function TabFunctions:CreateInputField(title, desc, defaultValue, handlerKey)
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
                     Parent = page
                 })
@@ -530,6 +542,7 @@ return function(env)
                     TextSize = 13,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(1, -80, 0.5, -12),
                     Size = UDim2.new(0, 65, 0, 24),
                     PlaceholderText = "Value",
@@ -553,6 +566,7 @@ return function(env)
                 step = step or 1
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 70),
                     Parent = page
                 })
@@ -585,6 +599,7 @@ return function(env)
 
                 local sliderBg = Create("Frame", {
                     BackgroundColor3 = Color3.fromRGB(40, 40, 45),
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(0, 15, 0, 50),
                     Size = UDim2.new(1, -95, 0, 6),
                     Parent = card
@@ -593,6 +608,7 @@ return function(env)
 
                 local sliderFill = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Accent,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
                     Parent = sliderBg
                 })
@@ -601,6 +617,7 @@ return function(env)
                 local sliderButton = Create("TextButton", {
                     Text = "",
                     BackgroundColor3 = CONFIG.Colors.Text,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new((default - min) / (max - min), -8, 0.5, -8),
                     Size = UDim2.new(0, 16, 0, 16),
                     AutoButtonColor = false,
@@ -665,6 +682,7 @@ return function(env)
             function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 50),
                     Parent = page
                 })
@@ -691,6 +709,7 @@ return function(env)
                     TextSize = 12,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(1, -110, 0.5, -15),
                     Size = UDim2.new(0, 95, 0, 30),
                     AutoButtonColor = false,
@@ -712,6 +731,7 @@ return function(env)
             function TabFunctions:CreatePlayerDropdown(title, desc)
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
                     Parent = page
                 })
@@ -748,6 +768,7 @@ return function(env)
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(1, -180, 0.5, -12),
                     Size = UDim2.new(0, 165, 0, 24),
                     AutoButtonColor = false,
@@ -759,6 +780,7 @@ return function(env)
 
                 local dropdownFrame = Create("ScrollingFrame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(0, 0, 0, 0),
                     Size = UDim2.new(0, 165, 0, 0),
                     Visible = false,
@@ -827,6 +849,7 @@ return function(env)
                             TextSize = 11,
                             TextColor3 = CONFIG.Colors.Text,
                             BackgroundColor3 = Color3.fromRGB(50, 50, 55),
+                            BackgroundTransparency = BACK_TRANSPARENCY,
                             Size = UDim2.new(1, -10, 0, buttonHeight),
                             Position = UDim2.new(0, 5, 0, 0),
                             AutoButtonColor = false,
@@ -937,6 +960,7 @@ return function(env)
             function TabFunctions:CreateButton(title, buttonText, color, handlerKey)
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 50),
                     Parent = page
                 })
@@ -963,6 +987,7 @@ return function(env)
                     TextSize = 13,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = color or CONFIG.Colors.Accent,
+                    BackgroundTransparency = BACK_TRANSPARENCY,
                     Position = UDim2.new(0, 15, 0.5, -15),
                     Size = UDim2.new(1, -30, 0, 30),
                     AutoButtonColor = false,
