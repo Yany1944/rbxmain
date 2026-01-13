@@ -94,7 +94,6 @@ local GuiService = game:GetService("GuiService")
 local LocalPlayer = Players.LocalPlayer
 
 
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 3: STATE MANAGEMENT (СТРОКИ 116-252)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -259,6 +258,553 @@ local function TrackConnection(conn)
     end
     return conn
 end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- AIMBOT SYSTEM (ИСПРАВЛЕННАЯ ИНТЕГРАЦИЯ)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+if _G.AIMBOT_LOADED then
+    warn("Aimbot already loaded!")
+else
+    _G.AIMBOT_LOADED = true
+
+-- ========================================
+-- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ АИМБОТА
+-- ========================================
+local vec2, vec3 = Vector2.new, Vector3.new
+local drawNew = Drawing.new
+local colRgb = Color3.fromRGB
+
+-- ========================================
+-- СИСТЕМА ИГРОКОВ ДЛЯ АИМБОТА
+-- ========================================
+local clientChar = LocalPlayer.Character
+local clientRoot, clientHumanoid
+local clientCamera = workspace.CurrentCamera or workspace:FindFirstChildOfClass('Camera')
+local clientTeam = LocalPlayer.Team
+
+local function GetRootPart(character)
+    if not character then return nil end
+
+    local hrp = character:FindFirstChild('HumanoidRootPart')
+    if hrp and hrp:IsA('BasePart') then return hrp end
+
+    local torso = character:FindFirstChild('Torso')
+    if torso and torso:IsA('BasePart') then return torso end
+
+    local upperTorso = character:FindFirstChild('UpperTorso')
+    if upperTorso and upperTorso:IsA('BasePart') then return upperTorso end
+
+    if character.PrimaryPart then return character.PrimaryPart end
+
+    local head = character:FindFirstChild('Head')
+    if head and head:IsA('BasePart') then return head end
+
+    for _, child in ipairs(character:GetChildren()) do
+        if child:IsA('BasePart') then return child end
+    end
+
+    return nil
+end
+
+local function updateCharacter()
+    clientChar = LocalPlayer.Character
+    if clientChar then
+        task.wait(0.5)
+        clientRoot = GetRootPart(clientChar)
+        clientHumanoid = clientChar:FindFirstChildOfClass('Humanoid')
+    end
+end
+
+TrackConnection(LocalPlayer.CharacterAdded:Connect(updateCharacter))
+updateCharacter()
+
+TrackConnection(workspace:GetPropertyChangedSignal('CurrentCamera'):Connect(function()
+    clientCamera = workspace.CurrentCamera or workspace:FindFirstChildOfClass('Camera')
+end))
+
+TrackConnection(LocalPlayer:GetPropertyChangedSignal('Team'):Connect(function()
+    clientTeam = LocalPlayer.Team
+end))
+
+-- Система менеджеров игроков для аимбота
+local playerNames = {}
+local playerManagers = {}
+local playerCons = {}
+
+local function removePlayer(player)
+    local name = player.Name
+    if playerCons[name] then
+        for _, con in pairs(playerCons[name]) do
+            con:Disconnect()
+        end
+    end
+
+    playerManagers[name] = nil
+    playerCons[name] = nil
+
+    local idx = table.find(playerNames, name)
+    if idx then table.remove(playerNames, idx) end
+end
+
+local function readyPlayer(player)
+    local name = player.Name
+    local manager = {}
+    local cons = {}
+
+    table.insert(playerNames, name)
+
+    cons['chr-add'] = player.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        manager.Character = char
+        manager.RootPart = GetRootPart(char)
+        manager.Humanoid = char:FindFirstChildOfClass('Humanoid')
+
+        if not manager.RootPart then
+            warn(string.format("Player %s: не найдена корневая часть!", name))
+        end
+    end)
+
+    cons['chr-rem'] = player.CharacterRemoving:Connect(function()
+        manager.Character = nil
+        manager.RootPart = nil
+        manager.Humanoid = nil
+    end)
+
+    cons['team'] = player:GetPropertyChangedSignal('Team'):Connect(function()
+        manager.Team = player.Team
+    end)
+
+    if player.Character then
+        task.wait(0.5)
+        manager.Character = player.Character
+        manager.RootPart = GetRootPart(player.Character)
+        manager.Humanoid = player.Character:FindFirstChildOfClass('Humanoid')
+    end
+
+    manager.Team = player.Team
+    manager.Player = player
+
+    playerManagers[name] = manager
+    playerCons[name] = cons
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        readyPlayer(player)
+    end
+end
+
+TrackConnection(Players.PlayerAdded:Connect(readyPlayer))
+TrackConnection(Players.PlayerRemoving:Connect(removePlayer))
+
+-- ========================================
+-- КОНФИГУРАЦИЯ АИМБОТА
+-- ========================================
+State.AimbotConfig = {
+    Enabled = false,
+
+    AliveCheck = true,
+    DistanceCheck = false,
+    FovCheck = false,
+    TeamCheck = true,
+    VisibilityCheck = false,
+
+    LockOn = false,
+    Prediction = false,
+    Deltatime = false,
+
+    Distance = 2000,
+    Fov = 150,
+    PredictionValue = 0,
+    Smoothness = 0.5,
+    VerticalOffset = 0,
+
+    Method = 'Mouse',
+    SafetyKey = nil,
+    MouseButton = 'RMB'
+}
+
+-- ========================================
+-- ПРОВЕРКА КНОПКИ МЫШИ
+-- ========================================
+local function IsMouseButtonPressed(button)
+    if button == 'LMB' then
+        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+    elseif button == 'RMB' then
+        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    else
+        return false
+    end
+end
+
+-- ========================================
+-- ЛОГИКА АИМБОТА
+-- ========================================
+local AimbotTarget = nil
+local PreviousTarget = nil
+local FovCircle, FovCircleOutline
+local cachedMousePos = vec2(0, 0)
+local lastMouseUpdate = 0
+local validPlayers = {}
+local lastValidCheck = 0
+local AimbotConnection = nil
+
+local function StartAimbot()
+    if AimbotConnection then
+        AimbotConnection:Disconnect()
+        AimbotConnection = nil
+    end
+
+    if FovCircle then pcall(function() FovCircle:Remove() end) FovCircle = nil end
+    if FovCircleOutline then pcall(function() FovCircleOutline:Remove() end) FovCircleOutline = nil end
+
+    FovCircle = drawNew('Circle')
+    FovCircle.NumSides = 40
+    FovCircle.Thickness = 2
+    FovCircle.Visible = State.AimbotConfig.FovCheck
+    FovCircle.Radius = State.AimbotConfig.Fov
+    FovCircle.Color = CONFIG.Colors.Accent
+    FovCircle.ZIndex = 2
+
+    FovCircleOutline = drawNew('Circle')
+    FovCircleOutline.NumSides = 40
+    FovCircleOutline.Thickness = 4
+    FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+    FovCircleOutline.Radius = State.AimbotConfig.Fov
+    FovCircleOutline.Color = colRgb(0, 0, 0)
+    FovCircleOutline.ZIndex = 1
+
+    _G.FovCircle = FovCircle
+    _G.FovCircleOutline = FovCircleOutline
+
+    local function isValidTarget(root, hum)
+        if not root or not root.Parent then return false end
+        if not root:IsA('BasePart') then return false end
+        if State.AimbotConfig.AliveCheck and hum then
+            return hum.Health and hum.Health > 0
+        end
+        return true
+    end
+
+    local function dist(cpos, rootpos)
+        if State.AimbotConfig.DistanceCheck then
+            return ((cpos - rootpos).Magnitude < State.AimbotConfig.Distance)
+        else
+            return true
+        end
+    end
+
+    local function alive(hum)
+        if State.AimbotConfig.AliveCheck then
+            return hum and hum.Health and hum.Health > 0
+        else
+            return true
+        end
+    end
+
+    local function team(pteam)
+        if State.AimbotConfig.TeamCheck then
+            return (pteam ~= clientTeam)
+        else
+            return true
+        end
+    end
+
+    local function vis(root)
+        if State.AimbotConfig.VisibilityCheck and clientChar and clientRoot then
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            rayParams.FilterDescendantsInstances = {clientChar}
+            rayParams.IgnoreWater = true
+
+            local origin = clientRoot.Position
+            local direction = (root.Position - origin)
+
+            local rayResult = workspace:Raycast(origin, direction, rayParams)
+
+            if not rayResult then return true end
+            return rayResult.Instance:IsDescendantOf(root.Parent)
+        else
+            return true
+        end
+    end
+
+    local function lock(targ)
+        if State.AimbotConfig.LockOn then
+            if PreviousTarget then
+                return (targ == PreviousTarget)
+            else
+                return true
+            end
+        else
+            return true
+        end
+    end
+
+    local function predic(part)
+        if State.AimbotConfig.Prediction then
+            return part and (part.Position + (part.AssemblyLinearVelocity * State.AimbotConfig.PredictionValue) + vec3(0, State.AimbotConfig.VerticalOffset, 0))
+        else
+            return part and (part.Position + vec3(0, State.AimbotConfig.VerticalOffset, 0))
+        end
+    end
+
+    local function calculatePriority(rootPos, screenDist, isVisible)
+        if not rootPos or not screenDist then return -999999 end
+        local score = 10000 - screenDist
+
+        if isVisible then score = score + 2000 end
+
+        if clientRoot then
+            local physicalDist = (clientRoot.Position - rootPos).Magnitude
+            if physicalDist < 100 then score = score + 500 end
+        end
+
+        return score
+    end
+
+    local function updateValidPlayers()
+        table.clear(validPlayers)
+
+        for i = 1, #playerNames do
+            local plrObject = playerManagers[playerNames[i]]
+
+            if plrObject and plrObject.RootPart and plrObject.RootPart.Parent then
+                if team(plrObject.Team) then
+                    table.insert(validPlayers, plrObject)
+                end
+            end
+        end
+    end
+
+    updateValidPlayers()
+
+    local NextTarget
+
+    if State.AimbotConfig.Method == 'Mouse' then
+        NextTarget = function(mp)
+            local FinalTarget, FinalVec2, FinalVec3
+            local BestPriority = -999999
+            local MousePosition = mp or vec2(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+            local CameraPos = clientCamera.CFrame.Position
+
+            AimbotTarget = nil
+
+            for i = 1, #validPlayers do
+                local plrObject = validPlayers[i]
+                local Root, Humanoid = plrObject.RootPart, plrObject.Humanoid
+
+                if not isValidTarget(Root, Humanoid) then continue end
+
+                local CurVec3 = predic(Root)
+
+                if (CurVec3 and lock(Root) and alive(Humanoid) and dist(CameraPos, CurVec3)) then
+                    local CurVec2, CurVis = clientCamera:WorldToViewportPoint(CurVec3)
+
+                    if CurVis then
+                        CurVec2 = vec2(CurVec2.X, CurVec2.Y)
+                        local CurMag = (MousePosition - CurVec2).Magnitude
+
+                        if CurMag < (State.AimbotConfig.FovCheck and State.AimbotConfig.Fov or 9999) then
+                            local isVisible = vis(Root)
+                            local priority = calculatePriority(CurVec3, CurMag, isVisible)
+
+                            if priority > BestPriority then
+                                BestPriority = priority
+                                FinalTarget = Root
+                                FinalVec2 = CurVec2
+                                FinalVec3 = CurVec3
+                            end
+                        end
+                    end
+                end
+            end
+
+            AimbotTarget = FinalVec2
+            return FinalTarget, FinalVec2, nil
+        end
+
+    elseif State.AimbotConfig.Method == 'Camera' then
+        NextTarget = function(mp)
+            local FinalTarget, FinalVec2, FinalVec3
+            local BestPriority = -999999
+            local MousePosition = mp or vec2(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+            local CameraPos = clientCamera.CFrame.Position
+
+            AimbotTarget = nil
+
+            for i = 1, #validPlayers do
+                local plrObject = validPlayers[i]
+                local Root, Humanoid = plrObject.RootPart, plrObject.Humanoid
+
+                if not isValidTarget(Root, Humanoid) then continue end
+
+                local CurVec3 = predic(Root)
+
+                if (CurVec3 and lock(Root) and alive(Humanoid) and dist(CameraPos, CurVec3)) then
+                    local CurVec2, CurVis = clientCamera:WorldToViewportPoint(CurVec3)
+
+                    if CurVis then
+                        CurVec2 = vec2(CurVec2.X, CurVec2.Y)
+                        local CurMag = (MousePosition - CurVec2).Magnitude
+
+                        if CurMag < (State.AimbotConfig.FovCheck and State.AimbotConfig.Fov or 9999) then
+                            local isVisible = vis(Root)
+                            local priority = calculatePriority(CurVec3, CurMag, isVisible)
+
+                            if priority > BestPriority then
+                                BestPriority = priority
+                                FinalTarget = Root
+                                FinalVec2 = CurVec2
+                                FinalVec3 = CurVec3
+                            end
+                        end
+                    end
+                end
+            end
+
+            AimbotTarget = FinalVec2
+            return FinalTarget, FinalVec3
+        end
+    end
+
+    if State.AimbotConfig.Method == 'Camera' then
+        AimbotConnection = RunService.RenderStepped:Connect(function()
+            local currentTime = tick()
+            if currentTime - lastMouseUpdate > 0.032 then
+                cachedMousePos = UserInputService:GetMouseLocation()
+                lastMouseUpdate = currentTime
+            end
+            FovCircle.Position = cachedMousePos
+            FovCircleOutline.Position = cachedMousePos
+
+            FovCircle.Color = CONFIG.Colors.Accent
+
+            FovCircle.Visible = State.AimbotConfig.FovCheck
+            FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+
+            if currentTime - lastValidCheck > 0.5 then
+                updateValidPlayers()
+                lastValidCheck = currentTime
+            end
+
+            local isActive = false
+            if State.AimbotConfig.SafetyKey then
+                isActive = UserInputService:IsKeyDown(State.AimbotConfig.SafetyKey)
+            else
+                isActive = IsMouseButtonPressed(State.AimbotConfig.MouseButton)
+            end
+
+            if not isActive then
+                PreviousTarget = nil
+                AimbotTarget = nil
+                return
+            end
+
+            -- ИСПРАВЛЕНИЕ: Проверяем видимость GUI MM2 скрипта, а не MainFrame из исходного аимбота
+            if State.UIElements.MainGui and CoreGui:FindFirstChild("MM2_ESP_UI") then
+                local mainGui = CoreGui:FindFirstChild("MM2_ESP_UI")
+                if mainGui and mainGui:FindFirstChild("MainFrame") then
+                    if mainGui.MainFrame.Visible then return end
+                end
+            end
+
+            local target, position = NextTarget(cachedMousePos)
+            PreviousTarget = target
+
+            if position then
+                local _ = clientCamera.CFrame
+                clientCamera.CFrame = CFrame.new(_.Position, position):lerp(_, State.AimbotConfig.Smoothness)
+            end
+        end)
+    elseif State.AimbotConfig.Method == 'Mouse' then
+        AimbotConnection = RunService.RenderStepped:Connect(function(dt)
+            local currentTime = tick()
+
+            if currentTime - lastMouseUpdate > 0.032 then
+                cachedMousePos = UserInputService:GetMouseLocation()
+                lastMouseUpdate = currentTime
+            end
+
+            FovCircle.Position = cachedMousePos
+            FovCircleOutline.Position = cachedMousePos
+            FovCircle.Color = CONFIG.Colors.Accent
+
+            FovCircle.Visible = State.AimbotConfig.FovCheck
+            FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+
+            if currentTime - lastValidCheck > 0.5 then
+                updateValidPlayers()
+                lastValidCheck = currentTime
+            end
+
+            local isActive = false
+            if State.AimbotConfig.SafetyKey then
+                isActive = UserInputService:IsKeyDown(State.AimbotConfig.SafetyKey)
+            else
+                isActive = IsMouseButtonPressed(State.AimbotConfig.MouseButton)
+            end
+
+            if not isActive then
+                PreviousTarget = nil
+                AimbotTarget = nil
+                return
+            end
+
+            -- ИСПРАВЛЕНИЕ: Проверяем видимость GUI MM2 скрипта
+            if State.UIElements.MainGui and CoreGui:FindFirstChild("MM2_ESP_UI") then
+                local mainGui = CoreGui:FindFirstChild("MM2_ESP_UI")
+                if mainGui and mainGui:FindFirstChild("MainFrame") then
+                    if mainGui.MainFrame.Visible then return end
+                end
+            end
+
+            local target, position, _ = NextTarget(cachedMousePos)
+            PreviousTarget = target
+
+            if position then
+                local delta = position - cachedMousePos
+                delta *= State.AimbotConfig.Deltatime and ((1 - State.AimbotConfig.Smoothness) * dt * 75) or (1 - State.AimbotConfig.Smoothness)
+                mousemoverel(delta.X, delta.Y)
+            end
+        end)
+    end
+
+    TrackConnection(AimbotConnection)
+end
+
+local function StopAimbot()
+    if AimbotConnection then
+        AimbotConnection:Disconnect()
+        AimbotConnection = nil
+    end
+
+    if FovCircle then pcall(function() FovCircle:Remove() end) FovCircle = nil end
+    if FovCircleOutline then pcall(function() FovCircleOutline:Remove() end) FovCircleOutline = nil end
+
+    AimbotTarget = nil
+    PreviousTarget = nil
+end
+
+local function ToggleAimbot(enabled)
+    State.AimbotConfig.Enabled = enabled
+
+    if enabled then
+        StartAimbot()
+    else
+        StopAimbot()
+    end
+end
+
+-- Экспорт функций в глобальную область видимости
+_G.ToggleAimbot = ToggleAimbot
+_G.StartAimbot = StartAimbot
+_G.StopAimbot = StopAimbot
+
+end -- конец проверки _G.AIMBOT_LOADED
+
+
 -- ============= PING CHAMS SYSTEM =============
 local PINGCHAMS_BUFFERMAXSECONDS = 3.0
 local PINGCHAMS_PINGUPDATEINTERVAL = 0.2
@@ -994,6 +1540,7 @@ local function FullShutdown()
     --print("[FullShutdown] Starting complete cleanup...")
 
     pcall(function()
+        if State.AimbotConfig.Enabled then StopAimbot() end
         if State.AutoFarmEnabled then StopAutoFarm() end
         if State.XPFarmEnabled then StopXPFarm() end
         if State.NoClipEnabled then DisableNoClip() end
@@ -3089,10 +3636,12 @@ local function StartAutoFarm()
     instantPickupWasEnabled = State.InstantPickupEnabled
     
     State.CoinFarmThread = task.spawn(function()
+        local allowFly = false  -- ✅ Флаг для переключения ТП → Полёт
         --print("[Auto Farm] 🚀 Запущен")
         if State.UndergroundMode then
             --print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
         end
+
         -- ✅ Включаем годмод при старте автофарма
         if State.GodModeWithAutoFarm and not State.GodModeEnabled then
             pcall(function()
@@ -3124,6 +3673,7 @@ local function StartAutoFarm()
                 --print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
+                allowFly = false
                 if State.spawnAtPlayer and not spawnAtPlayerOriginalState then
                     State.spawnAtPlayer = false
                 end
@@ -3153,7 +3703,7 @@ local function StartAutoFarm()
                     noCoinsAttempts = 0
                     
                     pcall(function()
-                        if currentCoins < 1 then
+                        if not allowFly then  -- ✅ Вместо проверки currentCoins < 1
                             local currentTime = tick()
                             local timeSinceLastTP = currentTime - lastTeleportTime
                             
@@ -3185,6 +3735,7 @@ local function StartAutoFarm()
                                 end
                                 
                                 AddCoinToBlacklist(coin)
+                                allowFly = true
                             end
                         else
                             if State.UndergroundMode then
@@ -3483,6 +4034,7 @@ local function StartAutoFarm()
                     --print("[Auto Farm] ✅ Новый раунд начался! Сбрасываю счётчики и продолжаю фарм...")
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
+                    allowFly = false
                     
                 else
                     --print("[Auto Farm] 🔄 XP Farm выключен - делаю быстрый ресет без ожидания конца раунда...")
@@ -3502,6 +4054,7 @@ local function StartAutoFarm()
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
+                    allowFly = false
 
                     task.wait(3)
 
@@ -5074,11 +5627,246 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             if State.ClickTPActive then TeleportToMouse() end
         end,
 
+        -- AIMBOT HANDLERS (добавить в Handlers = {})
+        AimbotEnabled = function(value)
+            if value then
+                StartAimbot()
+            else
+                StopAimbot()
+            end
+            State.AimbotConfig.Enabled = value
+        end,
+
+        AimbotAliveCheck = function(value)
+            State.AimbotConfig.AliveCheck = value
+        end,
+
+        AimbotDistanceCheck = function(value)
+            State.AimbotConfig.DistanceCheck = value
+        end,
+
+        AimbotFovCheck = function(value)
+            State.AimbotConfig.FovCheck = value
+            if _G.FovCircle then
+                _G.FovCircle.Visible = value
+            end
+            if _G.FovCircleOutline then
+                _G.FovCircleOutline.Visible = value
+            end
+        end,
+
+        AimbotTeamCheck = function(value)
+            State.AimbotConfig.TeamCheck = value
+        end,
+
+        AimbotVisibilityCheck = function(value)
+            State.AimbotConfig.VisibilityCheck = value
+        end,
+
+        AimbotLockOn = function(value)
+            State.AimbotConfig.LockOn = value
+        end,
+
+        AimbotPrediction = function(value)
+            State.AimbotConfig.Prediction = value
+        end,
+
+        AimbotDeltatime = function(value)
+            State.AimbotConfig.Deltatime = value
+        end,
+
+        AimbotDistance = function(value)
+            State.AimbotConfig.Distance = value
+        end,
+
+        AimbotFov = function(value)
+            State.AimbotConfig.Fov = value
+            if _G.FovCircle then
+                _G.FovCircle.Radius = value
+            end
+            if _G.FovCircleOutline then
+                _G.FovCircleOutline.Radius = value
+            end
+        end,
+
+        AimbotSmoothness = function(value)
+            State.AimbotConfig.Smoothness = value / 100
+        end,
+
+        AimbotPredictionValue = function(value)
+            State.AimbotConfig.PredictionValue = value / 100
+        end,
+
+        AimbotVerticalOffset = function(value)
+            State.AimbotConfig.VerticalOffset = value / 100
+        end,
+
+        AimbotMethod = function(value)
+            State.AimbotConfig.Method = value
+            if State.AimbotConfig.Enabled then
+                StopAimbot()
+                StartAimbot()
+            end
+        end,
+
+        AimbotMouseButton = function(value)
+            State.AimbotConfig.MouseButton = value
+        end,
         Shutdown = function() FullShutdown() end,
     }
 })
 
 GUI.Init()
+
+----------------------------------------------------------------
+-- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
+----------------------------------------------------------------
+local MainTab = GUI.CreateTab("Main")
+
+    MainTab:CreateSection("CHARACTER SETTINGS")
+    MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, "ApplyWalkSpeed")
+    MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, "ApplyJumpPower")
+    MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, "ApplyMaxCameraZoom")
+
+    MainTab:CreateSection("CAMERA")
+    MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
+    MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",true)
+
+    MainTab:CreateSection("TELEPORT & MOVEMENT")
+    MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+    MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
+
+    MainTab:CreateSection("GODMODE")
+    MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
+
+    MainTab:CreateSection("AIMBOT")
+    MainTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled",false)
+
+    MainTab:CreateSection("TARGETING CHECKS")
+    MainTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
+    MainTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
+    MainTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck")
+    MainTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
+    MainTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck",)
+
+    MainTab:CreateSection("ADVANCED OPTIONS")
+    MainTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn")
+    MainTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction")
+    MainTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
+
+    MainTab:CreateSection("TARGETING VALUES")
+    MainTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 100)
+    MainTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
+    MainTab:CreateSlider("Smoothness", "Aim smoothness (0-100)", 0, 100, State.AimbotConfig.Smoothness * 100, "AimbotSmoothness", 5)
+
+    MainTab:CreateSection("PREDICTION & OFFSET")
+    MainTab:CreateSlider("Prediction", "Movement prediction strength (0-100)", 0, 100, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 5)
+    MainTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 10)
+
+    MainTab:CreateSection("METHOD & ACTIVATION")
+    MainTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
+    MainTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+
+local VisualsTab = GUI.CreateTab("Visuals")
+
+    VisualsTab:CreateSection("NOTIFICATIONS")
+    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled")
+
+    VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
+    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP")
+    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP")
+    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP")
+    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP")
+
+    VisualsTab:CreateSection("Misc")
+    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+    VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
+    VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+
+local CombatTab = GUI.CreateTab("Combat")
+
+    CombatTab:CreateSection("EXTENDED HITBOX")
+    CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
+    CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
+
+    CombatTab:CreateSection("MURDERER TOOLS")
+    CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
+    CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
+    CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+    CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
+
+    CombatTab:CreateSection("SHERIFF TOOLS")
+    CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
+    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup")
+    CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+
+local FarmTab = GUI.CreateTab("Farming")
+
+    FarmTab:CreateSection("AUTO FARM")
+    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm")
+    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm")
+
+    FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode")
+    FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+    FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
+    FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
+    FarmTab:CreateToggle("Auto Reconnect (Farm)","Reconnect every 25 min during autofarm to avoid AFK kick","HandleAutoReconnect")
+    FarmTab:CreateInputField("Reconnect interval","Интервал в минутах (по умолчанию 25)", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+    FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
+
+local FunTab = GUI.CreateTab("Fun")
+
+    FunTab:CreateSection("ANIMATION KEYBINDS")
+    FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
+    FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
+    FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
+    FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
+    FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
+
+    FunTab:CreateSection("ANTI-FLING")
+    FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
+    FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
+
+    FunTab:CreateSection("FLING PLAYER")
+    FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
+    FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
+
+    FunTab:CreateSection("FLING ROLE")
+    FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
+    FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
+
+local TrollingTab = GUI.CreateTab("Troll")
+
+    TrollingTab:CreateSection("SELECT TARGET")
+    TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
+
+    TrollingTab:CreateSection("TROLLING MODES")
+    TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
+    TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
+    TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
+
+    TrollingTab:CreateSection("ORBIT SETTINGS")
+    TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
+    TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
+    TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
+    TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
+
+    TrollingTab:CreateSection("BLOCK PATH SETTINGS")
+    TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
+
+    TrollingTab:CreateSection("ORBIT PRESETS")
+    TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
+    TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
+    TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
+
+local UtilityTab = GUI.CreateTab("Server")
+
+    UtilityTab:CreateSection("SERVER MANAGEMENT")
+    UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
+    UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+    UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
+
+
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
@@ -5098,7 +5886,7 @@ end)
 
 CreateNotificationUI()
 ApplyCharacterSettings()
-
+SetupGunTracking()
 pcall(function()
     ApplyFOV(State.CameraFOV)
 end)
@@ -5130,6 +5918,9 @@ if AUTOEXEC_ENABLED then
             
             task.wait(0.1)
             EnableFPSBoost()
+            
+            task.wait(0.1)
+            UIOnly(true)
         end)
     end)
 end
