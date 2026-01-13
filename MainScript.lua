@@ -319,7 +319,7 @@ local clientCamera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass(
 local clientTeam = LocalPlayer.Team
 
 local function GetRootPart(character)
-    if not character then return nil end
+    if not character or not character.Parent then return nil end
 
     local hrp = character:FindFirstChild('HumanoidRootPart')
     if hrp and hrp:IsA('BasePart') then return hrp end
@@ -330,7 +330,9 @@ local function GetRootPart(character)
     local upperTorso = character:FindFirstChild('UpperTorso')
     if upperTorso and upperTorso:IsA('BasePart') then return upperTorso end
 
-    if character.PrimaryPart then return character.PrimaryPart end
+    if character.PrimaryPart and character.PrimaryPart.Parent then 
+        return character.PrimaryPart 
+    end
 
     local head = character:FindFirstChild('Head')
     if head and head:IsA('BasePart') then return head end
@@ -391,12 +393,20 @@ local function readyPlayer(player)
 
     cons['chr-add'] = player.CharacterAdded:Connect(function(char)
         task.wait(0.5)
-        manager.Character = char
-        manager.RootPart = GetRootPart(char)
-        manager.Humanoid = char:FindFirstChildOfClass('Humanoid')
-
-        if not manager.RootPart then
-            warn(string.format("Player %s: не найдена корневая часть!", name))
+        
+        local success, err = pcall(function()
+            if not char or not char.Parent then return end
+            
+            manager.Character = char
+            manager.RootPart = GetRootPart(char)
+            
+            if char and char.Parent then
+                manager.Humanoid = char:FindFirstChildOfClass('Humanoid')
+            end
+        end)
+        
+        if not success then
+            warn(string.format("Player %s initialization error: %s", name, err))
         end
     end)
 
@@ -410,11 +420,18 @@ local function readyPlayer(player)
         manager.Team = player.Team
     end)
 
+    -- ✅ Проверка при инициализации
     if player.Character then
         task.wait(0.5)
-        manager.Character = player.Character
-        manager.RootPart = GetRootPart(player.Character)
-        manager.Humanoid = player.Character:FindFirstChildOfClass('Humanoid')
+        
+        if player.Character and player.Character.Parent then
+            manager.Character = player.Character
+            manager.RootPart = GetRootPart(player.Character)
+            
+            if player.Character and player.Character.Parent then
+                manager.Humanoid = player.Character:FindFirstChildOfClass('Humanoid')
+            end
+        end
     end
 
     manager.Team = player.Team
