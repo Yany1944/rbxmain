@@ -5838,12 +5838,12 @@ local AimTab = GUI.CreateTab("Aim")
 local VisualsTab = GUI.CreateTab("Visuals")
 
     VisualsTab:CreateSection("NOTIFICATIONS")
-    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",true)
+    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
 
     VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",true)
-    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",true)
-    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
+    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
+    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
 
     VisualsTab:CreateSection("Misc")
