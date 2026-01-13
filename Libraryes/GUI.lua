@@ -994,16 +994,6 @@ return function(env)
             return TabFunctions
         end
 
-
-        function GUI.Init()
-            CreateUI()
-        end
-        
-        -- Экспортируем CreateTab для использования в основном скрипте
-        GUI.CreateTab = CreateTab
-        
-        return GUI
-
         ----------------------------------------------------------------
         -- Кнопка закрытия и обработка инпута (клавиши / клик по GUI)
         ----------------------------------------------------------------
@@ -1063,16 +1053,21 @@ return function(env)
     end
 
     ----------------------------------------------------------------
-    -- ПУБЛИЧНЫЙ API
+    -- API
     ----------------------------------------------------------------
 
     function GUI.Init()
         CreateUI()
     end
 
+    -- Экспортируем CreateTab для использования в основном скрипте
+    GUI.CreateTab = CreateTab
+
     function GUI.Cleanup()
         if State.UIElements.MainGui then
-            pcall(function() State.UIElements.MainGui:Destroy() end)
+            pcall(function()
+                State.UIElements.MainGui:Destroy()
+            end)
             State.UIElements.MainGui = nil
         end
     end
