@@ -399,7 +399,10 @@ return function(env)
                 return dropdown
             end
 
-            function TabFunctions:CreateToggle(title, desc, handlerKey)
+            function TabFunctions:CreateToggle(title, desc, handlerKey, default)
+                -- Если default не указан, по умолчанию false
+                default = default or false
+            
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
                     Size = UDim2.new(1, 0, 0, 60),
@@ -407,7 +410,7 @@ return function(env)
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-
+            
                 Create("TextLabel", {
                     Text = title,
                     Font = Enum.Font.GothamMedium,
@@ -419,7 +422,7 @@ return function(env)
                     Size = UDim2.new(0, 250, 0, 20),
                     Parent = card
                 })
-
+            
                 Create("TextLabel", {
                     Text = desc,
                     Font = Enum.Font.Gotham,
@@ -431,36 +434,49 @@ return function(env)
                     Size = UDim2.new(0, 250, 0, 20),
                     Parent = card
                 })
-
+            
+                -- УЛУЧШЕНИЕ: Начальный цвет и позиция зависят от default
                 local toggleBg = Create("TextButton", {
                     Text = "",
-                    BackgroundColor3 = Color3.fromRGB(50, 50, 55),
+                    BackgroundColor3 = default and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55),
                     Position = UDim2.new(1, -60, 0.5, -12),
                     Size = UDim2.new(0, 44, 0, 24),
                     AutoButtonColor = false,
                     Parent = card
                 })
                 AddCorner(toggleBg, 24)
-
+            
+                -- УЛУЧШЕНИЕ: Начальная позиция круга зависит от default
                 local toggleCircle = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Text,
-                    Position = UDim2.new(0, 2, 0.5, -10),
+                    Position = default and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10),
                     Size = UDim2.new(0, 20, 0, 20),
                     Parent = toggleBg
                 })
                 AddCorner(toggleCircle, 20)
-
-                local state = false
+            
+                -- УЛУЧШЕНИЕ: Начальное состояние из параметра default
+                local state = default
+            
+                -- УЛУЧШЕНИЕ: Сразу вызываем handler с начальным значением
+                -- Это гарантирует, что State будет синхронизирован с GUI
+                if default then
+                    task.spawn(function()
+                        callHandler(handlerKey, default)
+                    end)
+                end
+            
                 TrackConnection(toggleBg.MouseButton1Click:Connect(function()
                     state = not state
                     local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
                     local targetPos = state and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
-
+            
                     TweenService:Create(toggleBg, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
                     TweenService:Create(toggleCircle, TweenInfo.new(0.2), {Position = targetPos}):Play()
-
+            
                     callHandler(handlerKey, state)
                 end))
+            
                 return toggleBg
             end
 
