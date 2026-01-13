@@ -12,7 +12,7 @@ return function(env)
     local TrackConnection = env.TrackConnection
     local ShowNotification = env.ShowNotification
     local Handlers = env.Handlers
-    local BACK_TRANSPARENCY = 0.1
+    local BACK_TRANSPARENCY = 0.15
 
     local GUI = {}
 
@@ -1017,7 +1017,6 @@ return function(env)
             end
 
             return TabFunctions
-            UpdateBlur(true)
         end
         GUI.CreateTab = CreateTab
         ----------------------------------------------------------------
