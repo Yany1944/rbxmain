@@ -12,9 +12,23 @@ return function(env)
     local TrackConnection = env.TrackConnection
     local ShowNotification = env.ShowNotification
     local Handlers = env.Handlers
-    local BACK_TRANSPARENCY = 0.15
+    local BACK_TRANSPARENCY = 0.1
 
     local GUI = {}
+    local function UpdateBlur(state)
+        local blur = game:GetService("Lighting"):FindFirstChild("MM2_Script_Blur")
+        if not blur then
+            blur = Instance.new("BlurEffect")
+            blur.Name = "MM2_Script_Blur"
+            blur.Size = 0 
+            blur.Parent = game:GetService("Lighting")
+        end
+    
+        local targetSize = state and 18 or 0 -- Сила размытия (18-24 оптимально)
+        TweenService:Create(blur, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = targetSize
+        }):Play()
+    end
 
     ----------------------------------------------------------------
     -- ХЕЛПЕРЫ UI (БЛОК 19)
@@ -96,7 +110,20 @@ return function(env)
             Parent = gui
         })
         AddCorner(mainFrame, 12)
-        AddStroke(mainFrame, 2, CONFIG.Colors.Accent, 0.8)
+        local glassTexture = Create("ImageLabel", {
+            Name = "GlassTexture",
+            BackgroundTransparency = 1,
+            Image = "rbxassetid://9968344186", -- Текстура шума
+            ImageTransparency = 0.92, -- Прозрачность шума (0.92 = едва заметно)
+            ImageColor3 = Color3.fromRGB(255, 255, 255),
+            ScaleType = Enum.ScaleType.Tile,
+            TileSize = UDim2.new(0, 128, 0, 128),
+            Size = UDim2.new(1, 0, 1, 0),
+            ZIndex = 0, -- Важно: ZIndex ниже контента, но выше фона
+            Parent = mainFrame
+        })
+        AddCorner(glassTexture, 12)
+        AddStroke(mainFrame, 1.5, Color3.fromRGB(255, 255, 255), 0.75) -- Светлая полупрозрачная обводка
 
         local header = Create("Frame", {
             Name = "Header",
@@ -1017,6 +1044,7 @@ return function(env)
             end
 
             return TabFunctions
+            UpdateBlur(true)
         end
         GUI.CreateTab = CreateTab
         ----------------------------------------------------------------
@@ -1037,6 +1065,7 @@ return function(env)
         local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
             if not processed and input.KeyCode == CONFIG.HideKey then
                 mainFrame.Visible = not mainFrame.Visible
+                UpdateBlur(mainFrame.Visible)
             end
 
             if processed then return end
