@@ -5759,13 +5759,13 @@ local MainTab = GUI.CreateTab("Main")
     MainTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
 
     MainTab:CreateSection("TARGETING VALUES")
-    MainTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 100)
+    MainTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
     MainTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
-    MainTab:CreateSlider("Smoothness", "Aim smoothness (0-100)", 0, 100, State.AimbotConfig.Smoothness * 100, "AimbotSmoothness", 5)
+    MainTab:CreateSlider("Smoothness", "Aim smoothness (0-100)", 0, 100, State.AimbotConfig.Smoothness * 100, "AimbotSmoothness", 1)
 
     MainTab:CreateSection("PREDICTION & OFFSET")
-    MainTab:CreateSlider("Prediction", "Movement prediction strength (0-100)", 0, 100, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 5)
-    MainTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 10)
+    MainTab:CreateSlider("Prediction", "Movement prediction strength (0-100)", 0, 100, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+    MainTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 
     MainTab:CreateSection("METHOD & ACTIVATION")
     MainTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
