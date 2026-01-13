@@ -450,10 +450,10 @@ State.AimbotConfig = {
     Deltatime = false,
 
     Distance = 2000,
-    Fov = 70,
-    PredictionValue = 0,
-    Smoothness = 2.5,
-    VerticalOffset = 0,
+    Fov = 50,
+    PredictionValue = 0.05,
+    Smoothness = 3.5,
+    VerticalOffset = 0.7,
 
     Method = 'Mouse',
     SafetyKey = nil,
@@ -5818,7 +5818,7 @@ local AimTab = GUI.CreateTab("Aim")
 
     AimTab:CreateSection("ADVANCED OPTIONS")
     AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn")
-    AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction")
+    AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
     AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
 
     AimTab:CreateSection("TARGETING VALUES")
@@ -5828,7 +5828,7 @@ local AimTab = GUI.CreateTab("Aim")
 
 
     AimTab:CreateSection("PREDICTION & OFFSET")
-    AimTab:CreateSlider("Prediction", "Movement prediction strength (0-100)", 0, 100, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+    AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
     AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 
     AimTab:CreateSection("METHOD & ACTIVATION")
