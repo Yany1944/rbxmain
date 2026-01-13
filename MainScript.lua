@@ -5817,7 +5817,7 @@ local AimTab = GUI.CreateTab("Aim")
     AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
     AimTab:CreateSection("ADVANCED OPTIONS")
-    AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn")
+    AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
     AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
     AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
 
