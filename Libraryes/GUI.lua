@@ -993,7 +993,7 @@ return function(env)
 
             return TabFunctions
         end
-
+        GUI.CreateTab = CreateTab
         ----------------------------------------------------------------
         -- Кнопка закрытия и обработка инпута (клавиши / клик по GUI)
         ----------------------------------------------------------------
@@ -1059,9 +1059,6 @@ return function(env)
     function GUI.Init()
         CreateUI()
     end
-
-    -- Экспортируем CreateTab для использования в основном скрипте
-    GUI.CreateTab = CreateTab
 
     function GUI.Cleanup()
         if State.UIElements.MainGui then
