@@ -263,6 +263,40 @@ end
 -- AIMBOT SYSTEM (ИСПРАВЛЕННАЯ ИНТЕГРАЦИЯ)
 -- ══════════════════════════════════════════════════════════════════════════════
 
+-- Отключаем CanQuery для всех аксессуаров (чтобы raycast их игнорировал)
+local function DisableAccessoryQueries(character)
+    for _, accessory in ipairs(character:GetChildren()) do
+        if accessory:IsA("Accessory") or accessory:IsA("Accoutrement") then
+            local handle = accessory:FindFirstChild("Handle")
+            if handle and handle:IsA("BasePart") then
+                handle.CanQuery = false
+            end
+        end
+    end
+end
+
+-- Применяем к локальному игроку
+if clientChar then
+    DisableAccessoryQueries(clientChar)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1) -- Ждём загрузки аксессуаров
+    DisableAccessoryQueries(char)
+end)
+
+-- Применяем ко всем игрокам
+for _, player in ipairs(Players:GetPlayers()) do
+    if player.Character then
+        DisableAccessoryQueries(player.Character)
+    end
+    player.CharacterAdded:Connect(function(char)
+        task.wait(1)
+        DisableAccessoryQueries(char)
+    end)
+end
+
+
 if _G.AIMBOT_LOADED then
     warn("Aimbot already loaded!")
 else
@@ -416,9 +450,9 @@ State.AimbotConfig = {
     Deltatime = false,
 
     Distance = 2000,
-    Fov = 150,
+    Fov = 70,
     PredictionValue = 0,
-    Smoothness = 0.5,
+    Smoothness = 2.5,
     VerticalOffset = 0,
 
     Method = 'Mouse',
@@ -513,23 +547,28 @@ local function StartAimbot()
     end
 
     local function vis(root)
-        if State.AimbotConfig.VisibilityCheck and clientChar and clientRoot then
+        if State.AimbotConfig.VisibilityCheck and clientChar and clientCamera then
+            -- Луч от камеры, а не от HumanoidRootPart
+            local origin = clientCamera.CFrame.Position
+            local direction = (root.Position - origin)
+            
             local rayParams = RaycastParams.new()
             rayParams.FilterType = Enum.RaycastFilterType.Exclude
-            rayParams.FilterDescendantsInstances = {clientChar}
+            rayParams.FilterDescendantsInstances = {clientChar, root.Parent}
             rayParams.IgnoreWater = true
-
-            local origin = clientRoot.Position
-            local direction = (root.Position - origin)
 
             local rayResult = Workspace:Raycast(origin, direction, rayParams)
 
-            if not rayResult then return true end
+            if not rayResult then 
+                return true 
+            end
+            
             return rayResult.Instance:IsDescendantOf(root.Parent)
         else
             return true
         end
     end
+
 
     local function lock(targ)
         if State.AimbotConfig.LockOn then
@@ -609,8 +648,14 @@ local function StartAimbot()
 
                         if CurMag < (State.AimbotConfig.FovCheck and State.AimbotConfig.Fov or 9999) then
                             local isVisible = vis(Root)
+                            
+                            -- ✅ Пропускаем невидимые цели, если включена проверка
+                            if State.AimbotConfig.VisibilityCheck and not isVisible then
+                                continue
+                            end
+                            
                             local priority = calculatePriority(CurVec3, CurMag, isVisible)
-
+                            
                             if priority > BestPriority then
                                 BestPriority = priority
                                 FinalTarget = Root
@@ -652,8 +697,14 @@ local function StartAimbot()
 
                         if CurMag < (State.AimbotConfig.FovCheck and State.AimbotConfig.Fov or 9999) then
                             local isVisible = vis(Root)
+                            
+                            -- ✅ Пропускаем невидимые цели, если включена проверка
+                            if State.AimbotConfig.VisibilityCheck and not isVisible then
+                                continue
+                            end
+                            
                             local priority = calculatePriority(CurVec3, CurMag, isVisible)
-
+                            
                             if priority > BestPriority then
                                 BestPriority = priority
                                 FinalTarget = Root
@@ -763,7 +814,17 @@ local function StartAimbot()
 
             if position then
                 local delta = position - cachedMousePos
-                delta *= State.AimbotConfig.Deltatime and ((1 - State.AimbotConfig.Smoothness) * dt * 75) or (1 - State.AimbotConfig.Smoothness)
+                
+                -- ✅ ИСПРАВЛЕНИЕ: правильная формула со smoothness
+                local smoothValue = math.max(State.AimbotConfig.Smoothness, 0.01) -- Минимум 0.01 чтобы избежать деления на 0
+                
+                if State.AimbotConfig.Deltatime then
+                    -- Для deltatime режима
+                    delta = delta / smoothValue * dt * 60 -- Нормализация под 60 FPS
+                else
+                    -- Обычный режим - делим на smoothness
+                    delta = delta / smoothValue
+                end
                 
                 if mousemoverel then
                     mousemoverel(delta.X, delta.Y)
@@ -5694,7 +5755,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         end,
 
         AimbotSmoothness = function(value)
-            State.AimbotConfig.Smoothness = value / 100
+            State.AimbotConfig.Smoothness = value
         end,
 
         AimbotPredictionValue = function(value)
@@ -5743,33 +5804,36 @@ local MainTab = GUI.CreateTab("Main")
     MainTab:CreateSection("GODMODE")
     MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
-    MainTab:CreateSection("AIMBOT")
-    MainTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled",false)
+local AimTab = GUI.CreateTab("Aim")
 
-    MainTab:CreateSection("TARGETING CHECKS")
-    MainTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
-    MainTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
-    MainTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",false)
-    MainTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
-    MainTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
+    AimTab:CreateSection("AIMBOT")
+    AimTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled",false)
 
-    MainTab:CreateSection("ADVANCED OPTIONS")
-    MainTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn")
-    MainTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction")
-    MainTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
+    AimTab:CreateSection("TARGETING CHECKS")
+    AimTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
+    AimTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
+    AimTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",true)
+    AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
+    AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
-    MainTab:CreateSection("TARGETING VALUES")
-    MainTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
-    MainTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
-    MainTab:CreateSlider("Smoothness", "Aim smoothness (0-100)", 0, 100, State.AimbotConfig.Smoothness * 100, "AimbotSmoothness", 1)
+    AimTab:CreateSection("ADVANCED OPTIONS")
+    AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn")
+    AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction")
+    AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
 
-    MainTab:CreateSection("PREDICTION & OFFSET")
-    MainTab:CreateSlider("Prediction", "Movement prediction strength (0-100)", 0, 100, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
-    MainTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
+    AimTab:CreateSection("TARGETING VALUES")
+    AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
+    AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
+    AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
-    MainTab:CreateSection("METHOD & ACTIVATION")
-    MainTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
-    MainTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+
+    AimTab:CreateSection("PREDICTION & OFFSET")
+    AimTab:CreateSlider("Prediction", "Movement prediction strength (0-100)", 0, 100, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+    AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
+
+    AimTab:CreateSection("METHOD & ACTIVATION")
+    AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
+    AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
 
 local VisualsTab = GUI.CreateTab("Visuals")
 
