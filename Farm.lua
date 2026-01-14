@@ -4,6 +4,7 @@
 
 --if game.PlaceId ~= 142823291 then return end
 local AUTOEXEC_ENABLED = true
+_G.AUTOEXEC_ENABLED = true
 -- Loadstring Emotes (строка 3)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
 
