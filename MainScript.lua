@@ -5842,7 +5842,7 @@ task.spawn(function()
     local function updateCoins(coins)
         -- Форматируем с запятыми для читаемости
         local formatted = tostring(coins):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-        coinsLabel.Text = string.format("Coins: <font color=\"rgb(255, 215, 0)\">%s</font>", formatted)
+        coinsLabel.Text = string.format("Coins: <font color=\"rgb(255, 215, 110)\">%s</font>", formatted)
         
         -- Динамический расчет ширины по количеству символов (включая запятые)
         local displayLength = #formatted
