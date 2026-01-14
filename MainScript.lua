@@ -5807,8 +5807,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
 GUI.Init()
 
-GUI.Init()
-
 -- ОПТИМИЗИРОВАННАЯ СИСТЕМА МОНЕТ (с поддержкой запятых)
 task.spawn(function()
     task.wait(0.5)
