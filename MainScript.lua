@@ -5245,29 +5245,16 @@ end
 -- БЛОК 18: UTILITY FUNCTIONS (СТРОКИ 3051-3200)
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- SetupAntiAFK() - VirtualUser:CaptureController()
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
-    LocalPlayer.Idled:Connect(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end)
     
-    task.spawn(function()
-        while getgenv().MM2_ESP_Script do
-            pcall(function()
-                if getconnections then
-                    for _, connection in next, getconnections(LocalPlayer.Idled) do
-                        if connection.Disable then
-                            connection:Disable()
-                        end
-                    end
-                end
-            end)
-            task.wait(60)
-        end
+    LocalPlayer.Idled:Connect(function()
+        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
     end)
 end
+
 
 local function Rejoin()
     task.wait(0.5)
