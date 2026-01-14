@@ -13,7 +13,10 @@ if getgenv().MM2_ESP_Script then
 end
 getgenv().MM2_ESP_Script = true
 
-_G.AUTOEXEC_ENABLED = true
+local AUTOFARM_ENABLED = true
+local WHITELIST_IDS = {982594515, 6163487250, 2058109987}
+
+_G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
 pcall(function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
