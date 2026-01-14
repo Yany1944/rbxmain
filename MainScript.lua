@@ -2,19 +2,27 @@
 -- БЛОК 1: INITIALIZATION & PROTECTION (СТРОКИ 1-70)
 -- ══════════════════════════════════════════════════════════════════════════════
 
+-- PlaceId проверка (если нужна)
 --if game.PlaceId ~= 142823291 then return end
-local AUTOEXEC_ENABLED = false
--- Loadstring Emotes (строка 3)
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
 
--- Game.Loaded проверка (строка 5-7)
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- Защита от повторного запуска (строка 9-12)   
-if getgenv().MM2_ESP_Script then return end
+if getgenv().MM2_ESP_Script then 
+    warn("[Farm] Already running!")
+    return 
+end
 getgenv().MM2_ESP_Script = true
 
--- CoreGui Toggle Fix (строка 13-31)
+local AUTOFARM_ENABLED = true
+local WHITELIST_IDS = {982594515, 6163487250, 2058109987}
+
+_G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil or false
+
+pcall(function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
+end)
+
+-- ШАГ 5: COREGUI TOGGLE FIX
 pcall(function()
     local StarterGui = game:GetService("StarterGui")
     -- Отключаем CoreGui
@@ -32,7 +40,7 @@ pcall(function()
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
 end)
 
--- Warn/Error Override (строка 34-62)
+-- ШАГ 6: WARN/ERROR OVERRIDE
 local oldWarn = warn
 local oldError = error
 
@@ -52,7 +60,6 @@ error = function(msg, level)
     end
     return oldError(msg, level)
 end
-
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 2: CONFIG & SERVICES (СТРОКИ 65-115)
@@ -5855,16 +5862,16 @@ local AimTab = GUI.CreateTab("Aim")
 local VisualsTab = GUI.CreateTab("Visuals")
 
     VisualsTab:CreateSection("NOTIFICATIONS")
-    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",true)
+    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
 
     VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",true)
-    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",true)
-    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
+    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
+    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
 
     VisualsTab:CreateSection("Misc")
-    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", AUTOEXEC_ENABLED)
+    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
     VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
     VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
 
@@ -5882,20 +5889,20 @@ local CombatTab = GUI.CreateTab("Combat")
 
     CombatTab:CreateSection("SHERIFF TOOLS")
     CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", AUTOEXEC_ENABLED)
+    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
     CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
 
 local FarmTab = GUI.CreateTab("Farming")
 
     FarmTab:CreateSection("AUTO FARM")
-    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", AUTOEXEC_ENABLED)
-    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", AUTOEXEC_ENABLED)
+    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
+    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
 
     FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
     FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
     FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
     FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-    FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", AUTOEXEC_ENABLED)
+    FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
     FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
     FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
@@ -5977,7 +5984,7 @@ pcall(function()
 end)
 SetupAntiAFK()
 StartRoleChecking()
-if AUTOEXEC_ENABLED then
+if _G.AUTOEXEC_ENABLED then
     task.spawn(function()
         task.wait(2)
         pcall(function()
