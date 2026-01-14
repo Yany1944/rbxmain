@@ -116,25 +116,9 @@ return function(env)
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
             Position = UDim2.new(0, 15, 0, 0),
-            Size = UDim2.new(0, 280, 1, 0),  -- ИЗМЕНЕНО: фиксированная ширина
+            Size = UDim2.new(0.8, 0, 1, 0),
             Parent = header
         })
-        
-        -- НОВОЕ: Label для монет
-        local coinsLabel = Create("TextLabel", {
-            Text = "Coins: ...",
-            RichText = true,
-            Font = Enum.Font.GothamBold,
-            TextSize = 14,
-            TextColor3 = CONFIG.Colors.Text,
-            TextXAlignment = Enum.TextXAlignment.Right,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(1, -120, 0, 0),
-            Size = UDim2.new(0, 85, 1, 0),
-            Parent = header
-        })
-        
-        State.UIElements.CoinsLabel = coinsLabel
 
         local closeButton = Create("TextButton", {
             Text = "X",
