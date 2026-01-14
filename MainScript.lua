@@ -476,8 +476,8 @@ State.AimbotConfig = {
     Distance = 2000,
     Fov = 50,
     PredictionValue = 0.03,
-    Smoothness = 3.0,
-    VerticalOffset = 0.8,
+    Smoothness = 3.5,
+    VerticalOffset = 0.7,
 
     Method = 'Mouse',
     SafetyKey = nil,
@@ -5245,16 +5245,29 @@ end
 -- БЛОК 18: UTILITY FUNCTIONS (СТРОКИ 3051-3200)
 -- ══════════════════════════════════════════════════════════════════════════════
 
+-- SetupAntiAFK() - VirtualUser:CaptureController()
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
-    
     LocalPlayer.Idled:Connect(function()
-        VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-        task.wait(1)
-        VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+    
+    task.spawn(function()
+        while getgenv().MM2_ESP_Script do
+            pcall(function()
+                if getconnections then
+                    for _, connection in next, getconnections(LocalPlayer.Idled) do
+                        if connection.Disable then
+                            connection:Disable()
+                        end
+                    end
+                end
+            end)
+            task.wait(60)
+        end
     end)
 end
-
 
 local function Rejoin()
     task.wait(0.5)
@@ -5793,6 +5806,77 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 })
 
 GUI.Init()
+
+-- ОПТИМИЗИРОВАННАЯ СИСТЕМА МОНЕТ
+task.spawn(function()
+    task.wait(0.5)
+    
+    local header = State.UIElements.MainGui and State.UIElements.MainGui:FindFirstChild("MainFrame")
+    if header then header = header:FindFirstChild("Header") end
+    if not header then return end
+    
+    -- Создаем label с автоматической шириной
+    local coinsLabel = Instance.new("TextLabel")
+    coinsLabel.Name = "CoinsDisplay"
+    coinsLabel.Text = ""
+    coinsLabel.RichText = true
+    coinsLabel.Font = Enum.Font.GothamBold
+    coinsLabel.TextSize = 14
+    coinsLabel.TextColor3 = CONFIG.Colors.Text
+    coinsLabel.TextXAlignment = Enum.TextXAlignment.Right
+    coinsLabel.BackgroundTransparency = 1
+    coinsLabel.TextScaled = false
+    coinsLabel.Parent = header
+    
+    -- Функция обновления позиции и текста
+    local function updateCoins(coins)
+        coinsLabel.Text = string.format("Coins: <font color=\"rgb(220, 145, 230)\">%d</font>", coins)
+        
+        -- Динамический расчет ширины по количеству цифр
+        local digitCount = #tostring(coins)
+        local width = math.clamp(60 + (digitCount * 8), 85, 150)
+        
+        -- Позиция: отступ от крестика (35px) + margin (10px) + ширина label
+        coinsLabel.Size = UDim2.new(0, width, 1, 0)
+        coinsLabel.Position = UDim2.new(1, -(45 + width), 0, 0)
+    end
+    
+    task.wait(1.5)
+    
+    -- Подключение к GUI игры (одно подключение на весь скрипт)
+    local success, coinsElement = pcall(function()
+        return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 5)
+            :WaitForChild("Christmas2025", 5)
+            :WaitForChild("Container", 5)
+            :WaitForChild("Main", 5)
+            :WaitForChild("Gifting", 5)
+            :WaitForChild("Title", 5)
+            :WaitForChild("Tokens", 5)
+            :WaitForChild("Container", 5)
+            :WaitForChild("TextLabel", 5)
+    end)
+    
+    if success and coinsElement then
+        -- Начальное обновление
+        local initialCoins = tonumber(coinsElement.Text) or 0
+        updateCoins(initialCoins)
+        
+        -- ЕДИНСТВЕННОЕ подключение - срабатывает только при изменении
+        local connection = coinsElement:GetPropertyChangedSignal("Text"):Connect(function()
+            local coins = tonumber(coinsElement.Text) or 0
+            updateCoins(coins)
+        end)
+        
+        -- Cleanup при удалении GUI
+        table.insert(State.Connections, connection)
+    else
+        coinsLabel.Text = "Coins: <font color=\"rgb(255, 0, 0)\">N/A</font>"
+        coinsLabel.Size = UDim2.new(0, 100, 1, 0)
+        coinsLabel.Position = UDim2.new(1, -145, 0, 0)
+    end
+end)
+
+
 
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
