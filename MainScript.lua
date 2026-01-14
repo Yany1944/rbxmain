@@ -5807,7 +5807,9 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
 GUI.Init()
 
--- ОПТИМИЗИРОВАННАЯ СИСТЕМА МОНЕТ
+GUI.Init()
+
+-- ОПТИМИЗИРОВАННАЯ СИСТЕМА МОНЕТ (с поддержкой запятых)
 task.spawn(function()
     task.wait(0.5)
     
@@ -5828,13 +5830,23 @@ task.spawn(function()
     coinsLabel.TextScaled = false
     coinsLabel.Parent = header
     
+    -- Функция парсинга числа (убирает запятые)
+    local function parseNumber(text)
+        if not text then return 0 end
+        -- Убираем все запятые: "26,292" -> "26292"
+        local cleaned = tostring(text):gsub(",", "")
+        return tonumber(cleaned) or 0
+    end
+    
     -- Функция обновления позиции и текста
     local function updateCoins(coins)
-        coinsLabel.Text = string.format("Coins: <font color=\"rgb(220, 145, 230)\">%d</font>", coins)
+        -- Форматируем с запятыми для читаемости
+        local formatted = tostring(coins):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        coinsLabel.Text = string.format("Coins: <font color=\"rgb(255, 215, 0)\">%s</font>", formatted)
         
-        -- Динамический расчет ширины по количеству цифр
-        local digitCount = #tostring(coins)
-        local width = math.clamp(60 + (digitCount * 8), 85, 150)
+        -- Динамический расчет ширины по количеству символов (включая запятые)
+        local displayLength = #formatted
+        local width = math.clamp(60 + (displayLength * 8), 85, 150)
         
         -- Позиция: отступ от крестика (35px) + margin (10px) + ширина label
         coinsLabel.Size = UDim2.new(0, width, 1, 0)
@@ -5843,7 +5855,7 @@ task.spawn(function()
     
     task.wait(1.5)
     
-    -- Подключение к GUI игры (одно подключение на весь скрипт)
+    -- Подключение к GUI игры
     local success, coinsElement = pcall(function()
         return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 5)
             :WaitForChild("Christmas2025", 5)
@@ -5857,13 +5869,13 @@ task.spawn(function()
     end)
     
     if success and coinsElement then
-        -- Начальное обновление
-        local initialCoins = tonumber(coinsElement.Text) or 0
+        -- Начальное обновление с парсингом
+        local initialCoins = parseNumber(coinsElement.Text)
         updateCoins(initialCoins)
         
         -- ЕДИНСТВЕННОЕ подключение - срабатывает только при изменении
         local connection = coinsElement:GetPropertyChangedSignal("Text"):Connect(function()
-            local coins = tonumber(coinsElement.Text) or 0
+            local coins = parseNumber(coinsElement.Text)
             updateCoins(coins)
         end)
         
@@ -5875,8 +5887,6 @@ task.spawn(function()
         coinsLabel.Position = UDim2.new(1, -145, 0, 0)
     end
 end)
-
-
 
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
