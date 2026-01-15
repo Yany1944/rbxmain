@@ -529,7 +529,7 @@ local function StartAimbot()
     FovCircle.Visible = State.AimbotConfig.FovCheck
     FovCircle.Radius = State.AimbotConfig.Fov
     FovCircle.Color = CONFIG.Colors.Accent
-    FovCircle.Transparency = 0.15
+    FovCircle.Transparency = 0.7
     FovCircle.ZIndex = 2
 
     FovCircleOutline = drawNew('Circle')
@@ -538,7 +538,7 @@ local function StartAimbot()
     FovCircleOutline.Visible = State.AimbotConfig.FovCheck
     FovCircleOutline.Radius = State.AimbotConfig.Fov
     FovCircleOutline.Color = colRgb(0, 0, 0)
-    FovCircleOutline.Transparency = 0.15
+    FovCircleOutline.Transparency = 0.8
     FovCircleOutline.ZIndex = 1
 
     _G.FovCircle = FovCircle
@@ -5793,7 +5793,23 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         -- ESP
         GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() end,
-        PlayerNicknamesESP = function(on) State.PlayerNicknamesESP = on UpdatePlayerNicknamesVisibility() end,
+        PlayerNicknamesESP = function(on)
+        State.PlayerNicknamesESP = on
+        if on then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    CreatePlayerNicknameESP(player)
+                end
+            end
+        else
+            -- Удаляем все ESP при выключении
+            for player, _ in pairs(State.PlayerNicknamesCache) do
+                RemovePlayerNicknameESP(player)
+            end
+        end
+        
+        UpdatePlayerNicknamesVisibility()
+    end,
         MurderESP = function(on) State.MurderESP = on end,
         SheriffESP = function(on) State.SheriffESP = on end,
         InnocentESP = function(on) State.InnocentESP = on end,
