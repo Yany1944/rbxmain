@@ -12,7 +12,7 @@ return function(env)
     local TrackConnection = env.TrackConnection
     local ShowNotification = env.ShowNotification
     local Handlers = env.Handlers
-    local BACK_TRANSPARENCY = 0.10
+    local BACK_TRANSPARENCY = 0.15
 
     local GUI = {}
 
@@ -82,9 +82,9 @@ return function(env)
         local Camera = workspace.CurrentCamera
         local blur = Instance.new("BlurEffect")
         blur.Name = "MM2_MenuBlur"
-        blur.Size = 8 -- Начальное значение
-        blur.Parent = Camera
-        State.UIElements.BlurEffect = blur -- Сохраняем для управления
+        blur.Size = 3  -- Очень легкое размытие (было 8-12)
+        blur.Parent = workspace.CurrentCamera
+        State.UIElements.BlurEffect = blur
         
         local gui = Create("ScreenGui", {
             Name = "MM2_ESP_UI",
@@ -1060,9 +1060,6 @@ return function(env)
             if not processed and input.KeyCode == CONFIG.HideKey then
                 mainFrame.Visible = not mainFrame.Visible
                 toggleBlur(mainFrame.Visible) -- Синхронизация блюра с видимостью
-            end
-            if not processed and input.KeyCode == CONFIG.HideKey then
-                mainFrame.Visible = not mainFrame.Visible
             end
 
             if processed then return end
