@@ -78,6 +78,14 @@ return function(env)
             if child.Name == "MM2_ESP_UI" then child:Destroy() end
         end
 
+        -- Создание BlurEffect для камеры
+        local Camera = workspace.CurrentCamera
+        local blur = Instance.new("BlurEffect")
+        blur.Name = "MM2_MenuBlur"
+        blur.Size = 8 -- Начальное значение
+        blur.Parent = Camera
+        State.UIElements.BlurEffect = blur -- Сохраняем для управления
+        
         local gui = Create("ScreenGui", {
             Name = "MM2_ESP_UI",
             Parent = CoreGui
@@ -106,6 +114,20 @@ return function(env)
             Parent = mainFrame
         })
         AddCorner(header, 12)
+            -- После создания mainFrame
+        local function toggleBlur(visible)
+            if State.UIElements.BlurEffect then
+                local targetSize = visible and 12 or 0 -- 12 = интенсивность размытия
+                TweenService:Create(
+                    State.UIElements.BlurEffect,
+                    TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                    {Size = targetSize}
+                ):Play()
+            end
+        end
+        
+        -- Включаем блюр при создании
+        toggleBlur(true)
 
         local titleLabel = Create("TextLabel", {
             Text = "MM2 <font color=\"rgb(128, 0, 128)\">for my кошичка жена!</font>",
@@ -1037,6 +1059,10 @@ return function(env)
         local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
             if not processed and input.KeyCode == CONFIG.HideKey then
                 mainFrame.Visible = not mainFrame.Visible
+                toggleBlur(mainFrame.Visible) -- Синхронизация блюра с видимостью
+            end
+            if not processed and input.KeyCode == CONFIG.HideKey then
+                mainFrame.Visible = not mainFrame.Visible
             end
 
             if processed then return end
@@ -1086,6 +1112,12 @@ return function(env)
     end
 
     function GUI.Cleanup()
+        if State.UIElements.BlurEffect then
+            pcall(function()
+                State.UIElements.BlurEffect:Destroy()
+            end)
+            State.UIElements.BlurEffect = nil
+        end
         if State.UIElements.MainGui then
             pcall(function()
                 State.UIElements.MainGui:Destroy()
@@ -1093,6 +1125,7 @@ return function(env)
             State.UIElements.MainGui = nil
         end
     end
+
 
     return GUI
 end
