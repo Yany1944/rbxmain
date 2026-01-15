@@ -6121,10 +6121,10 @@ local VisualsTab = GUI.CreateTab("Visuals")
 
     VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
     VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
-    VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
     VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
     VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
+    VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
     VisualsTab:CreateSection("Misc")
     VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
