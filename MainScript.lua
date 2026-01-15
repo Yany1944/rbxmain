@@ -190,6 +190,11 @@ local State = {
     GunCache = {},
     CurrentGunDrop = nil,
 
+    -- Player Nicknames ESP
+    PlayerNicknamesESP = false,
+    PlayerNicknamesCache = {},
+
+
     -- Ping chams
     PingChamsEnabled = false,
     PingChamsBuffer = {},
@@ -524,6 +529,7 @@ local function StartAimbot()
     FovCircle.Visible = State.AimbotConfig.FovCheck
     FovCircle.Radius = State.AimbotConfig.Fov
     FovCircle.Color = CONFIG.Colors.Accent
+    FovCircle.Transparency = 0.15
     FovCircle.ZIndex = 2
 
     FovCircleOutline = drawNew('Circle')
@@ -532,6 +538,7 @@ local function StartAimbot()
     FovCircleOutline.Visible = State.AimbotConfig.FovCheck
     FovCircleOutline.Radius = State.AimbotConfig.Fov
     FovCircleOutline.Color = colRgb(0, 0, 0)
+    FovCircleOutline.Transparency = 0.15
     FovCircleOutline.ZIndex = 1
 
     _G.FovCircle = FovCircle
@@ -1662,6 +1669,15 @@ local function FullShutdown()
         end
         State.GunCache = {}
         State.CurrentGunDrop = nil
+                -- Player Nicknames ESP
+        for player, espData in pairs(State.PlayerNicknamesCache) do
+            pcall(function()
+                if espData.billboard then
+                    espData.billboard:Destroy()
+                end
+            end)
+        end
+        State.PlayerNicknamesCache = {}
     end)
 
     pcall(function() GUI.Cleanup() end)
@@ -4410,6 +4426,148 @@ ToggleGodMode = function()
     end
 end
 
+----------------------------------------------------------------
+-- PLAYER NICKNAMES ESP
+----------------------------------------------------------------
+
+local nicknamesConnection = nil
+local playerConnections = {}
+
+local function CreatePlayerNicknameESP(player)
+    if not player or player == LocalPlayer then return end
+    
+    local character = player.Character
+    if not character or not character.Parent then return end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp or not hrp.Parent then return end
+    
+    -- Удаляем старый ESP если есть
+    if State.PlayerNicknamesCache[player] then
+        RemovePlayerNicknameESP(player)
+    end
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "PlayerNicknameESP"
+    billboard.Adornee = hrp
+    billboard.Size = UDim2.new(0, 140, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Enabled = State.PlayerNicknamesESP
+    billboard.Parent = hrp
+    
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Text = player.Name
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 12
+    label.TextStrokeTransparency = 0.6
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Parent = billboard
+    
+    State.PlayerNicknamesCache[player] = {
+        billboard = billboard
+    }
+end
+
+local function RemovePlayerNicknameESP(player)
+    if not player or not State.PlayerNicknamesCache[player] then return end
+    
+    local espData = State.PlayerNicknamesCache[player]
+    
+    pcall(function()
+        if espData.billboard then
+            espData.billboard:Destroy()
+        end
+    end)
+    
+    State.PlayerNicknamesCache[player] = nil
+end
+
+local function UpdatePlayerNicknamesVisibility()
+    for player, espData in pairs(State.PlayerNicknamesCache) do
+        if espData.billboard then
+            espData.billboard.Enabled = State.PlayerNicknamesESP
+        end
+    end
+end
+
+local function SetupPlayerTracking(player)
+    if player == LocalPlayer then return end
+    if playerConnections[player] then return end
+    
+    playerConnections[player] = {}
+    
+    -- CharacterAdded
+    playerConnections[player].charAdded = player.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        if State.PlayerNicknamesESP then
+            CreatePlayerNicknameESP(player)
+        end
+    end)
+    
+    -- CharacterRemoving
+    playerConnections[player].charRemoving = player.CharacterRemoving:Connect(function()
+        RemovePlayerNicknameESP(player)
+    end)
+    
+    -- Если у игрока уже есть персонаж
+    if player.Character and State.PlayerNicknamesESP then
+        CreatePlayerNicknameESP(player)
+    end
+end
+
+local function RemovePlayerTracking(player)
+    if playerConnections[player] then
+        for _, conn in pairs(playerConnections[player]) do
+            pcall(function() conn:Disconnect() end)
+        end
+        playerConnections[player] = nil
+    end
+    RemovePlayerNicknameESP(player)
+end
+
+local function SetupPlayerNicknamesTracking()
+    if nicknamesConnection then
+        nicknamesConnection:Disconnect()
+        nicknamesConnection = nil
+    end
+    
+    -- Очищаем старые подключения
+    for player, _ in pairs(playerConnections) do
+        RemovePlayerTracking(player)
+    end
+    
+    -- Настраиваем отслеживание для существующих игроков
+    for _, player in ipairs(Players:GetPlayers()) do
+        SetupPlayerTracking(player)
+    end
+    
+    -- Отслеживаем новых игроков
+    TrackConnection(Players.PlayerAdded:Connect(function(player)
+        SetupPlayerTracking(player)
+    end))
+    
+    -- Отслеживаем выход игроков
+    TrackConnection(Players.PlayerRemoving:Connect(function(player)
+        RemovePlayerTracking(player)
+    end))
+    
+    -- Heartbeat для обновления видимости
+    nicknamesConnection = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            for player, espData in pairs(State.PlayerNicknamesCache) do
+                if espData.billboard then
+                    espData.billboard.Enabled = State.PlayerNicknamesESP
+                end
+            end
+        end)
+    end)
+    
+    table.insert(State.Connections, nicknamesConnection)
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 13: TROLLING FEATURES (СТРОКИ 1801-2050)
@@ -5635,9 +5793,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         -- ESP
         GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() end,
+        PlayerNicknamesESP = function(on) State.PlayerNicknamesESP = on UpdatePlayerNicknamesVisibility() end,
         MurderESP = function(on) State.MurderESP = on end,
         SheriffESP = function(on) State.SheriffESP = on end,
         InnocentESP = function(on) State.InnocentESP = on end,
+        
 
         -- Visuals
         UIOnly = function(on) State.UIOnlyEnabled = on if on then EnableUIOnly() else DisableUIOnly() end end,
@@ -5945,6 +6105,7 @@ local VisualsTab = GUI.CreateTab("Visuals")
 
     VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
     VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+    VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
     VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
     VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
     VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
@@ -6058,6 +6219,7 @@ end)
 CreateNotificationUI()
 ApplyCharacterSettings()
 SetupGunTracking()
+SetupPlayerNicknamesTracking()
 pcall(function()
     ApplyFOV(State.CameraFOV)
 end)
