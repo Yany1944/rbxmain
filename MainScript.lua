@@ -13,52 +13,6 @@ if getgenv().MM2_ESP_Script then
 end
 getgenv().MM2_ESP_Script = true
 
--- ═══════════════════════════════════════════════════════
--- SETTINGS SAVE/LOAD SYSTEM
--- ═══════════════════════════════════════════════════════
-local SETTINGS_FILE = "MM2_Script_Settings.json"
-
-local function LoadSettings()
-    if readfile and isfile then
-        local success, fileExists = pcall(function()
-            return isfile(SETTINGS_FILE)
-        end)
-        
-        if success and fileExists then
-            local readSuccess, content = pcall(function()
-                return readfile(SETTINGS_FILE)
-            end)
-            
-            if readSuccess and content then
-                local jsonSuccess, data = pcall(function()
-                    return game:GetService("HttpService"):JSONDecode(content)
-                end)
-                
-                if jsonSuccess and type(data) == "table" then
-                    return data
-                end
-            end
-        end
-    end
-    
-    -- Значения по умолчанию
-    return {
-        AutoLoadOnTeleport = true
-    }
-end
-
-local function SaveSettings(settings)
-    if writefile then
-        pcall(function()
-            local json = game:GetService("HttpService"):JSONEncode(settings)
-            writefile(SETTINGS_FILE, json)
-        end)
-    end
-end
-
--- Загружаем настройки при старте
-local savedSettings = LoadSettings()
-
 local AUTOFARM_ENABLED = true
 --SK2ND = 982594515
 --slonsagg2 = 6163487250
@@ -193,7 +147,7 @@ local State = {
     GodModeWithAutoFarm = true,
 
     -- Auto-load script on teleport
-    AutoLoadOnTeleport = savedSettings.AutoLoadOnTeleport,
+    AutoLoadOnTeleport = true,
 
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
@@ -316,16 +270,14 @@ local State = {
 
 local ScriptAlive = true
 
--- ═══════════════════════════════════════════════════════
--- AUTO-LOAD ON TELEPORT HANDLER
--- ═══════════════════════════════════════════════════════
 local TeleportCheck = false
 game.Players.LocalPlayer.OnTeleport:Connect(function()
     if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
         TeleportCheck = true
-        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
+        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmainrefs/heads/main/MainScript.lua", true))()]])
     end
 end)
+
 
 local function TrackConnection(conn)
     if conn then
@@ -6041,12 +5993,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.AimbotConfig.MouseButton = value
         end,
         Shutdown = function() FullShutdown() end,
-        -- Auto-load on teleport
-        AutoLoadOnTeleport = function(on)
-            State.AutoLoadOnTeleport = on
-            local settings = {AutoLoadOnTeleport = on}
-            SaveSettings(settings)
-        end,
     }
 })
 
@@ -6282,8 +6228,6 @@ local UtilityTab = GUI.CreateTab("Server")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
     UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
     UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
-    UtilityTab:CreateToggle("Auto-Load on Teleport", "Script will reload when you teleport (session only)", "AutoLoadOnTeleport", true)
-
 
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
