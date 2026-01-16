@@ -270,13 +270,28 @@ local State = {
     }
 }
 
+-- ═══════════════════════════════════════════════════════
+-- AUTO-LOAD ON TELEPORT WITH GLOBAL FLAG
+-- ═══════════════════════════════════════════════════════
+
+-- Проверка глобального флага при загрузке
+if getgenv().MM2_DISABLE_AUTOLOAD then
+    getgenv().MM2_DISABLE_AUTOLOAD = nil -- Сбрасываем флаг
+    warn("[AutoLoad] Disabled by user - script will not load")
+    return -- ОСТАНАВЛИВАЕМ ЗАГРУЗКУ
+end
+
 local TeleportCheck = false
 game.Players.LocalPlayer.OnTeleport:Connect(function()
     if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
         TeleportCheck = true
         queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
+    else
+        -- Если выключен - устанавливаем флаг отмены
+        getgenv().MM2_DISABLE_AUTOLOAD = true
     end
 end)
+
 
 local function TrackConnection(conn)
     if conn then
@@ -5995,6 +6010,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         -- Auto-load on teleport
         AutoLoadOnTeleport = function(on)
             State.AutoLoadOnTeleport = on
+            if on then
+                getgenv().MM2_DISABLE_AUTOLOAD = nil -- Снимаем блокировку
+            else
+                getgenv().MM2_DISABLE_AUTOLOAD = true -- Ставим блокировку
+            end
         end,
     }
 })
