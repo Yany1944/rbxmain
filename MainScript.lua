@@ -13,13 +13,7 @@ if getgenv().MM2_ESP_Script then
 end
 getgenv().MM2_ESP_Script = true
 
-local TeleportCheck = false
-game.Players.LocalPlayer.OnTeleport:Connect(function(State)
-    if not TeleportCheck and queue_on_teleport then
-        TeleportCheck = true
-        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
-    end
-end)
+local AUTOFARM_ENABLED = true
 
 local AUTOFARM_ENABLED = true
 --SK2ND = 982594515
@@ -154,6 +148,9 @@ local State = {
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
 
+    -- Auto-load script on teleport
+    AutoLoadOnTeleport = true,
+
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
@@ -273,7 +270,13 @@ local State = {
     }
 }
 
-local ScriptAlive = true
+local TeleportCheck = false
+game.Players.LocalPlayer.OnTeleport:Connect(function()
+    if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
+        TeleportCheck = true
+        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
+    end
+end)
 
 local function TrackConnection(conn)
     if conn then
@@ -5989,6 +5992,10 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.AimbotConfig.MouseButton = value
         end,
         Shutdown = function() FullShutdown() end,
+        -- Auto-load on teleport
+        AutoLoadOnTeleport = function(on)
+            State.AutoLoadOnTeleport = on
+        end,
     }
 })
 
@@ -6224,6 +6231,7 @@ local UtilityTab = GUI.CreateTab("Server")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
     UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
     UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
+    UtilityTab:CreateToggle("Auto-Load on Teleport", "Script will reload when you teleport (session only)", "AutoLoadOnTeleport", true)
 
 
 ---------
