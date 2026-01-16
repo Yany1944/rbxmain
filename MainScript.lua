@@ -13,8 +13,19 @@ if getgenv().MM2_ESP_Script then
 end
 getgenv().MM2_ESP_Script = true
 
+local TeleportCheck = false
+game.Players.LocalPlayer.OnTeleport:Connect(function(State)
+    if not TeleportCheck and queue_on_teleport then
+        TeleportCheck = true
+        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
+    end
+end)
+
 local AUTOFARM_ENABLED = true
-local WHITELIST_IDS = {982594515, 6163487250, 2058109987}
+--SK2ND = 982594515
+--slonsagg2 = 6163487250
+--0Jl9lra = 2058109987
+local WHITELIST_IDS = {982594515, 6163487250}
 
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
