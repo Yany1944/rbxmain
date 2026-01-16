@@ -138,7 +138,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 21,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -152,7 +152,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 25 * 60, -- 25 минут в секундах
+    ReconnectInterval = 20 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
 
     -- XP Farm
@@ -3729,6 +3729,37 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     return true
 end
 
+local function CountPlayersWithKnives()
+    local count = 0
+    local Players = game:GetService("Players")
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        local hasKnife = false
+        -- Проверяем Backpack
+        if player.Backpack then
+            for _, item in pairs(player.Backpack:GetChildren()) do
+                if item.Name == "Knife" then
+                    hasKnife = true
+                    break
+                end
+            end
+        end
+        -- Проверяем Character (если нож в руках)
+        if not hasKnife and player.Character then
+            for _, item in pairs(player.Character:GetChildren()) do
+                if item.Name == "Knife" then
+                    hasKnife = true
+                    break
+                end
+            end
+        end
+        if hasKnife then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 
 local shootMurderer
 local InstantKillAll
@@ -3800,78 +3831,83 @@ local function StartAutoFarm()
                 continue
             end
             
-            local currentCoins = GetCollectedCoinsCount()
-            
-            if currentCoins >= 50 then
-                --print("[Auto Farm] ✅ Все 50 монет собраны!")
-                noCoinsAttempts = maxNoCoinsAttempts
+            if CountPlayersWithKnives() > 1 then
+                noCoinsAttempts = maxNoCoinsAttempts  -- Эмулируем "все монеты собраны"
             else
-                local coin = FindNearestCoin()
+                -- ✅ Собираем монеты только если НЕ Snowball Fight
+                local currentCoins = GetCollectedCoinsCount()
                 
-                if not coin then
-                    noCoinsAttempts = noCoinsAttempts + 1
-                    --print("[Auto Farm] 🔍 Монета не найдена (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
-                    
-                    if noCoinsAttempts < maxNoCoinsAttempts then
-                        task.wait(0.3)
-                    end
+                if currentCoins >= 50 then
+                    --print("[Auto Farm] ✅ Все 50 монет собраны!")
+                    noCoinsAttempts = maxNoCoinsAttempts
                 else
-                    noCoinsAttempts = 0
+                    local coin = FindNearestCoin()
                     
-                    pcall(function()
-                        if not allowFly then  -- ✅ Вместо проверки currentCoins < 1
-                            local currentTime = tick()
-                            local timeSinceLastTP = currentTime - lastTeleportTime
-                            
-                            if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
-                                local waitTime = State.CoinFarmDelay - timeSinceLastTP
-                                task.wait(waitTime)
-                            end
-                            
-                            --print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
-                            
-                            local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
-                            
-                            if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
-                                humanoidRootPart.CFrame = targetCFrame
-                                lastTeleportTime = tick()
+                    if not coin then
+                        noCoinsAttempts = noCoinsAttempts + 1
+                        --print("[Auto Farm] 🔍 Монета не найдена (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
+                        
+                        if noCoinsAttempts < maxNoCoinsAttempts then
+                            task.wait(0.3)
+                        end
+                    else
+                        noCoinsAttempts = 0
+                        
+                        pcall(function()
+                            if not allowFly then
+                                local currentTime = tick()
+                                local timeSinceLastTP = currentTime - lastTeleportTime
                                 
-                                if firetouchinterest then
-                                    firetouchinterest(humanoidRootPart, coin, 0)
-                                    task.wait(0.05)
-                                    firetouchinterest(humanoidRootPart, coin, 1)
+                                if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
+                                    local waitTime = State.CoinFarmDelay - timeSinceLastTP
+                                    task.wait(waitTime)
                                 end
                                 
-                                task.wait(0.2)
+                                --print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
+                                
+                                local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
+                                
+                                if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
+                                    humanoidRootPart.CFrame = targetCFrame
+                                    lastTeleportTime = tick()
+                                    
+                                    if firetouchinterest then
+                                        firetouchinterest(humanoidRootPart, coin, 0)
+                                        task.wait(0.05)
+                                        firetouchinterest(humanoidRootPart, coin, 1)
+                                    end
+                                    
+                                    task.wait(0.2)
+                                    
+                                    coinLabelCache = nil
+                                    local coinsAfter = GetCollectedCoinsCount()
+                                    if coinsAfter > currentCoins then
+                                        --print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
+                                    end
+                                    
+                                    AddCoinToBlacklist(coin)
+                                    allowFly = true
+                                end
+                            else
+                                if State.UndergroundMode then
+                                    --print("[Auto Farm] 🕳️ Полёт под землёй к монете")
+                                else
+                                    --print("[Auto Farm] ✈️ Полёт к монете")
+                                end
+                                
+                                EnableNoClip()
+                                SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
                                 
                                 coinLabelCache = nil
                                 local coinsAfter = GetCollectedCoinsCount()
                                 if coinsAfter > currentCoins then
-                                    --print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
+                                    --print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
                                 end
                                 
                                 AddCoinToBlacklist(coin)
-                                allowFly = true
                             end
-                        else
-                            if State.UndergroundMode then
-                                --print("[Auto Farm] 🕳️ Полёт под землёй к монете")
-                            else
-                                --print("[Auto Farm] ✈️ Полёт к монете")
-                            end
-                            
-                            EnableNoClip()
-                            SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
-                            
-                            coinLabelCache = nil
-                            local coinsAfter = GetCollectedCoinsCount()
-                            if coinsAfter > currentCoins then
-                                --print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
-                            end
-                            
-                            AddCoinToBlacklist(coin)
-                        end
-                    end)
+                        end)
+                    end
                 end
             end
             
@@ -3914,7 +3950,7 @@ local function StartAutoFarm()
                                     
                                     if murderer == LocalPlayer then
                                         --print("[XP Farm] 🔪 Мы мурдерер! Активирую knifeThrow...")
-                                        
+                                        --[[
                                         -- ✅ Включаем spawnAtPlayer если был выключен
                                         if not State.spawnAtPlayer then
                                             State.spawnAtPlayer = true
@@ -3942,10 +3978,10 @@ local function StartAutoFarm()
                                             
                                             task.wait(throwDelay)
                                         end
-                                        
-                                        -- ✅ Fallback: если после 30 попыток раунд не завершился
+                                        --]]
+                                        -- ✅ Fallback: если после 1 попыток раунд не завершился
                                         if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
-                                            --print("[XP Farm] ⚠️ knifeThrow не сработал за 10 попыток! Использую InstantKillAll...")
+                                            --print("[XP Farm] ⚠️ Использую InstantKillAll...")
                                             
                                             local success, error = pcall(function()
                                                 InstantKillAll()
