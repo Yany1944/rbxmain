@@ -8,12 +8,56 @@
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 if getgenv().MM2_ESP_Script then 
-    warn("[Farm] Already running!")
+    warn("Already running!")
     return 
 end
 getgenv().MM2_ESP_Script = true
 
-local AUTOFARM_ENABLED = true
+-- ═══════════════════════════════════════════════════════
+-- SETTINGS SAVE/LOAD SYSTEM
+-- ═══════════════════════════════════════════════════════
+local SETTINGS_FILE = "MM2_Script_Settings.json"
+
+local function LoadSettings()
+    if readfile and isfile then
+        local success, fileExists = pcall(function()
+            return isfile(SETTINGS_FILE)
+        end)
+        
+        if success and fileExists then
+            local readSuccess, content = pcall(function()
+                return readfile(SETTINGS_FILE)
+            end)
+            
+            if readSuccess and content then
+                local jsonSuccess, data = pcall(function()
+                    return game:GetService("HttpService"):JSONDecode(content)
+                end)
+                
+                if jsonSuccess and type(data) == "table" then
+                    return data
+                end
+            end
+        end
+    end
+    
+    -- Значения по умолчанию
+    return {
+        AutoLoadOnTeleport = true
+    }
+end
+
+local function SaveSettings(settings)
+    if writefile then
+        pcall(function()
+            local json = game:GetService("HttpService"):JSONEncode(settings)
+            writefile(SETTINGS_FILE, json)
+        end)
+    end
+end
+
+-- Загружаем настройки при старте
+local savedSettings = LoadSettings()
 
 local AUTOFARM_ENABLED = true
 --SK2ND = 982594515
@@ -149,7 +193,7 @@ local State = {
     GodModeWithAutoFarm = true,
 
     -- Auto-load script on teleport
-    AutoLoadOnTeleport = true,
+    AutoLoadOnTeleport = savedSettings.AutoLoadOnTeleport,
 
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
@@ -270,28 +314,18 @@ local State = {
     }
 }
 
--- ═══════════════════════════════════════════════════════
--- AUTO-LOAD ON TELEPORT WITH GLOBAL FLAG
--- ═══════════════════════════════════════════════════════
+local ScriptAlive = true
 
--- Проверка глобального флага при загрузке
-if getgenv().MM2_DISABLE_AUTOLOAD then
-    getgenv().MM2_DISABLE_AUTOLOAD = nil -- Сбрасываем флаг
-    warn("[AutoLoad] Disabled by user - script will not load")
-    return -- ОСТАНАВЛИВАЕМ ЗАГРУЗКУ
-end
-
+-- ═══════════════════════════════════════════════════════
+-- AUTO-LOAD ON TELEPORT HANDLER
+-- ═══════════════════════════════════════════════════════
 local TeleportCheck = false
 game.Players.LocalPlayer.OnTeleport:Connect(function()
     if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
         TeleportCheck = true
         queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
-    else
-        -- Если выключен - устанавливаем флаг отмены
-        getgenv().MM2_DISABLE_AUTOLOAD = true
     end
 end)
-
 
 local function TrackConnection(conn)
     if conn then
@@ -6010,11 +6044,8 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         -- Auto-load on teleport
         AutoLoadOnTeleport = function(on)
             State.AutoLoadOnTeleport = on
-            if on then
-                getgenv().MM2_DISABLE_AUTOLOAD = nil -- Снимаем блокировку
-            else
-                getgenv().MM2_DISABLE_AUTOLOAD = true -- Ставим блокировку
-            end
+            local settings = {AutoLoadOnTeleport = on}
+            SaveSettings(settings)
         end,
     }
 })
