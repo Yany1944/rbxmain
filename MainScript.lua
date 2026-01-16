@@ -274,7 +274,7 @@ local TeleportCheck = false
 game.Players.LocalPlayer.OnTeleport:Connect(function()
     if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
         TeleportCheck = true
-        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmainrefs/heads/main/MainScript.lua", true))()]])
+        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
     end
 end)
 
