@@ -138,7 +138,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 21,
+    CoinFarmFlySpeed = 22,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -152,7 +152,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 20 * 60, -- 25 минут в секундах
+    ReconnectInterval = 25 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
 
     -- XP Farm
