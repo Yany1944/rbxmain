@@ -4018,7 +4018,7 @@ local function StartAutoFarm()
                                     
                                     if murderer == LocalPlayer then
                                         --print("[XP Farm] 🔪 Мы мурдерер! Активирую knifeThrow...")
-                                        
+                                        --[[
                                         -- ✅ Включаем spawnAtPlayer если был выключен
                                         if not State.spawnAtPlayer then
                                             State.spawnAtPlayer = true
@@ -4046,8 +4046,8 @@ local function StartAutoFarm()
                                             
                                             task.wait(throwDelay)
                                         end
-                                        
-                                        -- ✅ Fallback: если после 30 попыток раунд не завершился
+                                        --]]
+                                        -- ✅ Fallback: если после 1 попыток раунд не завершился
                                         if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
                                             --print("[XP Farm] ⚠️ knifeThrow не сработал за 10 попыток! Использую InstantKillAll...")
                                             
