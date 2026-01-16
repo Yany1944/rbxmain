@@ -274,10 +274,9 @@ local TeleportCheck = false
 game.Players.LocalPlayer.OnTeleport:Connect(function()
     if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
         TeleportCheck = true
-        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmainrefs/heads/main/MainScript.lua", true))()]])
+        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
     end
 end)
-
 
 local function TrackConnection(conn)
     if conn then
@@ -6029,6 +6028,9 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.AimbotConfig.MouseButton = value
         end,
         Shutdown = function() FullShutdown() end,
+        AutoLoadOnTeleport = function(on)
+            State.AutoLoadOnTeleport = on
+        end,
     }
 })
 
@@ -6264,6 +6266,7 @@ local UtilityTab = GUI.CreateTab("Server")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
     UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
     UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
+    UtilityTab:CreateToggle("Auto-Load on Teleport", "Script will reload when you teleport (session only)", "AutoLoadOnTeleport", true)
 
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
