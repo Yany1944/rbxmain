@@ -138,7 +138,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 21,
+    CoinFarmFlySpeed = 22,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -152,7 +152,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 20 * 60, -- 25 минут в секундах
+    ReconnectInterval = 25 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
 
     -- XP Farm
@@ -274,7 +274,7 @@ local TeleportCheck = false
 game.Players.LocalPlayer.OnTeleport:Connect(function()
     if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
         TeleportCheck = true
-        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
+        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmainrefs/heads/main/MainScript.lua", true))()]])
     end
 end)
 
@@ -495,7 +495,7 @@ State.AimbotConfig = {
     Distance = 2000,
     Fov = 50,
     PredictionValue = 0.03,
-    Smoothness = 3.5,
+    Smoothness = 3,
     VerticalOffset = 0.7,
 
     Method = 'Mouse',
@@ -3728,37 +3728,6 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     return true
 end
 
-local function CountPlayersWithKnives()
-    local count = 0
-    local Players = game:GetService("Players")
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        local hasKnife = false
-        -- Проверяем Backpack
-        if player.Backpack then
-            for _, item in pairs(player.Backpack:GetChildren()) do
-                if item.Name == "Knife" then
-                    hasKnife = true
-                    break
-                end
-            end
-        end
-        -- Проверяем Character (если нож в руках)
-        if not hasKnife and player.Character then
-            for _, item in pairs(player.Character:GetChildren()) do
-                if item.Name == "Knife" then
-                    hasKnife = true
-                    break
-                end
-            end
-        end
-        if hasKnife then
-            count = count + 1
-        end
-    end
-    return count
-end
-
 
 local shootMurderer
 local InstantKillAll
@@ -3767,6 +3736,28 @@ local ToggleGodMode
 
 local spawnAtPlayerOriginalState = false
 local instantPickupWasEnabled = false
+
+local function CountPlayersWithKnife()
+    local count = 0
+    local Players = game:GetService("Players")
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character then
+            local backpack = player:FindFirstChild("Backpack")
+            local character = player.Character
+            
+            -- Проверяем нож в руках или в инвентаре
+            local knifeInHand = character:FindFirstChild("Knife")
+            local knifeInBackpack = backpack and backpack:FindFirstChild("Knife")
+            
+            if knifeInHand or knifeInBackpack then
+                count = count + 1
+            end
+        end
+    end
+    
+    return count
+end
 
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
@@ -3782,18 +3773,12 @@ local function StartAutoFarm()
     instantPickupWasEnabled = State.InstantPickupEnabled
     
     State.CoinFarmThread = task.spawn(function()
-        local allowFly = false  -- ✅ Флаг для переключения ТП → Полёт
-        --print("[Auto Farm] 🚀 Запущен")
-        if State.UndergroundMode then
-            --print("[Auto Farm] 🕳️ Режим под землёй: ВКЛ")
-        end
-
-        -- ✅ Включаем годмод при старте автофарма
+        local allowFly = false
+        
         if State.GodModeWithAutoFarm and not State.GodModeEnabled then
             pcall(function()
-                ToggleGodMode()  -- Включаем только если был выключен
+                ToggleGodMode()
             end)
-            --print("[Auto Farm] 🛡️ GodMode автоматически включен")
         end
                 
         local noCoinsAttempts = 0
@@ -3816,7 +3801,6 @@ local function StartAutoFarm()
             local murdererExists = getMurder() ~= nil
             
             if not murdererExists then
-                --print("[Auto Farm] ⏳ Жду начала раунда...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
                 allowFly = false
@@ -3830,94 +3814,179 @@ local function StartAutoFarm()
                 continue
             end
             
-            if CountPlayersWithKnives() > 1 then
-                noCoinsAttempts = maxNoCoinsAttempts  -- Эмулируем "все монеты собраны"
+            local currentCoins = GetCollectedCoinsCount()
+            
+            if currentCoins >= 50 then
+                noCoinsAttempts = maxNoCoinsAttempts
             else
-                -- ✅ Собираем монеты только если НЕ Snowball Fight
-                local currentCoins = GetCollectedCoinsCount()
+                local coin = FindNearestCoin()
                 
-                if currentCoins >= 50 then
-                    --print("[Auto Farm] ✅ Все 50 монет собраны!")
-                    noCoinsAttempts = maxNoCoinsAttempts
-                else
-                    local coin = FindNearestCoin()
+                if not coin then
+                    noCoinsAttempts = noCoinsAttempts + 1
                     
-                    if not coin then
-                        noCoinsAttempts = noCoinsAttempts + 1
-                        --print("[Auto Farm] 🔍 Монета не найдена (попытка " .. noCoinsAttempts .. "/" .. maxNoCoinsAttempts .. ")")
-                        
-                        if noCoinsAttempts < maxNoCoinsAttempts then
-                            task.wait(0.3)
-                        end
-                    else
-                        noCoinsAttempts = 0
-                        
-                        pcall(function()
-                            if not allowFly then
-                                local currentTime = tick()
-                                local timeSinceLastTP = currentTime - lastTeleportTime
+                    if noCoinsAttempts < maxNoCoinsAttempts then
+                        task.wait(0.3)
+                    end
+                else
+                    noCoinsAttempts = 0
+                    
+                    pcall(function()
+                        if not allowFly then
+                            local currentTime = tick()
+                            local timeSinceLastTP = currentTime - lastTeleportTime
+                            
+                            if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
+                                local waitTime = State.CoinFarmDelay - timeSinceLastTP
+                                task.wait(waitTime)
+                            end
+                            
+                            local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
+                            
+                            if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
+                                humanoidRootPart.CFrame = targetCFrame
+                                lastTeleportTime = tick()
                                 
-                                if timeSinceLastTP < State.CoinFarmDelay and lastTeleportTime > 0 then
-                                    local waitTime = State.CoinFarmDelay - timeSinceLastTP
-                                    task.wait(waitTime)
+                                if firetouchinterest then
+                                    firetouchinterest(humanoidRootPart, coin, 0)
+                                    task.wait(0.05)
+                                    firetouchinterest(humanoidRootPart, coin, 1)
                                 end
                                 
-                                --print("[Auto Farm] 📍 ТП к монете #" .. (currentCoins + 1))
-                                
-                                local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
-                                
-                                if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
-                                    humanoidRootPart.CFrame = targetCFrame
-                                    lastTeleportTime = tick()
-                                    
-                                    if firetouchinterest then
-                                        firetouchinterest(humanoidRootPart, coin, 0)
-                                        task.wait(0.05)
-                                        firetouchinterest(humanoidRootPart, coin, 1)
-                                    end
-                                    
-                                    task.wait(0.2)
-                                    
-                                    coinLabelCache = nil
-                                    local coinsAfter = GetCollectedCoinsCount()
-                                    if coinsAfter > currentCoins then
-                                        --print("[Auto Farm] ✅ Монета собрана (TP) | Всего: " .. coinsAfter)
-                                    end
-                                    
-                                    AddCoinToBlacklist(coin)
-                                    allowFly = true
-                                end
-                            else
-                                if State.UndergroundMode then
-                                    --print("[Auto Farm] 🕳️ Полёт под землёй к монете")
-                                else
-                                    --print("[Auto Farm] ✈️ Полёт к монете")
-                                end
-                                
-                                EnableNoClip()
-                                SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                                task.wait(0.2)
                                 
                                 coinLabelCache = nil
                                 local coinsAfter = GetCollectedCoinsCount()
-                                if coinsAfter > currentCoins then
-                                    --print("[Auto Farm] ✅ Монета собрана (Fly) | Всего: " .. coinsAfter)
-                                end
                                 
                                 AddCoinToBlacklist(coin)
+                                allowFly = true
                             end
-                        end)
-                    end
+                        else
+                            EnableNoClip()
+                            SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                            
+                            coinLabelCache = nil
+                            local coinsAfter = GetCollectedCoinsCount()
+                            
+                            AddCoinToBlacklist(coin)
+                        end
+                    end)
                 end
             end
             
+            -- ═══════════════════════════════════════════════════════════
+            -- ГЛАВНАЯ ЛОГИКА: Snowball Fight VS Обычный режим
+            -- ═══════════════════════════════════════════════════════════
+            
             if noCoinsAttempts >= maxNoCoinsAttempts then
-                --print("[Auto Farm] ✅ Все доступные монеты собраны!")
-                
                 pcall(function()
                     DisableNoClip()
                 end)
                 
-                if State.XPFarmEnabled then
+                local playersWithKnife = CountPlayersWithKnife()
+                local isSnowballMode = playersWithKnife > 1
+                
+                -- ═══════════════════════════════════════════════════════════
+                -- SNOWBALL FIGHT РЕЖИМ
+                -- ═══════════════════════════════════════════════════════════
+                if isSnowballMode then
+                    
+                    if State.XPFarmEnabled then
+                        -- XP Farm включен: используем knifeThrow
+                        if not State.spawnAtPlayer then
+                            State.spawnAtPlayer = true
+                        end
+                        
+                        local throwAttempts = 0
+                        local maxThrowAttempts = 1
+                        local throwDelay = 3
+                        
+                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and throwAttempts < maxThrowAttempts do
+                            pcall(function()
+                                knifeThrow(true)
+                            end)
+                            
+                            throwAttempts = throwAttempts + 1
+                            task.wait(throwDelay)
+                        end
+                        
+                        -- Fallback: InstantKillAll
+                        if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
+                            pcall(function()
+                                InstantKillAll()
+                            end)
+                        end
+                        
+                        -- Ждём конца раунда
+                        repeat
+                            task.wait(1)
+                        until getMurder() == nil or not State.AutoFarmEnabled
+                        
+                    else
+                        -- XP Farm выключен: просто ресет
+                        pcall(function()
+                            UnfloatCharacter()
+                        end)
+                        
+                        if State.GodModeWithAutoFarm and State.GodModeEnabled then
+                            pcall(function()
+                                ToggleGodMode()
+                            end)
+                        end
+                        
+                        ResetCharacter()
+                        State.CoinBlacklist = {}
+                        noCoinsAttempts = 0
+                        allowFly = false
+                        
+                        task.wait(3)
+                        
+                        if State.GodModeWithAutoFarm then
+                            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                            local humanoid = character:WaitForChild("Humanoid", 5)
+                            
+                            if humanoid then
+                                task.wait(1)
+                                
+                                if not State.GodModeEnabled then
+                                    pcall(function()
+                                        ToggleGodMode()
+                                    end)
+                                end
+                            end
+                        end
+                        
+                        -- Ждём конца раунда
+                        repeat
+                            task.wait(1)
+                        until getMurder() == nil or not State.AutoFarmEnabled
+                    end
+                    
+                    -- Общий cleanup после Snowball
+                    if not State.AutoFarmEnabled then
+                        break
+                    end
+                    
+                    pcall(function()
+                        UnfloatCharacter()
+                    end)
+                    
+                    CleanupCoinBlacklist()
+                    task.wait(5)
+                    
+                    -- Ждём нового раунда
+                    repeat
+                        task.wait(1)
+                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    
+                    if not State.AutoFarmEnabled then
+                        break
+                    end
+                    
+                    State.CoinBlacklist = {}
+                    noCoinsAttempts = 0
+                    allowFly = false
+
+                elseif State.XPFarmEnabled then
                     --print("[Auto Farm] ⏳ XP Farm включен, передаю управление...")
                     
                     currentCoins = GetCollectedCoinsCount()
@@ -3949,7 +4018,7 @@ local function StartAutoFarm()
                                     
                                     if murderer == LocalPlayer then
                                         --print("[XP Farm] 🔪 Мы мурдерер! Активирую knifeThrow...")
-                                        --[[
+                                        
                                         -- ✅ Включаем spawnAtPlayer если был выключен
                                         if not State.spawnAtPlayer then
                                             State.spawnAtPlayer = true
@@ -3977,10 +4046,10 @@ local function StartAutoFarm()
                                             
                                             task.wait(throwDelay)
                                         end
-                                        --]]
-                                        -- ✅ Fallback: если после 1 попыток раунд не завершился
+                                        
+                                        -- ✅ Fallback: если после 30 попыток раунд не завершился
                                         if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
-                                            --print("[XP Farm] ⚠️ Использую InstantKillAll...")
+                                            --print("[XP Farm] ⚠️ knifeThrow не сработал за 10 попыток! Использую InstantKillAll...")
                                             
                                             local success, error = pcall(function()
                                                 InstantKillAll()
@@ -4110,16 +4179,11 @@ local function StartAutoFarm()
                             end
                         end
                     end
-                end
-                
-                if State.XPFarmEnabled then
-                    --print("[Auto Farm] ⏳ XP Farm включен - жду смерти мурдерера...")
                     repeat
                         task.wait(1)
                     until getMurder() == nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
-                        --print("[Auto Farm] ⚠️ Автофарм был выключен, выхожу из цикла...")
                         break
                     end
                     
@@ -4127,25 +4191,19 @@ local function StartAutoFarm()
                         UnfloatCharacter()
                     end)
                     
-                    --print("[Auto Farm] 🎉 Мурдерер мёртв! Жду официального окончания раунда...")
                     CleanupCoinBlacklist()
                     task.wait(5)
                     
                     if getMurder() ~= nil then
-                        --print("[Auto Farm] ⚠️ Новый раунд уже начался! Пропускаю ресет...")
                         State.CoinBlacklist = {}
                         noCoinsAttempts = 0
                         continue
                     end
                     
-                    --print("[Auto Farm] 🔄 Раунд полностью закончился! Делаю ресет...")
-                    
-                    -- ✅ Выключаем годмод перед ресетом
                     if State.GodModeWithAutoFarm and State.GodModeEnabled then
                         pcall(function()
-                            ToggleGodMode()  -- Выключаем
+                            ToggleGodMode()
                         end)
-                        --print("[Auto Farm] 🛡️ GodMode временно выключен перед ресетом")
                     end
 
                     ResetCharacter()
@@ -4154,39 +4212,33 @@ local function StartAutoFarm()
 
                     task.wait(3)
 
-                    -- ✅ Включаем годмод после респавна
-                    if State.GodModeWithAutoFarm then  -- ✅ БЕЗ проверки State.GodModeEnabled!
-                        -- Ждём появления персонажа
+                    if State.GodModeWithAutoFarm then
                         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
                         local humanoid = character:WaitForChild("Humanoid", 5)
                         
                         if humanoid then
-                            task.wait(1)  -- Даём серверу инициализировать персонажа
+                            task.wait(1)
                             
-                            if not State.GodModeEnabled then  -- ✅ ТЕПЕРЬ проверяем
+                            if not State.GodModeEnabled then
                                 pcall(function()
-                                    ToggleGodMode()  -- Включаем
+                                    ToggleGodMode()
                                 end)
-                                --print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
                             end
                         end
                     end
                     
-                    --print("[Auto Farm] ⏳ Жду начала нового раунда...")
                     repeat
                         task.wait(1)
                     until getMurder() ~= nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
-                        --print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания раунда")
                         break
                     end
                     
-                    --print("[Auto Farm] ✅ Новый раунд начался! Сбрасываю счётчики и продолжаю фарм...")
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     allowFly = false
-                    
+
                 else
                     --print("[Auto Farm] 🔄 XP Farm выключен - делаю быстрый ресет без ожидания конца раунда...")
                     CleanupCoinBlacklist()
@@ -6027,7 +6079,9 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         AimbotMouseButton = function(value)
             State.AimbotConfig.MouseButton = value
         end,
+
         Shutdown = function() FullShutdown() end,
+
         AutoLoadOnTeleport = function(on)
             State.AutoLoadOnTeleport = on
         end,
@@ -6266,7 +6320,6 @@ local UtilityTab = GUI.CreateTab("Server")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
     UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
     UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
-    UtilityTab:CreateToggle("Auto-Load on Teleport", "Script will reload when you teleport (session only)", "AutoLoadOnTeleport", true)
 
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
