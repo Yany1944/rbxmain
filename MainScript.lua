@@ -3892,6 +3892,7 @@ local function StartAutoFarm()
                     
                     if State.XPFarmEnabled then
                         -- XP Farm включен: используем knifeThrow
+                        --[[
                         if not State.spawnAtPlayer then
                             State.spawnAtPlayer = true
                         end
@@ -3908,7 +3909,7 @@ local function StartAutoFarm()
                             throwAttempts = throwAttempts + 1
                             task.wait(throwDelay)
                         end
-                        
+                        --]]
                         -- Fallback: InstantKillAll
                         if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
                             pcall(function()
