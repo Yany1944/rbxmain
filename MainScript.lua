@@ -138,7 +138,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 20,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
