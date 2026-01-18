@@ -152,7 +152,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 25 * 60, -- 25 минут в секундах
+    ReconnectInterval = 40 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
 
     -- XP Farm
