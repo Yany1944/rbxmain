@@ -13,7 +13,7 @@ if getgenv().MM2_ESP_Script then
 end
 getgenv().MM2_ESP_Script = true
 
-local AUTOFARM_ENABLED = true
+local AUTOFARM_ENABLED = false
 --SK2ND = 982594515
 --slonsagg2 = 6163487250
 --0Jl9lra = 2058109987
@@ -138,7 +138,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 20,
+    CoinFarmFlySpeed = 22,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -152,7 +152,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 40 * 60, -- 25 минут в секундах
+    ReconnectInterval = 25 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
 
     -- XP Farm
@@ -767,24 +767,23 @@ local function StartAimbot()
     end
 
     if State.AimbotConfig.Method == 'Camera' then
-        AimbotConnection = RunService.RenderStepped:Connect(function()
-            local currentTime = tick()
-            if currentTime - lastMouseUpdate > 0.032 then
-                cachedMousePos = UserInputService:GetMouseLocation()
-                lastMouseUpdate = currentTime
-            end
-            FovCircle.Position = cachedMousePos
-            FovCircleOutline.Position = cachedMousePos
+    AimbotConnection = RunService.RenderStepped:Connect(function()
+        local currentTime = tick()
+        
+        -- ✅ Обновляем позицию мыши каждый кадр БЕЗ задержки
+        cachedMousePos = UserInputService:GetMouseLocation()
+        
+        FovCircle.Position = cachedMousePos
+        FovCircleOutline.Position = cachedMousePos
+        FovCircle.Color = CONFIG.Colors.Accent
 
-            FovCircle.Color = CONFIG.Colors.Accent
+        FovCircle.Visible = State.AimbotConfig.FovCheck
+        FovCircleOutline.Visible = State.AimbotConfig.FovCheck
 
-            FovCircle.Visible = State.AimbotConfig.FovCheck
-            FovCircleOutline.Visible = State.AimbotConfig.FovCheck
-
-            if currentTime - lastValidCheck > 0.5 then
-                updateValidPlayers()
-                lastValidCheck = currentTime
-            end
+        if currentTime - lastValidCheck > 0.5 then
+            updateValidPlayers()
+            lastValidCheck = currentTime
+        end
 
             local isActive = false
             if State.AimbotConfig.SafetyKey then
@@ -816,10 +815,8 @@ local function StartAimbot()
         AimbotConnection = RunService.RenderStepped:Connect(function(dt)
             local currentTime = tick()
 
-            if currentTime - lastMouseUpdate > 0.032 then
-                cachedMousePos = UserInputService:GetMouseLocation()
-                lastMouseUpdate = currentTime
-            end
+            -- ✅ Убираем ограничение частоты обновления
+            cachedMousePos = UserInputService:GetMouseLocation()
 
             FovCircle.Position = cachedMousePos
             FovCircleOutline.Position = cachedMousePos
