@@ -3287,14 +3287,14 @@ local function GetCollectedCoinsCount()
         end
     end
 
-    -- УРОВЕНЬ 2: Попытка прямого пути с pcall защитой
+    -- ✅ УРОВЕНЬ 2: Прямой путь - "Coin" вместо "SnowToken"
     local success, coins = pcall(function()
         local label = LocalPlayer.PlayerGui
             :FindFirstChild("MainGUI")
             :FindFirstChild("Game")
             :FindFirstChild("CoinBags")
             :FindFirstChild("Container")
-            :FindFirstChild("SnowToken")
+            :FindFirstChild("Coin")  -- ✅ ИЗМЕНЕНО: было "SnowToken"
             :FindFirstChild("CurrencyFrame")
             :FindFirstChild("Icon")
             :FindFirstChild("Coins")
@@ -3307,7 +3307,7 @@ local function GetCollectedCoinsCount()
         return 0
     end)
 
-    if success and coins > 0 then
+    if success and coins >= 0 then  -- ✅ >= 0 вместо > 0
         return coins
     end
 
@@ -3631,8 +3631,10 @@ local function FindNearestCoin()
            and coin:FindFirstChildWhichIsA("TouchTransmitter") 
            and not State.CoinBlacklist[coin] then
 
+            -- ✅ КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Убрана проверка Transparency
+            -- Причина: В текущей версии MM2 CoinVisual.Transparency = 1 (всегда прозрачный)
             local coinVisual = coin:FindFirstChild("CoinVisual")
-            if coinVisual and coinVisual.Transparency == 0 then
+            if coinVisual then
                 local distance = (coin.Position - hrpPosition).Magnitude
 
                 if distance < closestDistance then
@@ -3673,9 +3675,18 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             return false
         end
         
-        -- ✅ ПРОВЕРКА: видима ли монета (CoinVisual.Transparency)
+        -- ✅ ИСПРАВЛЕНО: Убрана проверка Transparency
+        -- Причина: В текущей версии MM2 все CoinVisual имеют Transparency = 1
+        -- Достаточно проверить существование TouchTransmitter (уже сделано в FindNearestCoin)
         local coinVisual = coin:FindFirstChild("CoinVisual")
-        if not coinVisual or coinVisual.Transparency ~= 0 then
+        if not coinVisual then
+            return false
+        end
+        
+        -- ✅ ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: монета всё ещё собираемая
+        local touchTransmitter = coin:FindFirstChildWhichIsA("TouchTransmitter")
+        if not touchTransmitter then
+            -- Монета уже была собрана, TouchTransmitter удалён
             return false
         end
         
@@ -3703,7 +3714,7 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         
-        -- ✅ Вызываем firetouchinterest на 80% полёта (раньше чем монета телепортируется)
+        -- ✅ Вызываем firetouchinterest на 85% полёта
         if alpha >= 0.85 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
@@ -3717,6 +3728,7 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
         
         task.wait()
     end
+    
     if State.UndergroundMode then
         local finalCFrame = CFrame.new(humanoidRootPart.Position) * CFrame.Angles(math.rad(90), 0, 0)
         humanoidRootPart.CFrame = finalCFrame
@@ -3724,6 +3736,7 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     
     return true
 end
+
 
 
 local shootMurderer
@@ -3755,6 +3768,54 @@ local function CountPlayersWithKnife()
     
     return count
 end
+--[[
+local function DiagnoseAutoFarm()
+    print("=== AUTO FARM DIAGNOSTICS ===")
+    
+    -- Проверка 1: Карта и контейнер
+    local map = getMap()
+    print("✓ Map found:", map ~= nil)
+    if map then
+        local container = map:FindFirstChild("CoinContainer")
+        print("✓ CoinContainer:", container ~= nil)
+        if container then
+            local coins = 0
+            for _, child in ipairs(container:GetChildren()) do
+                if child.Name == "Coin_Server" then coins = coins + 1 end
+            end
+            print("✓ Coins in container:", coins)
+        end
+    end
+    
+    -- Проверка 2: GUI и валюта
+    pcall(function()
+        local container = LocalPlayer.PlayerGui.MainGUI.Game.CoinBags.Container
+        print("\n=== ACTIVE CURRENCY ===")
+        for _, child in ipairs(container:GetChildren()) do
+            if child:IsA("Frame") and child.Visible then
+                local coinsLabel = child:FindFirstChild("CurrencyFrame", true)
+                if coinsLabel then
+                    coinsLabel = coinsLabel:FindFirstChild("Icon", true)
+                    if coinsLabel then
+                        coinsLabel = coinsLabel:FindFirstChild("Coins")
+                        if coinsLabel then
+                            print("✓ Active:", child.Name, "=", coinsLabel.Text)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    
+    -- Проверка 3: Функции
+    print("\n=== FUNCTION TEST ===")
+    print("✓ GetCollectedCoinsCount():", GetCollectedCoinsCount())
+    print("✓ FindNearestCoin():", FindNearestCoin())
+    print("✓ CoinBlacklist size:", #State.CoinBlacklist)
+    
+    print("=== END DIAGNOSTICS ===")
+end
+--]]
 
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
@@ -3783,6 +3844,8 @@ local function StartAutoFarm()
         local lastTeleportTime = 0
         
         while State.AutoFarmEnabled do
+            --print("[DEBUG] ═══ Цикл автофарма ═══")
+            
             local character = LocalPlayer.Character
             if not character then 
                 task.wait(0.5)
@@ -3796,8 +3859,10 @@ local function StartAutoFarm()
             end
             
             local murdererExists = getMurder() ~= nil
+            --print("[DEBUG] Мурдерер существует:", murdererExists)
             
             if not murdererExists then
+                --print("[DEBUG] ⏳ Нет мурдерера, жду раунд...")
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
                 allowFly = false
@@ -3813,13 +3878,16 @@ local function StartAutoFarm()
             
             local currentCoins = GetCollectedCoinsCount()
             
-            if currentCoins >= 50 then
+            if currentCoins >= 40 then
                 noCoinsAttempts = maxNoCoinsAttempts
             else
                 local coin = FindNearestCoin()
-                
+                --print("[DEBUG] 🪙 Ближайшая монета:", coin)
+
                 if not coin then
                     noCoinsAttempts = noCoinsAttempts + 1
+                    --print("[DEBUG] ⚠️ Монета не найдена, попытка", noCoinsAttempts, "/", maxNoCoinsAttempts)
+                    --DiagnoseAutoFarm()
                     
                     if noCoinsAttempts < maxNoCoinsAttempts then
                         task.wait(0.3)
@@ -3990,7 +4058,7 @@ local function StartAutoFarm()
                     currentCoins = GetCollectedCoinsCount()
                     --print("[Auto Farm] 💰 Собрано монет: " .. currentCoins .. "/50")
                     
-                    if currentCoins >= 50 then
+                    if currentCoins >= 40 then
                         character = LocalPlayer.Character
                         if character then
                             humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
@@ -6087,7 +6155,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 })
 
 GUI.Init()
-
+--[[
 -- ОПТИМИЗИРОВАННАЯ СИСТЕМА МОНЕТ (с поддержкой запятых)
 task.spawn(function()
     task.wait(0.5)
@@ -6166,7 +6234,7 @@ task.spawn(function()
         coinsLabel.Position = UDim2.new(1, -145, 0, 0)
     end
 end)
-
+--]]
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
 ----------------------------------------------------------------
