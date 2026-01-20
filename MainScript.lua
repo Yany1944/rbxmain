@@ -13,7 +13,7 @@ if getgenv().MM2_ESP_Script then
 end
 getgenv().MM2_ESP_Script = true
 
-local AUTOFARM_ENABLED = false
+local AUTOFARM_ENABLED = true
 --SK2ND = 982594515
 --slonsagg2 = 6163487250
 --0Jl9lra = 2058109987
