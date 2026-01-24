@@ -4975,9 +4975,21 @@ knifeThrow = function(silent)
     local success, err = pcall(function()
         LocalPlayer.Character.Knife.Events.KnifeThrown:FireServer(unpack(argsThrowRemote))
     end)
-    
-    if not success and not silent then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
+
+    if success then
+        task.wait()  -- ✅ Ждем только при успехе
+        
+        if knife then
+            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                hum:UnequipTools()
+            end
+        end
+    else
+        -- ❌ Ошибка броска - нож остается экипированным
+        if not silent then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
+        end
     end
 end
 
@@ -5606,6 +5618,36 @@ local function Rejoin()
     end)
 end
 
+local function respawn(plr)
+    local char = plr.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local ogpos = hrp.CFrame
+    local ogpos2 = workspace.CurrentCamera.CFrame
+
+    -- Сохраняем позицию ДО респавна
+    task.spawn(function()
+        local newChar = plr.CharacterAdded:Wait()
+        local newHrp = newChar:WaitForChild("HumanoidRootPart", 10)
+        if newHrp then
+            -- Ждём загрузки физики
+            task.wait(0.1)
+            newHrp.CFrame = ogpos
+            task.wait()
+            workspace.CurrentCamera.CFrame = ogpos2
+        end
+    end)
+
+    -- Теперь делаем респавн
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if hum then
+        hum.Health = 0
+    end
+end
+
+
 local function ServerHop()
     -- ═══════════════════════════════════════════════════════════
     -- SERVER HOP SYSTEM v2.0 - Enhanced with file tracking
@@ -6041,6 +6083,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         HandleAutoRejoin = HandleAutoRejoin,
         HandleAutoReconnect = HandleAutoReconnect,
         SetReconnectInterval = SetReconnectInterval,
+        RespawnPlr = function() respawn(game:GetService("Players").LocalPlayer) end,
         
         -- Keybind system / input
         ClearKeybind = ClearKeybind,
@@ -6255,6 +6298,7 @@ local MainTab = GUI.CreateTab("Main")
 
     MainTab:CreateSection("GODMODE")
     MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
+    MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
 
 local AimTab = GUI.CreateTab("Aim")
 
