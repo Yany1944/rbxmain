@@ -5618,6 +5618,10 @@ local function Rejoin()
     end)
 end
 
+local function ExecuteInf()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end
+
 local function respawn(plr)
     local char = plr.Character
     if not char then return end
@@ -6079,6 +6083,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         -- Server
         Rejoin = Rejoin,
+        ExecInf = ExecuteInf,
         ServerHop = ServerHop,
         HandleAutoRejoin = HandleAutoRejoin,
         HandleAutoReconnect = HandleAutoReconnect,
@@ -6430,6 +6435,7 @@ local UtilityTab = GUI.CreateTab("Server")
     UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
     UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
     UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
+    UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
