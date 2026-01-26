@@ -3336,7 +3336,7 @@ local function EnableNoClip()
     end))
     
     if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip: </font><font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
 end
 
@@ -3670,7 +3670,7 @@ local function StartFly(flyType)
     end
     
     if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Fly</font> " .. flyType .. ": <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Fly</font> " .. flyType .. ": <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
 end
 
@@ -4956,7 +4956,7 @@ ToggleGodMode = function()
     State.GodModeEnabled = not State.GodModeEnabled
     if State.GodModeEnabled then
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
+            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
         end
         
         ApplyGodMode()
@@ -6489,7 +6489,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             if on then
                 State.CoinBlacklist = {}
                 State.StartSessionCoins = GetCollectedCoinsCount()
-                ShowNotification("Auto Farm: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
+                ShowNotification("Auto Farm: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
                 StartAutoFarm()
             else
                 StopAutoFarm()
