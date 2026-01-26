@@ -130,7 +130,7 @@ local State = {
     -- Fly System
     FlyEnabled = false,
     FlyType = "Fly",  -- "Fly", "Vehicle Fly", "CFrame Fly", "Swim"
-    FlySpeed = 20,
+    FlySpeed = 40,
     FlyConnection = nil,
     FlyBodyVelocity = nil,
     FlyBodyGyro = nil,
@@ -3336,7 +3336,7 @@ local function EnableNoClip()
     end))
     
     if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Noclip: </font><font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
     end
 end
 
@@ -3670,7 +3670,7 @@ local function StartFly(flyType)
     end
     
     if State.NotificationsEnabled then
-        ShowNotification("Fly: " .. flyType .. " [ON]", CONFIG.Colors.Green)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Fly</font> " .. flyType .. ": <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
     end
 end
 
@@ -3689,7 +3689,7 @@ local function StopFly()
     end
     
     if State.NotificationsEnabled then
-        ShowNotification("Fly [OFF]", CONFIG.Colors.Red)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Fly </font>" .. flyType .. ": <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
     end
 end
 
@@ -4956,7 +4956,7 @@ ToggleGodMode = function()
     State.GodModeEnabled = not State.GodModeEnabled
     if State.GodModeEnabled then
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Green)
+            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
         end
         
         ApplyGodMode()
@@ -6753,17 +6753,16 @@ do
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
 
-        MainTab:CreateSection("TELEPORT & MOVEMENT")
+        MainTab:CreateSection("TELEPORT & OTHER")
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
-	
-		MainTab:CreateSection("FLY SETTINGS")
-        MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
-        MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 50, State.FlySpeed, "FlySpeed", 5)
-        MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
-
-        MainTab:CreateSection("GODMODE")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
+
+        MainTab:CreateSection("FLY SETTINGS")
+        MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
+        MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 80, State.FlySpeed, "FlySpeed", 5)
+        MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
+        ----------------------------------------------------------------------------
         MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
 end
 
