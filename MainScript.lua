@@ -126,6 +126,16 @@ local State = {
     
     -- Camera 
     ViewClipEnabled = false,
+
+    -- Fly System
+    FlyEnabled = false,
+    FlyType = "Fly",  -- "Fly", "Vehicle Fly", "CFrame Fly", "Swim"
+    FlySpeed = 20,
+    FlyConnection = nil,
+    FlyBodyVelocity = nil,
+    FlyBodyGyro = nil,
+    CFlyHead = nil,
+    SwimConnection = nil,
     
     -- Combat
     ExtendedHitboxSize = 15,
@@ -264,7 +274,8 @@ local State = {
         NoClip = Enum.KeyCode.Unknown,
         ShootMurderer = Enum.KeyCode.Unknown,
         PickupGun = Enum.KeyCode.Unknown,
-        InstantKillAll = Enum.KeyCode.Unknown
+        InstantKillAll = Enum.KeyCode.Unknown,
+        Fly = Enum.KeyCode.Unknown
     }
 }
 
@@ -3367,6 +3378,330 @@ local function DisableNoClip()
 end
 
 
+-- ═══════════════════════════════════════════════════════════
+-- FLY ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+-- ═══════════════════════════════════════════════════════════
+local function getRoot(char)
+	if char and char:FindFirstChildOfClass("Humanoid") then
+		return char:FindFirstChildOfClass("Humanoid").RootPart
+	else
+		return nil
+	end
+end
+local FLYING = false
+local QEfly = true
+local flyKeyDown = nil
+local flyKeyUp = nil
+local CFloop = nil
+local swimming = false
+local oldgrav = workspace.Gravity
+local swimbeat = nil
+local gravReset = nil
+
+-- ═══════════════════════════════════════════════════════════
+-- FLY SYSTEM (INFINITE YIELD BASED)
+-- ═══════════════════════════════════════════════════════════
+
+-- Базовый Fly (PC)
+local function sFLY(vfly)
+    local plr = LocalPlayer
+    local char = plr.Character or plr.CharacterAdded:Wait()
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        repeat task.wait() until char:FindFirstChildOfClass("Humanoid")
+        humanoid = char:FindFirstChildOfClass("Humanoid")
+    end
+
+    if flyKeyDown or flyKeyUp then
+        flyKeyDown:Disconnect()
+        flyKeyUp:Disconnect()
+    end
+
+    local T = getRoot(char)
+    local CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+    local lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+    local SPEED = 0
+
+    local function FLY()
+        FLYING = true
+        local BG = Instance.new('BodyGyro')
+        local BV = Instance.new('BodyVelocity')
+        BG.P = 9e4
+        BG.Parent = T
+        BV.Parent = T
+        BG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+        BG.CFrame = T.CFrame
+        BV.Velocity = Vector3.new(0, 0, 0)
+        BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        
+        State.FlyBodyGyro = BG
+        State.FlyBodyVelocity = BV
+        
+        task.spawn(function()
+            repeat task.wait()
+                local camera = Workspace.CurrentCamera
+                if not vfly and humanoid then
+                    humanoid.PlatformStand = true
+                end
+
+                if CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0 then
+                    SPEED = 50
+                elseif not (CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0) and SPEED ~= 0 then
+                    SPEED = 0
+                end
+                
+                if (CONTROL.L + CONTROL.R) ~= 0 or (CONTROL.F + CONTROL.B) ~= 0 or (CONTROL.Q + CONTROL.E) ~= 0 then
+                    BV.Velocity = ((camera.CFrame.LookVector * (CONTROL.F + CONTROL.B)) + ((camera.CFrame * CFrame.new(CONTROL.L + CONTROL.R, (CONTROL.F + CONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - camera.CFrame.p)) * SPEED
+                    lCONTROL = {F = CONTROL.F, B = CONTROL.B, L = CONTROL.L, R = CONTROL.R}
+                elseif (CONTROL.L + CONTROL.R) == 0 and (CONTROL.F + CONTROL.B) == 0 and (CONTROL.Q + CONTROL.E) == 0 and SPEED ~= 0 then
+                    BV.Velocity = ((camera.CFrame.LookVector * (lCONTROL.F + lCONTROL.B)) + ((camera.CFrame * CFrame.new(lCONTROL.L + lCONTROL.R, (lCONTROL.F + lCONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - camera.CFrame.p)) * SPEED
+                else
+                    BV.Velocity = Vector3.new(0, 0, 0)
+                end
+                BG.CFrame = camera.CFrame
+            until not FLYING
+            CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+            lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+            SPEED = 0
+            BG:Destroy()
+            BV:Destroy()
+
+            if humanoid then humanoid.PlatformStand = false end
+        end)
+    end
+
+    local flyspeed = State.FlySpeed / 50
+
+    flyKeyDown = UserInputService.InputBegan:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == Enum.KeyCode.W then
+            CONTROL.F = flyspeed
+        elseif input.KeyCode == Enum.KeyCode.S then
+            CONTROL.B = -flyspeed
+        elseif input.KeyCode == Enum.KeyCode.A then
+            CONTROL.L = -flyspeed
+        elseif input.KeyCode == Enum.KeyCode.D then
+            CONTROL.R = flyspeed
+        elseif input.KeyCode == Enum.KeyCode.E and QEfly then
+            CONTROL.Q = flyspeed * 2
+        elseif input.KeyCode == Enum.KeyCode.Q and QEfly then
+            CONTROL.E = -flyspeed * 2
+        end
+        pcall(function() Workspace.CurrentCamera.CameraType = Enum.CameraType.Track end)
+    end)
+
+    flyKeyUp = UserInputService.InputEnded:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == Enum.KeyCode.W then
+            CONTROL.F = 0
+        elseif input.KeyCode == Enum.KeyCode.S then
+            CONTROL.B = 0
+        elseif input.KeyCode == Enum.KeyCode.A then
+            CONTROL.L = 0
+        elseif input.KeyCode == Enum.KeyCode.D then
+            CONTROL.R = 0
+        elseif input.KeyCode == Enum.KeyCode.E then
+            CONTROL.Q = 0
+        elseif input.KeyCode == Enum.KeyCode.Q then
+            CONTROL.E = 0
+        end
+    end)
+    
+    table.insert(State.Connections, flyKeyDown)
+    table.insert(State.Connections, flyKeyUp)
+    
+    FLY()
+end
+
+-- Отключение базового Fly
+local function NOFLY()
+    FLYING = false
+    if flyKeyDown or flyKeyUp then 
+        flyKeyDown:Disconnect() 
+        flyKeyUp:Disconnect() 
+    end
+    if State.FlyBodyGyro then
+        State.FlyBodyGyro:Destroy()
+        State.FlyBodyGyro = nil
+    end
+    if State.FlyBodyVelocity then
+        State.FlyBodyVelocity:Destroy()
+        State.FlyBodyVelocity = nil
+    end
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
+        LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
+    end
+    pcall(function() Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
+end
+
+-- CFrame Fly
+local function sCFLY()
+    local speaker = LocalPlayer
+    local char = speaker.Character or speaker.CharacterAdded:Wait()
+    
+    speaker.Character:FindFirstChildOfClass('Humanoid').PlatformStand = true
+    local Head = speaker.Character:WaitForChild("Head")
+    Head.Anchored = true
+    State.CFlyHead = Head
+    
+    if CFloop then CFloop:Disconnect() end
+    
+    CFloop = RunService.Heartbeat:Connect(function(deltaTime)
+        if not FLYING or not speaker.Character or not speaker.Character:FindFirstChild('Head') then
+            return
+        end
+        
+        local CFspeed = State.FlySpeed
+        local Head = speaker.Character.Head
+        local moveDirection = speaker.Character:FindFirstChildOfClass('Humanoid').MoveDirection * (CFspeed * deltaTime)
+        local headCFrame = Head.CFrame
+        local camera = Workspace.CurrentCamera
+        local cameraCFrame = camera.CFrame
+        local cameraOffset = headCFrame:ToObjectSpace(cameraCFrame).Position
+        cameraCFrame = cameraCFrame * CFrame.new(-cameraOffset.X, -cameraOffset.Y, -cameraOffset.Z + 1)
+        local cameraPosition = cameraCFrame.Position
+        local headPosition = headCFrame.Position
+
+        local objectSpaceVelocity = CFrame.new(cameraPosition, Vector3.new(headPosition.X, cameraPosition.Y, headPosition.Z)):VectorToObjectSpace(moveDirection)
+        Head.CFrame = CFrame.new(headPosition) * (cameraCFrame - cameraPosition) * CFrame.new(objectSpaceVelocity)
+    end)
+    
+    FLYING = true
+    table.insert(State.Connections, CFloop)
+end
+
+-- Отключение CFrame Fly
+local function NOCFLY()
+    FLYING = false
+    if CFloop then
+        CFloop:Disconnect()
+        CFloop = nil
+    end
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
+        LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
+    end
+    if State.CFlyHead then
+        State.CFlyHead.Anchored = false
+        State.CFlyHead = nil
+    end
+end
+
+-- Swim
+local function sSwim()
+    local speaker = LocalPlayer
+    if not swimming and speaker and speaker.Character and speaker.Character:FindFirstChildWhichIsA("Humanoid") then
+        oldgrav = Workspace.Gravity
+        Workspace.Gravity = 0
+        
+        local swimDied = function()
+            Workspace.Gravity = oldgrav
+            swimming = false
+        end
+        
+        local Humanoid = speaker.Character:FindFirstChildWhichIsA("Humanoid")
+        gravReset = Humanoid.Died:Connect(swimDied)
+        
+        local enums = Enum.HumanoidStateType:GetEnumItems()
+        table.remove(enums, table.find(enums, Enum.HumanoidStateType.None))
+        for i, v in pairs(enums) do
+            Humanoid:SetStateEnabled(v, false)
+        end
+        Humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
+        
+        swimbeat = RunService.Heartbeat:Connect(function()
+            pcall(function()
+                local root = getRoot(speaker.Character)
+                if root then
+                    root.Velocity = ((Humanoid.MoveDirection ~= Vector3.new() or UserInputService:IsKeyDown(Enum.KeyCode.Space)) and root.Velocity or Vector3.new())
+                end
+            end)
+        end)
+        
+        swimming = true
+        State.SwimConnection = swimbeat
+        table.insert(State.Connections, gravReset)
+        table.insert(State.Connections, swimbeat)
+    end
+end
+
+-- Отключение Swim
+local function NOSwim()
+    local speaker = LocalPlayer
+    if speaker and speaker.Character and speaker.Character:FindFirstChildWhichIsA("Humanoid") then
+        Workspace.Gravity = oldgrav
+        swimming = false
+        
+        if gravReset then
+            gravReset:Disconnect()
+            gravReset = nil
+        end
+        if swimbeat ~= nil then
+            swimbeat:Disconnect()
+            swimbeat = nil
+        end
+        
+        local Humanoid = speaker.Character:FindFirstChildWhichIsA("Humanoid")
+        local enums = Enum.HumanoidStateType:GetEnumItems()
+        table.remove(enums, table.find(enums, Enum.HumanoidStateType.None))
+        for i, v in pairs(enums) do
+            Humanoid:SetStateEnabled(v, true)
+        end
+    end
+end
+
+-- Главные функции управления
+local function StartFly(flyType)
+    if State.FlyEnabled then
+        StopFly()
+        task.wait(0.1)
+    end
+    
+    State.FlyEnabled = true
+    State.FlyType = flyType
+    
+    if flyType == "Fly" then
+        sFLY(false)
+    elseif flyType == "Vehicle Fly" then
+        sFLY(true)
+    elseif flyType == "CFrame Fly" then
+        sCFLY()
+    elseif flyType == "Swim" then
+        sSwim()
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Fly: " .. flyType .. " [ON]", CONFIG.Colors.Green)
+    end
+end
+
+local function StopFly()
+    if not State.FlyEnabled then return end
+    
+    local currentType = State.FlyType
+    State.FlyEnabled = false
+    
+    if currentType == "CFrame Fly" then
+        NOCFLY()
+    elseif currentType == "Swim" then
+        NOSwim()
+    else
+        NOFLY()
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Fly [OFF]", CONFIG.Colors.Red)
+    end
+end
+
+local function ToggleFly()
+    if State.FlyEnabled then
+        StopFly()
+    else
+        StartFly(State.FlyType)
+    end
+end
+
+
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 11: AUTO FARM SYSTEM (СТРОКИ 1181-1600)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -6004,6 +6339,10 @@ local function HandleActionInput(input)
         end
     end
 
+    if input.KeyCode == State.Keybinds.Fly and State.Keybinds.Fly ~= Enum.KeyCode.Unknown then
+        ToggleFly()
+    end
+
     if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
         if State.NoClipEnabled then
             DisableNoClip()
@@ -6292,9 +6631,22 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
                 if _G.StartAimbot then _G.StartAimbot() end
             end
         end,
-
         AimbotMouseButton = function(value)
             State.AimbotConfig.MouseButton = value
+        end,
+
+        -- ✅ FLY ОБРАБОТЧИКИ (добавить здесь)
+        FlyMode = function(value)
+            State.FlyType = value
+            if State.FlyEnabled then
+                StopFly()
+                task.wait(0.1)
+                StartFly(State.FlyType)
+            end
+        end,
+
+        FlySpeed = function(value)
+            State.FlySpeed = value
         end,
 
         Shutdown = function() FullShutdown() end,
@@ -6389,157 +6741,177 @@ end)
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
 ----------------------------------------------------------------
-local MainTab = GUI.CreateTab("Main")
+do
+    local MainTab = GUI.CreateTab("Main")
 
-    MainTab:CreateSection("CHARACTER SETTINGS")
-    MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, "ApplyWalkSpeed")
-    MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, "ApplyJumpPower")
-    MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, "ApplyMaxCameraZoom")
+        MainTab:CreateSection("CHARACTER SETTINGS")
+        MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, "ApplyWalkSpeed")
+        MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, "ApplyJumpPower")
+        MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, "ApplyMaxCameraZoom")
 
-    MainTab:CreateSection("CAMERA")
-    MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
-    MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
+        MainTab:CreateSection("CAMERA")
+        MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
+        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
 
-    MainTab:CreateSection("TELEPORT & MOVEMENT")
-    MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
-    MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
+        MainTab:CreateSection("TELEPORT & MOVEMENT")
+        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+        MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
+	
+		MainTab:CreateSection("FLY SETTINGS")
+        MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
+        MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 50, State.FlySpeed, "FlySpeed", 5)
+        MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
 
-    MainTab:CreateSection("GODMODE")
-    MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
-    MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
+        MainTab:CreateSection("GODMODE")
+        MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
+        MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
+end
 
-local AimTab = GUI.CreateTab("Aim")
+do
+    local AimTab = GUI.CreateTab("Aim")
 
-    AimTab:CreateSection("AIMBOT")
-    AimTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled",false)
+        AimTab:CreateSection("AIMBOT")
+        AimTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled",false)
 
-    AimTab:CreateSection("TARGETING CHECKS")
-    AimTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
-    AimTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
-    AimTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",true)
-    AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
-    AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
+        AimTab:CreateSection("TARGETING CHECKS")
+        AimTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
+        AimTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
+        AimTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",true)
+        AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
+        AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
-    AimTab:CreateSection("ADVANCED OPTIONS")
-    AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
-    AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
-    AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
+        AimTab:CreateSection("ADVANCED OPTIONS")
+        AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
+        AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
+        AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
 
-    AimTab:CreateSection("TARGETING VALUES")
-    AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
-    AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
-    AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
+        AimTab:CreateSection("TARGETING VALUES")
+        AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
+        AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
+        AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
 
-    AimTab:CreateSection("PREDICTION & OFFSET")
-    AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
-    AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
+        AimTab:CreateSection("PREDICTION & OFFSET")
+        AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+        AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 
-    AimTab:CreateSection("METHOD & ACTIVATION")
-    AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
-    AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+        AimTab:CreateSection("METHOD & ACTIVATION")
+        AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
+        AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+end
 
-local VisualsTab = GUI.CreateTab("Visuals")
+do
+    local VisualsTab = GUI.CreateTab("Visuals")
 
-    VisualsTab:CreateSection("NOTIFICATIONS")
-    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
+        VisualsTab:CreateSection("NOTIFICATIONS")
+        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
 
-    VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
-    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
-    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
-    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
-    VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
+        VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
+        VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+        VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
+        VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
+        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
-    VisualsTab:CreateSection("Misc")
-    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
-    VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
-    VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        VisualsTab:CreateSection("Misc")
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
+        VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
+        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+end
 
-local CombatTab = GUI.CreateTab("Combat")
+do
+    local CombatTab = GUI.CreateTab("Combat")
 
-    CombatTab:CreateSection("EXTENDED HITBOX")
-    CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
-    CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
+        CombatTab:CreateSection("EXTENDED HITBOX")
+        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
+        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
 
-    CombatTab:CreateSection("MURDERER TOOLS")
-    CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
-    CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
-    CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
-    CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
+        CombatTab:CreateSection("MURDERER TOOLS")
+        CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
+        CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
+        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+        CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
-    CombatTab:CreateSection("SHERIFF TOOLS")
-    CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
-    CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+        CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
+        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
+        CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+end
 
-local FarmTab = GUI.CreateTab("Farming")
+do
+    local FarmTab = GUI.CreateTab("Farming")
 
-    FarmTab:CreateSection("AUTO FARM")
-    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
-    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateSection("AUTO FARM")
+        FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
 
-    FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
-    FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
-    FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-    FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-    FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
-    FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
-    FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
+        FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
+        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+        FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
+        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+        FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
+end
 
-local FunTab = GUI.CreateTab("Fun")
+do
+    local FunTab = GUI.CreateTab("Fun")
 
-    FunTab:CreateSection("ANIMATION KEYBINDS")
-    FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
-    FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
-    FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
-    FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
-    FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
+        FunTab:CreateSection("ANIMATION KEYBINDS")
+        FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
+        FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
+        FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
+        FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
+        FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-    FunTab:CreateSection("ANTI-FLING")
-    FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
-    FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
+        FunTab:CreateSection("ANTI-FLING")
+        FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
+        FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
 
-    FunTab:CreateSection("FLING PLAYER")
-    FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
-    FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
+        FunTab:CreateSection("FLING PLAYER")
+        FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
+        FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-    FunTab:CreateSection("FLING ROLE")
-    FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
-    FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
+        FunTab:CreateSection("FLING ROLE")
+        FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
+        FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
+end
 
-local TrollingTab = GUI.CreateTab("Troll")
+do
+    local TrollingTab = GUI.CreateTab("Troll")
 
-    TrollingTab:CreateSection("SELECT TARGET")
-    TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
+        TrollingTab:CreateSection("SELECT TARGET")
+        TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
 
-    TrollingTab:CreateSection("TROLLING MODES")
-    TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
-    TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
-    TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
+        TrollingTab:CreateSection("TROLLING MODES")
+        TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
+        TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
+        TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
 
-    TrollingTab:CreateSection("ORBIT SETTINGS")
-    TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
-    TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
-    TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
-    TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
+        TrollingTab:CreateSection("ORBIT SETTINGS")
+        TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
+        TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
+        TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
+        TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
 
-    TrollingTab:CreateSection("BLOCK PATH SETTINGS")
-    TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
+        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
+        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
 
-    TrollingTab:CreateSection("ORBIT PRESETS")
-    TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
-    TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
-    TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
+        TrollingTab:CreateSection("ORBIT PRESETS")
+        TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
+        TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
+        TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
+end
 
-local UtilityTab = GUI.CreateTab("Server")
+do
+    local UtilityTab = GUI.CreateTab("Server")
 
-    UtilityTab:CreateSection("SERVER MANAGEMENT")
-    UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
-    UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
-    UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
-    UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
-
+        UtilityTab:CreateSection("SERVER MANAGEMENT")
+        UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
+        UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
+        UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
+end
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
