@@ -5603,6 +5603,9 @@ local function EnableInstantPickup()
     end
     
     State.InstantPickupEnabled = true
+    if not currentMapConnection then
+        SetupGunTracking()
+    end
     
     -- ✅ ИСПОЛЬЗУЕМ ГЛОБАЛЬНУЮ ПЕРЕМЕННУЮ
     local lastAttemptedGun = nil
