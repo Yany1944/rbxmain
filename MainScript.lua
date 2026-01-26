@@ -3689,9 +3689,10 @@ local function StopFly()
     end
     
     if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Fly </font>(" .. flyType .. "): <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
+        ShowNotification("<font color=\"rgb(220,220,220)\">Fly </font>(" .. currentType .. "): <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
     end
 end
+
 
 local function ToggleFly()
     if State.FlyEnabled then
