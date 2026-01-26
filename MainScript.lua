@@ -2790,12 +2790,16 @@ local function SetupGunTracking()
 
             if gun and gun ~= previousGun then
                 State.CurrentGunDrop = gun
+
                 if State.NotificationsEnabled then
-                    ShowNotification(
-                        "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
-                        CONFIG.Colors.Gun
-                    )
+                    task.spawn(function()
+                        ShowNotification(
+                            "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
+                            CONFIG.Colors.Gun
+                        )
+                    end)
                 end
+                
                 previousGun = gun
             end
 
@@ -4065,8 +4069,6 @@ local function FindNearestCoin()
            and coin:FindFirstChildWhichIsA("TouchTransmitter") 
            and not State.CoinBlacklist[coin] then
 
-            -- ✅ КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Убрана проверка Transparency
-            -- Причина: В текущей версии MM2 CoinVisual.Transparency = 1 (всегда прозрачный)
             local coinVisual = coin:FindFirstChild("CoinVisual")
             if coinVisual then
                 local distance = (coin.Position - hrpPosition).Magnitude
@@ -4079,7 +4081,51 @@ local function FindNearestCoin()
         end
     end
 
-    return closestCoin
+    return closestCoin, closestDistance -- ✅ ВОЗВРАЩАЕМ ЕЩЁ И РАССТОЯНИЕ
+end
+
+-- ✅ НОВАЯ ФУНКЦИЯ: Быстрая проверка на более близкую монету
+local function FindBetterCoin(currentCoin, currentDistance, threshold)
+    threshold = threshold or 10 -- Минимальная разница в studs для смены цели
+    
+    local character = LocalPlayer.Character
+    if not character then return nil end
+
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil end
+
+    local hrpPosition = humanoidRootPart.Position
+    
+    local coinContainer = nil
+    pcall(function()
+        local map = getMap()
+        if map then
+            coinContainer = map:FindFirstChild("CoinContainer")
+        end
+    end)
+
+    local searchRoot = coinContainer or Workspace
+
+    for _, coin in ipairs(searchRoot:GetDescendants()) do
+        if coin ~= currentCoin 
+           and coin:IsA("BasePart") 
+           and coin.Name == "Coin_Server"
+           and coin:FindFirstChildWhichIsA("TouchTransmitter") 
+           and not State.CoinBlacklist[coin] then
+
+            local coinVisual = coin:FindFirstChild("CoinVisual")
+            if coinVisual then
+                local distance = (coin.Position - hrpPosition).Magnitude
+                
+                -- ✅ Новая монета должна быть ЗНАЧИТЕЛЬНО ближе
+                if distance < (currentDistance - threshold) then
+                    return coin, distance
+                end
+            end
+        end
+    end
+
+    return nil
 end
 
 -- SmoothFlyToCoin() - Плавный полёт к монете
@@ -4101,31 +4147,45 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     local startTime = tick()
     local collectionAttempted = false
     
+    -- ✅ Переменные для динамической проверки
+    local lastCheckTime = tick()
+    local checkInterval = 0.3 -- Проверяем каждые 0.3 секунды
+    
     while tick() - startTime < duration do
         if not State.AutoFarmEnabled then break end
         
         -- ✅ ПРОВЕРКА: существует ли монета
         if not coin or not coin.Parent then
-            return false
+            return false, nil
         end
         
-        -- ✅ ИСПРАВЛЕНО: Убрана проверка Transparency
-        -- Причина: В текущей версии MM2 все CoinVisual имеют Transparency = 1
-        -- Достаточно проверить существование TouchTransmitter (уже сделано в FindNearestCoin)
         local coinVisual = coin:FindFirstChild("CoinVisual")
         if not coinVisual then
-            return false
+            return false, nil
         end
         
         -- ✅ ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: монета всё ещё собираемая
         local touchTransmitter = coin:FindFirstChildWhichIsA("TouchTransmitter")
         if not touchTransmitter then
-            -- Монета уже была собрана, TouchTransmitter удалён
-            return false
+            return false, nil
         end
         
         local character = LocalPlayer.Character
         if not character or not humanoidRootPart.Parent then break end
+        
+        -- ✅ ДИНАМИЧЕСКАЯ ПРОВЕРКА НА БОЛЕЕ БЛИЗКУЮ МОНЕТУ
+        local currentTime = tick()
+        if currentTime - lastCheckTime >= checkInterval then
+            lastCheckTime = currentTime
+            
+            local currentDistance = (humanoidRootPart.Position - coin.Position).Magnitude
+            local betterCoin, betterDistance = FindBetterCoin(coin, currentDistance, 10)
+            
+            if betterCoin then
+                -- ✅ Найдена более близкая монета - прерываем текущий полёт
+                return "switch", betterCoin
+            end
+        end
         
         local elapsed = tick() - startTime
         local alpha = math.min(elapsed / duration, 1)
@@ -4148,8 +4208,8 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         
-        -- ✅ Вызываем firetouchinterest на 85% полёта
-        if alpha >= 0.85 and not collectionAttempted then
+        -- ✅ Вызываем firetouchinterest на 90% полёта
+        if alpha >= 0.90 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
                 task.spawn(function()
@@ -4168,10 +4228,8 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
         humanoidRootPart.CFrame = finalCFrame
     end
     
-    return true
+    return true, nil
 end
-
-
 
 local shootMurderer
 local InstantKillAll
@@ -4364,13 +4422,41 @@ local function StartAutoFarm()
                             end
                         else
                             EnableNoClip()
-                            SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                            
+                            -- ✅ ОБРАБОТКА ДИНАМИЧЕСКОЙ СМЕНЫ ЦЕЛИ
+                            local currentTargetCoin = coin
+                            local maxRedirects = 5
+                            local redirectCount = 0
+                            
+                            while currentTargetCoin and redirectCount < maxRedirects do
+                                local result, newTarget = SmoothFlyToCoin(currentTargetCoin, humanoidRootPart, State.CoinFarmFlySpeed)
+                                
+                                if result == "switch" and newTarget then
+                                    -- ✅ ПРОСТО ПЕРЕКЛЮЧАЕМСЯ, БЕЗ BLACKLIST!
+                                    RemoveCoinTracer()
+                                    CreateCoinTracer(character, newTarget)
+                                    
+                                    currentTargetCoin = newTarget
+                                    redirectCount = redirectCount + 1
+                                    
+                                elseif result == true then
+                                    -- ✅ Успешно долетели до цели
+                                    break
+                                else
+                                    -- ❌ Монета исчезла (кто-то собрал)
+                                    break
+                                end
+                            end
                             
                             coinLabelCache = nil
                             local coinsAfter = GetCollectedCoinsCount()
 
                             RemoveCoinTracer()
-                            AddCoinToBlacklist(coin)
+                            
+                            -- ✅ В BLACKLIST ТОЛЬКО ФИНАЛЬНУЮ СОБРАННУЮ МОНЕТУ!
+                            if currentTargetCoin then
+                                AddCoinToBlacklist(currentTargetCoin)
+                            end
                         end
                     end)
                 end
@@ -5575,26 +5661,33 @@ shootMurderer = function(silent)
 end
 
 -- pickupGun() - Подбор пистолета
-local function pickupGun()
+local function pickupGun(silent)
     local gun = Workspace:FindFirstChild("GunDrop", true)
     
     if not gun then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>", CONFIG.Colors.Text)
-        return
+        if not silent and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>", CONFIG.Colors.Text)
+        end
+        return false
     end
     
     local character = LocalPlayer.Character
-    if not character then return end
+    if not character then return false end
     
     local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    if not hrp then return false end
     
     -- Используем firetouchinterest - никакого телепорта
     firetouchinterest(hrp, gun, 0)
     task.wait(0.1)
     firetouchinterest(hrp, gun, 1)
     
-    ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
+    -- ✅ УВЕДОМЛЕНИЕ ТОЛЬКО ЕСЛИ НЕ SILENT
+    if not silent and State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
+    end
+    
+    return true
 end
 
 local function EnableInstantPickup()
@@ -5608,7 +5701,6 @@ local function EnableInstantPickup()
         SetupGunTracking()
     end
     
-    -- ✅ ИСПОЛЬЗУЕМ ГЛОБАЛЬНУЮ ПЕРЕМЕННУЮ
     local lastAttemptedGun = nil
     
     State.InstantPickupThread = task.spawn(function()
@@ -5626,10 +5718,9 @@ local function EnableInstantPickup()
                 continue
             end
             
-            local gun = State.CurrentGunDrop  -- ✅ ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЙ
+            local gun = State.CurrentGunDrop
             local sheriff = getSheriff()
             
-            -- ✅ НОВЫЙ ПИСТОЛЕТ (который мы ещё не пробовали)
             if gun and not sheriff and gun ~= lastAttemptedGun then
                 
                 -- Проверяем, уже подобран?
@@ -5641,15 +5732,25 @@ local function EnableInstantPickup()
                 
                 local pickupSuccess = false
                 
-                -- ✅ 3 ПОПЫТКИ
+                -- ✅ 3 ПОПЫТКИ В SILENT РЕЖИМЕ
                 for attempt = 1, 3 do
-                    pickupGun()
+                    pickupGun(true)
                     task.wait(0.5)
                     
                     -- Проверяем успех
                     if LocalPlayer.Character:FindFirstChild("Gun") or 
                        LocalPlayer.Backpack:FindFirstChild("Gun") then
                         pickupSuccess = true
+                        
+                        -- ✅ ОДНО УВЕДОМЛЕНИЕ ПРИ УСПЕХЕ
+                        if State.NotificationsEnabled then
+                            task.spawn(function()
+                                ShowNotification(
+                                    "<font color=\"rgb(168,228,160)\">Gun: Instant Pickup ✓</font>",
+                                    CONFIG.Colors.Text
+                                )
+                            end)
+                        end
                         break
                     end
                     
@@ -5658,7 +5759,9 @@ local function EnableInstantPickup()
                         break
                     end
                 end
+                
                 lastAttemptedGun = gun
+                
                 if not pickupSuccess then
                     repeat
                         task.wait(0.2)
@@ -5680,11 +5783,10 @@ local function EnableInstantPickup()
                 end
             end
             
-            task.wait(0.1)  -- Уменьшил для быстрой реакции
+            task.wait(0.1)
         end
     end)
 end
-
 
 local function DisableInstantPickup()
     State.InstantPickupEnabled = false
@@ -6817,7 +6919,7 @@ do
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
         VisualsTab:CreateSection("Misc")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
         VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
 end
