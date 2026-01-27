@@ -7,11 +7,11 @@
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-if getgenv().MM2_ESP_Script then 
+if getgenv().MM2_Script then 
     warn("Already running!")
     return 
 end
-getgenv().MM2_ESP_Script = true
+getgenv().MM2_Script = true
 
 local AUTOFARM_ENABLED = false
 --SK2ND = 982594515
@@ -95,6 +95,7 @@ local CONFIG = {
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
@@ -6136,7 +6137,7 @@ local function SetupAntiAFK()
     end)
     
     task.spawn(function()
-        while getgenv().MM2_ESP_Script do
+        while getgenv().MM2_Script do
             pcall(function()
                 if getconnections then
                     for _, connection in next, getconnections(LocalPlayer.Idled) do
@@ -6396,6 +6397,33 @@ local function ServerHop()
     TeleportToServer(selectedServer.id)
 end
 
+local function ServerLagger()
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(255, 85, 85)\">Server Lagger: </font><font color=\"rgb(220,220,220)\">Success</font>",
+            CONFIG.Colors.Text
+        )
+    end
+   
+    pcall(function()
+        local GetSyncData = ReplicatedStorage.GetSyncData
+        local InvokeServer = GetSyncData.InvokeServer
+        local counter = 0
+       
+        while true do
+            for i = 1, 1 do
+                task.spawn(InvokeServer, GetSyncData)
+            end
+           
+            counter = counter + 1
+            if counter == 3 then
+                counter = 0
+                wait(0)
+            end
+        end
+    end)
+end
+
 -- СНАЧАЛА объявляем функции
 local function HandleEmoteInput(input)
     if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then
@@ -6633,6 +6661,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         Rejoin = Rejoin,
         ExecInf = ExecuteInf,
         ServerHop = ServerHop,
+        ServerLagger = ServerLagger,
         HandleAutoRejoin = HandleAutoRejoin,
         HandleAutoReconnect = HandleAutoReconnect,
         SetReconnectInterval = SetReconnectInterval,
@@ -7016,6 +7045,9 @@ do
         UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
+
+        UtilityTab:CreateSection("DANGER ZONE")
+        UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
