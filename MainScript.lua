@@ -5704,24 +5704,65 @@ shootMurderer = function(forceMagic)
         }
     else
         -- === SILENT MODE: Стрельба от дула пистолета ===
-        local gunHandle = gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel")
         local rightHand = LocalPlayer.Character:FindFirstChild("RightHand")
+        local gunHandle = gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel")
         
-        -- Используем позицию дула или правой руки
-        local gunPosition = gunHandle and gunHandle.Position or rightHand.Position
+        if not rightHand then
+            if not forceMagic then
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
+            end
+            return
+        end
         
-        -- Прогнозирование цели
+        -- 1. ТОЧНАЯ ПОЗИЦИЯ ДУЛА
+        -- В MM2 пистолет держится в RightHand, дуло ~2 studs впереди
+        local muzzleCFrame
+        if gunHandle then
+            muzzleCFrame = gunHandle.CFrame
+        else
+            -- Если Handle нет - вычисляем от руки
+            muzzleCFrame = rightHand.CFrame * CFrame.new(0, 0, -2)
+        end
+        
+        local muzzlePosition = muzzleCFrame.Position
+        
+        -- 2. МАКСИМАЛЬНАЯ ПРЕДИКЦИЯ ЦЕЛИ
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + 0.05
         
+        -- Время полета пули + пинг
+        -- MM2 пуля летит ~500 studs/sec, добавляем сетевую задержку
+        local distanceToTarget = (murdererHRP.Position - muzzlePosition).Magnitude
+        local bulletSpeed = 500 -- studs per second (примерная скорость MM2 пули)
+        local bulletTravelTime = distanceToTarget / bulletSpeed
+        local networkDelay = (pingValue / 1000)
+        
+        local totalPredictionTime = bulletTravelTime + networkDelay
+        
+        -- 3. ПРОДВИНУТАЯ ПРЕДИКЦИЯ
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
+        local predictedPos = murdererHRP.Position + (enemyVelocity * totalPredictionTime)
         
-        -- Стреляем от реальной позиции оружия к цели
+        -- ВАЖНО: Целимся в центр Torso для максимального хитбокса
+        -- Если стрелять в HRP/Head - можем промазать из-за маленького хитбокса
+        local murdererTorso = murderer.Character:FindFirstChild("Torso") or murderer.Character:FindFirstChild("UpperTorso")
+        local targetPart = murdererTorso or murdererHRP
+        
+        -- Применяем предикцию к выбранной части тела
+        local targetPartOffset = targetPart.Position - murdererHRP.Position
+        local finalTargetPosition = predictedPos + targetPartOffset
+        
+        -- 4. ФОРМИРОВАНИЕ ПРАВИЛЬНЫХ CFrame
+        -- Первый аргумент: CFrame дула, направленный на цель
+        local directionToTarget = (finalTargetPosition - muzzlePosition).Unit
+        local shootFromCFrame = CFrame.lookAt(muzzlePosition, muzzlePosition + directionToTarget)
+        
+        -- Второй аргумент: CFrame точки попадания
+        local shootToCFrame = CFrame.new(finalTargetPosition)
+        
         argsShootRemote = {
-            [1] = CFrame.lookAt(gunPosition, predictedPos),
-            [2] = CFrame.new(predictedPos)
+            [1] = shootFromCFrame,
+            [2] = shootToCFrame
         }
     end
     
