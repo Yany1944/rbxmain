@@ -137,6 +137,10 @@ local State = {
     FlyBodyGyro = nil,
     CFlyHead = nil,
     SwimConnection = nil,
+
+    SpeedGlitchEnabled = false,
+    SpeedGlitchSpeed = 50,
+    SpeedGlitchConnection = nil,
     
     -- Combat
     ExtendedHitboxSize = 15,
@@ -199,6 +203,9 @@ local State = {
     -- GodMode
     GodModeEnabled = false,
     GodModeConnections = {},
+    healthConnection = nil,
+    damageBlockerConnection = nil,
+    stateConnection = nil,
     
     -- Role detection
     prevMurd = nil,
@@ -282,7 +289,8 @@ local State = {
         ShootMurderer = Enum.KeyCode.Unknown,
         PickupGun = Enum.KeyCode.Unknown,
         InstantKillAll = Enum.KeyCode.Unknown,
-        Fly = Enum.KeyCode.Unknown
+        Fly = Enum.KeyCode.Unknown,
+        SpeedGlitch = Enum.KeyCode.Unknown,
     }
 }
 
@@ -3884,17 +3892,17 @@ local function ResetCharacter()
         State.GodModeEnabled = false
         
         -- ✅ Отключаем ВСЕ connections
-        if healthConnection then
-            healthConnection:Disconnect()
-            healthConnection = nil
+        if State.healthConnection then
+            State.healthConnection:Disconnect()
+            State.healthConnection = nil
         end
-        if stateConnection then
-            stateConnection:Disconnect()
-            stateConnection = nil
+        if State.stateConnection then
+            State.stateConnection:Disconnect()
+            State.stateConnection = nil
         end
-        if damageBlockerConnection then
-            damageBlockerConnection:Disconnect()
-            damageBlockerConnection = nil
+        if State.damageBlockerConnection then
+            State.damageBlockerConnection:Disconnect()
+            State.damageBlockerConnection = nil
         end
         
         for _, connection in ipairs(State.GodModeConnections) do
@@ -5032,10 +5040,6 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 12: GODMODE SYSTEM (СТРОКИ 1601-1800)
 -- ══════════════════════════════════════════════════════════════════════════════
-
-local healthConnection = nil
-local damageBlockerConnection = nil
-local stateConnection = nil
 local ApplyGodMode, SetupHealthProtection, SetupDamageBlocker
 
 -- ApplyGodMode() - Установка Health = math.huge
@@ -5069,12 +5073,12 @@ end
 
 -- SetupHealthProtection() - Защита Health/StateChanged
 SetupHealthProtection = function()
-    if healthConnection then
-        healthConnection:Disconnect()
+    if State.healthConnection then
+        State.healthConnection:Disconnect()
     end
     
-    if stateConnection then
-        stateConnection:Disconnect()
+    if State.stateConnection then
+        State.stateConnection:Disconnect()
     end
     
     local character = LocalPlayer.Character
@@ -5083,7 +5087,7 @@ SetupHealthProtection = function()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
     
-    stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
+    State.stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
         if State.GodModeEnabled then
             if newState == Enum.HumanoidStateType.Dead then
                 humanoid:ChangeState(Enum.HumanoidStateType.Running)
@@ -5091,26 +5095,26 @@ SetupHealthProtection = function()
             end
         end
     end)
-    table.insert(State.Connections, stateConnection)
+    table.insert(State.Connections, State.stateConnection)
     
-    healthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+    State.healthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
         if State.GodModeEnabled and humanoid.Health < math.huge then
             humanoid.Health = math.huge
         end
     end)
     
-    table.insert(State.Connections, healthConnection)
+    table.insert(State.Connections, State.healthConnection)
 end
 -- SetupDamageBlocker() - Блокировка Ragdoll/CreatorTag
 SetupDamageBlocker = function()
-    if damageBlockerConnection then
-        damageBlockerConnection:Disconnect()
+    if State.damageBlockerConnection then
+        State.damageBlockerConnection:Disconnect()
     end
     
     local character = LocalPlayer.Character
     if not character then return end
     
-    damageBlockerConnection = character.ChildAdded:Connect(function(child)
+    State.damageBlockerConnection = character.ChildAdded:Connect(function(child)
         if State.GodModeEnabled then
             if child.Name == "Ragdoll" or child.Name == "CreatorTag" or 
                (child:IsA("ObjectValue") and child.Name == "creator") then
@@ -5121,7 +5125,7 @@ SetupDamageBlocker = function()
         end
     end)
     
-    table.insert(State.Connections, damageBlockerConnection)
+    table.insert(State.Connections, State.damageBlockerConnection)
 end
 
 -- ToggleGodMode() - Включение/отключение
@@ -5168,17 +5172,17 @@ ToggleGodMode = function()
         end
         
         -- Отключаем локальные connections
-        if healthConnection then
-            healthConnection:Disconnect()
-            healthConnection = nil
+        if State.healthConnection then
+            State.healthConnection:Disconnect()
+            State.healthConnection = nil
         end
-        if stateConnection then
-            stateConnection:Disconnect()
-            stateConnection = nil
+        if State.stateConnection then
+            State.stateConnection:Disconnect()
+            State.stateConnection = nil
         end
-        if damageBlockerConnection then
-            damageBlockerConnection:Disconnect()
-            damageBlockerConnection = nil
+        if State.damageBlockerConnection then
+            State.damageBlockerConnection:Disconnect()
+            State.damageBlockerConnection = nil
         end
         
         -- ✅ Очищаем ТОЛЬКО GodMode connections
@@ -6580,6 +6584,127 @@ local function ServerLagger()
     end)
 end
 
+local DEFAULT_WALKSPEED = 18
+
+local function StartSpeedGlitch()
+    if State.SpeedGlitchEnabled then
+        StopSpeedGlitch()
+        task.wait(0.1)
+    end
+    
+    local character = LocalPlayer.Character
+    if not character then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">No character</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        repeat task.wait() until character:FindFirstChildOfClass("Humanoid")
+        humanoid = character:FindFirstChildOfClass("Humanoid")
+    end
+    
+    if not humanoid then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">No humanoid</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    State.SpeedGlitchEnabled = true
+    humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- ✅ Используем константу
+    
+    -- Функция для автоматического перезапуска при смерти
+    local function onSpeedGlitchDied()
+        if State.SpeedGlitchConnection then
+            State.SpeedGlitchConnection:Disconnect()
+            State.SpeedGlitchConnection = nil
+        end
+        
+        -- Перезапуск после респавна
+        if State.SpeedGlitchEnabled then
+            LocalPlayer.CharacterAdded:Wait()
+            task.wait(0.5)
+            if State.SpeedGlitchEnabled then
+                StartSpeedGlitch()
+            end
+        end
+    end
+    
+    -- Подключаем обработчик смерти
+    local diedConnection = humanoid.Died:Connect(onSpeedGlitchDied)
+    table.insert(State.Connections, diedConnection)
+    
+    -- CORE LOGIC: RenderStepped для спид глитча
+    State.SpeedGlitchConnection = RunService.RenderStepped:Connect(function()
+        if not State.SpeedGlitchEnabled then return end
+        
+        -- Проверка существования персонажа
+        if not humanoid or not humanoid.Parent or humanoid:GetState() == Enum.HumanoidStateType.Dead then
+            return
+        end
+        
+        local state = humanoid:GetState()
+        local isJumping = state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall
+        local isMoving = humanoid.MoveDirection.Magnitude > 0.1
+        
+        -- ГЛАВНАЯ ЛОГИКА: Скорость работает только при прыжке + движении
+        if isJumping and isMoving then
+            if humanoid.WalkSpeed ~= State.SpeedGlitchSpeed then
+                humanoid.WalkSpeed = State.SpeedGlitchSpeed
+            end
+        else
+            if humanoid.WalkSpeed ~= DEFAULT_WALKSPEED then  -- ✅ Используем константу
+                humanoid.WalkSpeed = DEFAULT_WALKSPEED
+            end
+        end
+    end)
+    
+    table.insert(State.Connections, State.SpeedGlitchConnection)
+    
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220,220,220)\">Speed Glitch: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
+    end
+end
+
+-- Остановка Speed Glitch
+local function StopSpeedGlitch()
+    if not State.SpeedGlitchEnabled then return end
+    
+    State.SpeedGlitchEnabled = false
+    
+    -- Отключаем RenderStepped соединение
+    if State.SpeedGlitchConnection then
+        State.SpeedGlitchConnection:Disconnect()
+        State.SpeedGlitchConnection = nil
+    end
+    
+    -- Возвращаем дефолтную скорость
+    local character = LocalPlayer.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- ✅ Используем константу
+        end
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220,220,220)\">Speed Glitch: </font><font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
+    end
+end
+
+-- Toggle Speed Glitch
+local function ToggleSpeedGlitch()
+    if State.SpeedGlitchEnabled then
+        StopSpeedGlitch()
+    else
+        StartSpeedGlitch()
+    end
+end
+
+
 -- СНАЧАЛА объявляем функции
 local function HandleEmoteInput(input)
     if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then
@@ -6631,6 +6756,10 @@ local function HandleActionInput(input)
 
     if input.KeyCode == State.Keybinds.Fly and State.Keybinds.Fly ~= Enum.KeyCode.Unknown then
         ToggleFly()
+    end
+    
+    if input.KeyCode == State.Keybinds.SpeedGlitch and State.Keybinds.SpeedGlitch ~= Enum.KeyCode.Unknown then
+        ToggleSpeedGlitch()
     end
 
     if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
@@ -6944,6 +7073,25 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.FlySpeed = value
         end,
 
+        SpeedGlitchSpeed = function(value)
+            State.SpeedGlitchSpeed = value
+
+            if State.SpeedGlitchEnabled then
+                local character = LocalPlayer.Character
+                if character then
+                    local humanoid = character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        local state = humanoid:GetState()
+                        local isJumping = state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall
+                        local isMoving = humanoid.MoveDirection.Magnitude > 0.1
+                        
+                        if isJumping and isMoving then
+                            humanoid.WalkSpeed = value
+                        end
+                    end
+                end
+            end
+        end,
         Shutdown = function() FullShutdown() end,
 
         AutoLoadOnTeleport = function(on)
@@ -7052,6 +7200,10 @@ do
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
+
+        MainTab:CreateSection("Speed Glitch")
+        MainTab:CreateSlider("Speed Glitch Speed", "Jump speed multiplier", 16, 100, State.SpeedGlitchSpeed, "SpeedGlitchSpeed", 5)
+        MainTab:CreateKeybindButton("Toggle Speed Glitch", "Enable/disable speed glitch", "SpeedGlitch")
 
         MainTab:CreateSection("FLY SETTINGS")
         MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
