@@ -3207,7 +3207,7 @@ end
 
 -- FlingMurderer() - Флинг убийцы
 local function FlingMurderer()
-    local murderer = getMurder()
+    local murderer = getMurderForAutoFarm()
     if not murderer then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
@@ -3365,7 +3365,7 @@ end
 
 -- FlingSheriff() - Флинг шерифа
 local function FlingSheriff()
-    local sheriff = getSheriff()
+    local sheriff = getSheriffForAutoFarm()
     if not sheriff then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Sheriff not found</font>", CONFIG.Colors.Text)
