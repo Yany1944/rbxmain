@@ -145,6 +145,7 @@ local State = {
     spawnAtPlayer = false,
     CanShootMurderer = true,
     ShootCooldown = 3,
+    ShootMurdererMode = "Magic",
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -159,6 +160,10 @@ local State = {
 
     -- Auto-load script on teleport
     AutoLoadOnTeleport = true,
+
+    currentMapConnection = nil,
+    currentMap = nil,
+    previousGun = nil,
 
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
@@ -2568,10 +2573,22 @@ local function UpdatePlayerHighlight(player, role)
     end
 end
 
--- getMurder() / getSheriff()
--- ЗАМЕНИТЬ полностью
 local function getMurder()
-    -- Приоритет 1: Серверные данные (быстрее)
+    -- Приоритет 1: Реальная проверка предметов
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("Knife") then
+            return plr
+        end
+    end
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local backpack = plr:FindFirstChild("Backpack")
+        if backpack and backpack:FindFirstChild("Knife") then
+            return plr
+        end
+    end
+    
+    -- Приоритет 2: Серверные данные (для ESP)
     if State.PlayerData then
         for playerName, data in pairs(State.PlayerData) do
             if data.Role == "Murderer" then
@@ -2583,28 +2600,25 @@ local function getMurder()
         end
     end
     
-    -- Приоритет 2: Fallback - проверка Backpack
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local backpack = plr:FindFirstChild("Backpack")
-        if backpack and backpack:FindFirstChild("Knife") then
-            return plr
-        end
-    end
-    
-    -- Приоритет 3: Fallback - проверка Character
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        if character and character:FindFirstChild("Knife") then
-            return plr
-        end
-    end
-    
     return nil
 end
 
-
 local function getSheriff()
-    -- Приоритет 1: Серверные данные (быстрее)
+    -- Приоритет 1: Реальная проверка предметов
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("Gun") then
+            return plr
+        end
+    end
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local backpack = plr:FindFirstChild("Backpack")
+        if backpack and backpack:FindFirstChild("Gun") then
+            return plr
+        end
+    end
+    
+    -- Приоритет 2: Серверные данные (для ESP)
     if State.PlayerData then
         for playerName, data in pairs(State.PlayerData) do
             if data.Role == "Sheriff" then
@@ -2616,22 +2630,33 @@ local function getSheriff()
         end
     end
     
-    -- Приоритет 2: Fallback - проверка Backpack
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local backpack = plr:FindFirstChild("Backpack")
-        if backpack and backpack:FindFirstChild("Gun") then
-            return plr
-        end
-    end
-    
-    -- Приоритет 3: Fallback - проверка Character
+    return nil
+end
+
+-- ✅ НОВЫЕ функции ТОЛЬКО для автофарма (БЕЗ серверных данных)
+local function getMurderForAutoFarm()
     for _, plr in ipairs(Players:GetPlayers()) do
         local character = plr.Character
-        if character and character:FindFirstChild("Gun") then
+        local backpack = plr:FindFirstChild("Backpack")
+
+        if (character and character:FindFirstChild("Knife"))
+            or (backpack and backpack:FindFirstChild("Knife")) then
             return plr
         end
     end
-    
+    return nil
+end
+
+local function getSheriffForAutoFarm()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        local backpack = plr:FindFirstChild("Backpack")
+
+        if (character and character:FindFirstChild("Gun"))
+            or (backpack and backpack:FindFirstChild("Gun")) then
+            return plr
+        end
+    end
     return nil
 end
 
@@ -2767,10 +2792,6 @@ end
 -- Gun ESP + уведомление
 ----------------------------------------------------------------
 
-local currentMapConnection = nil
-local currentMap = nil
-local previousGun = nil
-
 local function getMap()
     for _, v in ipairs(Workspace:GetChildren()) do
         if v:FindFirstChild("CoinContainer") then
@@ -2864,16 +2885,16 @@ local function UpdateGunESPVisibility()
 end
 
 local function SetupGunTracking()
-    if currentMapConnection then
-        currentMapConnection:Disconnect()
-        currentMapConnection = nil
+    if State.currentMapConnection then
+        State.currentMapConnection:Disconnect()
+        State.currentMapConnection = nil
     end
 
-    currentMapConnection = RunService.Heartbeat:Connect(function()
+    State.currentMapConnection = RunService.Heartbeat:Connect(function()
         pcall(function()
             local gun = getGun()
 
-            if gun and gun ~= previousGun then
+            if gun and gun ~= State.previousGun then
                 State.CurrentGunDrop = gun
 
                 if State.NotificationsEnabled then
@@ -2885,11 +2906,11 @@ local function SetupGunTracking()
                     end)
                 end
                 
-                previousGun = gun
+                State.previousGun = gun
             end
 
-            if not gun and previousGun then
-                previousGun = nil
+            if not gun and State.previousGun then
+                State.previousGun = nil
             end
 
             if gun and State.GunESP then
@@ -2911,7 +2932,7 @@ local function SetupGunTracking()
         end)
     end)
 
-    table.insert(State.Connections, currentMapConnection)
+    table.insert(State.Connections, State.currentMapConnection)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -3344,26 +3365,7 @@ end
 
 -- FlingSheriff() - Флинг шерифа
 local function FlingSheriff()
-    -- Поиск шерифа (аналогично FindMurderer)
-    local sheriff = nil
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character then
-            local gun = player.Character:FindFirstChild("Gun")
-            if gun then
-                sheriff = player
-                break
-            end
-            
-            if player.Backpack then
-                local gunInBackpack = player.Backpack:FindFirstChild("Gun")
-                if gunInBackpack then
-                    sheriff = player
-                    break
-                end
-            end
-        end
-    end
-    
+    local sheriff = getSheriff()
     if not sheriff then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Sheriff not found</font>", CONFIG.Colors.Text)
@@ -3371,7 +3373,6 @@ local function FlingSheriff()
         return
     end
     
-    -- Проверка: не флингим сам себя
     if sheriff == LocalPlayer then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You cannot fling yourself!</font>", CONFIG.Colors.Text)
@@ -4435,7 +4436,7 @@ local function StartAutoFarm()
                 continue 
             end
             
-            local murdererExists = getMurder() ~= nil
+            local murdererExists = getMurderForAutoFarm() ~= nil
             --print("[DEBUG] Мурдерер существует:", murdererExists)
             
             if not murdererExists then
@@ -4585,7 +4586,7 @@ local function StartAutoFarm()
                         end
                         --]]
                         -- Fallback: InstantKillAll
-                        if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
+                        if getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
                             pcall(function()
                                 InstantKillAll()
                             end)
@@ -4594,7 +4595,7 @@ local function StartAutoFarm()
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
-                        until getMurder() == nil or not State.AutoFarmEnabled
+                        until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
                         
                     else
                         -- XP Farm выключен: просто ресет
@@ -4633,7 +4634,7 @@ local function StartAutoFarm()
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
-                        until getMurder() == nil or not State.AutoFarmEnabled
+                        until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
                     end
                     
                     -- Общий cleanup после Snowball
@@ -4651,7 +4652,7 @@ local function StartAutoFarm()
                     -- Ждём нового раунда
                     repeat
                         task.wait(1)
-                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
                         break
@@ -4688,8 +4689,8 @@ local function StartAutoFarm()
                                 end
                                 
                                 if State.XPFarmEnabled then
-                                    local murderer = getMurder()
-                                    local sheriff = getSheriff()
+                                    local murderer = getMurderForAutoFarm()
+                                    local sheriff = getSheriffForAutoFarm()
                                     
                                     if murderer == LocalPlayer then
                                         --print("[XP Farm] 🔪 Мы мурдерер! Активирую knifeThrow...")
@@ -4723,7 +4724,7 @@ local function StartAutoFarm()
                                         end
                                         --]]
                                         -- ✅ Fallback: если после 1 попыток раунд не завершился
-                                        if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
+                                        if getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
                                             --print("[XP Farm] ⚠️ knifeThrow не сработал за 10 попыток! Использую InstantKillAll...")
                                             
                                             local success, error = pcall(function()
@@ -4745,14 +4746,14 @@ local function StartAutoFarm()
                                             local shootAttempts = 0
                                             local maxShootAttempts = 30
 
-                                            while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and shootAttempts < maxShootAttempts do
+                                            while getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and shootAttempts < maxShootAttempts do
                                                 character = LocalPlayer.Character
                                                 if not character then 
                                                     --print("[XP Farm] ⚠️ Персонаж исчез, прекращаю стрельбу")
                                                     break 
                                                 end
                                                 
-                                                local murdererPlayer = getMurder()
+                                                local murdererPlayer = getMurderForAutoFarm()
                                                 if not murdererPlayer then 
                                                     --print("[XP Farm] ✅ Раунд завершён! Мурдерер мёртв.")
                                                     break 
@@ -4783,7 +4784,7 @@ local function StartAutoFarm()
                                             end
 
                                             -- ✅ Проверяем причину выхода из цикла
-                                            if getMurder() == nil then
+                                            if getMurderForAutoFarm() == nil then
                                                 --print("[XP Farm] ✅ Мурдерер успешно убит! Раунд завершён.")
                                             elseif shootAttempts >= maxShootAttempts then
                                                 --print("[XP Farm] ⚠️ Достигнут лимит выстрелов (" .. maxShootAttempts .. "), прекращаю стрельбу")
@@ -4805,8 +4806,8 @@ local function StartAutoFarm()
                                         local flingAttempts = 1  -- Уже выполнили 1 флинг
                                         local maxFlingAttempts = 10
                                         
-                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and flingAttempts < maxFlingAttempts do
-                                            local murdererPlayer = getMurder()
+                                        while getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and flingAttempts < maxFlingAttempts do
+                                            local murdererPlayer = getMurderForAutoFarm()
                                             if not murdererPlayer then break end
                                             
                                             local murdererChar = murdererPlayer.Character
@@ -4838,7 +4839,7 @@ local function StartAutoFarm()
                                             
                                             task.wait(3)
                                             
-                                            if getMurder() == nil then
+                                            if getMurderForAutoFarm() == nil then
                                                 --print("[XP Farm] ✅ Мурдерер был сфлингован!")
                                                 break
                                             end
@@ -4856,7 +4857,7 @@ local function StartAutoFarm()
                     end
                     repeat
                         task.wait(1)
-                    until getMurder() == nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
                         break
@@ -4869,7 +4870,7 @@ local function StartAutoFarm()
                     CleanupCoinBlacklist()
                     task.wait(5)
                     
-                    if getMurder() ~= nil then
+                    if getMurderForAutoFarm() ~= nil then
                         State.CoinBlacklist = {}
                         noCoinsAttempts = 0
                         continue
@@ -4904,7 +4905,7 @@ local function StartAutoFarm()
                     
                     repeat
                         task.wait(1)
-                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
                         break
@@ -4957,7 +4958,7 @@ local function StartAutoFarm()
                     --print("[Auto Farm] ⏳ Жду конца текущего раунда...")
                     repeat
                         task.wait(1)
-                    until getMurder() == nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
 
                     if not State.AutoFarmEnabled then
                         --print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания")
@@ -4967,7 +4968,7 @@ local function StartAutoFarm()
                     --print("[Auto Farm] ⏳ Раунд закончился, жду начала нового раунда...")
                     repeat
                         task.wait(1)
-                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
 
                     if not State.AutoFarmEnabled then
                         --print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания нового раунда")
@@ -5604,29 +5605,14 @@ knifeThrow = function(silent)
 end
 
 
-shootMurderer = function(silent)
+shootMurderer = function(forceMagic)
+    -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
+    local useMode = forceMagic and "Magic" or (State.ShootMurdererMode or "Magic")
+    
     -- Проверка кулдауна
     if not State.CanShootMurderer then
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 165, 0)\">Wait </font><font color=\"rgb(220,220,220)\">Gun is on cooldown</font>", CONFIG.Colors.Text)
-        end
-        return
-    end
-    
-    -- Проверка роли
-    local sheriff = getSheriff()
-    if sheriff ~= LocalPlayer then
-        if not silent then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not sheriff/hero.</font>", CONFIG.Colors.Text)
-        end
-        return
-    end
-    
-    -- Поиск убийцы
-    local murderer = getMurder()
-    if not murderer or not murderer.Character then
-        if not silent then
-            ShowNotification("<font color=\"rgb(255, 165, 0)\">Warning </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
         end
         return
     end
@@ -5646,15 +5632,33 @@ shootMurderer = function(silent)
         end
         
         if not gun then
-            if not silent then
+            if not forceMagic then
                 ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the gun..?</font>", CONFIG.Colors.Text)
             end
             return
         end
     end
     
+    -- Проверка роли (ПОСЛЕ экипировки)
+    local sheriff = getSheriff()
+    if sheriff ~= LocalPlayer then
+        if not forceMagic then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not sheriff/hero.</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- Поиск убийцы
+    local murderer = getMurder()
+    if not murderer or not murderer.Character then
+        if not forceMagic then
+            ShowNotification("<font color=\"rgb(255, 165, 0)\">Warning </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
     if not LocalPlayer.Character:FindFirstChild("RightHand") then
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
         end
         return
@@ -5663,40 +5667,63 @@ shootMurderer = function(silent)
     local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
     
     if not murdererHRP then
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">Murderer has no HRP</font>", nil)
         end
         return
     end
     
-    -- === НОВАЯ ЛОГИКА 100% ПОПАДАНИЯ (Counter-Movement) ===
-    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
-    local pingValue = tonumber(ping:match("%d+")) or 50
-    local predictionTime = (pingValue / 1000) + 0.05
+    local argsShootRemote
     
-    local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-    local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
-    
-    local spawnPosition, targetPosition
+    if useMode == "Magic" then
+        -- === MAGIC MODE: Телепортация пули (текущая логика) ===
+        local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+        local pingValue = tonumber(ping:match("%d+")) or 50
+        local predictionTime = (pingValue / 1000) + 0.05
+        
+        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
+        
+        local spawnPosition, targetPosition
 
-    if enemyVelocity.Magnitude > 2 then
-        -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
-        local moveDir = enemyVelocity.Unit
-        spawnPosition = predictedPos + (moveDir * 5)
-        targetPosition = predictedPos
+        if enemyVelocity.Magnitude > 2 then
+            -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
+            local moveDir = enemyVelocity.Unit
+            spawnPosition = predictedPos + (moveDir * 5)
+            targetPosition = predictedPos
+        else
+            -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
+            local backDir = -murdererHRP.CFrame.LookVector
+            spawnPosition = predictedPos + (backDir * 3)
+            targetPosition = predictedPos
+        end
+        
+        argsShootRemote = {
+            [1] = CFrame.lookAt(spawnPosition, targetPosition),
+            [2] = CFrame.new(targetPosition)
+        }
     else
-        -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
-        local backDir = -murdererHRP.CFrame.LookVector
-        spawnPosition = predictedPos + (backDir * 3)
-        targetPosition = predictedPos
+        -- === SILENT MODE: Стрельба от дула пистолета ===
+        local gunHandle = gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel")
+        local rightHand = LocalPlayer.Character:FindFirstChild("RightHand")
+        
+        -- Используем позицию дула или правой руки
+        local gunPosition = gunHandle and gunHandle.Position or rightHand.Position
+        
+        -- Прогнозирование цели
+        local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+        local pingValue = tonumber(ping:match("%d+")) or 50
+        local predictionTime = (pingValue / 1000) + 0.05
+        
+        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
+        
+        -- Стреляем от реальной позиции оружия к цели
+        argsShootRemote = {
+            [1] = CFrame.lookAt(gunPosition, predictedPos),
+            [2] = CFrame.new(predictedPos)
+        }
     end
-    
-    -- Аргументы для выстрела (Используем lookAt для правильного хитбокса пули)
-    local argsShootRemote = {
-        [1] = CFrame.lookAt(spawnPosition, targetPosition),
-        [2] = CFrame.new(targetPosition)
-    }
-    -- ========================================================
     
     -- АКТИВИРУЕМ КУЛДАУН
     State.CanShootMurderer = false
@@ -5725,25 +5752,27 @@ shootMurderer = function(silent)
     end)
     
     if success then
-        if not silent then
-            ShowNotification("<font color=\"rgb(85, 255, 85)\">Shot fired! </font><font color=\"rgb(220,220,220)\">Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
+        if not forceMagic then
+            local modeText = useMode == "Magic" and "Magic" or "Silent"
+            ShowNotification("<font color=\"rgb(85, 255, 85)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
         end
         
         -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
         task.delay(State.ShootCooldown, function()
             State.CanShootMurderer = true
-            if not silent then
+            if not forceMagic then
                 ShowNotification("<font color=\"rgb(85, 255, 255)\">Ready </font><font color=\"rgb(220,220,220)\">You can shoot again</font>", CONFIG.Colors.Text)
             end
         end)
     else
         -- Если ошибка - сбрасываем кулдаун
         State.CanShootMurderer = true
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
         end
     end
 end
+
 
 -- pickupGun() - Подбор пистолета
 local function pickupGun(silent)
@@ -5782,7 +5811,7 @@ local function EnableInstantPickup()
     end
     
     State.InstantPickupEnabled = true
-    if not currentMapConnection then
+    if not State.currentMapConnection then
         SetupGunTracking()
     end
     
@@ -5804,30 +5833,35 @@ local function EnableInstantPickup()
             end
             
             local gun = State.CurrentGunDrop
-            local sheriff = getSheriff()
-            
-            if gun and not sheriff and gun ~= lastAttemptedGun then
-                
-                -- Проверяем, уже подобран?
-                if LocalPlayer.Character:FindFirstChild("Gun") or 
-                   LocalPlayer.Backpack:FindFirstChild("Gun") then
+            if gun and gun ~= lastAttemptedGun then
+    
+                -- ✅ Проверяем: мы уже Sheriff/Hero? Тогда не надо подбирать
+                local sheriff = getSheriff()
+                if sheriff == LocalPlayer then
                     lastAttemptedGun = gun
                     continue
                 end
                 
+                -- Проверяем, уже подобран НАМИ?
+                if LocalPlayer.Character:FindFirstChild("Gun") or 
+                LocalPlayer.Backpack:FindFirstChild("Gun") then
+                    lastAttemptedGun = gun
+                    continue
+                end
+    
+                
                 local pickupSuccess = false
                 
-                -- ✅ 3 ПОПЫТКИ В SILENT РЕЖИМЕ
-                for attempt = 1, 3 do
-                    pickupGun(true)
-                    task.wait(0.5)
+                -- ✅ 5 ПОПЫТОК с более быстрым интервалом
+                for attempt = 1, 5 do
+                    pickupGun(true)  -- silent mode
+                    task.wait(0.15)  -- ← Быстрее (было 0.5)
                     
                     -- Проверяем успех
                     if LocalPlayer.Character:FindFirstChild("Gun") or 
                        LocalPlayer.Backpack:FindFirstChild("Gun") then
                         pickupSuccess = true
                         
-                        -- ✅ ОДНО УВЕДОМЛЕНИЕ ПРИ УСПЕХЕ
                         if State.NotificationsEnabled then
                             task.spawn(function()
                                 ShowNotification(
@@ -5839,7 +5873,7 @@ local function EnableInstantPickup()
                         break
                     end
                     
-                    -- Пистолет исчез
+                    -- Пистолет исчез (кто-то другой подобрал)
                     if State.CurrentGunDrop ~= gun then
                         break
                     end
@@ -5847,9 +5881,10 @@ local function EnableInstantPickup()
                 
                 lastAttemptedGun = gun
                 
+                -- Если не удалось - ждём следующий Gun
                 if not pickupSuccess then
                     repeat
-                        task.wait(0.2)
+                        task.wait(0.1)  -- ← Быстрее (было 0.2)
                         if not State.InstantPickupEnabled then
                             return
                         end
@@ -5868,7 +5903,7 @@ local function EnableInstantPickup()
                 end
             end
             
-            task.wait(0.1)
+            task.wait(0.05)  -- ← Быстрее проверка цикла (было 0.1)
         end
     end)
 end
@@ -5881,6 +5916,7 @@ local function DisableInstantPickup()
         State.InstantPickupThread = nil
     end
 end
+
 
 -- EnableExtendedHitbox() - Включение расширенного хитбокса
 local OriginalSizes = {}
@@ -6864,6 +6900,10 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             end
         end,
 
+        ShootMurdererMode = function(value)
+            State.ShootMurdererMode = value
+        end,
+
         FlySpeed = function(value)
             State.FlySpeed = value
         end,
@@ -7051,9 +7091,10 @@ do
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
         CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
 end
 
 do
