@@ -206,6 +206,7 @@ local State = {
     PlayerHighlights = {},
     GunCache = {},
     CurrentGunDrop = nil,
+    PlayerData = {},
 
     -- Player Nicknames ESP
     PlayerNicknamesESP = false,
@@ -2467,6 +2468,24 @@ end
 -- ESP: роли + GunESP
 ----------------------------------------------------------------
 
+local function SetupPlayerDataListener()
+    local success, remotes = pcall(function()
+        return game.ReplicatedStorage:WaitForChild("Remotes", 5)
+    end)
+    
+    if not success or not remotes then return end
+    
+    local gameplay = remotes:FindFirstChild("Gameplay")
+    if not gameplay then return end
+    
+    local dataChanged = gameplay:FindFirstChild("PlayerDataChanged")
+    if not dataChanged then return end
+    
+    dataChanged.OnClientEvent:Connect(function(data)
+        State.PlayerData = data or {}
+    end)
+end
+
 -- CreateHighlight() - создание Highlight для персонажа
 local function CreateHighlight(adornee, color)
     if not adornee or not adornee.Parent then return nil end
@@ -2550,34 +2569,75 @@ local function UpdatePlayerHighlight(player, role)
 end
 
 -- getMurder() / getSheriff()
+-- ЗАМЕНИТЬ полностью
 local function getMurder()
+    -- Приоритет 1: Серверные данные (быстрее)
+    if State.PlayerData then
+        for playerName, data in pairs(State.PlayerData) do
+            if data.Role == "Murderer" then
+                local player = Players:FindFirstChild(playerName)
+                if player then
+                    return player
+                end
+            end
+        end
+    end
+    
+    -- Приоритет 2: Fallback - проверка Backpack
     for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        local backpack  = plr:FindFirstChild("Backpack")
-
-        if (character and character:FindFirstChild("Knife"))
-            or (backpack and backpack:FindFirstChild("Knife")) then
+        local backpack = plr:FindFirstChild("Backpack")
+        if backpack and backpack:FindFirstChild("Knife") then
             return plr
         end
     end
+    
+    -- Приоритет 3: Fallback - проверка Character
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        if character and character:FindFirstChild("Knife") then
+            return plr
+        end
+    end
+    
     return nil
 end
 
-local function getSheriff()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        local backpack  = plr:FindFirstChild("Backpack")
 
-        if (character and character:FindFirstChild("Gun"))
-            or (backpack and backpack:FindFirstChild("Gun")) then
+local function getSheriff()
+    -- Приоритет 1: Серверные данные (быстрее)
+    if State.PlayerData then
+        for playerName, data in pairs(State.PlayerData) do
+            if data.Role == "Sheriff" then
+                local player = Players:FindFirstChild(playerName)
+                if player then
+                    return player
+                end
+            end
+        end
+    end
+    
+    -- Приоритет 2: Fallback - проверка Backpack
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local backpack = plr:FindFirstChild("Backpack")
+        if backpack and backpack:FindFirstChild("Gun") then
             return plr
         end
     end
+    
+    -- Приоритет 3: Fallback - проверка Character
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local character = plr.Character
+        if character and character:FindFirstChild("Gun") then
+            return plr
+        end
+    end
+    
     return nil
 end
 
 -- Role ESP loop
 local function StartRoleChecking()
+    SetupPlayerDataListener()
     if State.RoleCheckLoop then
         pcall(function()
             State.RoleCheckLoop:Disconnect()
@@ -2630,7 +2690,7 @@ local function StartRoleChecking()
 
                 if State.NotificationsEnabled then
                     ShowNotification(
-                        "<font color=\"rgb(255, 85, 85)\">🔪 Murderer:</font> " .. murder.Name,
+                        "<font color=\"rgb(255, 85, 85)\">🗡️ Murderer:</font> " .. murder.Name,
                         CONFIG.Colors.Text
                     )
                     task.wait(0.1)
@@ -2647,7 +2707,10 @@ local function StartRoleChecking()
                 State.prevMurd    = nil
                 State.prevSher    = nil
                 State.heroSent    = false
-
+                
+                -- Очистка серверных данных
+                State.PlayerData = {}
+                
                 if State.NotificationsEnabled then
                     ShowNotification(
                         "<font color=\"rgb(220, 220, 220)\">Round ended</font>",
@@ -2656,6 +2719,28 @@ local function StartRoleChecking()
                 end
             end
 
+            -- Обнаружение начала нового раунда (есть оба)
+            if murder and sheriff and State.roundStart then
+                State.roundActive = true
+                State.roundStart  = false
+                State.prevMurd    = murder
+                State.prevSher    = sheriff
+                State.heroSent    = false
+
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "<font color=\"rgb(255, 85, 85)\">🗡️ Murderer:</font> " .. murder.Name,
+                        CONFIG.Colors.Text
+                    )
+                    task.wait(0.1)
+                    ShowNotification(
+                        "<font color=\"rgb(50, 150, 255)\">🔫 Sheriff:</font> " .. sheriff.Name,
+                        CONFIG.Colors.Text
+                    )
+                end
+            end
+
+            -- Обнаружение смены шерифа (Hero)
             if sheriff
                 and State.prevSher
                 and sheriff ~= State.prevSher
@@ -2668,14 +2753,13 @@ local function StartRoleChecking()
 
                 if State.NotificationsEnabled then
                     ShowNotification(
-                        "<font color=\"rgb(50, 150, 255)\">New Sheriff:</font> " .. sheriff.Name,
+                        "<font color=\"rgb(50, 150, 255)\">⭐ Hero:</font> " .. sheriff.Name,
                         CONFIG.Colors.Text
                     )
                 end
             end
         end)
     end)
-
     table.insert(State.Connections, State.RoleCheckLoop)
 end
 
