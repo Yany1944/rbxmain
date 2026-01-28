@@ -6337,25 +6337,20 @@ local function respawn(plr)
     local ogpos = hrp.CFrame
     local ogpos2 = workspace.CurrentCamera.CFrame
 
-    -- Сохраняем позицию ДО респавна
     task.spawn(function()
         local newChar = plr.CharacterAdded:Wait()
-        local newHrp = newChar:WaitForChild("HumanoidRootPart", 10)
+        local newHrp = newChar:WaitForChild("HumanoidRootPart", 3)
         if newHrp then
-            -- Ждём загрузки физики
-            task.wait(0.1)
+            newHrp.Anchored = true  -- Фиксируем на момент телепорта
             newHrp.CFrame = ogpos
-            task.wait()
             workspace.CurrentCamera.CFrame = ogpos2
+            newHrp.Anchored = false  -- Освобождаем
         end
     end)
 
-    -- Теперь делаем респавн
-    local hum = char:FindFirstChildWhichIsA("Humanoid")
-    if hum then
-        hum.Health = 0
-    end
+    char:BreakJoints()
 end
+
 
 
 local function ServerHop()
