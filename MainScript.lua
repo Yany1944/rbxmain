@@ -3239,7 +3239,7 @@ end
 
 -- FlingMurderer() - Флинг убийцы
 local function FlingMurderer()
-    local murderer = getMurderForAutoFarm()
+    local murderer = getMurder()
     if not murderer then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
