@@ -214,6 +214,10 @@ local State = {
     roundStart = true,
     roundActive = false,
     
+    PLACEHOLDER_IMAGE = "",
+    currentMurdererUserId = nil,
+    currentSheriffUserId = nil,
+
     -- ESP internals
     PlayerHighlights = {},
     GunCache = {},
@@ -2692,6 +2696,173 @@ local function getSheriffForAutoFarm()
     return nil
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- AVATAR DISPLAY SYSTEM
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Функция получения URL полного аватара (не headshot)
+local function getAvatarUrl(userId)
+    -- Используем встроенный Roblox API (не требует HttpService)
+    local success, thumbnailUrl = pcall(function()
+        return Players:GetUserThumbnailAsync(
+            userId,
+            Enum.ThumbnailType.AvatarBust,
+            Enum.ThumbnailSize.Size420x420
+        )
+    end)
+    
+    if success and thumbnailUrl then
+        return thumbnailUrl
+    else
+        warn("Failed to load avatar for UserId:", userId)
+        return nil
+    end
+end
+
+local function setAvatar(imageLabel, player)
+    if not imageLabel then return end
+    
+    if not player then
+        imageLabel.Image = ""
+        return
+    end
+    
+    local avatarUrl = getAvatarUrl(player.UserId)
+    
+    if avatarUrl then
+        imageLabel.Image = avatarUrl
+    else
+        imageLabel.Image = ""
+    end
+end
+
+-- Функция обновления аватаров (вызывается из Role ESP)
+local function updateRoleAvatars()
+    
+    if not State.UIElements.MurdererAvatar or not State.UIElements.SheriffAvatar then
+        warn("❌ Avatar UI elements not found!")
+        return
+    end
+    
+    local murderer = getMurder()
+    local sheriff = getSheriff()
+    
+    
+    -- Обновляем Murderer
+    if murderer then
+        if State.currentMurdererUserId ~= murderer.UserId then
+            State.currentMurdererUserId = murderer.UserId
+            setAvatar(State.UIElements.MurdererAvatar, murderer)
+        end
+    else
+        if State.currentMurdererUserId ~= nil then
+            State.currentMurdererUserId = nil
+            State.UIElements.MurdererAvatar.Image = State.PLACEHOLDER_IMAGE
+        end
+    end
+    
+    -- Обновляем Sheriff
+    if sheriff then
+        if State.currentSheriffUserId ~= sheriff.UserId then
+            State.currentSheriffUserId = sheriff.UserId
+            setAvatar(State.UIElements.SheriffAvatar, sheriff)
+        end
+    else
+        if State.currentSheriffUserId ~= nil then
+            State.currentSheriffUserId = nil
+            State.UIElements.SheriffAvatar.Image = State.PLACEHOLDER_IMAGE
+        end
+    end
+end
+
+local function CreateAvatarUI()
+    pcall(function() CoreGui:FindFirstChild("MM2_AvatarDisplay"):Destroy() end)
+    
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "MM2_AvatarDisplay"
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 10
+    gui.Parent = CoreGui
+    
+    local container = Instance.new("Frame")
+    container.Position = UDim2.new(1, -270, 1, -100)
+    container.Size = UDim2.new(0, 170, 0, 90)
+    container.BackgroundTransparency = 1
+    container.Parent = gui
+    
+    -- Таблица конфигурации для аватаров
+    local avatarConfigs = {
+        Murderer = {
+            position = UDim2.new(0, 0, 0, 0),
+            color = CONFIG.Colors.Murder,
+            text = "Murderer"
+        },
+        Sheriff = {
+            position = UDim2.new(0, 90, 0, 0),
+            color = CONFIG.Colors.Sheriff,
+            text = "Sheriff"
+        }
+    }
+    
+    -- Функция создания аватара из конфига
+    local function createFromConfig(config)
+        local props = {
+            frame = {Size = UDim2.new(0, 80, 0, 90), BackgroundColor3 = CONFIG.Colors.Section, BackgroundTransparency = 0.2, Position = config.position},
+            corner = {CornerRadius = UDim.new(0, 8)},
+            stroke = {Color = config.color, Thickness = 2},
+            image = {Position = UDim2.new(0.5, 0, 0, 5), Size = UDim2.new(0, 60, 0, 60), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(40, 40, 45), Image = ""},
+            imgCorner = {CornerRadius = UDim.new(0, 6)},
+            label = {Position = UDim2.new(0, 0, 1, -22), Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = config.text, TextColor3 = config.color, Font = Enum.Font.GothamBold, TextSize = 10, TextStrokeTransparency = 0.5}
+        }
+        
+        local frame = Instance.new("Frame", container)
+        for k,v in pairs(props.frame) do frame[k] = v end
+        
+        local corner = Instance.new("UICorner", frame)
+        for k,v in pairs(props.corner) do corner[k] = v end
+        
+        local stroke = Instance.new("UIStroke", frame)
+        for k,v in pairs(props.stroke) do stroke[k] = v end
+        
+        local img = Instance.new("ImageLabel", frame)
+        for k,v in pairs(props.image) do img[k] = v end
+        
+        local imgCorner = Instance.new("UICorner", img)
+        for k,v in pairs(props.imgCorner) do imgCorner[k] = v end
+        
+        local label = Instance.new("TextLabel", frame)
+        for k,v in pairs(props.label) do label[k] = v end
+        
+        return img
+    end
+    
+    -- Создание аватаров
+    State.UIElements.MurdererAvatar = createFromConfig(avatarConfigs.Murderer)
+    State.UIElements.SheriffAvatar = createFromConfig(avatarConfigs.Sheriff)
+    State.UIElements.AvatarDisplayGui = gui
+end
+
+-- Функция очистки аватара Sheriff (вызывается при Gun drop)
+local function clearSheriffAvatar()
+    if State.UIElements.SheriffAvatar then
+        State.UIElements.SheriffAvatar.Image = ""
+        State.currentSheriffUserId = nil
+    end
+end
+
+-- Функция очистки всех аватаров (вызывается при окончании раунда)
+local function clearAllAvatars()
+    if State.UIElements.MurdererAvatar then
+        State.UIElements.MurdererAvatar.Image = ""
+    end
+    if State.UIElements.SheriffAvatar then
+        State.UIElements.SheriffAvatar.Image = ""
+    end
+    State.currentMurdererUserId = nil
+    State.currentSheriffUserId = nil
+end
+
+
 -- Role ESP loop
 local function StartRoleChecking()
     SetupPlayerDataListener()
@@ -2756,6 +2927,10 @@ local function StartRoleChecking()
                         CONFIG.Colors.Text
                     )
                 end
+
+                task.spawn(function()
+                    updateRoleAvatars()
+                end)
             end
 
             if not murder and State.roundActive then
@@ -2774,27 +2949,7 @@ local function StartRoleChecking()
                         CONFIG.Colors.Text
                     )
                 end
-            end
-
-            -- Обнаружение начала нового раунда (есть оба)
-            if murder and sheriff and State.roundStart then
-                State.roundActive = true
-                State.roundStart  = false
-                State.prevMurd    = murder
-                State.prevSher    = sheriff
-                State.heroSent    = false
-
-                if State.NotificationsEnabled then
-                    ShowNotification(
-                        "<font color=\"rgb(255, 85, 85)\">🗡️ Murderer:</font> " .. murder.Name,
-                        CONFIG.Colors.Text
-                    )
-                    task.wait(0.1)
-                    ShowNotification(
-                        "<font color=\"rgb(50, 150, 255)\">🔫 Sheriff:</font> " .. sheriff.Name,
-                        CONFIG.Colors.Text
-                    )
-                end
+                clearAllAvatars()
             end
 
             -- Обнаружение смены шерифа (Hero)
@@ -2814,6 +2969,9 @@ local function StartRoleChecking()
                         CONFIG.Colors.Text
                     )
                 end
+                task.spawn(function()
+                    updateRoleAvatars()
+                end)
             end
         end)
     end)
@@ -2936,8 +3094,11 @@ local function SetupGunTracking()
                             CONFIG.Colors.Gun
                         )
                     end)
-                end
-                
+                task.spawn(function()
+                    clearSheriffAvatar()
+                end)
+                end               
+
                 State.previousGun = gun
             end
 
@@ -2971,101 +3132,105 @@ end
 -- БЛОК 7: Fling (СТРОКИ 611-660)
 -- ══════════════════════════════════════════════════════════════════════════════
 
-local AntiFlingLastPos = Vector3.zero
-local FlingDetectionConnection = nil
-local FlingNeutralizerConnection = nil
-local DetectedFlingers = {}
-local FlingBlockedNotified = false
+local AntiFlingState = {
+    LastPos = Vector3.zero,
+    DetectionConn = nil,
+    NeutralizerConn = nil,
+    Flingers = {},
+    NotifCooldown = false,
+    Thresholds = {
+        Angular = 50,
+        Linear = 100,
+        Danger = 250
+    }
+}
 
 -- EnableAntiFling() - Включение защиты от флинга
 local function EnableAntiFling()
     if State.AntiFlingEnabled then return end
     State.AntiFlingEnabled = true
-
-    FlingDetectionConnection = RunService.Heartbeat:Connect(function()
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
-                local primaryPart = player.Character.PrimaryPart
-                if primaryPart then
-                    if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
-                        if not DetectedFlingers[player.Name] then
-                            DetectedFlingers[player.Name] = true
-                        end
-                        
-                        pcall(function()
-                            if player.Character then
-                                for _, part in ipairs(player.Character:GetDescendants()) do
-                                    if part:IsA("BasePart") then
-                                        pcall(function()
-                                            part.CanCollide = false
-                                            part.AssemblyAngularVelocity = Vector3.zero
-                                            part.AssemblyLinearVelocity = Vector3.zero
-                                            part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
-                                        end)
-                                    end
-                                end
-                            end
-                        end)
-                    end
-                end
-            end
-        end
-    end)
     
-
-    FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
-        local character = LocalPlayer.Character
-        if character and character.PrimaryPart then
-            local primaryPart = character.PrimaryPart
-            if State.IsFlingInProgress then
-                AntiFlingLastPos = primaryPart.Position
-                return
-            end
-			
-            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or 
-               primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
+    -- Обнаружение флингеров
+    AntiFlingState.DetectionConn = RunService.Heartbeat:Connect(function()
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character and plr.Character.PrimaryPart then
+                local part = plr.Character.PrimaryPart
+                local angVel = part.AssemblyAngularVelocity.Magnitude
+                local linVel = part.AssemblyLinearVelocity.Magnitude
                 
-                if State.NotificationsEnabled and not FlingBlockedNotified then
-                    ShowNotification(
-                        "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
-                        CONFIG.Colors.Text
-                    )
+                if angVel > AntiFlingState.Thresholds.Angular or linVel > AntiFlingState.Thresholds.Linear then
+                    AntiFlingState.Flingers[plr.Name] = true
                     
-                    FlingBlockedNotified = true
-                    task.delay(3, function()
-                        FlingBlockedNotified = false
+                    pcall(function()
+                        for _, obj in ipairs(plr.Character:GetDescendants()) do
+                            if obj:IsA("BasePart") then
+                                pcall(function()
+                                    obj.CanCollide = false
+                                    obj.AssemblyAngularVelocity = Vector3.zero
+                                    obj.AssemblyLinearVelocity = Vector3.zero
+                                    obj.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
+                                end)
+                            end
+                        end
                     end)
                 end
-                
-                primaryPart.AssemblyLinearVelocity = Vector3.zero
-                primaryPart.AssemblyAngularVelocity = Vector3.zero
-                
-                if AntiFlingLastPos ~= Vector3.zero then
-                    primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
-                end
-            else
-                AntiFlingLastPos = primaryPart.Position
             end
         end
     end)
     
-    table.insert(State.Connections, FlingDetectionConnection)
-    table.insert(State.Connections, FlingNeutralizerConnection)
+    -- Защита локального игрока
+    AntiFlingState.NeutralizerConn = RunService.Heartbeat:Connect(function()
+        local char = LocalPlayer.Character
+        if not char or not char.PrimaryPart then return end
+        
+        local part = char.PrimaryPart
+        
+        if State.IsFlingInProgress then
+            AntiFlingState.LastPos = part.Position
+            return
+        end
+        
+        local velMag = part.AssemblyLinearVelocity.Magnitude
+        local angMag = part.AssemblyAngularVelocity.Magnitude
+        
+        if velMag > AntiFlingState.Thresholds.Danger or angMag > AntiFlingState.Thresholds.Danger then
+            if State.NotificationsEnabled and not AntiFlingState.NotifCooldown then
+                ShowNotification(
+                    "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
+                    CONFIG.Colors.Text
+                )
+                AntiFlingState.NotifCooldown = true
+                task.delay(3, function() AntiFlingState.NotifCooldown = false end)
+            end
+            
+            part.AssemblyLinearVelocity = Vector3.zero
+            part.AssemblyAngularVelocity = Vector3.zero
+            
+            if AntiFlingState.LastPos ~= Vector3.zero then
+                part.CFrame = CFrame.new(AntiFlingState.LastPos)
+            end
+        else
+            AntiFlingState.LastPos = part.Position
+        end
+    end)
+    
+    table.insert(State.Connections, AntiFlingState.DetectionConn)
+    table.insert(State.Connections, AntiFlingState.NeutralizerConn)
 end
 
 -- DisableAntiFling() - Отключение защиты
 local function DisableAntiFling()
     State.AntiFlingEnabled = false
-    DetectedFlingers = {}
+    AntiFlingState.Flingers = {}
     
-    if FlingDetectionConnection then
-        FlingDetectionConnection:Disconnect()
-        FlingDetectionConnection = nil
+    if AntiFlingState.DetectionConn then
+        AntiFlingState.DetectionConn:Disconnect()
+        AntiFlingState.DetectionConn = nil
     end
     
-    if FlingNeutralizerConnection then
-        FlingNeutralizerConnection:Disconnect()
-        FlingNeutralizerConnection = nil
+    if AntiFlingState.NeutralizerConn then
+        AntiFlingState.NeutralizerConn:Disconnect()
+        AntiFlingState.NeutralizerConn = nil
     end
 end
 
@@ -5243,6 +5408,10 @@ local playerConnections = {}
 local function CreatePlayerNicknameESP(player)
     if not player or player == LocalPlayer then return end
     
+    -- ✅ Дополнительные проверки
+    if not player.Parent then return end
+    if not player:IsDescendantOf(game) then return end
+    
     local character = player.Character
     if not character or not character.Parent then return end
     
@@ -5278,6 +5447,7 @@ local function CreatePlayerNicknameESP(player)
         billboard = billboard
     }
 end
+
 
 local function RemovePlayerNicknameESP(player)
     if not player or not State.PlayerNicknamesCache[player] then return end
@@ -5938,12 +6108,18 @@ local function EnableInstantPickup()
                                     CONFIG.Colors.Text
                                 )
                             end)
+                                task.spawn(function()
+                                updateRoleAvatars()
+                            end)
                         end
                         break
                     end
                     
                     -- Пистолет исчез (кто-то другой подобрал)
                     if State.CurrentGunDrop ~= gun then
+                        task.spawn(function()
+                            updateRoleAvatars()
+                        end)
                         break
                     end
                 end
@@ -7404,6 +7580,7 @@ end)
 -- ═══════════════════════════════════════════════════════════════
 
 CreateNotificationUI()
+CreateAvatarUI()
 ApplyCharacterSettings()
 SetupGunTracking()
 SetupPlayerNicknamesTracking()
