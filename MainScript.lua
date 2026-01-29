@@ -294,15 +294,39 @@ local State = {
     }
 }
 
-local ScriptAlive = true
-
+-- Замените существующий блок TeleportCheck на этот:
 local TeleportCheck = false
-game.Players.LocalPlayer.OnTeleport:Connect(function()
-    if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
-        TeleportCheck = true
-        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
-    end
-end)
+
+-- Используйте более надежную проверку
+if queue_on_teleport then
+    local teleportScript = [[
+        -- Ждем полной загрузки
+        repeat task.wait() until game:IsLoaded()
+        task.wait(2)
+        
+        -- Проверяем PlaceId
+        if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
+            local success, err = pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
+            end)
+            if not success then
+                warn("Ошибка автозагрузки:", err)
+            end
+        end
+    ]]
+    
+    -- Попытка 1: OnTeleport event
+    game.Players.LocalPlayer.OnTeleport:Connect(function(State)
+        if State == Enum.TeleportState.Started and not TeleportCheck then
+            TeleportCheck = true
+            queue_on_teleport(teleportScript)
+        end
+    end)
+    
+    -- Попытка 2: Сразу добавляем в очередь (для ручной смены серверов)
+    queue_on_teleport(teleportScript)
+end
+
 
 local function TrackConnection(conn)
     if conn then
@@ -333,7 +357,7 @@ if clientChar then
 end
 
 LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1) -- Ждём загрузки аксессуаров
+    task.wait(1)
     DisableAccessoryQueries(char)
 end)
 
