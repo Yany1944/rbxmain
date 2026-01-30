@@ -343,40 +343,6 @@ end
 -- AIMBOT SYSTEM (ИСПРАВЛЕННАЯ ИНТЕГРАЦИЯ)
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- Отключаем CanQuery для всех аксессуаров (чтобы raycast их игнорировал)
-local function DisableAccessoryQueries(character)
-    for _, accessory in ipairs(character:GetChildren()) do
-        if accessory:IsA("Accessory") or accessory:IsA("Accoutrement") then
-            local handle = accessory:FindFirstChild("Handle")
-            if handle and handle:IsA("BasePart") then
-                handle.CanQuery = false
-            end
-        end
-    end
-end
-
--- Применяем к локальному игроку
-if clientChar then
-    DisableAccessoryQueries(clientChar)
-end
-
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1)
-    DisableAccessoryQueries(char)
-end)
-
--- Применяем ко всем игрокам
-for _, player in ipairs(Players:GetPlayers()) do
-    if player.Character then
-        DisableAccessoryQueries(player.Character)
-    end
-    player.CharacterAdded:Connect(function(char)
-        task.wait(1)
-        DisableAccessoryQueries(char)
-    end)
-end
-
-
 if _G.AIMBOT_LOADED then
     warn("Aimbot already loaded!")
 else
@@ -397,6 +363,38 @@ local clientMouse = LocalPlayer:GetMouse()
 local clientRoot, clientHumanoid
 local clientCamera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass('Camera')
 local clientTeam = LocalPlayer.Team
+
+local function DisableAccessoryQueries(character)
+    for _, accessory in ipairs(character:GetChildren()) do
+        if accessory:IsA("Accessory") or accessory:IsA("Accoutrement") then
+            local handle = accessory:FindFirstChild("Handle")
+            if handle and handle:IsA("BasePart") then
+                handle.CanQuery = false
+            end
+        end
+    end
+end
+
+-- Применяем к локальному игроку
+if clientChar then
+    DisableAccessoryQueries(clientChar)
+end
+
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    DisableAccessoryQueries(char)
+end))
+
+-- Применяем ко всем игрокам
+for _, player in ipairs(Players:GetPlayers()) do
+    if player.Character then
+        DisableAccessoryQueries(player.Character)
+    end
+    TrackConnection(player.CharacterAdded:Connect(function(char)
+        task.wait(1)
+        DisableAccessoryQueries(char)
+    end))
+end
 
 local function GetRootPart(character)
     if not character or not character.Parent then return nil end
@@ -584,7 +582,7 @@ local AimbotState = {
     lastValidCheck = 0,
     Connection = nil
 }
-
+_G.AimbotState = AimbotState
 
 local function StartAimbot()
     if AimbotState.Connection then
@@ -592,9 +590,24 @@ local function StartAimbot()
         AimbotState.Connection = nil
     end
 
-    if AimbotState.FovCircle then pcall(function() AimbotState.FovCircle:Remove() end) AimbotState.FovCircle = nil end
-    if AimbotState.FovCircleOutline then pcall(function() AimbotState.FovCircleOutline:Remove() end) AimbotState.FovCircleOutline = nil end
+    -- ✅ ИСПРАВЛЕНИЕ: Безопасное удаление с проверкой
+    if AimbotState.FovCircle then 
+        pcall(function() 
+            AimbotState.FovCircle.Visible = false
+            AimbotState.FovCircle:Remove() 
+        end) 
+        AimbotState.FovCircle = nil 
+    end
+    
+    if AimbotState.FovCircleOutline then 
+        pcall(function() 
+            AimbotState.FovCircleOutline.Visible = false
+            AimbotState.FovCircleOutline:Remove() 
+        end) 
+        AimbotState.FovCircleOutline = nil 
+    end
 
+    -- Создание новых кругов
     AimbotState.FovCircle = drawNew('Circle')
     AimbotState.FovCircle.NumSides = 40
     AimbotState.FovCircle.Thickness = 2
@@ -612,8 +625,6 @@ local function StartAimbot()
     AimbotState.FovCircleOutline.Color = colRgb(0, 0, 0)
     AimbotState.FovCircleOutline.Transparency = 0.8
     AimbotState.FovCircleOutline.ZIndex = 1
-
-    _G.AimbotState = AimbotState
 
     local function isValidTarget(root, hum)
         if not root or not root.Parent then return false end
@@ -825,6 +836,9 @@ local function StartAimbot()
 
     if State.AimbotConfig.Method == 'Camera' then
     AimbotState.Connection = RunService.RenderStepped:Connect(function()
+        if not AimbotState.FovCircle or not AimbotState.FovCircleOutline then 
+            return 
+        end
         local currentTime = tick()
         
         -- ✅ Обновляем позицию мыши каждый кадр БЕЗ задержки
@@ -870,6 +884,9 @@ local function StartAimbot()
         end)
     elseif State.AimbotConfig.Method == 'Mouse' then
         AimbotState.Connection = RunService.RenderStepped:Connect(function(dt)
+        if not AimbotState.FovCircle or not AimbotState.FovCircleOutline then 
+            return 
+        end
             local currentTime = tick()
 
             -- ✅ Убираем ограничение частоты обновления
@@ -937,12 +954,20 @@ end
 
 local function StopAimbot()
     if AimbotState.Connection then
-        AimbotState.Connection:Disconnect()
+        pcall(function() AimbotState.Connection:Disconnect() end)
         AimbotState.Connection = nil
     end
 
-    if AimbotState.FovCircle then pcall(function() AimbotState.FovCircle:Remove() end) AimbotState.FovCircle = nil end
-    if AimbotState.FovCircleOutline then pcall(function() AimbotState.FovCircleOutline:Remove() end) AimbotState.FovCircleOutline = nil end
+    -- Безопасное удаление с проверкой
+    if AimbotState.FovCircle then 
+        pcall(function() AimbotState.FovCircle:Remove() end) 
+        AimbotState.FovCircle = nil 
+    end
+    
+    if AimbotState.FovCircleOutline then 
+        pcall(function() AimbotState.FovCircleOutline:Remove() end) 
+        AimbotState.FovCircleOutline = nil 
+    end
 
     AimbotState.Target = nil
     AimbotState.PreviousTarget = nil
@@ -6015,7 +6040,6 @@ shootMurderer = function(forceMagic)
     end
 end
 
-
 -- pickupGun() - Подбор пистолета
 local function pickupGun(silent)
     local gun = Workspace:FindFirstChild("GunDrop", true)
@@ -7193,10 +7217,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         AimbotFovCheck = function(value)
             State.AimbotConfig.FovCheck = value
-            if _G.AimbotState.FovCircle then
+            -- ✅ ИСПРАВЛЕНИЕ: Добавлена проверка на существование
+            if _G.AimbotState and _G.AimbotState.FovCircle then
                 _G.AimbotState.FovCircle.Visible = value
             end
-            if _G.AimbotState.FovCircleOutline then
+            if _G.AimbotState and _G.AimbotState.FovCircleOutline then
                 _G.AimbotState.FovCircleOutline.Visible = value
             end
         end,
@@ -7227,10 +7252,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         AimbotFov = function(value)
             State.AimbotConfig.Fov = value
-            if _G.AimbotState.FovCircle then
+            -- ✅ ИСПРАВЛЕНИЕ: Добавлена проверка на существование
+            if _G.AimbotState and _G.AimbotState.FovCircle then
                 _G.AimbotState.FovCircle.Radius = value
             end
-            if _G.AimbotState.FovCircleOutline then
+            if _G.AimbotState and _G.AimbotState.FovCircleOutline then
                 _G.AimbotState.FovCircleOutline.Radius = value
             end
         end,
@@ -7251,9 +7277,12 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.AimbotConfig.Method = value
             if State.AimbotConfig.Enabled then
                 if _G.StopAimbot then _G.StopAimbot() end
+                -- ✅ Небольшая задержка для перезапуска
+                task.wait(0.1)
                 if _G.StartAimbot then _G.StartAimbot() end
             end
         end,
+
         AimbotMouseButton = function(value)
             State.AimbotConfig.MouseButton = value
         end,
