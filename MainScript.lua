@@ -573,44 +573,47 @@ end
 -- ========================================
 -- ЛОГИКА АИМБОТА
 -- ========================================
-local AimbotTarget = nil
-local PreviousTarget = nil
-local FovCircle, FovCircleOutline
-local cachedMousePos = vec2(0, 0)
-local lastMouseUpdate = 0
-local validPlayers = {}
-local lastValidCheck = 0
-local AimbotConnection = nil
+local AimbotState = {
+    Target = nil,
+    PreviousTarget = nil,
+    FovCircle = nil,
+    FovCircleOutline = nil,
+    cachedMousePos = vec2(0, 0),
+    lastMouseUpdate = 0,
+    validPlayers = {},
+    lastValidCheck = 0,
+    Connection = nil
+}
+
 
 local function StartAimbot()
-    if AimbotConnection then
-        AimbotConnection:Disconnect()
-        AimbotConnection = nil
+    if AimbotState.Connection then
+        AimbotState.Connection:Disconnect()
+        AimbotState.Connection = nil
     end
 
-    if FovCircle then pcall(function() FovCircle:Remove() end) FovCircle = nil end
-    if FovCircleOutline then pcall(function() FovCircleOutline:Remove() end) FovCircleOutline = nil end
+    if AimbotState.FovCircle then pcall(function() AimbotState.FovCircle:Remove() end) AimbotState.FovCircle = nil end
+    if AimbotState.FovCircleOutline then pcall(function() AimbotState.FovCircleOutline:Remove() end) AimbotState.FovCircleOutline = nil end
 
-    FovCircle = drawNew('Circle')
-    FovCircle.NumSides = 40
-    FovCircle.Thickness = 2
-    FovCircle.Visible = State.AimbotConfig.FovCheck
-    FovCircle.Radius = State.AimbotConfig.Fov
-    FovCircle.Color = CONFIG.Colors.Accent
-    FovCircle.Transparency = 0.7
-    FovCircle.ZIndex = 2
+    AimbotState.FovCircle = drawNew('Circle')
+    AimbotState.FovCircle.NumSides = 40
+    AimbotState.FovCircle.Thickness = 2
+    AimbotState.FovCircle.Visible = State.AimbotConfig.FovCheck
+    AimbotState.FovCircle.Radius = State.AimbotConfig.Fov
+    AimbotState.FovCircle.Color = CONFIG.Colors.Accent
+    AimbotState.FovCircle.Transparency = 0.7
+    AimbotState.FovCircle.ZIndex = 2
 
-    FovCircleOutline = drawNew('Circle')
-    FovCircleOutline.NumSides = 40
-    FovCircleOutline.Thickness = 2
-    FovCircleOutline.Visible = State.AimbotConfig.FovCheck
-    FovCircleOutline.Radius = State.AimbotConfig.Fov
-    FovCircleOutline.Color = colRgb(0, 0, 0)
-    FovCircleOutline.Transparency = 0.8
-    FovCircleOutline.ZIndex = 1
+    AimbotState.FovCircleOutline = drawNew('Circle')
+    AimbotState.FovCircleOutline.NumSides = 40
+    AimbotState.FovCircleOutline.Thickness = 2
+    AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+    AimbotState.FovCircleOutline.Radius = State.AimbotConfig.Fov
+    AimbotState.FovCircleOutline.Color = colRgb(0, 0, 0)
+    AimbotState.FovCircleOutline.Transparency = 0.8
+    AimbotState.FovCircleOutline.ZIndex = 1
 
-    _G.FovCircle = FovCircle
-    _G.FovCircleOutline = FovCircleOutline
+    _G.AimbotState = AimbotState
 
     local function isValidTarget(root, hum)
         if not root or not root.Parent then return false end
@@ -671,8 +674,8 @@ local function StartAimbot()
 
     local function lock(targ)
         if State.AimbotConfig.LockOn then
-            if PreviousTarget then
-                return (targ == PreviousTarget)
+            if AimbotState.PreviousTarget then
+                return (targ == AimbotState.PreviousTarget)
             else
                 return true
             end
@@ -704,14 +707,14 @@ local function StartAimbot()
     end
 
     local function updateValidPlayers()
-        table.clear(validPlayers)
+        table.clear(AimbotState.validPlayers)
 
         for i = 1, #playerNames do
             local plrObject = playerManagers[playerNames[i]]
 
             if plrObject and plrObject.RootPart and plrObject.RootPart.Parent then
                 if team(plrObject.Team) then
-                    table.insert(validPlayers, plrObject)
+                    table.insert(AimbotState.validPlayers, plrObject)
                 end
             end
         end
@@ -728,10 +731,10 @@ local function StartAimbot()
             local MousePosition = mp or vec2(clientMouse.X, clientMouse.Y)
             local CameraPos = clientCamera.CFrame.Position
 
-            AimbotTarget = nil
+            AimbotState.Target = nil
 
-            for i = 1, #validPlayers do
-                local plrObject = validPlayers[i]
+            for i = 1, #AimbotState.validPlayers do
+                local plrObject = AimbotState.validPlayers[i]
                 local Root, Humanoid = plrObject.RootPart, plrObject.Humanoid
 
                 if not isValidTarget(Root, Humanoid) then continue end
@@ -766,7 +769,7 @@ local function StartAimbot()
                 end
             end
 
-            AimbotTarget = FinalVec2
+            AimbotState.Target = FinalVec2
             return FinalTarget, FinalVec2, nil
         end
 
@@ -777,10 +780,10 @@ local function StartAimbot()
             local MousePosition = mp or vec2(clientMouse.X, clientMouse.Y)  -- ✅ ИЗМЕНИТЬ
             local CameraPos = clientCamera.CFrame.Position
 
-            AimbotTarget = nil
+            AimbotState.Target = nil
 
-            for i = 1, #validPlayers do
-                local plrObject = validPlayers[i]
+            for i = 1, #AimbotState.validPlayers do
+                local plrObject = AimbotState.validPlayers[i]
                 local Root, Humanoid = plrObject.RootPart, plrObject.Humanoid
 
                 if not isValidTarget(Root, Humanoid) then continue end
@@ -815,28 +818,28 @@ local function StartAimbot()
                 end
             end
 
-            AimbotTarget = FinalVec2
+            AimbotState.Target = FinalVec2
             return FinalTarget, FinalVec3
         end
     end
 
     if State.AimbotConfig.Method == 'Camera' then
-    AimbotConnection = RunService.RenderStepped:Connect(function()
+    AimbotState.Connection = RunService.RenderStepped:Connect(function()
         local currentTime = tick()
         
         -- ✅ Обновляем позицию мыши каждый кадр БЕЗ задержки
-        cachedMousePos = UserInputService:GetMouseLocation()
+        AimbotState.cachedMousePos = UserInputService:GetMouseLocation()
         
-        FovCircle.Position = cachedMousePos
-        FovCircleOutline.Position = cachedMousePos
-        FovCircle.Color = CONFIG.Colors.Accent
+        AimbotState.FovCircle.Position = AimbotState.cachedMousePos
+        AimbotState.FovCircleOutline.Position = AimbotState.cachedMousePos
+        AimbotState.FovCircle.Color = CONFIG.Colors.Accent
 
-        FovCircle.Visible = State.AimbotConfig.FovCheck
-        FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+        AimbotState.FovCircle.Visible = State.AimbotConfig.FovCheck
+        AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
 
-        if currentTime - lastValidCheck > 0.5 then
+        if currentTime - AimbotState.lastValidCheck > 0.5 then
             updateValidPlayers()
-            lastValidCheck = currentTime
+            AimbotState.lastValidCheck = currentTime
         end
 
             local isActive = false
@@ -847,8 +850,8 @@ local function StartAimbot()
             end
 
             if not isActive then
-                PreviousTarget = nil
-                AimbotTarget = nil
+                AimbotState.PreviousTarget = nil
+                AimbotState.Target = nil
                 return
             end
 
@@ -857,8 +860,8 @@ local function StartAimbot()
                 return 
             end
 
-            local target, position = NextTarget(cachedMousePos)
-            PreviousTarget = target
+            local target, position = NextTarget(AimbotState.cachedMousePos)
+            AimbotState.PreviousTarget = target
 
             if position then
                 local _ = clientCamera.CFrame
@@ -866,22 +869,22 @@ local function StartAimbot()
             end
         end)
     elseif State.AimbotConfig.Method == 'Mouse' then
-        AimbotConnection = RunService.RenderStepped:Connect(function(dt)
+        AimbotState.Connection = RunService.RenderStepped:Connect(function(dt)
             local currentTime = tick()
 
             -- ✅ Убираем ограничение частоты обновления
-            cachedMousePos = UserInputService:GetMouseLocation()
+            AimbotState.cachedMousePos = UserInputService:GetMouseLocation()
 
-            FovCircle.Position = cachedMousePos
-            FovCircleOutline.Position = cachedMousePos
-            FovCircle.Color = CONFIG.Colors.Accent
+            AimbotState.FovCircle.Position = AimbotState.cachedMousePos
+            AimbotState.FovCircleOutline.Position = AimbotState.cachedMousePos
+            AimbotState.FovCircle.Color = CONFIG.Colors.Accent
 
-            FovCircle.Visible = State.AimbotConfig.FovCheck
-            FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+            AimbotState.FovCircle.Visible = State.AimbotConfig.FovCheck
+            AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
 
-            if currentTime - lastValidCheck > 0.5 then
+            if currentTime - AimbotState.lastValidCheck > 0.5 then
                 updateValidPlayers()
-                lastValidCheck = currentTime
+                AimbotState.lastValidCheck = currentTime
             end
 
             local isActive = false
@@ -892,8 +895,8 @@ local function StartAimbot()
             end
 
             if not isActive then
-                PreviousTarget = nil
-                AimbotTarget = nil
+                AimbotState.PreviousTarget = nil
+                AimbotState.Target = nil
                 return
             end
 
@@ -905,11 +908,11 @@ local function StartAimbot()
                 end
             end
 
-            local target, position, _ = NextTarget(cachedMousePos)
-            PreviousTarget = target
+            local target, position, _ = NextTarget(AimbotState.cachedMousePos)
+            AimbotState.PreviousTarget = target
 
             if position then
-                local delta = position - cachedMousePos
+                local delta = position - AimbotState.cachedMousePos
                 
                 -- ✅ ИСПРАВЛЕНИЕ: правильная формула со smoothness
                 local smoothValue = math.max(State.AimbotConfig.Smoothness, 0.01) -- Минимум 0.01 чтобы избежать деления на 0
@@ -929,20 +932,20 @@ local function StartAimbot()
         end)
     end
 
-    TrackConnection(AimbotConnection)
+    TrackConnection(AimbotState.Connection)
 end
 
 local function StopAimbot()
-    if AimbotConnection then
-        AimbotConnection:Disconnect()
-        AimbotConnection = nil
+    if AimbotState.Connection then
+        AimbotState.Connection:Disconnect()
+        AimbotState.Connection = nil
     end
 
-    if FovCircle then pcall(function() FovCircle:Remove() end) FovCircle = nil end
-    if FovCircleOutline then pcall(function() FovCircleOutline:Remove() end) FovCircleOutline = nil end
+    if AimbotState.FovCircle then pcall(function() AimbotState.FovCircle:Remove() end) AimbotState.FovCircle = nil end
+    if AimbotState.FovCircleOutline then pcall(function() AimbotState.FovCircleOutline:Remove() end) AimbotState.FovCircleOutline = nil end
 
-    AimbotTarget = nil
-    PreviousTarget = nil
+    AimbotState.Target = nil
+    AimbotState.PreviousTarget = nil
 end
 
 local function ToggleAimbot(enabled)
@@ -7190,11 +7193,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         AimbotFovCheck = function(value)
             State.AimbotConfig.FovCheck = value
-            if _G.FovCircle then
-                _G.FovCircle.Visible = value
+            if _G.AimbotState.FovCircle then
+                _G.AimbotState.FovCircle.Visible = value
             end
-            if _G.FovCircleOutline then
-                _G.FovCircleOutline.Visible = value
+            if _G.AimbotState.FovCircleOutline then
+                _G.AimbotState.FovCircleOutline.Visible = value
             end
         end,
 
@@ -7224,11 +7227,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         AimbotFov = function(value)
             State.AimbotConfig.Fov = value
-            if _G.FovCircle then
-                _G.FovCircle.Radius = value
+            if _G.AimbotState.FovCircle then
+                _G.AimbotState.FovCircle.Radius = value
             end
-            if _G.FovCircleOutline then
-                _G.FovCircleOutline.Radius = value
+            if _G.AimbotState.FovCircleOutline then
+                _G.AimbotState.FovCircleOutline.Radius = value
             end
         end,
 
