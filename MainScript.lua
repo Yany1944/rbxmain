@@ -5929,7 +5929,7 @@ shootMurderer = function(forceMagic)
             [2] = CFrame.new(targetPosition)
         }
     else
-        -- === SILENT MODE: Стрельба от дула пистолета ===
+    -- === SILENT MODE: Стрельба от дула пистолета ===
         local rightHand = LocalPlayer.Character:FindFirstChild("RightHand")
         local gunHandle = gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel")
         
@@ -5941,51 +5941,43 @@ shootMurderer = function(forceMagic)
         end
         
         -- 1. ТОЧНАЯ ПОЗИЦИЯ ДУЛА
-        -- В MM2 пистолет держится в RightHand, дуло ~2 studs впереди
         local muzzleCFrame
         if gunHandle then
             muzzleCFrame = gunHandle.CFrame
         else
-            -- Если Handle нет - вычисляем от руки
             muzzleCFrame = rightHand.CFrame * CFrame.new(0, 0, -2)
         end
         
         local muzzlePosition = muzzleCFrame.Position
         
-        -- 2. МАКСИМАЛЬНАЯ ПРЕДИКЦИЯ ЦЕЛИ
+        -- 2. ВЫБОР ЦЕЛЕВОЙ ЧАСТИ ТЕЛА
+        -- Целимся в Torso/UpperTorso для максимального хитбокса
+        local murdererTorso = murderer.Character:FindFirstChild("Torso") or murderer.Character:FindFirstChild("UpperTorso")
+        local targetPart = murdererTorso or murdererHRP
+        
+        -- ✅ ИСПРАВЛЕНИЕ: Берем позицию НАПРЯМУЮ от целевой части, а не через HRP
+        local targetPosition = targetPart.Position
+        
+        -- 3. РАСЧЕТ ПРЕДИКЦИИ
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
         
-        -- Время полета пули + пинг
-        -- MM2 пуля летит ~500 studs/sec, добавляем сетевую задержку
-        local distanceToTarget = (murdererHRP.Position - muzzlePosition).Magnitude
-        local bulletSpeed = 500 -- studs per second (примерная скорость MM2 пули)
+        local distanceToTarget = (targetPosition - muzzlePosition).Magnitude
+        local bulletSpeed = 500
         local bulletTravelTime = distanceToTarget / bulletSpeed
         local networkDelay = (pingValue / 1000)
         
         local totalPredictionTime = bulletTravelTime + networkDelay
         
-        -- 3. ПРОДВИНУТАЯ ПРЕДИКЦИЯ
+        -- 4. ПРИМЕНЯЕМ ПРЕДИКЦИЮ К ЦЕЛЕВОЙ ЧАСТИ
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local predictedPos = murdererHRP.Position + (enemyVelocity * totalPredictionTime)
-        
-        -- ВАЖНО: Целимся в центр Torso для максимального хитбокса
-        -- Если стрелять в HRP/Head - можем промазать из-за маленького хитбокса
-        local murdererTorso = murderer.Character:FindFirstChild("Torso") or murderer.Character:FindFirstChild("UpperTorso")
-        local targetPart = murdererTorso or murdererHRP
-        
-        -- Применяем предикцию к выбранной части тела
-        local targetPartOffset = targetPart.Position - murdererHRP.Position
-        local finalTargetPosition = predictedPos + targetPartOffset
-        
-        -- 4. ФОРМИРОВАНИЕ ПРАВИЛЬНЫХ CFrame
-        -- Первый аргумент: CFrame дула, направленный на цель
+        local finalTargetPosition = targetPosition + (enemyVelocity * totalPredictionTime)
+
+        -- 5. ФОРМИРОВАНИЕ CFrame
         local directionToTarget = (finalTargetPosition - muzzlePosition).Unit
         local shootFromCFrame = CFrame.lookAt(muzzlePosition, muzzlePosition + directionToTarget)
-        
-        -- Второй аргумент: CFrame точки попадания
         local shootToCFrame = CFrame.new(finalTargetPosition)
-        
+
         argsShootRemote = {
             [1] = shootFromCFrame,
             [2] = shootToCFrame
@@ -6057,12 +6049,16 @@ local function pickupGun(silent)
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     
-    -- Используем firetouchinterest - никакого телепорта
-    firetouchinterest(hrp, gun, 0)
-    task.wait(0.1)
-    firetouchinterest(hrp, gun, 1)
+    -- ✅ ЗАЩИТА: проверяем что gun существует и имеет Parent
+    if not gun or not gun.Parent then return false end
     
-    -- ✅ УВЕДОМЛЕНИЕ ТОЛЬКО ЕСЛИ НЕ SILENT
+    -- Используем firetouchinterest
+    pcall(function()
+        firetouchinterest(hrp, gun, 0)
+        task.wait(0.1)
+        firetouchinterest(hrp, gun, 1)
+    end)
+    
     if not silent and State.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
     end
@@ -6077,8 +6073,12 @@ local function EnableInstantPickup()
     end
     
     State.InstantPickupEnabled = true
+    
+    -- ✅ ЗАЩИТА: проверяем SetupGunTracking перед вызовом
     if not State.currentMapConnection then
-        SetupGunTracking()
+        pcall(function()
+            SetupGunTracking()
+        end)
     end
     
     local lastAttemptedGun = nil
@@ -6099,31 +6099,33 @@ local function EnableInstantPickup()
             end
             
             local gun = State.CurrentGunDrop
-            if gun and gun ~= lastAttemptedGun then
+            
+            -- ✅ ЗАЩИТА: проверяем существование gun и его Parent
+            if gun and gun.Parent and gun ~= lastAttemptedGun then
     
-                -- ✅ Проверяем: мы уже Sheriff/Hero? Тогда не надо подбирать
                 local sheriff = getSheriff()
                 if sheriff == LocalPlayer then
                     lastAttemptedGun = gun
                     continue
                 end
                 
-                -- Проверяем, уже подобран НАМИ?
                 if LocalPlayer.Character:FindFirstChild("Gun") or 
-                LocalPlayer.Backpack:FindFirstChild("Gun") then
+                   LocalPlayer.Backpack:FindFirstChild("Gun") then
                     lastAttemptedGun = gun
                     continue
                 end
-    
                 
                 local pickupSuccess = false
                 
-                -- ✅ 5 ПОПЫТОК с более быстрым интервалом
                 for attempt = 1, 5 do
-                    pickupGun(true)  -- silent mode
-                    task.wait(0.15)  -- ← Быстрее (было 0.5)
+                    -- ✅ ЗАЩИТА: проверяем gun перед каждой попыткой
+                    if not gun or not gun.Parent then
+                        break
+                    end
                     
-                    -- Проверяем успех
+                    pickupGun(true)
+                    task.wait(0.15)
+                    
                     if LocalPlayer.Character:FindFirstChild("Gun") or 
                        LocalPlayer.Backpack:FindFirstChild("Gun") then
                         pickupSuccess = true
@@ -6135,15 +6137,14 @@ local function EnableInstantPickup()
                                     CONFIG.Colors.Text
                                 )
                             end)
-                                task.spawn(function()
+                            task.spawn(function()
                                 updateRoleAvatars()
                             end)
                         end
                         break
                     end
                     
-                    -- Пистолет исчез (кто-то другой подобрал)
-                    if State.CurrentGunDrop ~= gun then
+                    if State.CurrentGunDrop ~= gun or not State.CurrentGunDrop then
                         task.spawn(function()
                             updateRoleAvatars()
                         end)
@@ -6153,20 +6154,17 @@ local function EnableInstantPickup()
                 
                 lastAttemptedGun = gun
                 
-                -- Если не удалось - ждём следующий Gun
                 if not pickupSuccess then
                     repeat
-                        task.wait(0.1)  -- ← Быстрее (было 0.2)
+                        task.wait(0.1)
                         if not State.InstantPickupEnabled then
                             return
                         end
                         
-                        -- Выходим, когда появится НОВЫЙ пистолет
                         if State.CurrentGunDrop and State.CurrentGunDrop ~= lastAttemptedGun then
                             break
                         end
                         
-                        -- Или когда старый исчезнет
                         if not State.CurrentGunDrop then
                             break
                         end
@@ -6175,7 +6173,7 @@ local function EnableInstantPickup()
                 end
             end
             
-            task.wait(0.05)  -- ← Быстрее проверка цикла (было 0.1)
+            task.wait(0.05)
         end
     end)
 end
@@ -6188,7 +6186,6 @@ local function DisableInstantPickup()
         State.InstantPickupThread = nil
     end
 end
-
 
 -- EnableExtendedHitbox() - Включение расширенного хитбокса
 local OriginalSizes = {}
@@ -6868,7 +6865,6 @@ local function StartSpeedGlitch()
     State.SpeedGlitchConnection = RunService.RenderStepped:Connect(function()
         if not State.SpeedGlitchEnabled then return end
         
-        -- Проверка существования персонажа
         if not humanoid or not humanoid.Parent or humanoid:GetState() == Enum.HumanoidStateType.Dead then
             return
         end
@@ -6877,15 +6873,11 @@ local function StartSpeedGlitch()
         local isJumping = state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall
         local isMoving = humanoid.MoveDirection.Magnitude > 0.1
         
-        -- ГЛАВНАЯ ЛОГИКА: Скорость работает только при прыжке + движении
+        -- Спид глитч работает ТОЛЬКО в прыжке + движение
         if isJumping and isMoving then
-            if humanoid.WalkSpeed ~= State.SpeedGlitchSpeed then
-                humanoid.WalkSpeed = State.SpeedGlitchSpeed
-            end
+            humanoid.WalkSpeed = State.SpeedGlitchSpeed  -- Без проверки, каждый кадр
         else
-            if humanoid.WalkSpeed ~= DEFAULT_WALKSPEED then  -- ✅ Используем константу
-                humanoid.WalkSpeed = DEFAULT_WALKSPEED
-            end
+            humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- Без проверки, каждый кадр
         end
     end)
     
@@ -6930,7 +6922,6 @@ local function ToggleSpeedGlitch()
         StartSpeedGlitch()
     end
 end
-
 
 -- СНАЧАЛА объявляем функции
 local function HandleEmoteInput(input)
@@ -7307,23 +7298,8 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         SpeedGlitchSpeed = function(value)
             State.SpeedGlitchSpeed = value
-
-            if State.SpeedGlitchEnabled then
-                local character = LocalPlayer.Character
-                if character then
-                    local humanoid = character:FindFirstChildOfClass("Humanoid")
-                    if humanoid then
-                        local state = humanoid:GetState()
-                        local isJumping = state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall
-                        local isMoving = humanoid.MoveDirection.Magnitude > 0.1
-                        
-                        if isJumping and isMoving then
-                            humanoid.WalkSpeed = value
-                        end
-                    end
-                end
-            end
         end,
+
         Shutdown = function() FullShutdown() end,
 
         AutoLoadOnTeleport = function(on)
