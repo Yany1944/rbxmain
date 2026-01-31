@@ -7,11 +7,11 @@
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-if getgenv().MM2_ESP_Script then 
+if getgenv().MM2_Script then 
     warn("Already running!")
     return 
 end
-getgenv().MM2_ESP_Script = true
+getgenv().MM2_Script = true
 
 local AUTOFARM_ENABLED = false
 --SK2ND = 982594515
@@ -95,6 +95,7 @@ local CONFIG = {
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
@@ -126,6 +127,20 @@ local State = {
     
     -- Camera 
     ViewClipEnabled = false,
+
+    -- Fly System
+    FlyEnabled = false,
+    FlyType = "Fly",  -- "Fly", "Vehicle Fly", "CFrame Fly", "Swim"
+    FlySpeed = 40,
+    FlyConnection = nil,
+    FlyBodyVelocity = nil,
+    FlyBodyGyro = nil,
+    CFlyHead = nil,
+    SwimConnection = nil,
+
+    SpeedGlitchEnabled = false,
+    SpeedGlitchSpeed = 50,
+    SpeedGlitchConnection = nil,
     
     -- Combat
     ExtendedHitboxSize = 15,
@@ -134,6 +149,7 @@ local State = {
     spawnAtPlayer = false,
     CanShootMurderer = true,
     ShootCooldown = 3,
+    ShootMurdererMode = "Magic",
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -148,6 +164,10 @@ local State = {
 
     -- Auto-load script on teleport
     AutoLoadOnTeleport = true,
+
+    currentMapConnection = nil,
+    currentMap = nil,
+    previousGun = nil,
 
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
@@ -183,6 +203,9 @@ local State = {
     -- GodMode
     GodModeEnabled = false,
     GodModeConnections = {},
+    healthConnection = nil,
+    damageBlockerConnection = nil,
+    stateConnection = nil,
     
     -- Role detection
     prevMurd = nil,
@@ -191,10 +214,15 @@ local State = {
     roundStart = true,
     roundActive = false,
     
+    PLACEHOLDER_IMAGE = "",
+    currentMurdererUserId = nil,
+    currentSheriffUserId = nil,
+
     -- ESP internals
     PlayerHighlights = {},
     GunCache = {},
     CurrentGunDrop = nil,
+    PlayerData = {},
 
     -- Player Nicknames ESP
     PlayerNicknamesESP = false,
@@ -264,19 +292,45 @@ local State = {
         NoClip = Enum.KeyCode.Unknown,
         ShootMurderer = Enum.KeyCode.Unknown,
         PickupGun = Enum.KeyCode.Unknown,
-        InstantKillAll = Enum.KeyCode.Unknown
+        InstantKillAll = Enum.KeyCode.Unknown,
+        Fly = Enum.KeyCode.Unknown,
+        SpeedGlitch = Enum.KeyCode.Unknown,
     }
 }
 
-local ScriptAlive = true
-
+-- Замените существующий блок TeleportCheck на этот:
 local TeleportCheck = false
-game.Players.LocalPlayer.OnTeleport:Connect(function()
-    if State.AutoLoadOnTeleport and not TeleportCheck and queue_on_teleport then
-        TeleportCheck = true
-        queue_on_teleport([[loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()]])
-    end
-end)
+
+-- Используйте более надежную проверку
+if queue_on_teleport then
+    local teleportScript = [[
+        -- Ждем полной загрузки
+        repeat task.wait() until game:IsLoaded()
+        task.wait(2)
+        
+        -- Проверяем PlaceId
+        if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
+            local success, err = pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
+            end)
+            if not success then
+                warn("Ошибка автозагрузки:", err)
+            end
+        end
+    ]]
+    
+    -- Попытка 1: OnTeleport event
+    game.Players.LocalPlayer.OnTeleport:Connect(function(State)
+        if State == Enum.TeleportState.Started and not TeleportCheck then
+            TeleportCheck = true
+            queue_on_teleport(teleportScript)
+        end
+    end)
+    
+    -- Попытка 2: Сразу добавляем в очередь (для ручной смены серверов)
+    queue_on_teleport(teleportScript)
+end
+
 
 local function TrackConnection(conn)
     if conn then
@@ -288,40 +342,6 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- AIMBOT SYSTEM (ИСПРАВЛЕННАЯ ИНТЕГРАЦИЯ)
 -- ══════════════════════════════════════════════════════════════════════════════
-
--- Отключаем CanQuery для всех аксессуаров (чтобы raycast их игнорировал)
-local function DisableAccessoryQueries(character)
-    for _, accessory in ipairs(character:GetChildren()) do
-        if accessory:IsA("Accessory") or accessory:IsA("Accoutrement") then
-            local handle = accessory:FindFirstChild("Handle")
-            if handle and handle:IsA("BasePart") then
-                handle.CanQuery = false
-            end
-        end
-    end
-end
-
--- Применяем к локальному игроку
-if clientChar then
-    DisableAccessoryQueries(clientChar)
-end
-
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1) -- Ждём загрузки аксессуаров
-    DisableAccessoryQueries(char)
-end)
-
--- Применяем ко всем игрокам
-for _, player in ipairs(Players:GetPlayers()) do
-    if player.Character then
-        DisableAccessoryQueries(player.Character)
-    end
-    player.CharacterAdded:Connect(function(char)
-        task.wait(1)
-        DisableAccessoryQueries(char)
-    end)
-end
-
 
 if _G.AIMBOT_LOADED then
     warn("Aimbot already loaded!")
@@ -343,6 +363,38 @@ local clientMouse = LocalPlayer:GetMouse()
 local clientRoot, clientHumanoid
 local clientCamera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass('Camera')
 local clientTeam = LocalPlayer.Team
+
+local function DisableAccessoryQueries(character)
+    for _, accessory in ipairs(character:GetChildren()) do
+        if accessory:IsA("Accessory") or accessory:IsA("Accoutrement") then
+            local handle = accessory:FindFirstChild("Handle")
+            if handle and handle:IsA("BasePart") then
+                handle.CanQuery = false
+            end
+        end
+    end
+end
+
+-- Применяем к локальному игроку
+if clientChar then
+    DisableAccessoryQueries(clientChar)
+end
+
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    DisableAccessoryQueries(char)
+end))
+
+-- Применяем ко всем игрокам
+for _, player in ipairs(Players:GetPlayers()) do
+    if player.Character then
+        DisableAccessoryQueries(player.Character)
+    end
+    TrackConnection(player.CharacterAdded:Connect(function(char)
+        task.wait(1)
+        DisableAccessoryQueries(char)
+    end))
+end
 
 local function GetRootPart(character)
     if not character or not character.Parent then return nil end
@@ -519,44 +571,60 @@ end
 -- ========================================
 -- ЛОГИКА АИМБОТА
 -- ========================================
-local AimbotTarget = nil
-local PreviousTarget = nil
-local FovCircle, FovCircleOutline
-local cachedMousePos = vec2(0, 0)
-local lastMouseUpdate = 0
-local validPlayers = {}
-local lastValidCheck = 0
-local AimbotConnection = nil
+local AimbotState = {
+    Target = nil,
+    PreviousTarget = nil,
+    FovCircle = nil,
+    FovCircleOutline = nil,
+    cachedMousePos = vec2(0, 0),
+    lastMouseUpdate = 0,
+    validPlayers = {},
+    lastValidCheck = 0,
+    Connection = nil
+}
+_G.AimbotState = AimbotState
 
 local function StartAimbot()
-    if AimbotConnection then
-        AimbotConnection:Disconnect()
-        AimbotConnection = nil
+    if AimbotState.Connection then
+        AimbotState.Connection:Disconnect()
+        AimbotState.Connection = nil
     end
 
-    if FovCircle then pcall(function() FovCircle:Remove() end) FovCircle = nil end
-    if FovCircleOutline then pcall(function() FovCircleOutline:Remove() end) FovCircleOutline = nil end
+    -- ✅ ИСПРАВЛЕНИЕ: Безопасное удаление с проверкой
+    if AimbotState.FovCircle then 
+        pcall(function() 
+            AimbotState.FovCircle.Visible = false
+            AimbotState.FovCircle:Remove() 
+        end) 
+        AimbotState.FovCircle = nil 
+    end
+    
+    if AimbotState.FovCircleOutline then 
+        pcall(function() 
+            AimbotState.FovCircleOutline.Visible = false
+            AimbotState.FovCircleOutline:Remove() 
+        end) 
+        AimbotState.FovCircleOutline = nil 
+    end
 
-    FovCircle = drawNew('Circle')
-    FovCircle.NumSides = 40
-    FovCircle.Thickness = 2
-    FovCircle.Visible = State.AimbotConfig.FovCheck
-    FovCircle.Radius = State.AimbotConfig.Fov
-    FovCircle.Color = CONFIG.Colors.Accent
-    FovCircle.Transparency = 0.7
-    FovCircle.ZIndex = 2
+    -- Создание новых кругов
+    AimbotState.FovCircle = drawNew('Circle')
+    AimbotState.FovCircle.NumSides = 40
+    AimbotState.FovCircle.Thickness = 2
+    AimbotState.FovCircle.Visible = State.AimbotConfig.FovCheck
+    AimbotState.FovCircle.Radius = State.AimbotConfig.Fov
+    AimbotState.FovCircle.Color = CONFIG.Colors.Accent
+    AimbotState.FovCircle.Transparency = 0.7
+    AimbotState.FovCircle.ZIndex = 2
 
-    FovCircleOutline = drawNew('Circle')
-    FovCircleOutline.NumSides = 40
-    FovCircleOutline.Thickness = 2
-    FovCircleOutline.Visible = State.AimbotConfig.FovCheck
-    FovCircleOutline.Radius = State.AimbotConfig.Fov
-    FovCircleOutline.Color = colRgb(0, 0, 0)
-    FovCircleOutline.Transparency = 0.8
-    FovCircleOutline.ZIndex = 1
-
-    _G.FovCircle = FovCircle
-    _G.FovCircleOutline = FovCircleOutline
+    AimbotState.FovCircleOutline = drawNew('Circle')
+    AimbotState.FovCircleOutline.NumSides = 40
+    AimbotState.FovCircleOutline.Thickness = 2
+    AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+    AimbotState.FovCircleOutline.Radius = State.AimbotConfig.Fov
+    AimbotState.FovCircleOutline.Color = colRgb(0, 0, 0)
+    AimbotState.FovCircleOutline.Transparency = 0.8
+    AimbotState.FovCircleOutline.ZIndex = 1
 
     local function isValidTarget(root, hum)
         if not root or not root.Parent then return false end
@@ -617,8 +685,8 @@ local function StartAimbot()
 
     local function lock(targ)
         if State.AimbotConfig.LockOn then
-            if PreviousTarget then
-                return (targ == PreviousTarget)
+            if AimbotState.PreviousTarget then
+                return (targ == AimbotState.PreviousTarget)
             else
                 return true
             end
@@ -650,14 +718,14 @@ local function StartAimbot()
     end
 
     local function updateValidPlayers()
-        table.clear(validPlayers)
+        table.clear(AimbotState.validPlayers)
 
         for i = 1, #playerNames do
             local plrObject = playerManagers[playerNames[i]]
 
             if plrObject and plrObject.RootPart and plrObject.RootPart.Parent then
                 if team(plrObject.Team) then
-                    table.insert(validPlayers, plrObject)
+                    table.insert(AimbotState.validPlayers, plrObject)
                 end
             end
         end
@@ -674,10 +742,10 @@ local function StartAimbot()
             local MousePosition = mp or vec2(clientMouse.X, clientMouse.Y)
             local CameraPos = clientCamera.CFrame.Position
 
-            AimbotTarget = nil
+            AimbotState.Target = nil
 
-            for i = 1, #validPlayers do
-                local plrObject = validPlayers[i]
+            for i = 1, #AimbotState.validPlayers do
+                local plrObject = AimbotState.validPlayers[i]
                 local Root, Humanoid = plrObject.RootPart, plrObject.Humanoid
 
                 if not isValidTarget(Root, Humanoid) then continue end
@@ -712,7 +780,7 @@ local function StartAimbot()
                 end
             end
 
-            AimbotTarget = FinalVec2
+            AimbotState.Target = FinalVec2
             return FinalTarget, FinalVec2, nil
         end
 
@@ -723,10 +791,10 @@ local function StartAimbot()
             local MousePosition = mp or vec2(clientMouse.X, clientMouse.Y)  -- ✅ ИЗМЕНИТЬ
             local CameraPos = clientCamera.CFrame.Position
 
-            AimbotTarget = nil
+            AimbotState.Target = nil
 
-            for i = 1, #validPlayers do
-                local plrObject = validPlayers[i]
+            for i = 1, #AimbotState.validPlayers do
+                local plrObject = AimbotState.validPlayers[i]
                 local Root, Humanoid = plrObject.RootPart, plrObject.Humanoid
 
                 if not isValidTarget(Root, Humanoid) then continue end
@@ -761,28 +829,31 @@ local function StartAimbot()
                 end
             end
 
-            AimbotTarget = FinalVec2
+            AimbotState.Target = FinalVec2
             return FinalTarget, FinalVec3
         end
     end
 
     if State.AimbotConfig.Method == 'Camera' then
-    AimbotConnection = RunService.RenderStepped:Connect(function()
+    AimbotState.Connection = RunService.RenderStepped:Connect(function()
+        if not AimbotState.FovCircle or not AimbotState.FovCircleOutline then 
+            return 
+        end
         local currentTime = tick()
         
         -- ✅ Обновляем позицию мыши каждый кадр БЕЗ задержки
-        cachedMousePos = UserInputService:GetMouseLocation()
+        AimbotState.cachedMousePos = UserInputService:GetMouseLocation()
         
-        FovCircle.Position = cachedMousePos
-        FovCircleOutline.Position = cachedMousePos
-        FovCircle.Color = CONFIG.Colors.Accent
+        AimbotState.FovCircle.Position = AimbotState.cachedMousePos
+        AimbotState.FovCircleOutline.Position = AimbotState.cachedMousePos
+        AimbotState.FovCircle.Color = CONFIG.Colors.Accent
 
-        FovCircle.Visible = State.AimbotConfig.FovCheck
-        FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+        AimbotState.FovCircle.Visible = State.AimbotConfig.FovCheck
+        AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
 
-        if currentTime - lastValidCheck > 0.5 then
+        if currentTime - AimbotState.lastValidCheck > 0.5 then
             updateValidPlayers()
-            lastValidCheck = currentTime
+            AimbotState.lastValidCheck = currentTime
         end
 
             local isActive = false
@@ -793,8 +864,8 @@ local function StartAimbot()
             end
 
             if not isActive then
-                PreviousTarget = nil
-                AimbotTarget = nil
+                AimbotState.PreviousTarget = nil
+                AimbotState.Target = nil
                 return
             end
 
@@ -803,8 +874,8 @@ local function StartAimbot()
                 return 
             end
 
-            local target, position = NextTarget(cachedMousePos)
-            PreviousTarget = target
+            local target, position = NextTarget(AimbotState.cachedMousePos)
+            AimbotState.PreviousTarget = target
 
             if position then
                 local _ = clientCamera.CFrame
@@ -812,22 +883,25 @@ local function StartAimbot()
             end
         end)
     elseif State.AimbotConfig.Method == 'Mouse' then
-        AimbotConnection = RunService.RenderStepped:Connect(function(dt)
+        AimbotState.Connection = RunService.RenderStepped:Connect(function(dt)
+        if not AimbotState.FovCircle or not AimbotState.FovCircleOutline then 
+            return 
+        end
             local currentTime = tick()
 
             -- ✅ Убираем ограничение частоты обновления
-            cachedMousePos = UserInputService:GetMouseLocation()
+            AimbotState.cachedMousePos = UserInputService:GetMouseLocation()
 
-            FovCircle.Position = cachedMousePos
-            FovCircleOutline.Position = cachedMousePos
-            FovCircle.Color = CONFIG.Colors.Accent
+            AimbotState.FovCircle.Position = AimbotState.cachedMousePos
+            AimbotState.FovCircleOutline.Position = AimbotState.cachedMousePos
+            AimbotState.FovCircle.Color = CONFIG.Colors.Accent
 
-            FovCircle.Visible = State.AimbotConfig.FovCheck
-            FovCircleOutline.Visible = State.AimbotConfig.FovCheck
+            AimbotState.FovCircle.Visible = State.AimbotConfig.FovCheck
+            AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
 
-            if currentTime - lastValidCheck > 0.5 then
+            if currentTime - AimbotState.lastValidCheck > 0.5 then
                 updateValidPlayers()
-                lastValidCheck = currentTime
+                AimbotState.lastValidCheck = currentTime
             end
 
             local isActive = false
@@ -838,8 +912,8 @@ local function StartAimbot()
             end
 
             if not isActive then
-                PreviousTarget = nil
-                AimbotTarget = nil
+                AimbotState.PreviousTarget = nil
+                AimbotState.Target = nil
                 return
             end
 
@@ -851,11 +925,11 @@ local function StartAimbot()
                 end
             end
 
-            local target, position, _ = NextTarget(cachedMousePos)
-            PreviousTarget = target
+            local target, position, _ = NextTarget(AimbotState.cachedMousePos)
+            AimbotState.PreviousTarget = target
 
             if position then
-                local delta = position - cachedMousePos
+                local delta = position - AimbotState.cachedMousePos
                 
                 -- ✅ ИСПРАВЛЕНИЕ: правильная формула со smoothness
                 local smoothValue = math.max(State.AimbotConfig.Smoothness, 0.01) -- Минимум 0.01 чтобы избежать деления на 0
@@ -875,20 +949,28 @@ local function StartAimbot()
         end)
     end
 
-    TrackConnection(AimbotConnection)
+    TrackConnection(AimbotState.Connection)
 end
 
 local function StopAimbot()
-    if AimbotConnection then
-        AimbotConnection:Disconnect()
-        AimbotConnection = nil
+    if AimbotState.Connection then
+        pcall(function() AimbotState.Connection:Disconnect() end)
+        AimbotState.Connection = nil
     end
 
-    if FovCircle then pcall(function() FovCircle:Remove() end) FovCircle = nil end
-    if FovCircleOutline then pcall(function() FovCircleOutline:Remove() end) FovCircleOutline = nil end
+    -- Безопасное удаление с проверкой
+    if AimbotState.FovCircle then 
+        pcall(function() AimbotState.FovCircle:Remove() end) 
+        AimbotState.FovCircle = nil 
+    end
+    
+    if AimbotState.FovCircleOutline then 
+        pcall(function() AimbotState.FovCircleOutline:Remove() end) 
+        AimbotState.FovCircleOutline = nil 
+    end
 
-    AimbotTarget = nil
-    PreviousTarget = nil
+    AimbotState.Target = nil
+    AimbotState.PreviousTarget = nil
 end
 
 local function ToggleAimbot(enabled)
@@ -1420,6 +1502,104 @@ local function CreateTracer(startPos, endPos, duration)
         end
     end)
 end
+
+-- ============= COIN TRACER SYSTEM (С АНИМАЦИЕЙ) =============
+local CurrentCoinTracer = nil
+local TracersAccent = Color3.fromRGB(220, 145, 230)
+
+-- ✅ ВЫБЕРИТЕ ОДИН ИЗ ЦВЕТОВ ДЛЯ МОНЕТ:
+-- local CoinTracerColor = Color3.fromRGB(0, 255, 255)      -- 🔵 ЦИАН (контрастирует с фиолетовым)
+-- local CoinTracerColor = Color3.fromRGB(255, 215, 0)   -- 🟡 ЗОЛОТОЙ (классика для монет)
+-- local CoinTracerColor = Color3.fromRGB(144, 238, 144) -- 🟢 СВЕТЛО-ЗЕЛЁНЫЙ (хорошая видимость)
+local CoinTracerColor = Color3.fromRGB(255, 105, 180) -- 💗 РОЗОВЫЙ (гармония с фиолетовым)
+-- local CoinTracerColor = Color3.fromRGB(173, 216, 230) -- 🔵 СВЕТЛО-ГОЛУБОЙ (нежное сочетание)
+
+local function CreateCoinTracer(character, targetCoin)
+    if not character or not targetCoin then return end
+    -- ✅ УБРАНА проверка State.BulletTracersEnabled
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    -- Удаляем старый трасер
+    if CurrentCoinTracer then
+        pcall(function()
+            CurrentCoinTracer.beam:Destroy()
+            CurrentCoinTracer.att0:Destroy()
+            CurrentCoinTracer.att1:Destroy()
+        end)
+        CurrentCoinTracer = nil
+    end
+    
+    -- Создаем новые Attachment
+    local attachment0 = Instance.new("Attachment")
+    attachment0.Name = "CoinTracerStart"
+    attachment0.Parent = hrp
+    
+    local attachment1 = Instance.new("Attachment")
+    attachment1.Name = "CoinTracerEnd"
+    attachment1.Parent = targetCoin
+    
+    -- Создаем Beam
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Color = ColorSequence.new(CoinTracerColor)
+    beam.FaceCamera = true
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Brightness = 5
+    beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    beam.TextureMode = Enum.TextureMode.Stretch
+    beam.TextureSpeed = 2
+    beam.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    beam.Width0 = 0.3
+    beam.Width1 = 0.3
+    beam.ZOffset = 0.1
+    beam.Parent = attachment0
+    
+    CurrentCoinTracer = {
+        beam = beam,
+        att0 = attachment0,
+        att1 = attachment1,
+        coin = targetCoin
+    }
+    
+    return CurrentCoinTracer
+end
+
+local function RemoveCoinTracer()
+    if CurrentCoinTracer then
+        pcall(function()
+            CurrentCoinTracer.beam:Destroy()
+            CurrentCoinTracer.att0:Destroy()
+            CurrentCoinTracer.att1:Destroy()
+        end)
+        CurrentCoinTracer = nil
+    end
+end
+
+-- Обновление трасера каждый кадр
+RunService.RenderStepped:Connect(function()
+    if CurrentCoinTracer then
+        -- Проверка валидности монеты
+        if not CurrentCoinTracer.coin or not CurrentCoinTracer.coin.Parent then
+            RemoveCoinTracer()
+            return
+        end
+        
+        -- ✅ Проверяем ТОЛЬКО автофарм (без BulletTracersEnabled)
+        if not State.AutoFarmEnabled then
+            RemoveCoinTracer()
+            return
+        end
+    end
+end)
+
+
 
 local function GetShootOrigin(tool)
     if not tool then return nil end
@@ -2357,6 +2537,24 @@ end
 -- ESP: роли + GunESP
 ----------------------------------------------------------------
 
+local function SetupPlayerDataListener()
+    local success, remotes = pcall(function()
+        return game.ReplicatedStorage:WaitForChild("Remotes", 5)
+    end)
+    
+    if not success or not remotes then return end
+    
+    local gameplay = remotes:FindFirstChild("Gameplay")
+    if not gameplay then return end
+    
+    local dataChanged = gameplay:FindFirstChild("PlayerDataChanged")
+    if not dataChanged then return end
+    
+    dataChanged.OnClientEvent:Connect(function(data)
+        State.PlayerData = data or {}
+    end)
+end
+
 -- CreateHighlight() - создание Highlight для персонажа
 local function CreateHighlight(adornee, color)
     if not adornee or not adornee.Parent then return nil end
@@ -2439,11 +2637,71 @@ local function UpdatePlayerHighlight(player, role)
     end
 end
 
--- getMurder() / getSheriff()
 local function getMurder()
+    -- Приоритет 1: Реальная проверка предметов
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("Knife") then
+            return plr
+        end
+    end
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local backpack = plr:FindFirstChild("Backpack")
+        if backpack and backpack:FindFirstChild("Knife") then
+            return plr
+        end
+    end
+    
+    -- Приоритет 2: Серверные данные (для ESP)
+    if State.PlayerData then
+        for playerName, data in pairs(State.PlayerData) do
+            if data.Role == "Murderer" then
+                local player = Players:FindFirstChild(playerName)
+                if player then
+                    return player
+                end
+            end
+        end
+    end
+    
+    return nil
+end
+
+local function getSheriff()
+    -- Приоритет 1: Реальная проверка предметов
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("Gun") then
+            return plr
+        end
+    end
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local backpack = plr:FindFirstChild("Backpack")
+        if backpack and backpack:FindFirstChild("Gun") then
+            return plr
+        end
+    end
+    
+    -- Приоритет 2: Серверные данные (для ESP)
+    if State.PlayerData then
+        for playerName, data in pairs(State.PlayerData) do
+            if data.Role == "Sheriff" then
+                local player = Players:FindFirstChild(playerName)
+                if player then
+                    return player
+                end
+            end
+        end
+    end
+    
+    return nil
+end
+
+-- ✅ НОВЫЕ функции ТОЛЬКО для автофарма (БЕЗ серверных данных)
+local function getMurderForAutoFarm()
     for _, plr in ipairs(Players:GetPlayers()) do
         local character = plr.Character
-        local backpack  = plr:FindFirstChild("Backpack")
+        local backpack = plr:FindFirstChild("Backpack")
 
         if (character and character:FindFirstChild("Knife"))
             or (backpack and backpack:FindFirstChild("Knife")) then
@@ -2453,10 +2711,10 @@ local function getMurder()
     return nil
 end
 
-local function getSheriff()
+local function getSheriffForAutoFarm()
     for _, plr in ipairs(Players:GetPlayers()) do
         local character = plr.Character
-        local backpack  = plr:FindFirstChild("Backpack")
+        local backpack = plr:FindFirstChild("Backpack")
 
         if (character and character:FindFirstChild("Gun"))
             or (backpack and backpack:FindFirstChild("Gun")) then
@@ -2466,8 +2724,176 @@ local function getSheriff()
     return nil
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- AVATAR DISPLAY SYSTEM
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- Функция получения URL полного аватара (не headshot)
+local function getAvatarUrl(userId)
+    -- Используем встроенный Roblox API (не требует HttpService)
+    local success, thumbnailUrl = pcall(function()
+        return Players:GetUserThumbnailAsync(
+            userId,
+            Enum.ThumbnailType.AvatarBust,
+            Enum.ThumbnailSize.Size420x420
+        )
+    end)
+    
+    if success and thumbnailUrl then
+        return thumbnailUrl
+    else
+        warn("Failed to load avatar for UserId:", userId)
+        return nil
+    end
+end
+
+local function setAvatar(imageLabel, player)
+    if not imageLabel then return end
+    
+    if not player then
+        imageLabel.Image = ""
+        return
+    end
+    
+    local avatarUrl = getAvatarUrl(player.UserId)
+    
+    if avatarUrl then
+        imageLabel.Image = avatarUrl
+    else
+        imageLabel.Image = ""
+    end
+end
+
+-- Функция обновления аватаров (вызывается из Role ESP)
+local function updateRoleAvatars()
+    
+    if not State.UIElements.MurdererAvatar or not State.UIElements.SheriffAvatar then
+        warn("❌ Avatar UI elements not found!")
+        return
+    end
+    
+    local murderer = getMurder()
+    local sheriff = getSheriff()
+    
+    
+    -- Обновляем Murderer
+    if murderer then
+        if State.currentMurdererUserId ~= murderer.UserId then
+            State.currentMurdererUserId = murderer.UserId
+            setAvatar(State.UIElements.MurdererAvatar, murderer)
+        end
+    else
+        if State.currentMurdererUserId ~= nil then
+            State.currentMurdererUserId = nil
+            State.UIElements.MurdererAvatar.Image = State.PLACEHOLDER_IMAGE
+        end
+    end
+    
+    -- Обновляем Sheriff
+    if sheriff then
+        if State.currentSheriffUserId ~= sheriff.UserId then
+            State.currentSheriffUserId = sheriff.UserId
+            setAvatar(State.UIElements.SheriffAvatar, sheriff)
+        end
+    else
+        if State.currentSheriffUserId ~= nil then
+            State.currentSheriffUserId = nil
+            State.UIElements.SheriffAvatar.Image = State.PLACEHOLDER_IMAGE
+        end
+    end
+end
+
+local function CreateAvatarUI()
+    pcall(function() CoreGui:FindFirstChild("MM2_AvatarDisplay"):Destroy() end)
+    
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "MM2_AvatarDisplay"
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 10
+    gui.Parent = CoreGui
+    
+    local container = Instance.new("Frame")
+    container.Position = UDim2.new(1, -270, 1, -100)
+    container.Size = UDim2.new(0, 170, 0, 90)
+    container.BackgroundTransparency = 1
+    container.Parent = gui
+    
+    -- Таблица конфигурации для аватаров
+    local avatarConfigs = {
+        Murderer = {
+            position = UDim2.new(0, 0, 0, 0),
+            color = CONFIG.Colors.Murder,
+            text = "Murderer"
+        },
+        Sheriff = {
+            position = UDim2.new(0, 90, 0, 0),
+            color = CONFIG.Colors.Sheriff,
+            text = "Sheriff"
+        }
+    }
+    
+    -- Функция создания аватара из конфига
+    local function createFromConfig(config)
+        local props = {
+            frame = {Size = UDim2.new(0, 80, 0, 90), BackgroundColor3 = CONFIG.Colors.Section, BackgroundTransparency = 0.2, Position = config.position},
+            corner = {CornerRadius = UDim.new(0, 8)},
+            stroke = {Color = config.color, Thickness = 2},
+            image = {Position = UDim2.new(0.5, 0, 0, 5), Size = UDim2.new(0, 60, 0, 60), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(40, 40, 45), Image = ""},
+            imgCorner = {CornerRadius = UDim.new(0, 6)},
+            label = {Position = UDim2.new(0, 0, 1, -22), Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = config.text, TextColor3 = config.color, Font = Enum.Font.GothamBold, TextSize = 10, TextStrokeTransparency = 0.5}
+        }
+        
+        local frame = Instance.new("Frame", container)
+        for k,v in pairs(props.frame) do frame[k] = v end
+        
+        local corner = Instance.new("UICorner", frame)
+        for k,v in pairs(props.corner) do corner[k] = v end
+        
+        local stroke = Instance.new("UIStroke", frame)
+        for k,v in pairs(props.stroke) do stroke[k] = v end
+        
+        local img = Instance.new("ImageLabel", frame)
+        for k,v in pairs(props.image) do img[k] = v end
+        
+        local imgCorner = Instance.new("UICorner", img)
+        for k,v in pairs(props.imgCorner) do imgCorner[k] = v end
+        
+        local label = Instance.new("TextLabel", frame)
+        for k,v in pairs(props.label) do label[k] = v end
+        
+        return img
+    end
+    
+    -- Создание аватаров
+    State.UIElements.MurdererAvatar = createFromConfig(avatarConfigs.Murderer)
+    State.UIElements.SheriffAvatar = createFromConfig(avatarConfigs.Sheriff)
+    State.UIElements.AvatarDisplayGui = gui
+end
+
+-- Функция очистки аватара Sheriff (вызывается при Gun drop)
+local function clearSheriffAvatar()
+    if State.UIElements.SheriffAvatar then
+        State.UIElements.SheriffAvatar.Image = ""
+        State.currentSheriffUserId = nil
+    end
+end
+
+-- Функция очистки всех аватаров (вызывается при окончании раунда)
+local function clearAllAvatars()
+    if State.UIElements.MurdererAvatar then
+        State.UIElements.MurdererAvatar.Image = ""
+    end
+    if State.UIElements.SheriffAvatar then
+        State.UIElements.SheriffAvatar.Image = ""
+    end
+    State.currentMurdererUserId = nil
+    State.currentSheriffUserId = nil
+end
+
+
 -- Role ESP loop
 local function StartRoleChecking()
+    SetupPlayerDataListener()
     if State.RoleCheckLoop then
         pcall(function()
             State.RoleCheckLoop:Disconnect()
@@ -2520,7 +2946,7 @@ local function StartRoleChecking()
 
                 if State.NotificationsEnabled then
                     ShowNotification(
-                        "<font color=\"rgb(255, 85, 85)\">🔪 Murderer:</font> " .. murder.Name,
+                        "<font color=\"rgb(255, 85, 85)\">🗡️ Murderer:</font> " .. murder.Name,
                         CONFIG.Colors.Text
                     )
                     task.wait(0.1)
@@ -2529,6 +2955,10 @@ local function StartRoleChecking()
                         CONFIG.Colors.Text
                     )
                 end
+
+                task.spawn(function()
+                    updateRoleAvatars()
+                end)
             end
 
             if not murder and State.roundActive then
@@ -2537,15 +2967,20 @@ local function StartRoleChecking()
                 State.prevMurd    = nil
                 State.prevSher    = nil
                 State.heroSent    = false
-
+                
+                -- Очистка серверных данных
+                State.PlayerData = {}
+                
                 if State.NotificationsEnabled then
                     ShowNotification(
                         "<font color=\"rgb(220, 220, 220)\">Round ended</font>",
                         CONFIG.Colors.Text
                     )
                 end
+                clearAllAvatars()
             end
 
+            -- Обнаружение смены шерифа (Hero)
             if sheriff
                 and State.prevSher
                 and sheriff ~= State.prevSher
@@ -2558,24 +2993,22 @@ local function StartRoleChecking()
 
                 if State.NotificationsEnabled then
                     ShowNotification(
-                        "<font color=\"rgb(50, 150, 255)\">New Sheriff:</font> " .. sheriff.Name,
+                        "<font color=\"rgb(50, 150, 255)\">⭐ Hero:</font> " .. sheriff.Name,
                         CONFIG.Colors.Text
                     )
                 end
+                task.spawn(function()
+                    updateRoleAvatars()
+                end)
             end
         end)
     end)
-
     table.insert(State.Connections, State.RoleCheckLoop)
 end
 
 ----------------------------------------------------------------
 -- Gun ESP + уведомление
 ----------------------------------------------------------------
-
-local currentMapConnection = nil
-local currentMap = nil
-local previousGun = nil
 
 local function getMap()
     for _, v in ipairs(Workspace:GetChildren()) do
@@ -2670,28 +3103,35 @@ local function UpdateGunESPVisibility()
 end
 
 local function SetupGunTracking()
-    if currentMapConnection then
-        currentMapConnection:Disconnect()
-        currentMapConnection = nil
+    if State.currentMapConnection then
+        State.currentMapConnection:Disconnect()
+        State.currentMapConnection = nil
     end
 
-    currentMapConnection = RunService.Heartbeat:Connect(function()
+    State.currentMapConnection = RunService.Heartbeat:Connect(function()
         pcall(function()
             local gun = getGun()
 
-            if gun and gun ~= previousGun then
+            if gun and gun ~= State.previousGun then
                 State.CurrentGunDrop = gun
+
                 if State.NotificationsEnabled then
-                    ShowNotification(
-                        "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
-                        CONFIG.Colors.Gun
-                    )
-                end
-                previousGun = gun
+                    task.spawn(function()
+                        ShowNotification(
+                            "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
+                            CONFIG.Colors.Gun
+                        )
+                    end)
+                task.spawn(function()
+                    clearSheriffAvatar()
+                end)
+                end               
+
+                State.previousGun = gun
             end
 
-            if not gun and previousGun then
-                previousGun = nil
+            if not gun and State.previousGun then
+                State.previousGun = nil
             end
 
             if gun and State.GunESP then
@@ -2713,108 +3153,112 @@ local function SetupGunTracking()
         end)
     end)
 
-    table.insert(State.Connections, currentMapConnection)
+    table.insert(State.Connections, State.currentMapConnection)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 7: Fling (СТРОКИ 611-660)
 -- ══════════════════════════════════════════════════════════════════════════════
 
-local AntiFlingLastPos = Vector3.zero
-local FlingDetectionConnection = nil
-local FlingNeutralizerConnection = nil
-local DetectedFlingers = {}
-local FlingBlockedNotified = false
+local AntiFlingState = {
+    LastPos = Vector3.zero,
+    DetectionConn = nil,
+    NeutralizerConn = nil,
+    Flingers = {},
+    NotifCooldown = false,
+    Thresholds = {
+        Angular = 50,
+        Linear = 100,
+        Danger = 250
+    }
+}
 
 -- EnableAntiFling() - Включение защиты от флинга
 local function EnableAntiFling()
     if State.AntiFlingEnabled then return end
     State.AntiFlingEnabled = true
-
-    FlingDetectionConnection = RunService.Heartbeat:Connect(function()
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player.Character and player.Character:IsDescendantOf(Workspace) and player ~= LocalPlayer then
-                local primaryPart = player.Character.PrimaryPart
-                if primaryPart then
-                    if primaryPart.AssemblyAngularVelocity.Magnitude > 50 or primaryPart.AssemblyLinearVelocity.Magnitude > 100 then
-                        if not DetectedFlingers[player.Name] then
-                            DetectedFlingers[player.Name] = true
-                        end
-                        
-                        pcall(function()
-                            if player.Character then
-                                for _, part in ipairs(player.Character:GetDescendants()) do
-                                    if part:IsA("BasePart") then
-                                        pcall(function()
-                                            part.CanCollide = false
-                                            part.AssemblyAngularVelocity = Vector3.zero
-                                            part.AssemblyLinearVelocity = Vector3.zero
-                                            part.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
-                                        end)
-                                    end
-                                end
-                            end
-                        end)
-                    end
-                end
-            end
-        end
-    end)
     
-
-    FlingNeutralizerConnection = RunService.Heartbeat:Connect(function()
-        local character = LocalPlayer.Character
-        if character and character.PrimaryPart then
-            local primaryPart = character.PrimaryPart
-            if State.IsFlingInProgress then
-                AntiFlingLastPos = primaryPart.Position
-                return
-            end
-			
-            if primaryPart.AssemblyLinearVelocity.Magnitude > 250 or 
-               primaryPart.AssemblyAngularVelocity.Magnitude > 250 then
+    -- Обнаружение флингеров
+    AntiFlingState.DetectionConn = RunService.Heartbeat:Connect(function()
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character and plr.Character.PrimaryPart then
+                local part = plr.Character.PrimaryPart
+                local angVel = part.AssemblyAngularVelocity.Magnitude
+                local linVel = part.AssemblyLinearVelocity.Magnitude
                 
-                if State.NotificationsEnabled and not FlingBlockedNotified then
-                    ShowNotification(
-                        "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
-                        CONFIG.Colors.Text
-                    )
+                if angVel > AntiFlingState.Thresholds.Angular or linVel > AntiFlingState.Thresholds.Linear then
+                    AntiFlingState.Flingers[plr.Name] = true
                     
-                    FlingBlockedNotified = true
-                    task.delay(3, function()
-                        FlingBlockedNotified = false
+                    pcall(function()
+                        for _, obj in ipairs(plr.Character:GetDescendants()) do
+                            if obj:IsA("BasePart") then
+                                pcall(function()
+                                    obj.CanCollide = false
+                                    obj.AssemblyAngularVelocity = Vector3.zero
+                                    obj.AssemblyLinearVelocity = Vector3.zero
+                                    obj.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
+                                end)
+                            end
+                        end
                     end)
                 end
-                
-                primaryPart.AssemblyLinearVelocity = Vector3.zero
-                primaryPart.AssemblyAngularVelocity = Vector3.zero
-                
-                if AntiFlingLastPos ~= Vector3.zero then
-                    primaryPart.CFrame = CFrame.new(AntiFlingLastPos)
-                end
-            else
-                AntiFlingLastPos = primaryPart.Position
             end
         end
     end)
     
-    table.insert(State.Connections, FlingDetectionConnection)
-    table.insert(State.Connections, FlingNeutralizerConnection)
+    -- Защита локального игрока
+    AntiFlingState.NeutralizerConn = RunService.Heartbeat:Connect(function()
+        local char = LocalPlayer.Character
+        if not char or not char.PrimaryPart then return end
+        
+        local part = char.PrimaryPart
+        
+        if State.IsFlingInProgress then
+            AntiFlingState.LastPos = part.Position
+            return
+        end
+        
+        local velMag = part.AssemblyLinearVelocity.Magnitude
+        local angMag = part.AssemblyAngularVelocity.Magnitude
+        
+        if velMag > AntiFlingState.Thresholds.Danger or angMag > AntiFlingState.Thresholds.Danger then
+            if State.NotificationsEnabled and not AntiFlingState.NotifCooldown then
+                ShowNotification(
+                    "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
+                    CONFIG.Colors.Text
+                )
+                AntiFlingState.NotifCooldown = true
+                task.delay(3, function() AntiFlingState.NotifCooldown = false end)
+            end
+            
+            part.AssemblyLinearVelocity = Vector3.zero
+            part.AssemblyAngularVelocity = Vector3.zero
+            
+            if AntiFlingState.LastPos ~= Vector3.zero then
+                part.CFrame = CFrame.new(AntiFlingState.LastPos)
+            end
+        else
+            AntiFlingState.LastPos = part.Position
+        end
+    end)
+    
+    table.insert(State.Connections, AntiFlingState.DetectionConn)
+    table.insert(State.Connections, AntiFlingState.NeutralizerConn)
 end
 
 -- DisableAntiFling() - Отключение защиты
 local function DisableAntiFling()
     State.AntiFlingEnabled = false
-    DetectedFlingers = {}
+    AntiFlingState.Flingers = {}
     
-    if FlingDetectionConnection then
-        FlingDetectionConnection:Disconnect()
-        FlingDetectionConnection = nil
+    if AntiFlingState.DetectionConn then
+        AntiFlingState.DetectionConn:Disconnect()
+        AntiFlingState.DetectionConn = nil
     end
     
-    if FlingNeutralizerConnection then
-        FlingNeutralizerConnection:Disconnect()
-        FlingNeutralizerConnection = nil
+    if AntiFlingState.NeutralizerConn then
+        AntiFlingState.NeutralizerConn:Disconnect()
+        AntiFlingState.NeutralizerConn = nil
     end
 end
 
@@ -3146,26 +3590,7 @@ end
 
 -- FlingSheriff() - Флинг шерифа
 local function FlingSheriff()
-    -- Поиск шерифа (аналогично FindMurderer)
-    local sheriff = nil
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character then
-            local gun = player.Character:FindFirstChild("Gun")
-            if gun then
-                sheriff = player
-                break
-            end
-            
-            if player.Backpack then
-                local gunInBackpack = player.Backpack:FindFirstChild("Gun")
-                if gunInBackpack then
-                    sheriff = player
-                    break
-                end
-            end
-        end
-    end
-    
+    local sheriff = getSheriffForAutoFarm()
     if not sheriff then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Sheriff not found</font>", CONFIG.Colors.Text)
@@ -3173,7 +3598,6 @@ local function FlingSheriff()
         return
     end
     
-    -- Проверка: не флингим сам себя
     if sheriff == LocalPlayer then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You cannot fling yourself!</font>", CONFIG.Colors.Text)
@@ -3269,6 +3693,331 @@ local function DisableNoClip()
 end
 
 
+-- ═══════════════════════════════════════════════════════════
+-- FLY ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+-- ═══════════════════════════════════════════════════════════
+local function getRoot(char)
+	if char and char:FindFirstChildOfClass("Humanoid") then
+		return char:FindFirstChildOfClass("Humanoid").RootPart
+	else
+		return nil
+	end
+end
+local FLYING = false
+local QEfly = true
+local flyKeyDown = nil
+local flyKeyUp = nil
+local CFloop = nil
+local swimming = false
+local oldgrav = workspace.Gravity
+local swimbeat = nil
+local gravReset = nil
+
+-- ═══════════════════════════════════════════════════════════
+-- FLY SYSTEM (INFINITE YIELD BASED)
+-- ═══════════════════════════════════════════════════════════
+
+-- Базовый Fly (PC)
+local function sFLY(vfly)
+    local plr = LocalPlayer
+    local char = plr.Character or plr.CharacterAdded:Wait()
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        repeat task.wait() until char:FindFirstChildOfClass("Humanoid")
+        humanoid = char:FindFirstChildOfClass("Humanoid")
+    end
+
+    if flyKeyDown or flyKeyUp then
+        flyKeyDown:Disconnect()
+        flyKeyUp:Disconnect()
+    end
+
+    local T = getRoot(char)
+    local CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+    local lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+    local SPEED = 0
+
+    local function FLY()
+        FLYING = true
+        local BG = Instance.new('BodyGyro')
+        local BV = Instance.new('BodyVelocity')
+        BG.P = 9e4
+        BG.Parent = T
+        BV.Parent = T
+        BG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+        BG.CFrame = T.CFrame
+        BV.Velocity = Vector3.new(0, 0, 0)
+        BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        
+        State.FlyBodyGyro = BG
+        State.FlyBodyVelocity = BV
+        
+        task.spawn(function()
+            repeat task.wait()
+                local camera = Workspace.CurrentCamera
+                if not vfly and humanoid then
+                    humanoid.PlatformStand = true
+                end
+
+                if CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0 then
+                    SPEED = 50
+                elseif not (CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0) and SPEED ~= 0 then
+                    SPEED = 0
+                end
+                
+                if (CONTROL.L + CONTROL.R) ~= 0 or (CONTROL.F + CONTROL.B) ~= 0 or (CONTROL.Q + CONTROL.E) ~= 0 then
+                    BV.Velocity = ((camera.CFrame.LookVector * (CONTROL.F + CONTROL.B)) + ((camera.CFrame * CFrame.new(CONTROL.L + CONTROL.R, (CONTROL.F + CONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - camera.CFrame.p)) * SPEED
+                    lCONTROL = {F = CONTROL.F, B = CONTROL.B, L = CONTROL.L, R = CONTROL.R}
+                elseif (CONTROL.L + CONTROL.R) == 0 and (CONTROL.F + CONTROL.B) == 0 and (CONTROL.Q + CONTROL.E) == 0 and SPEED ~= 0 then
+                    BV.Velocity = ((camera.CFrame.LookVector * (lCONTROL.F + lCONTROL.B)) + ((camera.CFrame * CFrame.new(lCONTROL.L + lCONTROL.R, (lCONTROL.F + lCONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - camera.CFrame.p)) * SPEED
+                else
+                    BV.Velocity = Vector3.new(0, 0, 0)
+                end
+                BG.CFrame = camera.CFrame
+            until not FLYING
+            CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+            lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+            SPEED = 0
+            BG:Destroy()
+            BV:Destroy()
+
+            if humanoid then humanoid.PlatformStand = false end
+        end)
+    end
+
+    local flyspeed = State.FlySpeed / 50
+
+    flyKeyDown = UserInputService.InputBegan:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == Enum.KeyCode.W then
+            CONTROL.F = flyspeed
+        elseif input.KeyCode == Enum.KeyCode.S then
+            CONTROL.B = -flyspeed
+        elseif input.KeyCode == Enum.KeyCode.A then
+            CONTROL.L = -flyspeed
+        elseif input.KeyCode == Enum.KeyCode.D then
+            CONTROL.R = flyspeed
+        elseif input.KeyCode == Enum.KeyCode.E and QEfly then
+            CONTROL.Q = flyspeed * 2
+        elseif input.KeyCode == Enum.KeyCode.Q and QEfly then
+            CONTROL.E = -flyspeed * 2
+        end
+        pcall(function() Workspace.CurrentCamera.CameraType = Enum.CameraType.Track end)
+    end)
+
+    flyKeyUp = UserInputService.InputEnded:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == Enum.KeyCode.W then
+            CONTROL.F = 0
+        elseif input.KeyCode == Enum.KeyCode.S then
+            CONTROL.B = 0
+        elseif input.KeyCode == Enum.KeyCode.A then
+            CONTROL.L = 0
+        elseif input.KeyCode == Enum.KeyCode.D then
+            CONTROL.R = 0
+        elseif input.KeyCode == Enum.KeyCode.E then
+            CONTROL.Q = 0
+        elseif input.KeyCode == Enum.KeyCode.Q then
+            CONTROL.E = 0
+        end
+    end)
+    
+    table.insert(State.Connections, flyKeyDown)
+    table.insert(State.Connections, flyKeyUp)
+    
+    FLY()
+end
+
+-- Отключение базового Fly
+local function NOFLY()
+    FLYING = false
+    if flyKeyDown or flyKeyUp then 
+        flyKeyDown:Disconnect() 
+        flyKeyUp:Disconnect() 
+    end
+    if State.FlyBodyGyro then
+        State.FlyBodyGyro:Destroy()
+        State.FlyBodyGyro = nil
+    end
+    if State.FlyBodyVelocity then
+        State.FlyBodyVelocity:Destroy()
+        State.FlyBodyVelocity = nil
+    end
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
+        LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
+    end
+    pcall(function() Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
+end
+
+-- CFrame Fly
+local function sCFLY()
+    local speaker = LocalPlayer
+    local char = speaker.Character or speaker.CharacterAdded:Wait()
+    
+    speaker.Character:FindFirstChildOfClass('Humanoid').PlatformStand = true
+    local Head = speaker.Character:WaitForChild("Head")
+    Head.Anchored = true
+    State.CFlyHead = Head
+    
+    if CFloop then CFloop:Disconnect() end
+    
+    CFloop = RunService.Heartbeat:Connect(function(deltaTime)
+        if not FLYING or not speaker.Character or not speaker.Character:FindFirstChild('Head') then
+            return
+        end
+        
+        local CFspeed = State.FlySpeed
+        local Head = speaker.Character.Head
+        local moveDirection = speaker.Character:FindFirstChildOfClass('Humanoid').MoveDirection * (CFspeed * deltaTime)
+        local headCFrame = Head.CFrame
+        local camera = Workspace.CurrentCamera
+        local cameraCFrame = camera.CFrame
+        local cameraOffset = headCFrame:ToObjectSpace(cameraCFrame).Position
+        cameraCFrame = cameraCFrame * CFrame.new(-cameraOffset.X, -cameraOffset.Y, -cameraOffset.Z + 1)
+        local cameraPosition = cameraCFrame.Position
+        local headPosition = headCFrame.Position
+
+        local objectSpaceVelocity = CFrame.new(cameraPosition, Vector3.new(headPosition.X, cameraPosition.Y, headPosition.Z)):VectorToObjectSpace(moveDirection)
+        Head.CFrame = CFrame.new(headPosition) * (cameraCFrame - cameraPosition) * CFrame.new(objectSpaceVelocity)
+    end)
+    
+    FLYING = true
+    table.insert(State.Connections, CFloop)
+end
+
+-- Отключение CFrame Fly
+local function NOCFLY()
+    FLYING = false
+    if CFloop then
+        CFloop:Disconnect()
+        CFloop = nil
+    end
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
+        LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
+    end
+    if State.CFlyHead then
+        State.CFlyHead.Anchored = false
+        State.CFlyHead = nil
+    end
+end
+
+-- Swim
+local function sSwim()
+    local speaker = LocalPlayer
+    if not swimming and speaker and speaker.Character and speaker.Character:FindFirstChildWhichIsA("Humanoid") then
+        oldgrav = Workspace.Gravity
+        Workspace.Gravity = 0
+        
+        local swimDied = function()
+            Workspace.Gravity = oldgrav
+            swimming = false
+        end
+        
+        local Humanoid = speaker.Character:FindFirstChildWhichIsA("Humanoid")
+        gravReset = Humanoid.Died:Connect(swimDied)
+        
+        local enums = Enum.HumanoidStateType:GetEnumItems()
+        table.remove(enums, table.find(enums, Enum.HumanoidStateType.None))
+        for i, v in pairs(enums) do
+            Humanoid:SetStateEnabled(v, false)
+        end
+        Humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
+        
+        swimbeat = RunService.Heartbeat:Connect(function()
+            pcall(function()
+                local root = getRoot(speaker.Character)
+                if root then
+                    root.Velocity = ((Humanoid.MoveDirection ~= Vector3.new() or UserInputService:IsKeyDown(Enum.KeyCode.Space)) and root.Velocity or Vector3.new())
+                end
+            end)
+        end)
+        
+        swimming = true
+        State.SwimConnection = swimbeat
+        table.insert(State.Connections, gravReset)
+        table.insert(State.Connections, swimbeat)
+    end
+end
+
+-- Отключение Swim
+local function NOSwim()
+    local speaker = LocalPlayer
+    if speaker and speaker.Character and speaker.Character:FindFirstChildWhichIsA("Humanoid") then
+        Workspace.Gravity = oldgrav
+        swimming = false
+        
+        if gravReset then
+            gravReset:Disconnect()
+            gravReset = nil
+        end
+        if swimbeat ~= nil then
+            swimbeat:Disconnect()
+            swimbeat = nil
+        end
+        
+        local Humanoid = speaker.Character:FindFirstChildWhichIsA("Humanoid")
+        local enums = Enum.HumanoidStateType:GetEnumItems()
+        table.remove(enums, table.find(enums, Enum.HumanoidStateType.None))
+        for i, v in pairs(enums) do
+            Humanoid:SetStateEnabled(v, true)
+        end
+    end
+end
+
+-- Главные функции управления
+local function StartFly(flyType)
+    if State.FlyEnabled then
+        StopFly()
+        task.wait(0.1)
+    end
+    
+    State.FlyEnabled = true
+    State.FlyType = flyType
+    
+    if flyType == "Fly" then
+        sFLY(false)
+    elseif flyType == "Vehicle Fly" then
+        sFLY(true)
+    elseif flyType == "CFrame Fly" then
+        sCFLY()
+    elseif flyType == "Swim" then
+        sSwim()
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220,220,220)\">Fly</font> (" .. flyType .. "): <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
+    end
+end
+
+local function StopFly()
+    if not State.FlyEnabled then return end
+    
+    local currentType = State.FlyType
+    State.FlyEnabled = false
+    
+    if currentType == "CFrame Fly" then
+        NOCFLY()
+    elseif currentType == "Swim" then
+        NOSwim()
+    else
+        NOFLY()
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220,220,220)\">Fly </font>(" .. currentType .. "): <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
+    end
+end
+
+
+local function ToggleFly()
+    if State.FlyEnabled then
+        StopFly()
+    else
+        StartFly(State.FlyType)
+    end
+end
+
+
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 11: AUTO FARM SYSTEM (СТРОКИ 1181-1600)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -3360,17 +4109,17 @@ local function ResetCharacter()
         State.GodModeEnabled = false
         
         -- ✅ Отключаем ВСЕ connections
-        if healthConnection then
-            healthConnection:Disconnect()
-            healthConnection = nil
+        if State.healthConnection then
+            State.healthConnection:Disconnect()
+            State.healthConnection = nil
         end
-        if stateConnection then
-            stateConnection:Disconnect()
-            stateConnection = nil
+        if State.stateConnection then
+            State.stateConnection:Disconnect()
+            State.stateConnection = nil
         end
-        if damageBlockerConnection then
-            damageBlockerConnection:Disconnect()
-            damageBlockerConnection = nil
+        if State.damageBlockerConnection then
+            State.damageBlockerConnection:Disconnect()
+            State.damageBlockerConnection = nil
         end
         
         for _, connection in ipairs(State.GodModeConnections) do
@@ -3631,8 +4380,6 @@ local function FindNearestCoin()
            and coin:FindFirstChildWhichIsA("TouchTransmitter") 
            and not State.CoinBlacklist[coin] then
 
-            -- ✅ КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Убрана проверка Transparency
-            -- Причина: В текущей версии MM2 CoinVisual.Transparency = 1 (всегда прозрачный)
             local coinVisual = coin:FindFirstChild("CoinVisual")
             if coinVisual then
                 local distance = (coin.Position - hrpPosition).Magnitude
@@ -3645,7 +4392,51 @@ local function FindNearestCoin()
         end
     end
 
-    return closestCoin
+    return closestCoin, closestDistance -- ✅ ВОЗВРАЩАЕМ ЕЩЁ И РАССТОЯНИЕ
+end
+
+-- ✅ НОВАЯ ФУНКЦИЯ: Быстрая проверка на более близкую монету
+local function FindBetterCoin(currentCoin, currentDistance, threshold)
+    threshold = threshold or 10 -- Минимальная разница в studs для смены цели
+    
+    local character = LocalPlayer.Character
+    if not character then return nil end
+
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil end
+
+    local hrpPosition = humanoidRootPart.Position
+    
+    local coinContainer = nil
+    pcall(function()
+        local map = getMap()
+        if map then
+            coinContainer = map:FindFirstChild("CoinContainer")
+        end
+    end)
+
+    local searchRoot = coinContainer or Workspace
+
+    for _, coin in ipairs(searchRoot:GetDescendants()) do
+        if coin ~= currentCoin 
+           and coin:IsA("BasePart") 
+           and coin.Name == "Coin_Server"
+           and coin:FindFirstChildWhichIsA("TouchTransmitter") 
+           and not State.CoinBlacklist[coin] then
+
+            local coinVisual = coin:FindFirstChild("CoinVisual")
+            if coinVisual then
+                local distance = (coin.Position - hrpPosition).Magnitude
+                
+                -- ✅ Новая монета должна быть ЗНАЧИТЕЛЬНО ближе
+                if distance < (currentDistance - threshold) then
+                    return coin, distance
+                end
+            end
+        end
+    end
+
+    return nil
 end
 
 -- SmoothFlyToCoin() - Плавный полёт к монете
@@ -3667,31 +4458,45 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
     local startTime = tick()
     local collectionAttempted = false
     
+    -- ✅ Переменные для динамической проверки
+    local lastCheckTime = tick()
+    local checkInterval = 0.3 -- Проверяем каждые 0.3 секунды
+    
     while tick() - startTime < duration do
         if not State.AutoFarmEnabled then break end
         
         -- ✅ ПРОВЕРКА: существует ли монета
         if not coin or not coin.Parent then
-            return false
+            return false, nil
         end
         
-        -- ✅ ИСПРАВЛЕНО: Убрана проверка Transparency
-        -- Причина: В текущей версии MM2 все CoinVisual имеют Transparency = 1
-        -- Достаточно проверить существование TouchTransmitter (уже сделано в FindNearestCoin)
         local coinVisual = coin:FindFirstChild("CoinVisual")
         if not coinVisual then
-            return false
+            return false, nil
         end
         
         -- ✅ ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: монета всё ещё собираемая
         local touchTransmitter = coin:FindFirstChildWhichIsA("TouchTransmitter")
         if not touchTransmitter then
-            -- Монета уже была собрана, TouchTransmitter удалён
-            return false
+            return false, nil
         end
         
         local character = LocalPlayer.Character
         if not character or not humanoidRootPart.Parent then break end
+        
+        -- ✅ ДИНАМИЧЕСКАЯ ПРОВЕРКА НА БОЛЕЕ БЛИЗКУЮ МОНЕТУ
+        local currentTime = tick()
+        if currentTime - lastCheckTime >= checkInterval then
+            lastCheckTime = currentTime
+            
+            local currentDistance = (humanoidRootPart.Position - coin.Position).Magnitude
+            local betterCoin, betterDistance = FindBetterCoin(coin, currentDistance, 10)
+            
+            if betterCoin then
+                -- ✅ Найдена более близкая монета - прерываем текущий полёт
+                return "switch", betterCoin
+            end
+        end
         
         local elapsed = tick() - startTime
         local alpha = math.min(elapsed / duration, 1)
@@ -3714,8 +4519,8 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         
-        -- ✅ Вызываем firetouchinterest на 85% полёта
-        if alpha >= 0.85 and not collectionAttempted then
+        -- ✅ Вызываем firetouchinterest на 90% полёта
+        if alpha >= 0.90 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
                 task.spawn(function()
@@ -3734,10 +4539,8 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
         humanoidRootPart.CFrame = finalCFrame
     end
     
-    return true
+    return true, nil
 end
-
-
 
 local shootMurderer
 local InstantKillAll
@@ -3858,7 +4661,7 @@ local function StartAutoFarm()
                 continue 
             end
             
-            local murdererExists = getMurder() ~= nil
+            local murdererExists = getMurderForAutoFarm() ~= nil
             --print("[DEBUG] Мурдерер существует:", murdererExists)
             
             if not murdererExists then
@@ -3894,6 +4697,8 @@ local function StartAutoFarm()
                     end
                 else
                     noCoinsAttempts = 0
+
+                    CreateCoinTracer(character, coin)
                     
                     pcall(function()
                         if not allowFly then
@@ -3922,17 +4727,47 @@ local function StartAutoFarm()
                                 coinLabelCache = nil
                                 local coinsAfter = GetCollectedCoinsCount()
                                 
+                                RemoveCoinTracer()
                                 AddCoinToBlacklist(coin)
                                 allowFly = true
                             end
                         else
                             EnableNoClip()
-                            SmoothFlyToCoin(coin, humanoidRootPart, State.CoinFarmFlySpeed)
+                            
+                            -- ✅ ОБРАБОТКА ДИНАМИЧЕСКОЙ СМЕНЫ ЦЕЛИ
+                            local currentTargetCoin = coin
+                            local maxRedirects = 5
+                            local redirectCount = 0
+                            
+                            while currentTargetCoin and redirectCount < maxRedirects do
+                                local result, newTarget = SmoothFlyToCoin(currentTargetCoin, humanoidRootPart, State.CoinFarmFlySpeed)
+                                
+                                if result == "switch" and newTarget then
+                                    -- ✅ ПРОСТО ПЕРЕКЛЮЧАЕМСЯ, БЕЗ BLACKLIST!
+                                    RemoveCoinTracer()
+                                    CreateCoinTracer(character, newTarget)
+                                    
+                                    currentTargetCoin = newTarget
+                                    redirectCount = redirectCount + 1
+                                    
+                                elseif result == true then
+                                    -- ✅ Успешно долетели до цели
+                                    break
+                                else
+                                    -- ❌ Монета исчезла (кто-то собрал)
+                                    break
+                                end
+                            end
                             
                             coinLabelCache = nil
                             local coinsAfter = GetCollectedCoinsCount()
+
+                            RemoveCoinTracer()
                             
-                            AddCoinToBlacklist(coin)
+                            -- ✅ В BLACKLIST ТОЛЬКО ФИНАЛЬНУЮ СОБРАННУЮ МОНЕТУ!
+                            if currentTargetCoin then
+                                AddCoinToBlacklist(currentTargetCoin)
+                            end
                         end
                     end)
                 end
@@ -3976,7 +4811,7 @@ local function StartAutoFarm()
                         end
                         --]]
                         -- Fallback: InstantKillAll
-                        if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
+                        if getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
                             pcall(function()
                                 InstantKillAll()
                             end)
@@ -3985,7 +4820,7 @@ local function StartAutoFarm()
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
-                        until getMurder() == nil or not State.AutoFarmEnabled
+                        until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
                         
                     else
                         -- XP Farm выключен: просто ресет
@@ -4024,7 +4859,7 @@ local function StartAutoFarm()
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
-                        until getMurder() == nil or not State.AutoFarmEnabled
+                        until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
                     end
                     
                     -- Общий cleanup после Snowball
@@ -4042,7 +4877,7 @@ local function StartAutoFarm()
                     -- Ждём нового раунда
                     repeat
                         task.wait(1)
-                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
                         break
@@ -4079,8 +4914,8 @@ local function StartAutoFarm()
                                 end
                                 
                                 if State.XPFarmEnabled then
-                                    local murderer = getMurder()
-                                    local sheriff = getSheriff()
+                                    local murderer = getMurderForAutoFarm()
+                                    local sheriff = getSheriffForAutoFarm()
                                     
                                     if murderer == LocalPlayer then
                                         --print("[XP Farm] 🔪 Мы мурдерер! Активирую knifeThrow...")
@@ -4114,7 +4949,7 @@ local function StartAutoFarm()
                                         end
                                         --]]
                                         -- ✅ Fallback: если после 1 попыток раунд не завершился
-                                        if getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
+                                        if getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled then
                                             --print("[XP Farm] ⚠️ knifeThrow не сработал за 10 попыток! Использую InstantKillAll...")
                                             
                                             local success, error = pcall(function()
@@ -4136,14 +4971,14 @@ local function StartAutoFarm()
                                             local shootAttempts = 0
                                             local maxShootAttempts = 30
 
-                                            while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and shootAttempts < maxShootAttempts do
+                                            while getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and shootAttempts < maxShootAttempts do
                                                 character = LocalPlayer.Character
                                                 if not character then 
                                                     --print("[XP Farm] ⚠️ Персонаж исчез, прекращаю стрельбу")
                                                     break 
                                                 end
                                                 
-                                                local murdererPlayer = getMurder()
+                                                local murdererPlayer = getMurderForAutoFarm()
                                                 if not murdererPlayer then 
                                                     --print("[XP Farm] ✅ Раунд завершён! Мурдерер мёртв.")
                                                     break 
@@ -4174,7 +5009,7 @@ local function StartAutoFarm()
                                             end
 
                                             -- ✅ Проверяем причину выхода из цикла
-                                            if getMurder() == nil then
+                                            if getMurderForAutoFarm() == nil then
                                                 --print("[XP Farm] ✅ Мурдерер успешно убит! Раунд завершён.")
                                             elseif shootAttempts >= maxShootAttempts then
                                                 --print("[XP Farm] ⚠️ Достигнут лимит выстрелов (" .. maxShootAttempts .. "), прекращаю стрельбу")
@@ -4196,8 +5031,8 @@ local function StartAutoFarm()
                                         local flingAttempts = 1  -- Уже выполнили 1 флинг
                                         local maxFlingAttempts = 10
                                         
-                                        while getMurder() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and flingAttempts < maxFlingAttempts do
-                                            local murdererPlayer = getMurder()
+                                        while getMurderForAutoFarm() ~= nil and State.AutoFarmEnabled and State.XPFarmEnabled and flingAttempts < maxFlingAttempts do
+                                            local murdererPlayer = getMurderForAutoFarm()
                                             if not murdererPlayer then break end
                                             
                                             local murdererChar = murdererPlayer.Character
@@ -4229,7 +5064,7 @@ local function StartAutoFarm()
                                             
                                             task.wait(3)
                                             
-                                            if getMurder() == nil then
+                                            if getMurderForAutoFarm() == nil then
                                                 --print("[XP Farm] ✅ Мурдерер был сфлингован!")
                                                 break
                                             end
@@ -4247,7 +5082,7 @@ local function StartAutoFarm()
                     end
                     repeat
                         task.wait(1)
-                    until getMurder() == nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
                         break
@@ -4260,7 +5095,7 @@ local function StartAutoFarm()
                     CleanupCoinBlacklist()
                     task.wait(5)
                     
-                    if getMurder() ~= nil then
+                    if getMurderForAutoFarm() ~= nil then
                         State.CoinBlacklist = {}
                         noCoinsAttempts = 0
                         continue
@@ -4295,7 +5130,7 @@ local function StartAutoFarm()
                     
                     repeat
                         task.wait(1)
-                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
                     
                     if not State.AutoFarmEnabled then
                         break
@@ -4348,7 +5183,7 @@ local function StartAutoFarm()
                     --print("[Auto Farm] ⏳ Жду конца текущего раунда...")
                     repeat
                         task.wait(1)
-                    until getMurder() == nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
 
                     if not State.AutoFarmEnabled then
                         --print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания")
@@ -4358,7 +5193,7 @@ local function StartAutoFarm()
                     --print("[Auto Farm] ⏳ Раунд закончился, жду начала нового раунда...")
                     repeat
                         task.wait(1)
-                    until getMurder() ~= nil or not State.AutoFarmEnabled
+                    until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
 
                     if not State.AutoFarmEnabled then
                         --print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания нового раунда")
@@ -4379,6 +5214,7 @@ end
 
 -- ✅ ОБНОВЛЁННАЯ StopAutoFarm с правильным cleanup
 local function StopAutoFarm()
+    RemoveCoinTracer()
     State.AutoFarmEnabled = false
 
     if State.CoinFarmThread then
@@ -4421,10 +5257,6 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 12: GODMODE SYSTEM (СТРОКИ 1601-1800)
 -- ══════════════════════════════════════════════════════════════════════════════
-
-local healthConnection = nil
-local damageBlockerConnection = nil
-local stateConnection = nil
 local ApplyGodMode, SetupHealthProtection, SetupDamageBlocker
 
 -- ApplyGodMode() - Установка Health = math.huge
@@ -4458,12 +5290,12 @@ end
 
 -- SetupHealthProtection() - Защита Health/StateChanged
 SetupHealthProtection = function()
-    if healthConnection then
-        healthConnection:Disconnect()
+    if State.healthConnection then
+        State.healthConnection:Disconnect()
     end
     
-    if stateConnection then
-        stateConnection:Disconnect()
+    if State.stateConnection then
+        State.stateConnection:Disconnect()
     end
     
     local character = LocalPlayer.Character
@@ -4472,7 +5304,7 @@ SetupHealthProtection = function()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
     
-    stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
+    State.stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
         if State.GodModeEnabled then
             if newState == Enum.HumanoidStateType.Dead then
                 humanoid:ChangeState(Enum.HumanoidStateType.Running)
@@ -4480,26 +5312,26 @@ SetupHealthProtection = function()
             end
         end
     end)
-    table.insert(State.Connections, stateConnection)
+    table.insert(State.Connections, State.stateConnection)
     
-    healthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+    State.healthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
         if State.GodModeEnabled and humanoid.Health < math.huge then
             humanoid.Health = math.huge
         end
     end)
     
-    table.insert(State.Connections, healthConnection)
+    table.insert(State.Connections, State.healthConnection)
 end
 -- SetupDamageBlocker() - Блокировка Ragdoll/CreatorTag
 SetupDamageBlocker = function()
-    if damageBlockerConnection then
-        damageBlockerConnection:Disconnect()
+    if State.damageBlockerConnection then
+        State.damageBlockerConnection:Disconnect()
     end
     
     local character = LocalPlayer.Character
     if not character then return end
     
-    damageBlockerConnection = character.ChildAdded:Connect(function(child)
+    State.damageBlockerConnection = character.ChildAdded:Connect(function(child)
         if State.GodModeEnabled then
             if child.Name == "Ragdoll" or child.Name == "CreatorTag" or 
                (child:IsA("ObjectValue") and child.Name == "creator") then
@@ -4510,7 +5342,7 @@ SetupDamageBlocker = function()
         end
     end)
     
-    table.insert(State.Connections, damageBlockerConnection)
+    table.insert(State.Connections, State.damageBlockerConnection)
 end
 
 -- ToggleGodMode() - Включение/отключение
@@ -4518,7 +5350,7 @@ ToggleGodMode = function()
     State.GodModeEnabled = not State.GodModeEnabled
     if State.GodModeEnabled then
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Green)
+            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
         end
         
         ApplyGodMode()
@@ -4557,17 +5389,17 @@ ToggleGodMode = function()
         end
         
         -- Отключаем локальные connections
-        if healthConnection then
-            healthConnection:Disconnect()
-            healthConnection = nil
+        if State.healthConnection then
+            State.healthConnection:Disconnect()
+            State.healthConnection = nil
         end
-        if stateConnection then
-            stateConnection:Disconnect()
-            stateConnection = nil
+        if State.stateConnection then
+            State.stateConnection:Disconnect()
+            State.stateConnection = nil
         end
-        if damageBlockerConnection then
-            damageBlockerConnection:Disconnect()
-            damageBlockerConnection = nil
+        if State.damageBlockerConnection then
+            State.damageBlockerConnection:Disconnect()
+            State.damageBlockerConnection = nil
         end
         
         -- ✅ Очищаем ТОЛЬКО GodMode connections
@@ -4604,6 +5436,10 @@ local playerConnections = {}
 local function CreatePlayerNicknameESP(player)
     if not player or player == LocalPlayer then return end
     
+    -- ✅ Дополнительные проверки
+    if not player.Parent then return end
+    if not player:IsDescendantOf(game) then return end
+    
     local character = player.Character
     if not character or not character.Parent then return end
     
@@ -4639,6 +5475,7 @@ local function CreatePlayerNicknameESP(player)
         billboard = billboard
     }
 end
+
 
 local function RemovePlayerNicknameESP(player)
     if not player or not State.PlayerNicknamesCache[player] then return end
@@ -4994,29 +5831,14 @@ knifeThrow = function(silent)
 end
 
 
-shootMurderer = function(silent)
+shootMurderer = function(forceMagic)
+    -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
+    local useMode = forceMagic and "Magic" or (State.ShootMurdererMode or "Magic")
+    
     -- Проверка кулдауна
     if not State.CanShootMurderer then
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 165, 0)\">Wait </font><font color=\"rgb(220,220,220)\">Gun is on cooldown</font>", CONFIG.Colors.Text)
-        end
-        return
-    end
-    
-    -- Проверка роли
-    local sheriff = getSheriff()
-    if sheriff ~= LocalPlayer then
-        if not silent then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not sheriff/hero.</font>", CONFIG.Colors.Text)
-        end
-        return
-    end
-    
-    -- Поиск убийцы
-    local murderer = getMurder()
-    if not murderer or not murderer.Character then
-        if not silent then
-            ShowNotification("<font color=\"rgb(255, 165, 0)\">Warning </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
         end
         return
     end
@@ -5036,15 +5858,33 @@ shootMurderer = function(silent)
         end
         
         if not gun then
-            if not silent then
+            if not forceMagic then
                 ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the gun..?</font>", CONFIG.Colors.Text)
             end
             return
         end
     end
     
+    -- Проверка роли (ПОСЛЕ экипировки)
+    local sheriff = getSheriff()
+    if sheriff ~= LocalPlayer then
+        if not forceMagic then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not sheriff/hero.</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    -- Поиск убийцы
+    local murderer = getMurder()
+    if not murderer or not murderer.Character then
+        if not forceMagic then
+            ShowNotification("<font color=\"rgb(255, 165, 0)\">Warning </font><font color=\"rgb(220,220,220)\">Murderer not found</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
     if not LocalPlayer.Character:FindFirstChild("RightHand") then
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
         end
         return
@@ -5053,40 +5893,96 @@ shootMurderer = function(silent)
     local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
     
     if not murdererHRP then
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">Murderer has no HRP</font>", nil)
         end
         return
     end
     
-    -- === НОВАЯ ЛОГИКА 100% ПОПАДАНИЯ (Counter-Movement) ===
-    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
-    local pingValue = tonumber(ping:match("%d+")) or 50
-    local predictionTime = (pingValue / 1000) + 0.05
+    local argsShootRemote
     
-    local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-    local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
-    
-    local spawnPosition, targetPosition
+    if useMode == "Magic" then
+        -- === MAGIC MODE: Телепортация пули (текущая логика) ===
+        local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+        local pingValue = tonumber(ping:match("%d+")) or 50
+        local predictionTime = (pingValue / 1000) + 0.05
+        
+        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
+        
+        local spawnPosition, targetPosition
 
-    if enemyVelocity.Magnitude > 2 then
-        -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
-        local moveDir = enemyVelocity.Unit
-        spawnPosition = predictedPos + (moveDir * 5)
-        targetPosition = predictedPos
+        if enemyVelocity.Magnitude > 2 then
+            -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
+            local moveDir = enemyVelocity.Unit
+            spawnPosition = predictedPos + (moveDir * 5)
+            targetPosition = predictedPos
+        else
+            -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
+            local backDir = -murdererHRP.CFrame.LookVector
+            spawnPosition = predictedPos + (backDir * 3)
+            targetPosition = predictedPos
+        end
+        
+        argsShootRemote = {
+            [1] = CFrame.lookAt(spawnPosition, targetPosition),
+            [2] = CFrame.new(targetPosition)
+        }
     else
-        -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
-        local backDir = -murdererHRP.CFrame.LookVector
-        spawnPosition = predictedPos + (backDir * 3)
-        targetPosition = predictedPos
+    -- === SILENT MODE: Стрельба от дула пистолета ===
+        local rightHand = LocalPlayer.Character:FindFirstChild("RightHand")
+        local gunHandle = gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel")
+        
+        if not rightHand then
+            if not forceMagic then
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
+            end
+            return
+        end
+        
+        -- 1. ТОЧНАЯ ПОЗИЦИЯ ДУЛА
+        local muzzleCFrame
+        if gunHandle then
+            muzzleCFrame = gunHandle.CFrame
+        else
+            muzzleCFrame = rightHand.CFrame * CFrame.new(0, 0, -2)
+        end
+        
+        local muzzlePosition = muzzleCFrame.Position
+        
+        -- 2. ВЫБОР ЦЕЛЕВОЙ ЧАСТИ ТЕЛА
+        -- Целимся в Torso/UpperTorso для максимального хитбокса
+        local murdererTorso = murderer.Character:FindFirstChild("Torso") or murderer.Character:FindFirstChild("UpperTorso")
+        local targetPart = murdererTorso or murdererHRP
+        
+        -- ✅ ИСПРАВЛЕНИЕ: Берем позицию НАПРЯМУЮ от целевой части, а не через HRP
+        local targetPosition = targetPart.Position
+        
+        -- 3. РАСЧЕТ ПРЕДИКЦИИ
+        local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+        local pingValue = tonumber(ping:match("%d+")) or 50
+        
+        local distanceToTarget = (targetPosition - muzzlePosition).Magnitude
+        local bulletSpeed = 500
+        local bulletTravelTime = distanceToTarget / bulletSpeed
+        local networkDelay = (pingValue / 1000)
+        
+        local totalPredictionTime = bulletTravelTime + networkDelay
+        
+        -- 4. ПРИМЕНЯЕМ ПРЕДИКЦИЮ К ЦЕЛЕВОЙ ЧАСТИ
+        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+        local finalTargetPosition = targetPosition + (enemyVelocity * totalPredictionTime)
+
+        -- 5. ФОРМИРОВАНИЕ CFrame
+        local directionToTarget = (finalTargetPosition - muzzlePosition).Unit
+        local shootFromCFrame = CFrame.lookAt(muzzlePosition, muzzlePosition + directionToTarget)
+        local shootToCFrame = CFrame.new(finalTargetPosition)
+
+        argsShootRemote = {
+            [1] = shootFromCFrame,
+            [2] = shootToCFrame
+        }
     end
-    
-    -- Аргументы для выстрела (Используем lookAt для правильного хитбокса пули)
-    local argsShootRemote = {
-        [1] = CFrame.lookAt(spawnPosition, targetPosition),
-        [2] = CFrame.new(targetPosition)
-    }
-    -- ========================================================
     
     -- АКТИВИРУЕМ КУЛДАУН
     State.CanShootMurderer = false
@@ -5115,47 +6011,59 @@ shootMurderer = function(silent)
     end)
     
     if success then
-        if not silent then
-            ShowNotification("<font color=\"rgb(85, 255, 85)\">Shot fired! </font><font color=\"rgb(220,220,220)\">Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
+        if not forceMagic then
+            local modeText = useMode == "Magic" and "Magic" or "Silent"
+            ShowNotification("<font color=\"rgb(85, 255, 85)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
         end
         
         -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
         task.delay(State.ShootCooldown, function()
             State.CanShootMurderer = true
-            if not silent then
+            if not forceMagic then
                 ShowNotification("<font color=\"rgb(85, 255, 255)\">Ready </font><font color=\"rgb(220,220,220)\">You can shoot again</font>", CONFIG.Colors.Text)
             end
         end)
     else
         -- Если ошибка - сбрасываем кулдаун
         State.CanShootMurderer = true
-        if not silent then
+        if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
         end
     end
 end
 
 -- pickupGun() - Подбор пистолета
-local function pickupGun()
+local function pickupGun(silent)
     local gun = Workspace:FindFirstChild("GunDrop", true)
     
     if not gun then
-        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>", CONFIG.Colors.Text)
-        return
+        if not silent and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>", CONFIG.Colors.Text)
+        end
+        return false
     end
     
     local character = LocalPlayer.Character
-    if not character then return end
+    if not character then return false end
     
     local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    if not hrp then return false end
     
-    -- Используем firetouchinterest - никакого телепорта
-    firetouchinterest(hrp, gun, 0)
-    task.wait(0.1)
-    firetouchinterest(hrp, gun, 1)
+    -- ✅ ЗАЩИТА: проверяем что gun существует и имеет Parent
+    if not gun or not gun.Parent then return false end
     
-    ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
+    -- Используем firetouchinterest
+    pcall(function()
+        firetouchinterest(hrp, gun, 0)
+        task.wait(0.1)
+        firetouchinterest(hrp, gun, 1)
+    end)
+    
+    if not silent and State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
+    end
+    
+    return true
 end
 
 local function EnableInstantPickup()
@@ -5166,7 +6074,13 @@ local function EnableInstantPickup()
     
     State.InstantPickupEnabled = true
     
-    -- ✅ ИСПОЛЬЗУЕМ ГЛОБАЛЬНУЮ ПЕРЕМЕННУЮ
+    -- ✅ ЗАЩИТА: проверяем SetupGunTracking перед вызовом
+    if not State.currentMapConnection then
+        pcall(function()
+            SetupGunTracking()
+        end)
+    end
+    
     local lastAttemptedGun = nil
     
     State.InstantPickupThread = task.spawn(function()
@@ -5184,13 +6098,17 @@ local function EnableInstantPickup()
                 continue
             end
             
-            local gun = State.CurrentGunDrop  -- ✅ ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЙ
-            local sheriff = getSheriff()
+            local gun = State.CurrentGunDrop
             
-            -- ✅ НОВЫЙ ПИСТОЛЕТ (который мы ещё не пробовали)
-            if gun and not sheriff and gun ~= lastAttemptedGun then
+            -- ✅ ЗАЩИТА: проверяем существование gun и его Parent
+            if gun and gun.Parent and gun ~= lastAttemptedGun then
+    
+                local sheriff = getSheriff()
+                if sheriff == LocalPlayer then
+                    lastAttemptedGun = gun
+                    continue
+                end
                 
-                -- Проверяем, уже подобран?
                 if LocalPlayer.Character:FindFirstChild("Gun") or 
                    LocalPlayer.Backpack:FindFirstChild("Gun") then
                     lastAttemptedGun = gun
@@ -5199,37 +6117,54 @@ local function EnableInstantPickup()
                 
                 local pickupSuccess = false
                 
-                -- ✅ 3 ПОПЫТКИ
-                for attempt = 1, 3 do
-                    pickupGun()
-                    task.wait(0.5)
+                for attempt = 1, 5 do
+                    -- ✅ ЗАЩИТА: проверяем gun перед каждой попыткой
+                    if not gun or not gun.Parent then
+                        break
+                    end
                     
-                    -- Проверяем успех
+                    pickupGun(true)
+                    task.wait(0.15)
+                    
                     if LocalPlayer.Character:FindFirstChild("Gun") or 
                        LocalPlayer.Backpack:FindFirstChild("Gun") then
                         pickupSuccess = true
+                        
+                        if State.NotificationsEnabled then
+                            task.spawn(function()
+                                ShowNotification(
+                                    "<font color=\"rgb(168,228,160)\">Gun: Instant Pickup ✓</font>",
+                                    CONFIG.Colors.Text
+                                )
+                            end)
+                            task.spawn(function()
+                                updateRoleAvatars()
+                            end)
+                        end
                         break
                     end
                     
-                    -- Пистолет исчез
-                    if State.CurrentGunDrop ~= gun then
+                    if State.CurrentGunDrop ~= gun or not State.CurrentGunDrop then
+                        task.spawn(function()
+                            updateRoleAvatars()
+                        end)
                         break
                     end
                 end
+                
                 lastAttemptedGun = gun
+                
                 if not pickupSuccess then
                     repeat
-                        task.wait(0.2)
+                        task.wait(0.1)
                         if not State.InstantPickupEnabled then
                             return
                         end
                         
-                        -- Выходим, когда появится НОВЫЙ пистолет
                         if State.CurrentGunDrop and State.CurrentGunDrop ~= lastAttemptedGun then
                             break
                         end
                         
-                        -- Или когда старый исчезнет
                         if not State.CurrentGunDrop then
                             break
                         end
@@ -5238,11 +6173,10 @@ local function EnableInstantPickup()
                 end
             end
             
-            task.wait(0.1)  -- Уменьшил для быстрой реакции
+            task.wait(0.05)
         end
     end)
 end
-
 
 local function DisableInstantPickup()
     State.InstantPickupEnabled = false
@@ -5592,7 +6526,7 @@ local function SetupAntiAFK()
     end)
     
     task.spawn(function()
-        while getgenv().MM2_ESP_Script do
+        while getgenv().MM2_Script do
             pcall(function()
                 if getconnections then
                     for _, connection in next, getconnections(LocalPlayer.Idled) do
@@ -5631,25 +6565,20 @@ local function respawn(plr)
     local ogpos = hrp.CFrame
     local ogpos2 = workspace.CurrentCamera.CFrame
 
-    -- Сохраняем позицию ДО респавна
     task.spawn(function()
         local newChar = plr.CharacterAdded:Wait()
-        local newHrp = newChar:WaitForChild("HumanoidRootPart", 10)
+        local newHrp = newChar:WaitForChild("HumanoidRootPart", 3)
         if newHrp then
-            -- Ждём загрузки физики
-            task.wait(0.1)
+            newHrp.Anchored = true  -- Фиксируем на момент телепорта
             newHrp.CFrame = ogpos
-            task.wait()
             workspace.CurrentCamera.CFrame = ogpos2
+            newHrp.Anchored = false  -- Освобождаем
         end
     end)
 
-    -- Теперь делаем респавн
-    local hum = char:FindFirstChildWhichIsA("Humanoid")
-    if hum then
-        hum.Health = 0
-    end
+    char:BreakJoints()
 end
+
 
 
 local function ServerHop()
@@ -5852,6 +6781,148 @@ local function ServerHop()
     TeleportToServer(selectedServer.id)
 end
 
+local function ServerLagger()
+    if State.NotificationsEnabled then
+        ShowNotification(
+            "<font color=\"rgb(255, 85, 85)\">Server Lagger: </font><font color=\"rgb(220,220,220)\">Success</font>",
+            CONFIG.Colors.Text
+        )
+    end
+   
+    pcall(function()
+        local GetSyncData = ReplicatedStorage.GetSyncData
+        local InvokeServer = GetSyncData.InvokeServer
+        local counter = 0
+       
+        while true do
+            for i = 1, 1 do
+                task.spawn(InvokeServer, GetSyncData)
+            end
+           
+            counter = counter + 1
+            if counter == 3 then
+                counter = 0
+                wait(0)
+            end
+        end
+    end)
+end
+
+local DEFAULT_WALKSPEED = 18
+
+local function StartSpeedGlitch()
+    if State.SpeedGlitchEnabled then
+        StopSpeedGlitch()
+        task.wait(0.1)
+    end
+    
+    local character = LocalPlayer.Character
+    if not character then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">No character</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        repeat task.wait() until character:FindFirstChildOfClass("Humanoid")
+        humanoid = character:FindFirstChildOfClass("Humanoid")
+    end
+    
+    if not humanoid then
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">No humanoid</font>", CONFIG.Colors.Text)
+        end
+        return
+    end
+    
+    State.SpeedGlitchEnabled = true
+    humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- ✅ Используем константу
+    
+    -- Функция для автоматического перезапуска при смерти
+    local function onSpeedGlitchDied()
+        if State.SpeedGlitchConnection then
+            State.SpeedGlitchConnection:Disconnect()
+            State.SpeedGlitchConnection = nil
+        end
+        
+        -- Перезапуск после респавна
+        if State.SpeedGlitchEnabled then
+            LocalPlayer.CharacterAdded:Wait()
+            task.wait(0.5)
+            if State.SpeedGlitchEnabled then
+                StartSpeedGlitch()
+            end
+        end
+    end
+    
+    -- Подключаем обработчик смерти
+    local diedConnection = humanoid.Died:Connect(onSpeedGlitchDied)
+    table.insert(State.Connections, diedConnection)
+    
+    -- CORE LOGIC: RenderStepped для спид глитча
+    State.SpeedGlitchConnection = RunService.RenderStepped:Connect(function()
+        if not State.SpeedGlitchEnabled then return end
+        
+        if not humanoid or not humanoid.Parent or humanoid:GetState() == Enum.HumanoidStateType.Dead then
+            return
+        end
+        
+        local state = humanoid:GetState()
+        local isJumping = state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall
+        local isMoving = humanoid.MoveDirection.Magnitude > 0.1
+        
+        -- Спид глитч работает ТОЛЬКО в прыжке + движение
+        if isJumping and isMoving then
+            humanoid.WalkSpeed = State.SpeedGlitchSpeed  -- Без проверки, каждый кадр
+        else
+            humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- Без проверки, каждый кадр
+        end
+    end)
+    
+    table.insert(State.Connections, State.SpeedGlitchConnection)
+    
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220,220,220)\">Speed Glitch: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
+    end
+end
+
+-- Остановка Speed Glitch
+local function StopSpeedGlitch()
+    if not State.SpeedGlitchEnabled then return end
+    
+    State.SpeedGlitchEnabled = false
+    
+    -- Отключаем RenderStepped соединение
+    if State.SpeedGlitchConnection then
+        State.SpeedGlitchConnection:Disconnect()
+        State.SpeedGlitchConnection = nil
+    end
+    
+    -- Возвращаем дефолтную скорость
+    local character = LocalPlayer.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- ✅ Используем константу
+        end
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("<font color=\"rgb(220,220,220)\">Speed Glitch: </font><font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
+    end
+end
+
+-- Toggle Speed Glitch
+local function ToggleSpeedGlitch()
+    if State.SpeedGlitchEnabled then
+        StopSpeedGlitch()
+    else
+        StartSpeedGlitch()
+    end
+end
+
 -- СНАЧАЛА объявляем функции
 local function HandleEmoteInput(input)
     if input.KeyCode == State.Keybinds.Sit and State.Keybinds.Sit ~= Enum.KeyCode.Unknown then
@@ -5899,6 +6970,14 @@ local function HandleActionInput(input)
                 pcall(function() FlingPlayer(targetPlayer) end)
             end
         end
+    end
+
+    if input.KeyCode == State.Keybinds.Fly and State.Keybinds.Fly ~= Enum.KeyCode.Unknown then
+        ToggleFly()
+    end
+    
+    if input.KeyCode == State.Keybinds.SpeedGlitch and State.Keybinds.SpeedGlitch ~= Enum.KeyCode.Unknown then
+        ToggleSpeedGlitch()
     end
 
     if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
@@ -6047,7 +7126,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             if on then
                 State.CoinBlacklist = {}
                 State.StartSessionCoins = GetCollectedCoinsCount()
-                ShowNotification("Auto Farm: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
+                ShowNotification("Auto Farm: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
                 StartAutoFarm()
             else
                 StopAutoFarm()
@@ -6085,6 +7164,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         Rejoin = Rejoin,
         ExecInf = ExecuteInf,
         ServerHop = ServerHop,
+        ServerLagger = ServerLagger,
         HandleAutoRejoin = HandleAutoRejoin,
         HandleAutoReconnect = HandleAutoReconnect,
         SetReconnectInterval = SetReconnectInterval,
@@ -6128,11 +7208,12 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         AimbotFovCheck = function(value)
             State.AimbotConfig.FovCheck = value
-            if _G.FovCircle then
-                _G.FovCircle.Visible = value
+            -- ✅ ИСПРАВЛЕНИЕ: Добавлена проверка на существование
+            if _G.AimbotState and _G.AimbotState.FovCircle then
+                _G.AimbotState.FovCircle.Visible = value
             end
-            if _G.FovCircleOutline then
-                _G.FovCircleOutline.Visible = value
+            if _G.AimbotState and _G.AimbotState.FovCircleOutline then
+                _G.AimbotState.FovCircleOutline.Visible = value
             end
         end,
 
@@ -6162,11 +7243,12 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         AimbotFov = function(value)
             State.AimbotConfig.Fov = value
-            if _G.FovCircle then
-                _G.FovCircle.Radius = value
+            -- ✅ ИСПРАВЛЕНИЕ: Добавлена проверка на существование
+            if _G.AimbotState and _G.AimbotState.FovCircle then
+                _G.AimbotState.FovCircle.Radius = value
             end
-            if _G.FovCircleOutline then
-                _G.FovCircleOutline.Radius = value
+            if _G.AimbotState and _G.AimbotState.FovCircleOutline then
+                _G.AimbotState.FovCircleOutline.Radius = value
             end
         end,
 
@@ -6186,12 +7268,36 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.AimbotConfig.Method = value
             if State.AimbotConfig.Enabled then
                 if _G.StopAimbot then _G.StopAimbot() end
+                -- ✅ Небольшая задержка для перезапуска
+                task.wait(0.1)
                 if _G.StartAimbot then _G.StartAimbot() end
             end
         end,
 
         AimbotMouseButton = function(value)
             State.AimbotConfig.MouseButton = value
+        end,
+
+        -- ✅ FLY ОБРАБОТЧИКИ (добавить здесь)
+        FlyMode = function(value)
+            State.FlyType = value
+            if State.FlyEnabled then
+                StopFly()
+                task.wait(0.1)
+                StartFly(State.FlyType)
+            end
+        end,
+
+        ShootMurdererMode = function(value)
+            State.ShootMurdererMode = value
+        end,
+
+        FlySpeed = function(value)
+            State.FlySpeed = value
+        end,
+
+        SpeedGlitchSpeed = function(value)
+            State.SpeedGlitchSpeed = value
         end,
 
         Shutdown = function() FullShutdown() end,
@@ -6286,157 +7392,184 @@ end)
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
 ----------------------------------------------------------------
-local MainTab = GUI.CreateTab("Main")
+do
+    local MainTab = GUI.CreateTab("Main")
 
-    MainTab:CreateSection("CHARACTER SETTINGS")
-    MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, "ApplyWalkSpeed")
-    MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, "ApplyJumpPower")
-    MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, "ApplyMaxCameraZoom")
+        MainTab:CreateSection("CHARACTER SETTINGS")
+        MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.WalkSpeed, "ApplyWalkSpeed")
+        MainTab:CreateInputField("JumpPower", "Set custom jump power", State.JumpPower, "ApplyJumpPower")
+        MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.MaxCameraZoom, "ApplyMaxCameraZoom")
 
-    MainTab:CreateSection("CAMERA")
-    MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
-    MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
+        MainTab:CreateSection("CAMERA")
+        MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
+        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
 
-    MainTab:CreateSection("TELEPORT & MOVEMENT")
-    MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
-    MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
+        MainTab:CreateSection("TELEPORT & OTHER")
+        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+        MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
+        MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
-    MainTab:CreateSection("GODMODE")
-    MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
-    MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
+        MainTab:CreateSection("Speed Glitch")
+        MainTab:CreateSlider("Speed Glitch Speed", "Jump speed multiplier", 16, 100, State.SpeedGlitchSpeed, "SpeedGlitchSpeed", 5)
+        MainTab:CreateKeybindButton("Toggle Speed Glitch", "Enable/disable speed glitch", "SpeedGlitch")
 
-local AimTab = GUI.CreateTab("Aim")
+        MainTab:CreateSection("FLY SETTINGS")
+        MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
+        MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 80, State.FlySpeed, "FlySpeed", 5)
+        MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
+        ----------------------------------------------------------------------------
+        MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
+end
 
-    AimTab:CreateSection("AIMBOT")
-    AimTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled",false)
+do
+    local AimTab = GUI.CreateTab("Aim")
 
-    AimTab:CreateSection("TARGETING CHECKS")
-    AimTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
-    AimTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
-    AimTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",true)
-    AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
-    AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
+        AimTab:CreateSection("AIMBOT")
+        AimTab:CreateToggle("Enable Aimbot", "Toggle aimbot on/off", "AimbotEnabled",false)
 
-    AimTab:CreateSection("ADVANCED OPTIONS")
-    AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
-    AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
-    AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
+        AimTab:CreateSection("TARGETING CHECKS")
+        AimTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
+        AimTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
+        AimTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",true)
+        AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
+        AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
-    AimTab:CreateSection("TARGETING VALUES")
-    AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
-    AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
-    AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
+        AimTab:CreateSection("ADVANCED OPTIONS")
+        AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
+        AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
+        AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
+
+        AimTab:CreateSection("TARGETING VALUES")
+        AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
+        AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
+        AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
 
-    AimTab:CreateSection("PREDICTION & OFFSET")
-    AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
-    AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
+        AimTab:CreateSection("PREDICTION & OFFSET")
+        AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+        AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 
-    AimTab:CreateSection("METHOD & ACTIVATION")
-    AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
-    AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+        AimTab:CreateSection("METHOD & ACTIVATION")
+        AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
+        AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+end
 
-local VisualsTab = GUI.CreateTab("Visuals")
+do
+    local VisualsTab = GUI.CreateTab("Visuals")
 
-    VisualsTab:CreateSection("NOTIFICATIONS")
-    VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
+        VisualsTab:CreateSection("NOTIFICATIONS")
+        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
 
-    VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-    VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
-    VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
-    VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
-    VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
-    VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
+        VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
+        VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+        VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
+        VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
+        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
-    VisualsTab:CreateSection("Misc")
-    VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
-    VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
-    VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        VisualsTab:CreateSection("Misc")
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+        VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
+        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+end
 
-local CombatTab = GUI.CreateTab("Combat")
+do
+    local CombatTab = GUI.CreateTab("Combat")
 
-    CombatTab:CreateSection("EXTENDED HITBOX")
-    CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
-    CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
+        CombatTab:CreateSection("EXTENDED HITBOX")
+        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
+        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
 
-    CombatTab:CreateSection("MURDERER TOOLS")
-    CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
-    CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
-    CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
-    CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
+        CombatTab:CreateSection("MURDERER TOOLS")
+        CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
+        CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
+        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+        CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
-    CombatTab:CreateSection("SHERIFF TOOLS")
-    CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-    CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
-    CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+        CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
+        CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
+        CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
+end
 
-local FarmTab = GUI.CreateTab("Farming")
+do
+    local FarmTab = GUI.CreateTab("Farming")
 
-    FarmTab:CreateSection("AUTO FARM")
-    FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
-    FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateSection("AUTO FARM")
+        FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
 
-    FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
-    FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
-    FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-    FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-    FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
-    FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
-    FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
+        FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
+        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+        FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
+        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+        FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
+end
 
-local FunTab = GUI.CreateTab("Fun")
+do
+    local FunTab = GUI.CreateTab("Fun")
 
-    FunTab:CreateSection("ANIMATION KEYBINDS")
-    FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
-    FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
-    FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
-    FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
-    FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
+        FunTab:CreateSection("ANIMATION KEYBINDS")
+        FunTab:CreateKeybindButton("Sit Animation", "sit", "Sit")
+        FunTab:CreateKeybindButton("Dab Animation", "dab", "Dab")
+        FunTab:CreateKeybindButton("Zen Animation", "zen", "Zen")
+        FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
+        FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-    FunTab:CreateSection("ANTI-FLING")
-    FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
-    FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
+        FunTab:CreateSection("ANTI-FLING")
+        FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
+        FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
 
-    FunTab:CreateSection("FLING PLAYER")
-    FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
-    FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
+        FunTab:CreateSection("FLING PLAYER")
+        FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
+        FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-    FunTab:CreateSection("FLING ROLE")
-    FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
-    FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
+        FunTab:CreateSection("FLING ROLE")
+        FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
+        FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
+end
 
-local TrollingTab = GUI.CreateTab("Troll")
+do
+    local TrollingTab = GUI.CreateTab("Troll")
 
-    TrollingTab:CreateSection("SELECT TARGET")
-    TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
+        TrollingTab:CreateSection("SELECT TARGET")
+        TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling")
 
-    TrollingTab:CreateSection("TROLLING MODES")
-    TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
-    TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
-    TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
+        TrollingTab:CreateSection("TROLLING MODES")
+        TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
+        TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
+        TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
 
-    TrollingTab:CreateSection("ORBIT SETTINGS")
-    TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
-    TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
-    TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
-    TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
+        TrollingTab:CreateSection("ORBIT SETTINGS")
+        TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
+        TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
+        TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
+        TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
 
-    TrollingTab:CreateSection("BLOCK PATH SETTINGS")
-    TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
+        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
+        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
 
-    TrollingTab:CreateSection("ORBIT PRESETS")
-    TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
-    TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
-    TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
+        TrollingTab:CreateSection("ORBIT PRESETS")
+        TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
+        TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
+        TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
+end
 
-local UtilityTab = GUI.CreateTab("Server")
+do
+    local UtilityTab = GUI.CreateTab("Server")
 
-    UtilityTab:CreateSection("SERVER MANAGEMENT")
-    UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
-    UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
-    UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
-    UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
+        UtilityTab:CreateSection("SERVER MANAGEMENT")
+        UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
+        UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
+        UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
+        UtilityTab:CreateSection("DANGER ZONE")
+        UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
+end
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
@@ -6455,6 +7588,7 @@ end)
 -- ═══════════════════════════════════════════════════════════════
 
 CreateNotificationUI()
+CreateAvatarUI()
 ApplyCharacterSettings()
 SetupGunTracking()
 SetupPlayerNicknamesTracking()
