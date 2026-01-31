@@ -5908,17 +5908,16 @@ shootMurderer = function(forceMagic)
         local predictionTime = (pingValue / 1000) + 0.05
         
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
-        
+
+        local adjustedVelocity = Vector3.new(enemyVelocity.X, 0, enemyVelocity.Z)
+        local predictedPos = murdererHRP.Position + (adjustedVelocity * predictionTime)
         local spawnPosition, targetPosition
 
-        if enemyVelocity.Magnitude > 2 then
-            -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
-            local moveDir = enemyVelocity.Unit
+        if adjustedVelocity.Magnitude > 2 then
+            local moveDir = adjustedVelocity.Unit
             spawnPosition = predictedPos + (moveDir * 5)
             targetPosition = predictedPos
         else
-            -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
             local backDir = -murdererHRP.CFrame.LookVector
             spawnPosition = predictedPos + (backDir * 3)
             targetPosition = predictedPos
@@ -5969,9 +5968,11 @@ shootMurderer = function(forceMagic)
         
         local totalPredictionTime = bulletTravelTime + networkDelay
         
-        -- 4. ПРИМЕНЯЕМ ПРЕДИКЦИЮ К ЦЕЛЕВОЙ ЧАСТИ
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local finalTargetPosition = targetPosition + (enemyVelocity * totalPredictionTime)
+
+        local adjustedVelocity = Vector3.new(enemyVelocity.X, 0, enemyVelocity.Z)
+
+        local finalTargetPosition = targetPosition + (adjustedVelocity * totalPredictionTime)
 
         -- 5. ФОРМИРОВАНИЕ CFrame
         local directionToTarget = (finalTargetPosition - muzzlePosition).Unit
