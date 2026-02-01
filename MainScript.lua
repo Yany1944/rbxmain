@@ -298,7 +298,7 @@ local State = {
         SpeedGlitch = Enum.KeyCode.Unknown,
     }
 }
-
+--[[
 -- Замените существующий блок TeleportCheck на этот:
 local TeleportCheck = false
 
@@ -319,7 +319,7 @@ if queue_on_teleport then
             end
         end
     ]]
-    
+    --[[
     -- Попытка 1: OnTeleport event
     game.Players.LocalPlayer.OnTeleport:Connect(function(State)
         if State == Enum.TeleportState.Started and not TeleportCheck then
@@ -331,7 +331,7 @@ if queue_on_teleport then
     -- Попытка 2: Сразу добавляем в очередь (для ручной смены серверов)
     queue_on_teleport(teleportScript)
 end
-
+--]]
 
 local function TrackConnection(conn)
     if conn then
@@ -6057,7 +6057,7 @@ shootMurderer = function(forceMagic)
         
         if not gun then
             if not forceMagic then
-                ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the gun..?</font>", CONFIG.Colors.Text)
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not sheriff/hero.</font>", CONFIG.Colors.Text)
             end
             return
         end
@@ -6107,7 +6107,7 @@ shootMurderer = function(forceMagic)
         
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
 
-        local adjustedVelocity = Vector3.new(enemyVelocity.X, 0, enemyVelocity.Z)
+        local adjustedVelocity = enemyVelocity
         local predictedPos = murdererHRP.Position + (adjustedVelocity * predictionTime)
         local spawnPosition, targetPosition
 
@@ -6147,28 +6147,33 @@ shootMurderer = function(forceMagic)
         
         local muzzlePosition = muzzleCFrame.Position
         
-        -- 2. ВЫБОР ЦЕЛЕВОЙ ЧАСТИ ТЕЛА
-        -- Целимся в Torso/UpperTorso для максимального хитбокса
-        local murdererTorso = murderer.Character:FindFirstChild("Torso") or murderer.Character:FindFirstChild("UpperTorso")
-        local targetPart = murdererTorso or murdererHRP
-        
-        -- ✅ ИСПРАВЛЕНИЕ: Берем позицию НАПРЯМУЮ от целевой части, а не через HRP
-        local targetPosition = targetPart.Position
+        -- 2. ВЫБОР ЦЕЛЕВОЙ ЧАСТИ ТЕЛА (GetPivot метод)
+        local targetPosition = murderer.Character:GetPivot().Position
         
         -- 3. РАСЧЕТ ПРЕДИКЦИИ
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
-        
+
         local distanceToTarget = (targetPosition - muzzlePosition).Magnitude
         local bulletSpeed = 500
         local bulletTravelTime = distanceToTarget / bulletSpeed
         local networkDelay = (pingValue / 1000)
-        
-        local totalPredictionTime = bulletTravelTime + networkDelay
-        
-        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
 
-        local adjustedVelocity = Vector3.new(enemyVelocity.X, 0, enemyVelocity.Z)
+        local totalPredictionTime = bulletTravelTime + networkDelay
+
+        -- ✅ КРИТИЧНО: Берем velocity ЗАНОВО, чтобы синхронизировать с targetPosition
+        local freshHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
+        if not freshHRP then
+            if not forceMagic then
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">HRP lost</font>", nil)
+            end
+            return
+        end
+
+        local enemyVelocity = freshHRP.AssemblyLinearVelocity
+
+        -- ✅ ПОЛНЫЙ 3D предикт (НЕ обнуляем Y!)
+        local adjustedVelocity = enemyVelocity
 
         local finalTargetPosition = targetPosition + (adjustedVelocity * totalPredictionTime)
 
