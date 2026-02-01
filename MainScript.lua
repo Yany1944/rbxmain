@@ -104,7 +104,6 @@ local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 local LocalPlayer = Players.LocalPlayer
 
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 3: STATE MANAGEMENT (СТРОКИ 116-252)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -188,6 +187,7 @@ local State = {
     IsFlingInProgress = false,
     SelectedPlayerForFling = nil,
     OldPos = nil,
+    TrapTrackingConnection = nil,
 
     -- Walk Fling
     WalkFlingActive = false,
@@ -221,6 +221,7 @@ local State = {
     -- ESP internals
     PlayerHighlights = {},
     GunCache = {},
+    TrapCache = {},
     CurrentGunDrop = nil,
     PlayerData = {},
 
@@ -2041,15 +2042,20 @@ end
 -- ==============================
 -- OPTIMIZATION MODULE
 -- ==============================
-local afkModeActive = false
-local fpsBoostActive = false
-local uiOnlyActive = false
-local savedUIState = {}
-local savedUIOnlyState = {}  -- ← ИСПРАВЛЕНО: было nil
-local savedSettings = {
-    Lighting = {},
-    Camera = {}
+
+local OptimizationState = {
+    afkModeActive = false,
+    fpsBoostActive = false,
+    uiOnlyActive = false,
+    savedUIState = {},
+    savedUIOnlyState = {},
+    savedSettings = {
+        Lighting = {},
+        Camera = {}
+    },
+    fpsBoostDescendantConn = nil
 }
+
 -- ==============================
 -- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 -- ==============================
@@ -2078,7 +2084,7 @@ local function ApplyUIOptimization()
     end)
     
     pcall(function()
-        local targetTable = afkModeActive and savedUIState or savedUIOnlyState
+        local targetTable = OptimizationState.afkModeActive and OptimizationState.savedUIState or OptimizationState.savedUIOnlyState
         for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
             if gui:IsA("ScreenGui") and gui ~= MainGui then
                 if not targetTable[gui] then
@@ -2094,25 +2100,26 @@ end
 LocalPlayer.CharacterAdded:Connect(function(character)
     task.wait(0.5)
     
-    if afkModeActive then
+    if OptimizationState.afkModeActive then
         ApplyUIOptimization()
         pcall(function()
             RunService:Set3dRenderingEnabled(false)
         end)
-    elseif uiOnlyActive then
+    elseif OptimizationState.uiOnlyActive then
         ApplyUIOptimization()
     end
 end)
+
 -- ==============================
 -- AFK MODE FUNCTIONS
 -- ==============================
 
 EnableMaxOptimization = function()
-    if afkModeActive then 
+    if OptimizationState.afkModeActive then 
         return 
     end
     
-    afkModeActive = true
+    OptimizationState.afkModeActive = true
     
     -- 1. ОТКЛЮЧЕНИЕ 3D РЕНДЕРИНГА
     pcall(function()
@@ -2124,7 +2131,7 @@ EnableMaxOptimization = function()
     
     -- 3. ОТКЛЮЧЕНИЕ ОСВЕЩЕНИЯ
     pcall(function()
-        savedSettings.Lighting = {
+        OptimizationState.savedSettings.Lighting = {
             GlobalShadows = Lighting.GlobalShadows,
             Brightness = Lighting.Brightness,
             Ambient = Lighting.Ambient,
@@ -2142,7 +2149,7 @@ EnableMaxOptimization = function()
         
         for _, effect in pairs(Lighting:GetChildren()) do
             if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
-                savedSettings.Lighting[effect.Name] = effect
+                OptimizationState.savedSettings.Lighting[effect.Name] = effect
                 effect.Parent = nil
             end
         end
@@ -2152,7 +2159,7 @@ EnableMaxOptimization = function()
     pcall(function()
         local camera = Workspace.CurrentCamera
         if camera then
-            savedSettings.Camera.FieldOfView = camera.FieldOfView
+            OptimizationState.savedSettings.Camera.FieldOfView = camera.FieldOfView
             camera.FieldOfView = 50
         end
     end)
@@ -2167,11 +2174,11 @@ EnableMaxOptimization = function()
 end
 
 DisableMaxOptimization = function()
-    if not afkModeActive then 
+    if not OptimizationState.afkModeActive then 
         return 
     end
     
-    afkModeActive = false
+    OptimizationState.afkModeActive = false
     
     -- 1. ВКЛЮЧЕНИЕ 3D РЕНДЕРИНГА
     pcall(function()
@@ -2203,53 +2210,53 @@ DisableMaxOptimization = function()
     end)
     
     pcall(function()
-        for gui, wasEnabled in pairs(savedUIState) do
+        for gui, wasEnabled in pairs(OptimizationState.savedUIState) do
             if gui and gui.Parent then
                 gui.Enabled = wasEnabled
             end
         end
-        savedUIState = {}
+        OptimizationState.savedUIState = {}
     end)
     
     -- 3. ВОССТАНОВЛЕНИЕ ОСВЕЩЕНИЯ
     pcall(function()
-        if savedSettings.Lighting.GlobalShadows ~= nil then
-            Lighting.GlobalShadows = savedSettings.Lighting.GlobalShadows
-            Lighting.Brightness = savedSettings.Lighting.Brightness
-            Lighting.Ambient = savedSettings.Lighting.Ambient
-            Lighting.OutdoorAmbient = savedSettings.Lighting.OutdoorAmbient
-            Lighting.FogEnd = savedSettings.Lighting.FogEnd
-            Lighting.Technology = savedSettings.Lighting.Technology
+        if OptimizationState.savedSettings.Lighting.GlobalShadows ~= nil then
+            Lighting.GlobalShadows = OptimizationState.savedSettings.Lighting.GlobalShadows
+            Lighting.Brightness = OptimizationState.savedSettings.Lighting.Brightness
+            Lighting.Ambient = OptimizationState.savedSettings.Lighting.Ambient
+            Lighting.OutdoorAmbient = OptimizationState.savedSettings.Lighting.OutdoorAmbient
+            Lighting.FogEnd = OptimizationState.savedSettings.Lighting.FogEnd
+            Lighting.Technology = OptimizationState.savedSettings.Lighting.Technology
             
-            for name, effect in pairs(savedSettings.Lighting) do
+            for name, effect in pairs(OptimizationState.savedSettings.Lighting) do
                 if typeof(effect) == "Instance" then
                     effect.Parent = Lighting
                 end
             end
             
-            savedSettings.Lighting = {}
+            OptimizationState.savedSettings.Lighting = {}
         end
     end)
     
     -- 4. ВОССТАНОВЛЕНИЕ КАМЕРЫ
     pcall(function()
         local camera = Workspace.CurrentCamera
-        if camera and savedSettings.Camera.FieldOfView then
-            camera.FieldOfView = savedSettings.Camera.FieldOfView
+        if camera and OptimizationState.savedSettings.Camera.FieldOfView then
+            camera.FieldOfView = OptimizationState.savedSettings.Camera.FieldOfView
         end
     end)
 end
 
-local function EnableUIOnly()
-    if uiOnlyActive then return end
-    uiOnlyActive = true
-    savedUIOnlyState = {}
+EnableUIOnly = function()
+    if OptimizationState.uiOnlyActive then return end
+    OptimizationState.uiOnlyActive = true
+    OptimizationState.savedUIOnlyState = {}
     ApplyUIOptimization()
 end
 
-local function DisableUIOnly()
-    if not uiOnlyActive then return end
-    uiOnlyActive = false
+DisableUIOnly = function()
+    if not OptimizationState.uiOnlyActive then return end
+    OptimizationState.uiOnlyActive = false
     
     pcall(function()
         StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
@@ -2275,29 +2282,27 @@ local function DisableUIOnly()
     end)
     
     pcall(function()
-        -- ИСПРАВЛЕНО: проверка на пустую таблицу
-        if savedUIOnlyState and next(savedUIOnlyState) ~= nil then
-            for gui, wasEnabled in pairs(savedUIOnlyState) do
+        if OptimizationState.savedUIOnlyState and next(OptimizationState.savedUIOnlyState) ~= nil then
+            for gui, wasEnabled in pairs(OptimizationState.savedUIOnlyState) do
                 if gui and gui.Parent then
                     gui.Enabled = wasEnabled
                 end
             end
         end
-        savedUIOnlyState = {}
+        OptimizationState.savedUIOnlyState = {}
     end)
 end
+
 -- ==============================
 -- FPS BOOST FUNCTION
 -- ==============================
 
-local fpsBoostDescendantConn
-
-local function EnableFPSBoost()
-    if fpsBoostActive then
+EnableFPSBoost = function()
+    if OptimizationState.fpsBoostActive then
         return
     end
     
-    fpsBoostActive = true
+    OptimizationState.fpsBoostActive = true
     
     -- 1. TERRAIN OPTIMIZATION
     pcall(function()
@@ -2349,8 +2354,8 @@ local function EnableFPSBoost()
     end)
     
     -- 5. AUTO-CLEANUP NEW EFFECTS
-    fpsBoostDescendantConn = Workspace.DescendantAdded:Connect(function(child)
-        if not fpsBoostActive then return end
+    OptimizationState.fpsBoostDescendantConn = Workspace.DescendantAdded:Connect(function(child)
+        if not OptimizationState.fpsBoostActive then return end
         
         task.spawn(function()
             pcall(function()
@@ -2368,7 +2373,7 @@ local function EnableFPSBoost()
         end)
     end)
     
-    TrackConnection(fpsBoostDescendantConn)
+    TrackConnection(OptimizationState.fpsBoostDescendantConn)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -3042,9 +3047,9 @@ local function CreateGunESP(gunPart)
     local highlight = Instance.new("Highlight")
     highlight.Adornee            = gunPart
     highlight.FillColor          = CONFIG.Colors.Gun
-    highlight.FillTransparency   = 0.5
+    highlight.FillTransparency   = 0.8
     highlight.OutlineColor       = CONFIG.Colors.Gun
-    highlight.OutlineTransparency = 0
+    highlight.OutlineTransparency = 0.3
     highlight.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Enabled            = State.GunESP
     highlight.Parent             = gunPart
@@ -3102,6 +3107,169 @@ local function UpdateGunESPVisibility()
     end
 end
 
+----------------------------------------------------------------
+-- Trap ESP (работает только с Gun ESP)
+----------------------------------------------------------------
+local RemoveTrapESP
+
+local function CreateTrapESP(trapModel)
+    if not trapModel then return end
+    if not trapModel:IsA("Model") then return end
+    if not trapModel.Parent then return end
+    
+    if State.TrapCache[trapModel] then
+        RemoveTrapESP(trapModel)
+    end
+    
+    local mainPart = trapModel:FindFirstChild("TrapVisual")
+    if not mainPart or not mainPart:IsA("BasePart") then return end
+    
+    -- ✅ ПРОВЕРКА ПОЗИЦИИ: Игнорируем ловушки близко к центру (спавн/лобби)
+    local pos = mainPart.Position
+    if math.abs(pos.X) < 100 and math.abs(pos.Y) < 100 and math.abs(pos.Z) < 100 then
+        return  -- Слишком близко к центру - это не игровая ловушка
+    end
+    if State.NotificationsEnabled then
+        task.spawn(function()
+            ShowNotification(
+                "<font color=\"rgb(255, 85, 85)\">⚠️ Trap placed!</font>",
+                CONFIG.Colors.Murder  -- Используем цвет убийцы
+            )
+        end)
+    end
+    pcall(function()
+        mainPart.Material = Enum.Material.Glass
+        mainPart.Transparency = -math.huge
+        mainPart.Reflectance = -math.huge
+        mainPart.Color = Color3.fromRGB(255, 0, 4)
+    end)
+    
+    if not trapModel:FindFirstChildOfClass("Humanoid") then
+        local humanoid = Instance.new("Humanoid")
+        humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+        humanoid.Health = 0
+        humanoid.MaxHealth = 0
+        humanoid.Parent = trapModel
+    end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = trapModel
+    highlight.FillColor = Color3.fromRGB(255, 0, 4)
+    highlight.FillTransparency = 0.8
+    highlight.OutlineColor = Color3.fromRGB(255, 0, 4)
+    highlight.OutlineTransparency = 0.5
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Enabled = State.GunESP
+    highlight.Parent = trapModel
+    
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "TrapESPLabel"
+    billboard.Adornee = mainPart
+    billboard.Size = UDim2.new(0, 140, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 2, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = game:GetService("CoreGui")
+    
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Text = "Trap"
+    label.TextColor3 = Color3.fromRGB(255, 85, 85)
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 12
+    label.TextStrokeTransparency = 0.7
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Parent = billboard
+    
+    State.TrapCache[trapModel] = {
+        highlight = highlight,
+        billboard = billboard,
+        trapPart = mainPart
+    }
+end
+
+RemoveTrapESP = function(trapModel)
+    if not trapModel or not State.TrapCache[trapModel] then return end
+    
+    local espData = State.TrapCache[trapModel]
+    
+    pcall(function()
+        if espData.highlight then espData.highlight:Destroy() end
+        if espData.billboard then espData.billboard:Destroy() end
+        
+        if espData.trapPart and espData.trapPart.Parent then
+            espData.trapPart.Transparency = 1
+            espData.trapPart.Material = Enum.Material.Plastic
+        end
+    end)
+    
+    State.TrapCache[trapModel] = nil
+end
+
+local function UpdateTrapESPVisibility()
+    for trapModel, espData in pairs(State.TrapCache) do
+        if espData.highlight then
+            espData.highlight.Enabled = State.GunESP
+        end
+        if espData.billboard then
+            espData.billboard.Enabled = State.GunESP
+        end
+    end
+end
+
+local function ScanMurdererTraps()
+    if not State.GunESP then return end
+    
+    local murder = getMurder()
+    if not murder then
+        -- Нет убийцы - удаляем все ловушки
+        for cachedTrap in pairs(State.TrapCache) do
+            RemoveTrapESP(cachedTrap)
+        end
+        return
+    end
+    
+    local murdererFolder = Workspace:FindFirstChild(murder.Name)
+    if not murdererFolder then return end
+    
+    local foundTraps = {}
+    
+    for _, child in ipairs(murdererFolder:GetDescendants()) do
+        if child.Name == "Trap" and child:IsA("Model") then
+            if child:FindFirstChild("TrapVisual") and child:FindFirstChild("PlacedPlayer") then
+                foundTraps[child] = true
+                
+                if not State.TrapCache[child] then
+                    CreateTrapESP(child)
+                end
+            end
+        end
+    end
+    
+    for cachedTrap in pairs(State.TrapCache) do
+        if not foundTraps[cachedTrap] or not cachedTrap.Parent then
+            RemoveTrapESP(cachedTrap)
+        end
+    end
+end
+
+-- ✅ АВТОМАТИЧЕСКОЕ ОТСЛЕЖИВАНИЕ ЛОВУШЕК
+local function StartTrapTracking()
+    local lastScan = 0
+    
+    local connection = RunService.Heartbeat:Connect(function()
+        if not State.GunESP then return end
+        
+        local currentTime = tick()
+        if currentTime - lastScan >= 1 then
+            lastScan = currentTime
+            pcall(ScanMurdererTraps)
+        end
+    end)
+    
+    table.insert(State.Connections, connection)
+end
+
 local function SetupGunTracking()
     if State.currentMapConnection then
         State.currentMapConnection:Disconnect()
@@ -3122,9 +3290,9 @@ local function SetupGunTracking()
                             CONFIG.Colors.Gun
                         )
                     end)
-                task.spawn(function()
-                    clearSheriffAvatar()
-                end)
+                    task.spawn(function()
+                        clearSheriffAvatar()
+                    end)
                 end               
 
                 State.previousGun = gun
@@ -3150,12 +3318,14 @@ local function SetupGunTracking()
                     RemoveGunESP(cachedGun)
                 end
             end
+            -- if State.GunESP then
+            --     ScanForTraps()
+            -- end
         end)
     end)
 
     table.insert(State.Connections, State.currentMapConnection)
 end
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 7: Fling (СТРОКИ 611-660)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -3271,49 +3441,74 @@ local function FlingPlayer(playerToFling)
     if not playerToFling or not playerToFling.Character then 
         if State.NotificationsEnabled then
             ShowNotification(
-            "<font color=\"rgb(255, 85, 85)\">Fling error: </font><font color=\"rgb(220,220,220)\">Body parts missing</font>",
-            CONFIG.Colors.Text
-        )
+                "<font color=\"rgb(255, 85, 85)\">Fling error: </font><font color=\"rgb(220,220,220)\">Body parts missing</font>",
+                CONFIG.Colors.Text
+            )
         end
         return 
     end
 
-    local Character = LocalPlayer.Character
-    if not Character then return end
+    local FlingData = {
+        -- Локальный игрок
+        Character = LocalPlayer.Character,
+        Humanoid = nil,
+        RootPart = nil,
+        
+        -- Целевой игрок
+        TCharacter = playerToFling.Character,
+        THumanoid = nil,
+        TRootPart = nil,
+        THead = nil,
+        Accessory = nil,
+        Handle = nil,
+        
+        -- Настройки
+        antiFlingWasEnabled = State.AntiFlingEnabled,
+        OldPos = nil,
+        
+        -- Временные объекты
+        BV = nil
+    }
     
-    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    local RootPart = Humanoid and Humanoid.RootPart
-    if not RootPart then return end
+    if not FlingData.Character then return end
     
-    local antiFlingWasEnabled = State.AntiFlingEnabled
-    if antiFlingWasEnabled then
+    FlingData.Humanoid = FlingData.Character:FindFirstChildOfClass("Humanoid")
+    FlingData.RootPart = FlingData.Humanoid and FlingData.Humanoid.RootPart
+    if not FlingData.RootPart then return end
+    
+    if FlingData.antiFlingWasEnabled then
         DisableAntiFling()
     end
     State.IsFlingInProgress = true
 
-    local TCharacter = playerToFling.Character
-    local THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
-    local TRootPart = THumanoid and THumanoid.RootPart
-    local THead = TCharacter:FindFirstChild("Head")
-    local Accessory = TCharacter:FindFirstChildOfClass("Accessory")
-    local Handle = Accessory and Accessory:FindFirstChild("Handle")
+    FlingData.THumanoid = FlingData.TCharacter:FindFirstChildOfClass("Humanoid")
+    FlingData.TRootPart = FlingData.THumanoid and FlingData.THumanoid.RootPart
+    FlingData.THead = FlingData.TCharacter:FindFirstChild("Head")
+    FlingData.Accessory = FlingData.TCharacter:FindFirstChildOfClass("Accessory")
+    FlingData.Handle = FlingData.Accessory and FlingData.Accessory:FindFirstChild("Handle")
 
-    if not TRootPart and not THead and not Handle then
+    if not FlingData.TRootPart and not FlingData.THead and not FlingData.Handle then
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Body parts missing</font>",CONFIG.Colors.Text)
+            ShowNotification(
+                "<font color=\"rgb(255, 85, 85)\">Body parts missing</font>",
+                CONFIG.Colors.Text
+            )
         end
         return
     end
 
-    if RootPart.Velocity.Magnitude < 50 then
-        State.OldPos = RootPart.CFrame
+    if FlingData.RootPart.Velocity.Magnitude < 50 then
+        FlingData.OldPos = FlingData.RootPart.CFrame
     end
 
-    local targetPart = TRootPart or THead or Handle
+    local targetPart = FlingData.TRootPart or FlingData.THead or FlingData.Handle
     
     if targetPart.Velocity.Magnitude > 500 then
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">Fling: Already flung</font>",CONFIG.Colors.Text)
+            ShowNotification(
+                "<font color=\"rgb(220,220,220)\">Fling: Already flung</font>",
+                CONFIG.Colors.Text
+            )
         end
         return
     end
@@ -3321,19 +3516,19 @@ local function FlingPlayer(playerToFling)
     Workspace.CurrentCamera.CameraSubject = targetPart
     Workspace.FallenPartsDestroyHeight = 0/0
 
-    local BV = Instance.new("BodyVelocity")
-    BV.Name = "EpixVel"
-    BV.Parent = RootPart
-    BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
-    BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    FlingData.BV = Instance.new("BodyVelocity")
+    FlingData.BV.Name = "EpixVel"
+    FlingData.BV.Parent = FlingData.RootPart
+    FlingData.BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
+    FlingData.BV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
 
-    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+    FlingData.Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
 
     local function FPos(BasePart, Pos, Ang)
         local newCFrame = CFrame.new(BasePart.Position) * Pos * Ang
-        RootPart.CFrame = newCFrame  -- ✅ ИСПРАВЛЕНО: прямая установка вместо SetPrimaryPartCFrame
-        RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
-        RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
+        FlingData.RootPart.CFrame = newCFrame
+        FlingData.RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
+        FlingData.RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
     end
 
     local function SFBasePart(BasePart)
@@ -3342,32 +3537,32 @@ local function FlingPlayer(playerToFling)
         local Angle = 0
         
         repeat
-            if RootPart and THumanoid then
+            if FlingData.RootPart and FlingData.THumanoid then
                 if BasePart.Velocity.Magnitude < 50 then
                     Angle = Angle + 100
 
-                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    FPos(BasePart, CFrame.new(0, 1.5, 0) + FlingData.THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
 
-                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    FPos(BasePart, CFrame.new(0, -1.5, 0) + FlingData.THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
 
-                    FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + FlingData.THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
 
-                    FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + FlingData.THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
 
-                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
+                    FPos(BasePart, CFrame.new(0, 1.5, 0) + FlingData.THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
 
-                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
+                    FPos(BasePart, CFrame.new(0, -1.5, 0) + FlingData.THumanoid.MoveDirection, CFrame.Angles(math.rad(Angle), 0, 0))
                     task.wait()
                 else
-                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                    FPos(BasePart, CFrame.new(0, 1.5, FlingData.THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
                     task.wait()
 
-                    FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                    FPos(BasePart, CFrame.new(0, -1.5, -FlingData.THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
                     task.wait()
                 end
             else
@@ -3376,36 +3571,36 @@ local function FlingPlayer(playerToFling)
         until BasePart.Velocity.Magnitude > 500 or 
               BasePart.Parent ~= playerToFling.Character or 
               playerToFling.Parent ~= Players or 
-              playerToFling.Character ~= TCharacter or 
-              THumanoid.Sit or 
-              Humanoid.Health <= 0 or 
+              playerToFling.Character ~= FlingData.TCharacter or 
+              FlingData.THumanoid.Sit or 
+              FlingData.Humanoid.Health <= 0 or 
               tick() > Time + TimeToWait
     end
 
-    if TRootPart and THead then
-        if (TRootPart.CFrame.p - THead.CFrame.p).Magnitude > 5 then
-            SFBasePart(THead)
+    if FlingData.TRootPart and FlingData.THead then
+        if (FlingData.TRootPart.CFrame.p - FlingData.THead.CFrame.p).Magnitude > 5 then
+            SFBasePart(FlingData.THead)
         else
-            SFBasePart(TRootPart)
+            SFBasePart(FlingData.TRootPart)
         end
-    elseif TRootPart and not THead then
-        SFBasePart(TRootPart)
-    elseif not TRootPart and THead then
-        SFBasePart(THead)
-    elseif not TRootPart and not THead and Accessory and Handle then
-        SFBasePart(Handle)
+    elseif FlingData.TRootPart and not FlingData.THead then
+        SFBasePart(FlingData.TRootPart)
+    elseif not FlingData.TRootPart and FlingData.THead then
+        SFBasePart(FlingData.THead)
+    elseif not FlingData.TRootPart and not FlingData.THead and FlingData.Accessory and FlingData.Handle then
+        SFBasePart(FlingData.Handle)
     end
 
-    BV:Destroy()
-    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-    Workspace.CurrentCamera.CameraSubject = Humanoid
+    FlingData.BV:Destroy()
+    FlingData.Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+    Workspace.CurrentCamera.CameraSubject = FlingData.Humanoid
 
-    if State.OldPos then
+    if FlingData.OldPos then
         repeat
-            RootPart.CFrame = State.OldPos * CFrame.new(0, 0.5, 0)
-            Humanoid:ChangeState("GettingUp")
+            FlingData.RootPart.CFrame = FlingData.OldPos * CFrame.new(0, 0.5, 0)
+            FlingData.Humanoid:ChangeState("GettingUp")
 
-            for _, part in pairs(Character:GetChildren()) do
+            for _, part in pairs(FlingData.Character:GetChildren()) do
                 if part:IsA("BasePart") then
                     part.Velocity = Vector3.new()
                     part.RotVelocity = Vector3.new()
@@ -3413,20 +3608,23 @@ local function FlingPlayer(playerToFling)
             end
 
             task.wait()
-        until (RootPart.Position - State.OldPos.p).Magnitude < 25
+        until (FlingData.RootPart.Position - FlingData.OldPos.p).Magnitude < 25
     end
 
     Workspace.FallenPartsDestroyHeight = State.FPDH
     
     State.IsFlingInProgress = false
-    if antiFlingWasEnabled then
+    if FlingData.antiFlingWasEnabled then
         task.delay(1, function()
             EnableAntiFling()
         end)
     end
 
     if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Player flung: " .. playerToFling.Name .. "</font>",CONFIG.Colors.Text)
+        ShowNotification(
+            "<font color=\"rgb(220,220,220)\">Player flung: " .. playerToFling.Name .. "</font>",
+            CONFIG.Colors.Text
+        )
     end
 end
 
@@ -6389,7 +6587,7 @@ InstantKillAll = function()
     
     --print("[InstantKillAll] 📍 Телепортировано: " .. teleportedPlayers .. " игроков ПЕРЕД собой")
     
-    task.wait(0.5)
+    task.wait(0.2   )
     
     -- ✅ Активируем нож 3 раза
     for i = 1, 3 do
@@ -6989,41 +7187,6 @@ local function HandleActionInput(input)
         end
     end
 end
-
--- ══════════════════════════════════════════════════════════════════════════════
--- AUTO REJOIN & AUTO RECONNECT
--- ══════════════════════════════════════════════════════════════════════════════
-
--- Auto Rejoin on Disconnect
-local function HandleAutoRejoin(enabled)
-    State.AutoRejoinEnabled = enabled
-    
-    if enabled then
-        task.spawn(function()
-            repeat task.wait() until game.CoreGui:FindFirstChild('RobloxPromptGui')
-            
-            local promptOverlay = game.CoreGui.RobloxPromptGui.promptOverlay
-            local connection
-            
-            connection = promptOverlay.ChildAdded:Connect(function(prompt)
-                if State.AutoRejoinEnabled and prompt.Name == 'ErrorPrompt' then
-                    task.wait(0.5)
-                    Rejoin()
-                end
-            end)
-            
-            getgenv().AutoRejoinConnection = connection
-            TrackConnection(connection)
-        end)
-    else
-        if getgenv().AutoRejoinConnection then
-            getgenv().AutoRejoinConnection:Disconnect()
-            getgenv().AutoRejoinConnection = nil
-        end
-    end
-end
-
--- Константа для дефолтного интервала
 local DEFAULT_INTERVAL = 25 * 60
 
 -- Функция для установки интервала
@@ -7059,7 +7222,6 @@ local function HandleAutoReconnect(enabled)
         end
     end
 end
-
 -- А ТЕПЕРЬ создаём GUI с Handlers
 local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
@@ -7086,7 +7248,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
 
         -- ESP
-        GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() end,
+        GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
         PlayerNicknamesESP = function(on)
         State.PlayerNicknamesESP = on
         if on then
@@ -7592,6 +7754,7 @@ CreateNotificationUI()
 CreateAvatarUI()
 ApplyCharacterSettings()
 SetupGunTracking()
+StartTrapTracking   ()
 SetupPlayerNicknamesTracking()
 pcall(function()
     ApplyFOV(State.CameraFOV)
