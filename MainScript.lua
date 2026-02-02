@@ -3343,13 +3343,19 @@ local AntiFlingState = {
     }
 }
 
--- EnableAntiFling() - Включение защиты от флинга
 local function EnableAntiFling()
     if State.AntiFlingEnabled then return end
     State.AntiFlingEnabled = true
     
-    -- Обнаружение флингеров
-    AntiFlingState.DetectionConn = RunService.Heartbeat:Connect(function()
+    local char = LocalPlayer.Character
+    if char and char.PrimaryPart then
+        AntiFlingState.LastPos = char.PrimaryPart.Position
+    end
+    
+    local lastVelocityCheck = tick()
+    
+    AntiFlingState.NeutralizerConn = RunService.Stepped:Connect(function()
+        -- Проверка других игроков (оставляем как было)
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer and plr.Character and plr.Character.PrimaryPart then
                 local part = plr.Character.PrimaryPart
@@ -3374,45 +3380,68 @@ local function EnableAntiFling()
                 end
             end
         end
-    end)
-    
-    -- Защита локального игрока
-    AntiFlingState.NeutralizerConn = RunService.Heartbeat:Connect(function()
+        
+        -- Защита локального игрока
         local char = LocalPlayer.Character
         if not char or not char.PrimaryPart then return end
         
         local part = char.PrimaryPart
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
         
         if State.IsFlingInProgress then
             AntiFlingState.LastPos = part.Position
             return
         end
         
+        -- ТОЛЬКО для HumanoidRootPart, НЕ для всех частей
         local velMag = part.AssemblyLinearVelocity.Magnitude
         local angMag = part.AssemblyAngularVelocity.Magnitude
         
-        if velMag > AntiFlingState.Thresholds.Danger or angMag > AntiFlingState.Thresholds.Danger then
-            if State.NotificationsEnabled and not AntiFlingState.NotifCooldown then
-                ShowNotification(
-                    "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
-                    CONFIG.Colors.Text
-                )
-                AntiFlingState.NotifCooldown = true
-                task.delay(3, function() AntiFlingState.NotifCooldown = false end)
-            end
+        -- Проверяем только если humanoid жив и не в процессе ресета
+        local isAlive = humanoid and humanoid.Health > 0
+        
+        if isAlive and (velMag > AntiFlingState.Thresholds.Danger or angMag > AntiFlingState.Thresholds.Danger) then
+            local currentTime = tick()
             
-            part.AssemblyLinearVelocity = Vector3.zero
-            part.AssemblyAngularVelocity = Vector3.zero
-            
-            if AntiFlingState.LastPos ~= Vector3.zero then
-                part.CFrame = CFrame.new(AntiFlingState.LastPos)
+            -- Debounce чтобы не спамить
+            if currentTime - lastVelocityCheck > 0.1 then
+                if State.NotificationsEnabled and not AntiFlingState.NotifCooldown then
+                    ShowNotification(
+                        "<font color=\"rgb(220, 220, 220)\">Anti-Fling: Velocity neutralized</font>",
+                        CONFIG.Colors.Text
+                    )
+                    AntiFlingState.NotifCooldown = true
+                    task.delay(3, function() AntiFlingState.NotifCooldown = false end)
+                end
+                
+                -- Нейтрализация ТОЛЬКО HumanoidRootPart
+                part.AssemblyLinearVelocity = Vector3.zero
+                part.AssemblyAngularVelocity = Vector3.zero
+                
+                -- Временное отключение коллизий только для RootPart на 0.5 сек
+                part.CanCollide = false
+                task.delay(0.5, function()
+                    if part then
+                        part.CanCollide = true
+                    end
+                end)
+                
+                -- Телепорт назад ТОЛЬКО если LastPos валидна и близко (не телепорт сервера)
+                local distanceFromLast = (part.Position - AntiFlingState.LastPos).Magnitude
+                if AntiFlingState.LastPos ~= Vector3.zero and distanceFromLast < 1000 then
+                    part.CFrame = CFrame.new(AntiFlingState.LastPos)
+                end
+                
+                lastVelocityCheck = currentTime
             end
         else
-            AntiFlingState.LastPos = part.Position
+            -- Обновляем позицию только если не флинг
+            if isAlive then
+                AntiFlingState.LastPos = part.Position
+            end
         end
     end)
     
-    table.insert(State.Connections, AntiFlingState.DetectionConn)
     table.insert(State.Connections, AntiFlingState.NeutralizerConn)
 end
 
