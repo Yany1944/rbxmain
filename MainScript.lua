@@ -136,10 +136,6 @@ local State = {
     FlyBodyGyro = nil,
     CFlyHead = nil,
     SwimConnection = nil,
-
-    SpeedGlitchEnabled = false,
-    SpeedGlitchSpeed = 50,
-    SpeedGlitchConnection = nil,
     
     -- Combat
     ExtendedHitboxSize = 15,
@@ -295,7 +291,6 @@ local State = {
         PickupGun = Enum.KeyCode.Unknown,
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
-        SpeedGlitch = Enum.KeyCode.Unknown,
     }
 }
 --[[
@@ -6057,7 +6052,6 @@ knifeThrow = function(silent)
     end
 end
 
-
 shootMurderer = function(forceMagic)
     -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
     local useMode = forceMagic and "Magic" or (State.ShootMurdererMode or "Magic")
@@ -6131,13 +6125,11 @@ shootMurderer = function(forceMagic)
     if useMode == "Magic" then
         -- === MAGIC MODE: Телепортация пули (текущая логика) ===
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
-        local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + 0.05
-        
-        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+        local pingValue = tonumber(ping:match("[%d%.]+")) or 50
+        local predictionTime = (pingValue / 1000) + 0.03  -- Half RTT + фиксированный офсет
 
-        local adjustedVelocity = enemyVelocity
-        local predictedPos = murdererHRP.Position + (adjustedVelocity * predictionTime)
+        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
         local spawnPosition, targetPosition
 
         if adjustedVelocity.Magnitude > 2 then
@@ -6155,7 +6147,7 @@ shootMurderer = function(forceMagic)
             [2] = CFrame.new(targetPosition)
         }
     else
-    -- === SILENT MODE: Стрельба от дула пистолета ===
+        -- === SILENT MODE: Стрельба от дула пистолета ===
         local rightHand = LocalPlayer.Character:FindFirstChild("RightHand")
         local gunHandle = gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel")
         
@@ -6176,46 +6168,24 @@ shootMurderer = function(forceMagic)
         
         local muzzlePosition = muzzleCFrame.Position
         
-        -- 2. ВЫБОР ЦЕЛЕВОЙ ЧАСТИ ТЕЛА (GetPivot метод)
-        local targetPosition = murderer.Character:GetPivot().Position
-        
-        -- 3. РАСЧЕТ ПРЕДИКЦИИ
+        -- 2. ПРЕДИКЦИЯ (ИДЕНТИЧНА MAGIC MODE)
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
-
-        local distanceToTarget = (targetPosition - muzzlePosition).Magnitude
-        local bulletSpeed = 500
-        local bulletTravelTime = distanceToTarget / bulletSpeed
-        local networkDelay = (pingValue / 1000)
-
-        local totalPredictionTime = bulletTravelTime + networkDelay
-
-        -- ✅ КРИТИЧНО: Берем velocity ЗАНОВО, чтобы синхронизировать с targetPosition
-        local freshHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
-        if not freshHRP then
-            if not forceMagic then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">HRP lost</font>", nil)
-            end
-            return
-        end
-
-        local enemyVelocity = freshHRP.AssemblyLinearVelocity
-
-        -- ✅ ПОЛНЫЙ 3D предикт (НЕ обнуляем Y!)
-        local adjustedVelocity = enemyVelocity
-
-        local finalTargetPosition = targetPosition + (adjustedVelocity * totalPredictionTime)
-
-        -- 5. ФОРМИРОВАНИЕ CFrame
-        local directionToTarget = (finalTargetPosition - muzzlePosition).Unit
-        local shootFromCFrame = CFrame.lookAt(muzzlePosition, muzzlePosition + directionToTarget)
-        local shootToCFrame = CFrame.new(finalTargetPosition)
-
+        local predictionTime = (pingValue / 1000) + 0.05
+        
+        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
+        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
+        
+        -- 3. ФОРМИРОВАНИЕ CFrame (стреляем от дула в предсказанную позицию)
+        local shootFromCFrame = CFrame.lookAt(muzzlePosition, predictedPos)
+        local shootToCFrame = CFrame.new(predictedPos)
+        
         argsShootRemote = {
             [1] = shootFromCFrame,
             [2] = shootToCFrame
         }
     end
+
     
     -- АКТИВИРУЕМ КУЛДАУН
     State.CanShootMurderer = false
@@ -7041,120 +7011,99 @@ local function ServerLagger()
     end)
 end
 
-local DEFAULT_WALKSPEED = 18
-
-local function StartSpeedGlitch()
-    if State.SpeedGlitchEnabled then
-        StopSpeedGlitch()
-        task.wait(0.1)
-    end
+local function SpeedGlitch()
+    local player = game.Players.LocalPlayer
+    player.Character:WaitForChild('Humanoid')
+    wait(0.1)
     
-    local character = LocalPlayer.Character
-    if not character then
+    -- Проверка с новым именем
+    if player.Backpack:FindFirstChild("SpeedGlitchTool") or player.Character:FindFirstChild("SpeedGlitchTool") then
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">No character</font>", CONFIG.Colors.Text)
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">already given!</font>", CONFIG.Colors.Text)
         end
         return
     end
     
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then
-        repeat task.wait() until character:FindFirstChildOfClass("Humanoid")
-        humanoid = character:FindFirstChildOfClass("Humanoid")
-    end
-    
-    if not humanoid then
+    do
+        local tool = Instance.new('Tool')
+        tool.Name = "SpeedGlitchTool"  -- Новое имя
+        tool.CanBeDropped = false  -- Нельзя уронить
+        tool.Grip = CFrame.new(0, -6.292601585388184, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+        tool.GripForward = Vector3.new(-0, -0, -1)
+        tool.GripPos = Vector3.new(0, -6.292601585388184, 0)
+        tool.GripRight = Vector3.new(1, 0, 0)
+        tool.GripUp = Vector3.new(0, 1, 0)
+        tool.ManualActivationOnly = false
+        tool.RequiresHandle = true
+        tool.ToolTip = "Speed Glitch"  -- Подсказка при наведении
+        tool.TextureId = ""  -- Пустая иконка (будет показывать текст)
+
+        local child1 = Instance.new('Part')
+        child1.Name = "Handle"
+        child1.Size = Vector3.new(1.5, 12, 1.5)
+        child1.BrickColor = BrickColor.new("Medium stone grey")
+        child1.Material = Enum.Material.Plastic
+        child1.Reflectance = 0
+        child1.Transparency = 1  -- НЕВИДИМЫЙ
+        child1.CanCollide = false
+        child1.Shape = Enum.PartType.Block
+        child1.TopSurface = Enum.SurfaceType.Smooth
+        child1.BottomSurface = Enum.SurfaceType.Smooth
+        child1.Anchored = false
+        child1.LeftSurface = Enum.SurfaceType.Smooth
+        child1.RightSurface = Enum.SurfaceType.Smooth
+        child1.FrontSurface = Enum.SurfaceType.Smooth
+        child1.BackSurface = Enum.SurfaceType.Smooth
+
+        local child2 = Instance.new('SpecialMesh')
+        child2.Name = "Mesh"
+        child2.Scale = Vector3.new(0.5, 1.2000000476837158, 0.5)
+        child2.MeshType = Enum.MeshType.Head
+        child2.Offset = Vector3.new(0, 0, 0)
+        child2.Parent = child1
+
+        local child4 = Instance.new('Part')
+        child4.Name = "Sign"
+        child4.Size = Vector3.new(4.5, 4.5, 1.5)
+        child4.BrickColor = BrickColor.new("Bright yellow")
+        child4.Material = Enum.Material.Plastic
+        child4.Reflectance = 0
+        child4.Transparency = 1  -- НЕВИДИМЫЙ
+        child4.CanCollide = false
+        child4.Shape = Enum.PartType.Block
+        child4.TopSurface = Enum.SurfaceType.Smooth
+        child4.BottomSurface = Enum.SurfaceType.Smooth
+        child4.Anchored = false
+        child4.LeftSurface = Enum.SurfaceType.Smooth
+        child4.RightSurface = Enum.SurfaceType.Smooth
+        child4.FrontSurface = Enum.SurfaceType.Smooth
+        child4.BackSurface = Enum.SurfaceType.Smooth
+
+        local child5 = Instance.new('BlockMesh')
+        child5.Name = "Mesh"
+        child5.Parent = child4
+
+        -- DECALS УДАЛЕНЫ - больше не видны
+        
+        child4.Parent = child1
+        child1.Parent = tool
+
+        local weld = Instance.new('Weld')
+        weld.Name = "HandleToSign"
+        weld.Part0 = child1
+        weld.Part1 = child4
+        weld.C0 = CFrame.new(0, 3.75, 0)
+        weld.C1 = CFrame.new(0, 0, 0)
+        weld.Parent = child1
+
+        tool.Parent = player.Backpack
+        
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">No humanoid</font>", CONFIG.Colors.Text)
+            ShowNotification("<font color=\"rgb(85, 255, 85)\">Success: </font><font color=\"rgb(220,220,220)\">Speed Glitch tool given!</font>", CONFIG.Colors.Text)
         end
-        return
-    end
-    
-    State.SpeedGlitchEnabled = true
-    humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- ✅ Используем константу
-    
-    -- Функция для автоматического перезапуска при смерти
-    local function onSpeedGlitchDied()
-        if State.SpeedGlitchConnection then
-            State.SpeedGlitchConnection:Disconnect()
-            State.SpeedGlitchConnection = nil
-        end
-        
-        -- Перезапуск после респавна
-        if State.SpeedGlitchEnabled then
-            LocalPlayer.CharacterAdded:Wait()
-            task.wait(0.5)
-            if State.SpeedGlitchEnabled then
-                StartSpeedGlitch()
-            end
-        end
-    end
-    
-    -- Подключаем обработчик смерти
-    local diedConnection = humanoid.Died:Connect(onSpeedGlitchDied)
-    table.insert(State.Connections, diedConnection)
-    
-    -- CORE LOGIC: RenderStepped для спид глитча
-    State.SpeedGlitchConnection = RunService.RenderStepped:Connect(function()
-        if not State.SpeedGlitchEnabled then return end
-        
-        if not humanoid or not humanoid.Parent or humanoid:GetState() == Enum.HumanoidStateType.Dead then
-            return
-        end
-        
-        local state = humanoid:GetState()
-        local isJumping = state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall
-        local isMoving = humanoid.MoveDirection.Magnitude > 0.1
-        
-        -- Спид глитч работает ТОЛЬКО в прыжке + движение
-        if isJumping and isMoving then
-            humanoid.WalkSpeed = State.SpeedGlitchSpeed  -- Без проверки, каждый кадр
-        else
-            humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- Без проверки, каждый кадр
-        end
-    end)
-    
-    table.insert(State.Connections, State.SpeedGlitchConnection)
-    
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Speed Glitch: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
 end
 
--- Остановка Speed Glitch
-local function StopSpeedGlitch()
-    if not State.SpeedGlitchEnabled then return end
-    
-    State.SpeedGlitchEnabled = false
-    
-    -- Отключаем RenderStepped соединение
-    if State.SpeedGlitchConnection then
-        State.SpeedGlitchConnection:Disconnect()
-        State.SpeedGlitchConnection = nil
-    end
-    
-    -- Возвращаем дефолтную скорость
-    local character = LocalPlayer.Character
-    if character then
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = DEFAULT_WALKSPEED  -- ✅ Используем константу
-        end
-    end
-    
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(220,220,220)\">Speed Glitch: </font><font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
-    end
-end
-
--- Toggle Speed Glitch
-local function ToggleSpeedGlitch()
-    if State.SpeedGlitchEnabled then
-        StopSpeedGlitch()
-    else
-        StartSpeedGlitch()
-    end
-end
 
 -- СНАЧАЛА объявляем функции
 local function HandleEmoteInput(input)
@@ -7207,10 +7156,6 @@ local function HandleActionInput(input)
 
     if input.KeyCode == State.Keybinds.Fly and State.Keybinds.Fly ~= Enum.KeyCode.Unknown then
         ToggleFly()
-    end
-    
-    if input.KeyCode == State.Keybinds.SpeedGlitch and State.Keybinds.SpeedGlitch ~= Enum.KeyCode.Unknown then
-        ToggleSpeedGlitch()
     end
 
     if input.KeyCode == State.Keybinds.NoClip and State.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
@@ -7361,6 +7306,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         Rejoin = Rejoin,
         ExecInf = ExecuteInf,
         ServerHop = ServerHop,
+        SpeedGlitchTool = SpeedGlitch,
         ServerLagger = ServerLagger,
         HandleAutoRejoin = HandleAutoRejoin,
         HandleAutoReconnect = HandleAutoReconnect,
@@ -7493,10 +7439,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.FlySpeed = value
         end,
 
-        SpeedGlitchSpeed = function(value)
-            State.SpeedGlitchSpeed = value
-        end,
-
         Shutdown = function() FullShutdown() end,
 
         AutoLoadOnTeleport = function(on)
@@ -7607,8 +7549,7 @@ do
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
         MainTab:CreateSection("Speed Glitch")
-        MainTab:CreateSlider("Speed Glitch Speed", "Jump speed multiplier", 16, 100, State.SpeedGlitchSpeed, "SpeedGlitchSpeed", 5)
-        MainTab:CreateKeybindButton("Toggle Speed Glitch", "Enable/disable speed glitch", "SpeedGlitch")
+        MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
         MainTab:CreateSection("FLY SETTINGS")
         MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
