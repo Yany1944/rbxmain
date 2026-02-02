@@ -13,7 +13,7 @@ if getgenv().MM2_Script then
 end
 getgenv().MM2_Script = true
 
-local AUTOFARM_ENABLED = false
+local AUTOFARM_ENABLED = true
 --SK2ND = 982594515
 --slonsagg2 = 6163487250
 --0Jl9lra = 2058109987
@@ -149,7 +149,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 23,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -167,7 +167,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 25 * 60, -- 25 минут в секундах
+    ReconnectInterval = 60 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
 
     -- XP Farm
@@ -293,7 +293,7 @@ local State = {
         Fly = Enum.KeyCode.Unknown,
     }
 }
---[[
+
 -- Замените существующий блок TeleportCheck на этот:
 local TeleportCheck = false
 
@@ -314,7 +314,7 @@ if queue_on_teleport then
             end
         end
     ]]
-    --[[
+    --
     -- Попытка 1: OnTeleport event
     game.Players.LocalPlayer.OnTeleport:Connect(function(State)
         if State == Enum.TeleportState.Started and not TeleportCheck then
@@ -6216,7 +6216,7 @@ shootMurderer = function(forceMagic)
     if success then
         if not forceMagic then
             local modeText = useMode == "Magic" and "Magic" or "Silent"
-            ShowNotification("<font color=\"rgb(85, 255, 85)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
+            ShowNotification("<font color=\"rgb(168,228,160)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
         end
         
         -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
@@ -7099,7 +7099,7 @@ local function SpeedGlitch()
         tool.Parent = player.Backpack
         
         if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(85, 255, 85)\">Success: </font><font color=\"rgb(220,220,220)\">Speed Glitch tool given!</font>", CONFIG.Colors.Text)
+            ShowNotification("<font color=\"rgb(168,228,160)\">Success: </font><font color=\"rgb(220,220,220)\">Speed Glitch tool given!</font>", CONFIG.Colors.Text)
         end
     end
 end
