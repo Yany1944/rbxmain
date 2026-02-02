@@ -7659,7 +7659,7 @@ do
 
         FunTab:CreateSection("ANTI-FLING")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
-        FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
+        FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", _G.AUTOEXEC_ENABLED)
 
         FunTab:CreateSection("FLING PLAYER")
         FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
