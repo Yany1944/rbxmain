@@ -149,7 +149,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 23,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -7166,6 +7166,36 @@ local function HandleActionInput(input)
         end
     end
 end
+
+-- Auto Rejoin on Disconnect
+local function HandleAutoRejoin(enabled)
+    State.AutoRejoinEnabled = enabled
+    
+    if enabled then
+        task.spawn(function()
+            repeat task.wait() until game.CoreGui:FindFirstChild('RobloxPromptGui')
+            
+            local promptOverlay = game.CoreGui.RobloxPromptGui.promptOverlay
+            local connection
+            
+            connection = promptOverlay.ChildAdded:Connect(function(prompt)
+                if State.AutoRejoinEnabled and prompt.Name == 'ErrorPrompt' then
+                    task.wait(0.5)
+                    Rejoin()
+                end
+            end)
+            
+            getgenv().AutoRejoinConnection = connection
+            TrackConnection(connection)
+        end)
+    else
+        if getgenv().AutoRejoinConnection then
+            getgenv().AutoRejoinConnection:Disconnect()
+            getgenv().AutoRejoinConnection = nil
+        end
+    end
+end
+
 local DEFAULT_INTERVAL = 25 * 60
 
 -- Функция для установки интервала
@@ -7659,7 +7689,7 @@ do
 
         FunTab:CreateSection("ANTI-FLING")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
-        FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", _G.AUTOEXEC_ENABLED)
+        FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling")
 
         FunTab:CreateSection("FLING PLAYER")
         FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
