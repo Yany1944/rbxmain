@@ -6080,7 +6080,7 @@ shootMurderer = function(forceMagic)
         
         if not gun then
             if not forceMagic then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220,220,220)\">You're not sheriff/hero.</font>", CONFIG.Colors.Text)
+                ShowNotification("<font color=\"rgb(220, 220, 220)\">You don't have the gun..?</font>", CONFIG.Colors.Text)
             end
             return
         end
@@ -6125,18 +6125,21 @@ shootMurderer = function(forceMagic)
     if useMode == "Magic" then
         -- === MAGIC MODE: Телепортация пули (текущая логика) ===
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
-        local pingValue = tonumber(ping:match("[%d%.]+")) or 50
-        local predictionTime = (pingValue / 1000) + 0.03  -- Half RTT + фиксированный офсет
-
+        local pingValue = tonumber(ping:match("%d+")) or 50
+        local predictionTime = (pingValue / 1000) + 0.05
+        
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
         local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
+        
         local spawnPosition, targetPosition
 
-        if adjustedVelocity.Magnitude > 2 then
-            local moveDir = adjustedVelocity.Unit
+        if enemyVelocity.Magnitude > 2 then
+            -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
+            local moveDir = enemyVelocity.Unit
             spawnPosition = predictedPos + (moveDir * 5)
             targetPosition = predictedPos
         else
+            -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
             local backDir = -murdererHRP.CFrame.LookVector
             spawnPosition = predictedPos + (backDir * 3)
             targetPosition = predictedPos
