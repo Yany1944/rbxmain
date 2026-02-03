@@ -13,7 +13,7 @@ if getgenv().MM2_Script then
 end
 getgenv().MM2_Script = true
 
-local AUTOFARM_ENABLED = true
+local AUTOFARM_ENABLED = false
 --SK2ND = 982594515
 --slonsagg2 = 6163487250
 --0Jl9lra = 2058109987
