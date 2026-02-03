@@ -4769,9 +4769,6 @@ local InstantKillAll
 local knifeThrow
 local ToggleGodMode 
 
-local spawnAtPlayerOriginalState = false
-local instantPickupWasEnabled = false
-
 local function CountPlayersWithKnife()
     local count = 0
     local Players = game:GetService("Players")
@@ -4852,8 +4849,6 @@ local function StartAutoFarm()
     if not State.AutoFarmEnabled then return end
     
     State.CoinBlacklist = {}
-    spawnAtPlayerOriginalState = State.spawnAtPlayer
-    instantPickupWasEnabled = State.InstantPickupEnabled
     
     State.CoinFarmThread = task.spawn(function()
         local allowFly = false
@@ -4891,9 +4886,6 @@ local function StartAutoFarm()
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
                 allowFly = false
-                if State.spawnAtPlayer and not spawnAtPlayerOriginalState then
-                    State.spawnAtPlayer = false
-                end
                 pcall(function()
                     UnfloatCharacter()
                 end)
