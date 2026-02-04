@@ -13,11 +13,12 @@ if getgenv().MM2_Script then
 end
 getgenv().MM2_Script = true
 
-local AUTOFARM_ENABLED = false
+local AUTOFARM_ENABLED = true
 --SK2ND = 982594515
 --slonsagg2 = 6163487250
 --0Jl9lra = 2058109987
-local WHITELIST_IDS = {982594515, 6163487250, 2058109987}
+--serejenkaluv = 10341870648
+local WHITELIST_IDS = {10341870648}
 
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
