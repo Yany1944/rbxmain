@@ -117,6 +117,17 @@ local State = {
     ReconnectInterval = 60 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
 
+    -- Vote Spammer
+    VoteSpammerEnabled = false,
+    VoteSpammerActive = false,
+    VoteSpammerThread = nil,
+    VoteGoal = 8,
+    VoteSpammerSession = 0,
+    IsWaitingForVoting = false,
+    IsGoalReached = false,
+    TeleportedThisSession = false,
+    CurrentTargetPad = nil,
+
     -- XP Farm
     XPFarmEnabled = false,
     AFKModeEnabled = false,
@@ -577,6 +588,7 @@ local function FullShutdown()
         if State.AntiFlingEnabled then DisableAntiFling() end
         if State.GodModeEnabled then ToggleGodMode() end
         if State.InstantPickupEnabled then DisableInstantPickup() end
+        if State.VoteSpammerEnabled then StopVoteSpammer() end
     end)
 
     pcall(function()
@@ -3214,6 +3226,7 @@ local function DiagnoseAutoFarm()
 end
 --]]
 
+
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
     if State.CoinFarmThread then
@@ -3273,8 +3286,21 @@ local function StartAutoFarm()
             if currentCoins >= 40 then
                 noCoinsAttempts = maxNoCoinsAttempts
             else
-                local coin = FindNearestCoin()
-                --print("[DEBUG] 🪙 Ближайшая монета:", coin)
+                local coin, coinDistance = FindNearestCoin()  -- ✅ Получаем монету и расстояние
+                --print("[DEBUG] 🪙 Ближайшая монета:", coin, "Расстояние:", coinDistance)
+
+                -- ✅ ПРОВЕРКА: Если монета слишком далеко - флинг мурдерера
+                if coin and coinDistance and coinDistance > 2500 then
+                    
+                    pcall(function()
+                        FlingMurderer()
+                    end)
+                    
+                    task.wait(2)  -- Даём время на fling
+                    
+                    -- Пересканируем монеты после fling
+                    coin, coinDistance = FindNearestCoin()
+                end
 
                 if not coin then
                     noCoinsAttempts = noCoinsAttempts + 1
@@ -3493,13 +3519,13 @@ local function StartAutoFarm()
                                     humanoidRootPart.CFrame = safeSpot + Vector3.new(0, 5, 0)
                                     --print("[XP Farm] 📍 Телепортировался в безопасное место")
                                     
-                                    task.wait(0.5)
+                                    task.wait(0.2)
                                     local floatSuccess = FloatCharacter()
                                     if floatSuccess then
                                         --print("[XP Farm] 🎈 Закрепление активировано")
                                     end
                                     
-                                    task.wait(0.5)
+                                    task.wait(0.2)
                                 end
                                 
                                 if State.XPFarmEnabled then
@@ -4886,7 +4912,382 @@ local function respawn(plr)
     char:BreakJoints()
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- VOTE SPAMMER SYSTEM
+-- ══════════════════════════════════════════════════════════════════════════════
 
+local mapNames = {
+    ["bank 2"] = "Bank 2",
+    ["biolab"] = "BioLab",
+    ["bio lab"] = "BioLab",
+    ["factory"] = "Factory",
+    ["hospital 3"] = "Hospital 3",
+    ["hotel 2"] = "Hotel 2",
+    ["house 2"] = "House 2",
+    ["mansion 2"] = "Mansion 2",
+    ["mil base"] = "Mil Base",
+    ["milbase"] = "Mil Base",
+    ["office 3"] = "Office 3",
+    ["police station"] = "Police Station",
+    ["research facility"] = "Research Facility",
+    ["workplace"] = "Workplace"
+}
+
+local mapPriorities = {
+    ["House 2"] = 1,
+    ["Bank 2"] = 2,
+    ["Factory"] = 3,
+    ["Hospital 3"] = 4,
+    ["Workplace"] = 5,
+    ["Mansion 2"] = 6,
+    ["Office 3"] = 7,
+    ["Police Station"] = 8,
+    ["Hotel 2"] = 9,
+    ["Research Facility"] = 10,
+    ["BioLab"] = 11,
+    ["Mil Base"] = 12
+}
+
+local function respawn(plr)
+    local char = plr.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local ogpos = hrp.CFrame
+    local ogpos2 = workspace.CurrentCamera.CFrame
+
+    task.spawn(function()
+        local newChar = plr.CharacterAdded:Wait()
+        local newHrp = newChar:WaitForChild("HumanoidRootPart", 3)
+        if newHrp then
+            newHrp.Anchored = true
+            newHrp.CFrame = ogpos
+            workspace.CurrentCamera.CFrame = ogpos2
+            newHrp.Anchored = false
+        end
+    end)
+
+    char:BreakJoints()
+end
+
+local VotePad = {}
+VotePad.__index = VotePad
+
+function VotePad.new(padModel)
+    local self = setmetatable({}, VotePad)
+    self.Model = padModel
+    self.MapName = nil
+    self.Votes = 0
+    self.TextElements = {}
+    self.HasImage = false
+    self.ClickPart = nil
+    self.IsActive = false
+    self.Priority = 999
+    self:Initialize()
+    return self
+end
+
+function VotePad:Initialize()
+    for _, obj in pairs(self.Model:GetDescendants()) do
+        if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
+            if obj.Image ~= "" then
+                self.HasImage = true
+            end
+        end
+    end
+    
+    for _, obj in pairs(self.Model:GetDescendants()) do
+        if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+            table.insert(self.TextElements, obj)
+            local text = obj.Text
+            local textLower = text:lower()
+            
+            if not self.MapName then
+                for searchName, displayName in pairs(mapNames) do
+                    if textLower:find(searchName) then
+                        self.MapName = displayName
+                        self.Priority = mapPriorities[displayName] or 999
+                        break
+                    end
+                end
+            end
+            
+            if text:find("Votes:") then
+                local votes = text:match("Votes:%s*(%d+)")
+                self.Votes = tonumber(votes) or 0
+            end
+        end
+    end
+    
+    self.IsActive = (self.MapName ~= nil) and self.HasImage
+    self.ClickPart = self.Model:FindFirstChildWhichIsA("Part", true) or 
+                     self.Model:FindFirstChildWhichIsA("MeshPart", true)
+end
+
+function VotePad:UpdateVotes()
+    self.HasImage = false
+    for _, obj in pairs(self.Model:GetDescendants()) do
+        if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
+            if obj.Image ~= "" then
+                self.HasImage = true
+                break
+            end
+        end
+    end
+    
+    for _, element in pairs(self.TextElements) do
+        if element.Text:find("Votes:") then
+            local votes = element.Text:match("Votes:%s*(%d+)")
+            self.Votes = tonumber(votes) or 0
+        end
+    end
+    
+    self.IsActive = (self.MapName ~= nil) and self.HasImage
+    return self.Votes
+end
+
+function VotePad:GetPosition()
+    if self.ClickPart then
+        return self.ClickPart.Position
+    elseif self.Model:IsA("Model") and self.Model.PrimaryPart then
+        return self.Model.PrimaryPart.Position
+    elseif self.Model:IsA("BasePart") then
+        return self.Model.Position
+    end
+    return nil
+end
+
+local VoteSpammer = {}
+VoteSpammer.__index = VoteSpammer
+
+function VoteSpammer.new()
+    local self = setmetatable({}, VoteSpammer)
+    self.VotePads = {}
+    self.ActiveVotePads = {}
+    self.Active = false
+    self.AutoSpam = false
+    self.VoteGoal = State.VoteGoal or 8
+    self.Player = LocalPlayer
+    
+    self.IsWaitingForVoting = false
+    self.IsGoalReached = false
+    self.CurrentVotingSession = 0
+    self.TeleportedThisSession = false
+    self.CurrentTargetPad = nil
+    self.GodModeWasDisabled = false  -- Флаг что мы выключали GodMode
+    
+    return self
+end
+
+function VoteSpammer:Scan()
+    self.VotePads = {}
+    self.ActiveVotePads = {}
+    
+    local regularLobby = Workspace:FindFirstChild("RegularLobby")
+    if not regularLobby then return end
+    
+    for _, child in pairs(regularLobby:GetChildren()) do
+        if child.Name:find("VotePad") then
+            local votePad = VotePad.new(child)
+            if votePad.MapName then
+                table.insert(self.VotePads, votePad)
+                if votePad.IsActive then
+                    table.insert(self.ActiveVotePads, votePad)
+                end
+            end
+        end
+    end
+    
+    table.sort(self.ActiveVotePads, function(a, b)
+        return a.Priority < b.Priority
+    end)
+end
+
+function VoteSpammer:GetTargetPad()
+    if #self.ActiveVotePads > 0 then
+        return self.ActiveVotePads[1]
+    end
+    return nil
+end
+
+function VoteSpammer:TeleportToVotePad(votePad)
+    local character = self.Player.Character
+    if not character then return false end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return false end
+    
+    local position = votePad:GetPosition()
+    if not position then return false end
+    
+    humanoidRootPart.CFrame = CFrame.new(position + Vector3.new(0, 3, 0))
+    return true
+end
+
+function VoteSpammer:StartAutoSpam()
+    if self.AutoSpam then
+        return
+    end
+    
+    self.AutoSpam = true
+    self.GodModeWasDisabled = false
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Vote Spammer: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
+    end
+    
+    task.spawn(function()
+        while self.AutoSpam do
+            self:Scan()
+            
+            -- Обновляем VoteGoal из State
+            self.VoteGoal = State.VoteGoal or 8
+            
+            -- Голосование неактивно
+            if #self.ActiveVotePads == 0 then
+                if not self.IsWaitingForVoting then
+                    self.IsWaitingForVoting = true
+                    self.IsGoalReached = false
+                    self.TeleportedThisSession = false
+                    self.CurrentTargetPad = nil
+                    
+                    -- ✅ Включаем GodMode обратно (голосование закончилось)
+                    if self.GodModeWasDisabled and State.GodModeWithAutoFarm then
+                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                        local humanoid = character:WaitForChild("Humanoid", 5)
+                        
+                        if humanoid then
+                            task.wait(1)
+                            
+                            if not State.GodModeEnabled then
+                                pcall(function()
+                                    ToggleGodMode()
+                                end)
+                            end
+                        end
+                        self.GodModeWasDisabled = false
+                    end
+                end
+                task.wait(2)
+                continue
+            end
+            
+            -- Новое голосование началось
+            if self.IsWaitingForVoting then
+                self.CurrentVotingSession = self.CurrentVotingSession + 1
+                local targetPad = self:GetTargetPad()
+                
+                -- ✅ Выключаем GodMode перед началом голосования
+                if State.GodModeWithAutoFarm and State.GodModeEnabled then
+                    pcall(function()
+                        ToggleGodMode()
+                    end)
+                    self.GodModeWasDisabled = true
+                    task.wait(0.3)
+                end
+                
+                if targetPad then
+                    self.CurrentTargetPad = targetPad
+                end
+                self.IsWaitingForVoting = false
+                self.IsGoalReached = false
+            end
+            
+            local targetPad = self:GetTargetPad()
+            if not targetPad then
+                task.wait(2)
+                continue
+            end
+            
+            targetPad:UpdateVotes()
+            
+            -- Цель достигнута
+            if targetPad.Votes >= self.VoteGoal then
+                if not self.IsGoalReached then
+                    -- ✅ Включаем GodMode обратно (цель достигнута)
+                    if self.GodModeWasDisabled and State.GodModeWithAutoFarm then
+                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                        local humanoid = character:WaitForChild("Humanoid", 5)
+                        
+                        if humanoid then
+                            task.wait(1)
+                            
+                            if not State.GodModeEnabled then
+                                pcall(function()
+                                    ToggleGodMode()
+                                end)
+                            end
+                        end
+                        self.GodModeWasDisabled = false
+                    end
+                    self.IsGoalReached = true
+                end
+                task.wait(2)
+                continue
+            end
+            
+            -- Телепорт один раз за сессию
+            if not self.TeleportedThisSession then
+                if not self:TeleportToVotePad(targetPad) then
+                    task.wait(1)
+                    continue
+                end
+                self.TeleportedThisSession = true
+                task.wait(0.3)
+            end
+            
+            -- Респавн для голосования
+            respawn(self.Player)
+            task.wait(0.3)
+            
+            targetPad:UpdateVotes()
+        end
+    end)
+end
+
+function VoteSpammer:StopAutoSpam()
+    if not self.AutoSpam then
+        return
+    end
+    
+    self.AutoSpam = false
+    
+    -- ✅ Включаем GodMode обратно при остановке
+    if self.GodModeWasDisabled and State.GodModeWithAutoFarm then
+        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local humanoid = character:WaitForChild("Humanoid", 5)
+        
+        if humanoid then
+            task.wait(1)
+            
+            if not State.GodModeEnabled then
+                pcall(function()
+                    ToggleGodMode()
+                end)
+            end
+        end
+        self.GodModeWasDisabled = false
+    end
+    
+    if State.NotificationsEnabled then
+        ShowNotification("Vote Spammer: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
+    end
+end
+
+-- Создаем глобальный экземпляр
+if not _G.VoteSpammer then
+    _G.VoteSpammer = VoteSpammer.new()
+end
+
+-- Toggle функция
+local function ToggleVoteSpammer(enabled)
+    if enabled then
+        _G.VoteSpammer:StartAutoSpam()
+    else
+        _G.VoteSpammer:StopAutoSpam()
+    end
+end
 
 local function ServerHop()
     -- ═══════════════════════════════════════════════════════════
@@ -5444,6 +5845,8 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         Shutdown = function() FullShutdown() end,
 
+        VoteSpammer = ToggleVoteSpammer,
+
         AutoLoadOnTeleport = function(on)
             State.AutoLoadOnTeleport = on
         end,
@@ -5596,13 +5999,15 @@ do
         FarmTab:CreateSection("AUTO FARM")
         FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
-
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
         FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+        FarmTab:CreateSection("VOTE SPAM")
+        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", false)
+        FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 end
 
