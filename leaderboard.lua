@@ -358,8 +358,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-
-
 local function GetShootOrigin(tool)
     if not tool then return nil end
     local handle = tool:FindFirstChild("Handle")
@@ -1304,9 +1302,9 @@ local function CreateHighlight(adornee, color)
     local highlight = Instance.new("Highlight")
     highlight.Adornee = adornee
     highlight.FillColor = color
-    highlight.FillTransparency = 0.8
+    highlight.FillTransparency = 0.7
     highlight.OutlineColor = color
-    highlight.OutlineTransparency = 0.3
+    highlight.OutlineTransparency = 0.25
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Enabled = true
     highlight.Parent = adornee
@@ -3355,21 +3353,45 @@ local function StartAutoFarm()
                             local redirectCount = 0
                             
                             while currentTargetCoin and redirectCount < maxRedirects do
+                                -- ✅ ДОБАВЬ ПРОВЕРКУ ЗДЕСЬ
+                                local currentDistance = (currentTargetCoin.Position - humanoidRootPart.Position).Magnitude
+                                
+                                if currentDistance > 2500 then
+                                    if State.NotificationsEnabled then
+                                        ShowNotification(
+                                            string.format("<font color=\"rgb(255,170,50)\">⚠️ Target too far (%.0fm) during flight!</font> Flinging...", currentDistance),
+                                            CONFIG.Colors.Text
+                                        )
+                                    end
+                                    
+                                    pcall(function()
+                                        FlingMurderer()
+                                    end)
+                                    
+                                    task.wait(2)
+                                    
+                                    -- Пересканируем монеты
+                                    local newCoin, newDistance = FindNearestCoin()
+                                    if newCoin then
+                                        RemoveCoinTracer()
+                                        CreateCoinTracer(character, newCoin)
+                                        currentTargetCoin = newCoin
+                                    else
+                                        break  -- Нет монет - выходим
+                                    end
+                                end
+                                
                                 local result, newTarget = SmoothFlyToCoin(currentTargetCoin, humanoidRootPart, State.CoinFarmFlySpeed)
                                 
                                 if result == "switch" and newTarget then
-                                    -- ✅ ПРОСТО ПЕРЕКЛЮЧАЕМСЯ, БЕЗ BLACKLIST!
                                     RemoveCoinTracer()
                                     CreateCoinTracer(character, newTarget)
-                                    
                                     currentTargetCoin = newTarget
                                     redirectCount = redirectCount + 1
                                     
                                 elseif result == true then
-                                    -- ✅ Успешно долетели до цели
                                     break
                                 else
-                                    -- ❌ Монета исчезла (кто-то собрал)
                                     break
                                 end
                             end
@@ -4902,10 +4924,10 @@ local function respawn(plr)
         local newChar = plr.CharacterAdded:Wait()
         local newHrp = newChar:WaitForChild("HumanoidRootPart", 3)
         if newHrp then
-            newHrp.Anchored = true  -- Фиксируем на момент телепорта
+            newHrp.Anchored = true
             newHrp.CFrame = ogpos
             workspace.CurrentCamera.CFrame = ogpos2
-            newHrp.Anchored = false  -- Освобождаем
+            newHrp.Anchored = false
         end
     end)
 
@@ -4947,29 +4969,6 @@ local mapPriorities = {
     ["BioLab"] = 11,
     ["Mil Base"] = 12
 }
-
-local function respawn(plr)
-    local char = plr.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local ogpos = hrp.CFrame
-    local ogpos2 = workspace.CurrentCamera.CFrame
-
-    task.spawn(function()
-        local newChar = plr.CharacterAdded:Wait()
-        local newHrp = newChar:WaitForChild("HumanoidRootPart", 3)
-        if newHrp then
-            newHrp.Anchored = true
-            newHrp.CFrame = ogpos
-            workspace.CurrentCamera.CFrame = ogpos2
-            newHrp.Anchored = false
-        end
-    end)
-
-    char:BreakJoints()
-end
 
 local VotePad = {}
 VotePad.__index = VotePad
@@ -5974,7 +5973,7 @@ do
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
         VisualsTab:CreateSection("Misc")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
         VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
 end
 
@@ -6006,7 +6005,7 @@ do
         FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateSection("VOTE SPAM")
-        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", false)
+        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 end
