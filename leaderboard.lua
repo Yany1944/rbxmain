@@ -96,7 +96,7 @@ local State = {
     -- Auto Farm
     AutoFarmEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 23,
     CoinFarmDelay = 2,
     UndergroundMode = false,
     UndergroundOffset = 2.5,
@@ -4911,28 +4911,70 @@ local function ExecuteInf()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
 end
 
+local respawning = {} -- Таблица для отслеживания состояния респавна по игрокам
+
 local function respawn(plr)
     local char = plr.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
+    -- Защита от повторного вызова
+    if respawning[plr.UserId] then 
+        return 
+    end
+    respawning[plr.UserId] = true
+
     local ogpos = hrp.CFrame
     local ogpos2 = workspace.CurrentCamera.CFrame
 
+    -- Уникальный ID для этого респавна
+    local respawnId = tick()
+    
     task.spawn(function()
         local newChar = plr.CharacterAdded:Wait()
-        local newHrp = newChar:WaitForChild("HumanoidRootPart", 3)
-        if newHrp then
+        
+        -- Проверка что это все еще актуальный респавн
+        if not respawning[plr.UserId] or respawning[plr.UserId] ~= respawnId then 
+            return 
+        end
+        
+        local newHrp = newChar:WaitForChild("HumanoidRootPart", 5)
+        local newHum = newChar:WaitForChild("Humanoid", 5)
+        
+        if newHrp and newHum then
+            -- Ждем полной загрузки персонажа
+            if newHum.Health == 0 then
+                newHum.HealthChanged:Wait()
+            end
+            
+            task.wait(0.1) -- Небольшая задержка для загрузки всех частей
+            
             newHrp.Anchored = true
             newHrp.CFrame = ogpos
+            
+            -- Обновляем камеру после телепортации
+            task.wait()
             workspace.CurrentCamera.CFrame = ogpos2
+            
+            task.wait(0.05)
             newHrp.Anchored = false
         end
+        
+        -- Очищаем флаг через небольшую задержку
+        task.wait(0.2)
+        respawning[plr.UserId] = nil
     end)
 
+    respawning[plr.UserId] = respawnId
     char:BreakJoints()
 end
+
+-- Очистка при выходе игрока
+game.Players.PlayerRemoving:Connect(function(plr)
+    respawning[plr.UserId] = nil
+end)
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- VOTE SPAMMER SYSTEM
@@ -5233,12 +5275,12 @@ function VoteSpammer:StartAutoSpam()
                     continue
                 end
                 self.TeleportedThisSession = true
-                task.wait(0.3)
+                task.wait(0.4)
             end
             
             -- Респавн для голосования
             respawn(self.Player)
-            task.wait(0.3)
+            task.wait(0.4)
             
             targetPad:UpdateVotes()
         end
@@ -5973,7 +6015,7 @@ do
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
         VisualsTab:CreateSection("Misc")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", _G.AUTOEXEC_ENABLED)
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", false)
         VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
 end
 
