@@ -157,6 +157,7 @@ local State = {
     CoinBlacklist = {},
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
+    IsInvisible = false,
 
     -- Auto-load script on teleport
     AutoLoadOnTeleport = true,
@@ -6702,12 +6703,11 @@ local function TeleportToMouse()
 end
 
 -- ============= Глобальные переменные для невидимости =============
-local IsInvisible = false
 local InvisibilityConnection = nil
 local VisibleParts = {} -- Список только видимых частей (Transparency == 0)
 
 -- ============= Инициализация видимых частей =============
-local function InitializeVisibleParts()
+InitializeVisibleParts = function()
     VisibleParts = {}
     local Character = LocalPlayer.Character
     if not Character then return end
@@ -6721,11 +6721,10 @@ local function InitializeVisibleParts()
 end
 
 -- ============= Функция переключения невидимости =============
-local function ToggleInvisibility()
-    IsInvisible = not IsInvisible
+ToggleInvisibility = function()
+    State.IsInvisible = not State.IsInvisible
     
-    if IsInvisible then
-        print("Невидимость: Включена")
+    if State.IsInvisible then
         
         -- Отключаем старое подключение если есть
         if InvisibilityConnection then
@@ -6742,7 +6741,7 @@ local function ToggleInvisibility()
         
         -- Создаем цикл невидимости
         InvisibilityConnection = game:GetService('RunService').Heartbeat:Connect(function()
-            if not IsInvisible then return end
+            if not State.IsInvisible then return end
             
             local Character = LocalPlayer.Character
             if not Character then return end
@@ -6770,8 +6769,11 @@ local function ToggleInvisibility()
             RootPart.CFrame = OriginalCFrame
             Humanoid.CameraOffset = OriginalCameraOffset
         end)
+        
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
+        end
     else
-        print("Невидимость: Выключена")
         
         -- Отключаем цикл невидимости
         if InvisibilityConnection then
@@ -6796,6 +6798,10 @@ local function ToggleInvisibility()
             if Humanoid then
                 Humanoid.CameraOffset = Vector3.new(0, 0, 0)
             end
+        end
+        
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
         end
     end
 end
