@@ -103,6 +103,7 @@ local State = {
     CoinBlacklist = {},
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
+    InvisibleWithAutoFarm = true,
 
     -- Auto-load script on teleport
     AutoLoadOnTeleport = true,
@@ -3252,7 +3253,7 @@ local function StartAutoFarm()
             end)
         end
 
-        if not State.IsInvisible then
+        if State.InvisibleWithAutoFarm and not State.IsInvisible then
             pcall(function()
                 ToggleInvisibility()
             end)
@@ -3322,6 +3323,12 @@ local function StartAutoFarm()
                                 local waitTime = State.CoinFarmDelay - timeSinceLastTP
                                 task.wait(waitTime)
                             end
+
+                            if State.InvisibleWithAutoFarm and State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
+                                end)
+                            end
                             local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
                             
                             if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
@@ -3344,15 +3351,7 @@ local function StartAutoFarm()
                                 allowFly = true
                             end
                         else
-                            EnableNoClip()
-                            
-                            -- ✅ ВЫКЛЮЧАЕМ НЕВИДИМОСТЬ ОДИН РАЗ ДО ЦИКЛА
-                            if State.IsInvisible then
-                                pcall(function()
-                                    ToggleInvisibility()
-                                end)
-                            end
-                            
+                            EnableNoClip()                           
                             -- ✅ ОБРАБОТКА ДИНАМИЧЕСКОЙ СМЕНЫ ЦЕЛИ
                             local currentTargetCoin = coin
                             local maxRedirects = 5
@@ -3379,14 +3378,6 @@ local function StartAutoFarm()
                             end
                             
                             coinLabelCache = nil
-                            -- ✅ ВКЛЮЧАЕМ НЕВИДИМОСТЬ ОДИН РАЗ ПОСЛЕ ЦИКЛА
-                            local nextCoin, nextDistance = FindNearestCoin()
-                            if (not nextCoin or nextDistance > 5) and not State.IsInvisible then
-                                pcall(function()
-                                    ToggleInvisibility()
-                                end)
-                            end
-
                             RemoveCoinTracer()
                             
                             if currentTargetCoin then
@@ -3457,13 +3448,19 @@ local function StartAutoFarm()
                                 ToggleGodMode()
                             end)
                         end
+
+                        if State.InvisibleWithAutoFarm and State.IsInvisible then
+                            pcall(function()
+                                ToggleInvisibility()
+                            end)
+                        end
                         
                         ResetCharacter()
                         State.CoinBlacklist = {}
                         noCoinsAttempts = 0
                         allowFly = false
                         
-                        task.wait(3)
+                        task.wait(2)
                         
                         if State.GodModeWithAutoFarm then
                             local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -3475,6 +3472,13 @@ local function StartAutoFarm()
                                 if not State.GodModeEnabled then
                                     pcall(function()
                                         ToggleGodMode()
+                                    end)
+                                end
+
+                                task.wait(0.3)
+                                if not State.IsInvisible then
+                                    pcall(function()
+                                        ToggleInvisibility()
                                     end)
                                 end
                                 
@@ -3732,11 +3736,17 @@ local function StartAutoFarm()
                         end)
                     end
 
+                    if State.InvisibleWithAutoFarm and State.IsInvisible then
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
 
-                    task.wait(3)
+                    task.wait(2)
 
                     if State.GodModeWithAutoFarm then
                         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -3787,12 +3797,18 @@ local function StartAutoFarm()
                         --print("[Auto Farm] 🛡️ GodMode автоматически выключен")
                     end
 
+                    if State.InvisibleWithAutoFarm and State.IsInvisible then
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+                    
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     allowFly = false
 
-                    task.wait(3)
+                    task.wait(2)
 
                     -- ✅ ИСПРАВЛЕННЫЙ КОД: Включаем годмод после респавна
                     if State.GodModeWithAutoFarm then  -- ✅ БЕЗ проверки State.GodModeEnabled!
@@ -3811,7 +3827,7 @@ local function StartAutoFarm()
                             end
                             
                             task.wait(0.2)
-                            if not State.IsInvisible then
+                            if State.InvisibleWithAutoFarm and State.IsInvisible then
                                 pcall(function()
                                     ToggleInvisibility()
                                 end)
