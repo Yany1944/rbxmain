@@ -183,6 +183,7 @@ local State = {
     PlayerNicknamesESP = false,
     PlayerNicknamesCache = {},
 
+    IsInvisible = false,
 
     -- Tracers
     BulletTracersEnabled = false,
@@ -218,6 +219,7 @@ local State = {
         PickupGun = Enum.KeyCode.Unknown,
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
+        Invisibility = Enum.KeyCode.Unknown,
     }
 }
 
@@ -2960,6 +2962,12 @@ local function FindSafeAFKSpot()
     return hrp.CFrame * CFrame.new(0, 300, 0)
 end
 
+local ToggleInvisibility
+local InitializeVisibleParts
+
+local InvisibilityConnection = nil
+local VisibleParts = {}
+
 local function FindNearestCoin()
     local character = LocalPlayer.Character
     if not character then return nil end
@@ -3126,7 +3134,7 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         
-        -- ✅ Вызываем firetouchinterest на 90% полёта
+        -- ✅ ИСПРАВЛЕНО: Выключаем невидимость на 85% полёта (перед firetouchinterest)
         if alpha >= 0.90 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
@@ -3224,7 +3232,6 @@ local function DiagnoseAutoFarm()
 end
 --]]
 
-
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
     if State.CoinFarmThread then
@@ -3242,6 +3249,12 @@ local function StartAutoFarm()
         if State.GodModeWithAutoFarm and not State.GodModeEnabled then
             pcall(function()
                 ToggleGodMode()
+            end)
+        end
+
+        if not State.IsInvisible then
+            pcall(function()
+                ToggleInvisibility()
             end)
         end
                 
@@ -3284,21 +3297,8 @@ local function StartAutoFarm()
             if currentCoins >= 40 then
                 noCoinsAttempts = maxNoCoinsAttempts
             else
-                local coin, coinDistance = FindNearestCoin()  -- ✅ Получаем монету и расстояние
-                --print("[DEBUG] 🪙 Ближайшая монета:", coin, "Расстояние:", coinDistance)
-
-                -- ✅ ПРОВЕРКА: Если монета слишком далеко - флинг мурдерера
-                if coin and coinDistance and coinDistance > 2500 then
-                    
-                    pcall(function()
-                        FlingMurderer()
-                    end)
-                    
-                    task.wait(2)  -- Даём время на fling
-                    
-                    -- Пересканируем монеты после fling
-                    coin, coinDistance = FindNearestCoin()
-                end
+                local coin = FindNearestCoin()
+                --print("[DEBUG] 🪙 Ближайшая монета:", coin)
 
                 if not coin then
                     noCoinsAttempts = noCoinsAttempts + 1
@@ -3322,7 +3322,6 @@ local function StartAutoFarm()
                                 local waitTime = State.CoinFarmDelay - timeSinceLastTP
                                 task.wait(waitTime)
                             end
-                            
                             local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
                             
                             if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
@@ -3334,9 +3333,9 @@ local function StartAutoFarm()
                                     task.wait(0.05)
                                     firetouchinterest(humanoidRootPart, coin, 1)
                                 end
+
                                 
                                 task.wait(0.2)
-                                
                                 coinLabelCache = nil
                                 local coinsAfter = GetCollectedCoinsCount()
                                 
@@ -3347,61 +3346,49 @@ local function StartAutoFarm()
                         else
                             EnableNoClip()
                             
+                            -- ✅ ВЫКЛЮЧАЕМ НЕВИДИМОСТЬ ОДИН РАЗ ДО ЦИКЛА
+                            if State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
+                                end)
+                            end
+                            
                             -- ✅ ОБРАБОТКА ДИНАМИЧЕСКОЙ СМЕНЫ ЦЕЛИ
                             local currentTargetCoin = coin
                             local maxRedirects = 5
                             local redirectCount = 0
                             
                             while currentTargetCoin and redirectCount < maxRedirects do
-                                -- ✅ ДОБАВЬ ПРОВЕРКУ ЗДЕСЬ
-                                local currentDistance = (currentTargetCoin.Position - humanoidRootPart.Position).Magnitude
-                                
-                                if currentDistance > 2500 then
-                                    if State.NotificationsEnabled then
-                                        ShowNotification(
-                                            string.format("<font color=\"rgb(255,170,50)\">⚠️ Target too far (%.0fm) during flight!</font> Flinging...", currentDistance),
-                                            CONFIG.Colors.Text
-                                        )
-                                    end
-                                    
-                                    pcall(function()
-                                        FlingMurderer()
-                                    end)
-                                    
-                                    task.wait(2)
-                                    
-                                    -- Пересканируем монеты
-                                    local newCoin, newDistance = FindNearestCoin()
-                                    if newCoin then
-                                        RemoveCoinTracer()
-                                        CreateCoinTracer(character, newCoin)
-                                        currentTargetCoin = newCoin
-                                    else
-                                        break  -- Нет монет - выходим
-                                    end
-                                end
-                                
                                 local result, newTarget = SmoothFlyToCoin(currentTargetCoin, humanoidRootPart, State.CoinFarmFlySpeed)
                                 
                                 if result == "switch" and newTarget then
+                                    -- ✅ ПРОСТО ПЕРЕКЛЮЧАЕМСЯ, БЕЗ BLACKLIST!
                                     RemoveCoinTracer()
                                     CreateCoinTracer(character, newTarget)
+                                    
                                     currentTargetCoin = newTarget
                                     redirectCount = redirectCount + 1
                                     
                                 elseif result == true then
+                                    -- ✅ Успешно долетели до цели
                                     break
                                 else
+                                    -- ❌ Монета исчезла (кто-то собрал)
                                     break
                                 end
                             end
                             
                             coinLabelCache = nil
-                            local coinsAfter = GetCollectedCoinsCount()
+                            -- ✅ ВКЛЮЧАЕМ НЕВИДИМОСТЬ ОДИН РАЗ ПОСЛЕ ЦИКЛА
+                            local nextCoin, nextDistance = FindNearestCoin()
+                            if (not nextCoin or nextDistance > 5) and not State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
+                                end)
+                            end
 
                             RemoveCoinTracer()
                             
-                            -- ✅ В BLACKLIST ТОЛЬКО ФИНАЛЬНУЮ СОБРАННУЮ МОНЕТУ!
                             if currentTargetCoin then
                                 AddCoinToBlacklist(currentTargetCoin)
                             end
@@ -3490,9 +3477,10 @@ local function StartAutoFarm()
                                         ToggleGodMode()
                                     end)
                                 end
+                                
+                                task.wait(0.3)
                             end
-                        end
-                        
+                        end          
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
@@ -3541,13 +3529,13 @@ local function StartAutoFarm()
                                     humanoidRootPart.CFrame = safeSpot + Vector3.new(0, 5, 0)
                                     --print("[XP Farm] 📍 Телепортировался в безопасное место")
                                     
-                                    task.wait(0.2)
+                                    task.wait(0.5)
                                     local floatSuccess = FloatCharacter()
                                     if floatSuccess then
                                         --print("[XP Farm] 🎈 Закрепление активировано")
                                     end
                                     
-                                    task.wait(0.2)
+                                    task.wait(0.5)
                                 end
                                 
                                 if State.XPFarmEnabled then
@@ -3762,6 +3750,13 @@ local function StartAutoFarm()
                                     ToggleGodMode()
                                 end)
                             end
+                            
+                            task.wait(0.2)
+                            if not State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
+                                end)
+                            end
                         end
                     end
                     
@@ -3808,11 +3803,18 @@ local function StartAutoFarm()
                         if humanoid then
                             task.wait(1)  -- Даём серверу инициализировать персонажа
 
-                            if not State.GodModeEnabled then  -- ✅ ТЕПЕРЬ проверяем
+                            if not State.GodModeEnabled then
                                 pcall(function()
-                                    ToggleGodMode()  -- Включаем
+                                    ToggleGodMode()
                                 end)
                                 --print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
+                            end
+                            
+                            task.wait(0.2)
+                            if not State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
+                                end)
                             end
                         end
                     end
@@ -3867,6 +3869,7 @@ local function StopAutoFarm()
     lastCacheTime = 0
     
     State.CoinBlacklist = {}
+    State.spawnAtPlayer = spawnAtPlayerOriginalState
 
     --print("[Auto Farm] 🛑 Остановлен")
 end
@@ -4017,8 +4020,29 @@ ToggleGodMode = function()
                 SetupHealthProtection()
                 SetupDamageBlocker()
             end
+            
+            State.IsInvisible = false
+            if InvisibilityConnection then
+                InvisibilityConnection:Disconnect()
+                InvisibilityConnection = nil
+            end
+            VisibleParts = {}
+            task.wait(0.1)
+            local character = LocalPlayer.Character
+            if character then
+                local humanoid = character:FindFirstChild("Humanoid")
+                if humanoid then
+                    humanoid.CameraOffset = Vector3.new(0, 0, 0)
+                end
+            end
+            -- Сброс смещения камеры
+            task.wait(0.1)
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid.CameraOffset = Vector3.new(0, 0, 0)
+            end
         end)
-        table.insert(State.GodModeConnections, respawnConnection)  -- ✅ В ОТДЕЛЬНОЕ хранилище
+        table.insert(State.GodModeConnections, respawnConnection)
     else
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",CONFIG.Colors.Text)
@@ -4815,6 +4839,109 @@ local function TeleportToMouse()
     end
 end
 
+-- ============= Глобальные переменные для невидимости =============
+local InvisibilityConnection = nil
+local VisibleParts = {} -- Список только видимых частей (Transparency == 0)
+
+-- ============= Инициализация видимых частей =============
+InitializeVisibleParts = function()
+    VisibleParts = {}
+    local Character = LocalPlayer.Character
+    if not Character then return end
+    
+    -- Собираем только части с прозрачностью 0 (полностью видимые)
+    for _, part in pairs(Character:GetDescendants()) do
+        if part:IsA('BasePart') and part.Transparency == 0 then
+            table.insert(VisibleParts, part)
+        end
+    end
+end
+
+-- ============= Функция переключения невидимости =============
+ToggleInvisibility = function()
+    State.IsInvisible = not State.IsInvisible
+    
+    if State.IsInvisible then
+        
+        -- Отключаем старое подключение если есть
+        if InvisibilityConnection then
+            InvisibilityConnection:Disconnect()
+        end
+        
+        -- Инициализируем список видимых частей
+        InitializeVisibleParts()
+        
+        -- Меняем прозрачность всех видимых частей на 0.5
+        for _, part in pairs(VisibleParts) do
+            part.Transparency = 0.5
+        end
+        
+        -- Создаем цикл невидимости
+        InvisibilityConnection = game:GetService('RunService').Heartbeat:Connect(function()
+            if not State.IsInvisible then return end
+            
+            local Character = LocalPlayer.Character
+            if not Character then return end
+            
+            local RootPart = Character:FindFirstChild('HumanoidRootPart')
+            local Humanoid = Character:FindFirstChild('Humanoid')
+            if not RootPart or not Humanoid then return end
+            
+            -- Сохраняем текущую позицию и смещение камеры
+            local OriginalCFrame = RootPart.CFrame
+            local OriginalCameraOffset = Humanoid.CameraOffset
+            
+            -- Перемещаем персонажа вниз на 200000 единиц
+            local NewCFrame = OriginalCFrame * CFrame.new(0, -200000, 0)
+            local RelativePosition = NewCFrame:ToObjectSpace(CFrame.new(OriginalCFrame.Position)).Position
+
+            -- Применяем новую позицию и корректируем камеру
+            RootPart.CFrame = NewCFrame
+            Humanoid.CameraOffset = RelativePosition
+
+            -- Ждем следующего кадра
+            game:GetService('RunService').RenderStepped:Wait()
+
+            -- Возвращаем персонажа на исходную позицию
+            RootPart.CFrame = OriginalCFrame
+            Humanoid.CameraOffset = OriginalCameraOffset
+        end)
+        
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
+        end
+    else
+        
+        -- Отключаем цикл невидимости
+        if InvisibilityConnection then
+            InvisibilityConnection:Disconnect()
+            InvisibilityConnection = nil
+        end
+        
+        -- Возвращаем прозрачность всех видимых частей на 0
+        for _, part in pairs(VisibleParts) do
+            if part and part.Parent then
+                part.Transparency = 0
+            end
+        end
+        
+        -- Очищаем список
+        VisibleParts = {}
+        
+        -- Сбрасываем смещение камеры
+        local Character = LocalPlayer.Character
+        if Character then
+            local Humanoid = Character:FindFirstChild('Humanoid')
+            if Humanoid then
+                Humanoid.CameraOffset = Vector3.new(0, 0, 0)
+            end
+        end
+        
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
+        end
+    end
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 17: KEYBIND SYSTEM (СТРОКИ 2931-3050)
@@ -5707,6 +5834,10 @@ local function HandleActionInput(input)
             EnableNoClip()
         end
     end
+
+    if input.KeyCode == State.Keybinds.Invisibility and State.Keybinds.Invisibility ~= Enum.KeyCode.Unknown then
+        pcall(function() ToggleInvisibility() end)
+    end
 end
 
 -- Auto Rejoin on Disconnect
@@ -5988,7 +6119,8 @@ do
 
         MainTab:CreateSection("CAMERA")
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
-        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
+        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip", true)
+        MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
 
         MainTab:CreateSection("TELEPORT & OTHER")
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
@@ -6047,7 +6179,7 @@ do
         FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateSection("VOTE SPAM")
-        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", false)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 end
