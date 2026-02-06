@@ -3361,9 +3361,9 @@ local function EnableAntiFling()
                             if obj:IsA("BasePart") then
                                 pcall(function()
                                     obj.CanCollide = false
+                                    obj.Massless = true  -- Вместо CustomPhysicalProperties
                                     obj.AssemblyAngularVelocity = Vector3.zero
                                     obj.AssemblyLinearVelocity = Vector3.zero
-                                    obj.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
                                 end)
                             end
                         end
@@ -4238,7 +4238,7 @@ local function GetCollectedCoinsCount()
             :FindFirstChild("Game")
             :FindFirstChild("CoinBags")
             :FindFirstChild("Container")
-            :FindFirstChild("Coin")  -- ✅ ИЗМЕНЕНО: было "SnowToken"
+            :FindFirstChild("Coin")
             :FindFirstChild("CurrencyFrame")
             :FindFirstChild("Icon")
             :FindFirstChild("Coins")
@@ -4497,7 +4497,6 @@ local function UnfloatCharacter()
     return true
 end
 
-
 local function FindSafeAFKSpot()
     local character = LocalPlayer.Character
     if not character then return nil end
@@ -4547,6 +4546,12 @@ local function FindSafeAFKSpot()
     
     return hrp.CFrame * CFrame.new(0, 300, 0)
 end
+
+local ToggleInvisibility
+local InitializeVisibleParts
+
+local InvisibilityConnection = nil
+local VisibleParts = {}
 
 local function FindNearestCoin()
     local character = LocalPlayer.Character
@@ -4714,7 +4719,7 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         
-        -- ✅ Вызываем firetouchinterest на 90% полёта
+        -- ✅ ИСПРАВЛЕНО: Выключаем невидимость на 85% полёта (перед firetouchinterest)
         if alpha >= 0.90 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
@@ -4831,6 +4836,12 @@ local function StartAutoFarm()
                 ToggleGodMode()
             end)
         end
+
+        if State.InvisibleWithAutoFarm and not State.IsInvisible then
+            pcall(function()
+                ToggleInvisibility()
+            end)
+        end
                 
         local noCoinsAttempts = 0
         local maxNoCoinsAttempts = 4
@@ -4896,7 +4907,12 @@ local function StartAutoFarm()
                                 local waitTime = State.CoinFarmDelay - timeSinceLastTP
                                 task.wait(waitTime)
                             end
-                            
+
+                            if State.InvisibleWithAutoFarm and State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
+                                end)
+                            end
                             local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
                             
                             if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
@@ -4908,9 +4924,9 @@ local function StartAutoFarm()
                                     task.wait(0.05)
                                     firetouchinterest(humanoidRootPart, coin, 1)
                                 end
+
                                 
                                 task.wait(0.2)
-                                
                                 coinLabelCache = nil
                                 local coinsAfter = GetCollectedCoinsCount()
                                 
@@ -4919,8 +4935,7 @@ local function StartAutoFarm()
                                 allowFly = true
                             end
                         else
-                            EnableNoClip()
-                            
+                            EnableNoClip()                           
                             -- ✅ ОБРАБОТКА ДИНАМИЧЕСКОЙ СМЕНЫ ЦЕЛИ
                             local currentTargetCoin = coin
                             local maxRedirects = 5
@@ -4947,11 +4962,8 @@ local function StartAutoFarm()
                             end
                             
                             coinLabelCache = nil
-                            local coinsAfter = GetCollectedCoinsCount()
-
                             RemoveCoinTracer()
                             
-                            -- ✅ В BLACKLIST ТОЛЬКО ФИНАЛЬНУЮ СОБРАННУЮ МОНЕТУ!
                             if currentTargetCoin then
                                 AddCoinToBlacklist(currentTargetCoin)
                             end
@@ -5020,13 +5032,19 @@ local function StartAutoFarm()
                                 ToggleGodMode()
                             end)
                         end
+
+                        if State.InvisibleWithAutoFarm and State.IsInvisible then
+                            pcall(function()
+                                ToggleInvisibility()
+                            end)
+                        end
                         
                         ResetCharacter()
                         State.CoinBlacklist = {}
                         noCoinsAttempts = 0
                         allowFly = false
                         
-                        task.wait(3)
+                        task.wait(2)
                         
                         if State.GodModeWithAutoFarm then
                             local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -5040,9 +5058,16 @@ local function StartAutoFarm()
                                         ToggleGodMode()
                                     end)
                                 end
+
+                                if not State.IsInvisible then
+                                    pcall(function()
+                                        ToggleInvisibility()
+                                    end)
+                                end
+                                
+                                task.wait(0.3)
                             end
-                        end
-                        
+                        end          
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
@@ -5294,6 +5319,12 @@ local function StartAutoFarm()
                         end)
                     end
 
+                    if State.InvisibleWithAutoFarm and State.IsInvisible then
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
@@ -5310,6 +5341,12 @@ local function StartAutoFarm()
                             if not State.GodModeEnabled then
                                 pcall(function()
                                     ToggleGodMode()
+                                end)
+                            end
+                            
+                            if not State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
                                 end)
                             end
                         end
@@ -5342,12 +5379,18 @@ local function StartAutoFarm()
                         --print("[Auto Farm] 🛡️ GodMode автоматически выключен")
                     end
 
+                    if State.InvisibleWithAutoFarm and State.IsInvisible then
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+                    
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     allowFly = false
 
-                    task.wait(3)
+                    task.wait(2)
 
                     -- ✅ ИСПРАВЛЕННЫЙ КОД: Включаем годмод после респавна
                     if State.GodModeWithAutoFarm then  -- ✅ БЕЗ проверки State.GodModeEnabled!
@@ -5358,11 +5401,17 @@ local function StartAutoFarm()
                         if humanoid then
                             task.wait(1)  -- Даём серверу инициализировать персонажа
 
-                            if not State.GodModeEnabled then  -- ✅ ТЕПЕРЬ проверяем
+                            if not State.GodModeEnabled then
                                 pcall(function()
-                                    ToggleGodMode()  -- Включаем
+                                    ToggleGodMode()
                                 end)
                                 --print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
+                            end
+                            
+                            if State.InvisibleWithAutoFarm and State.IsInvisible then
+                                pcall(function()
+                                    ToggleInvisibility()
+                                end)
                             end
                         end
                     end
