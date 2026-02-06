@@ -185,7 +185,6 @@ local State = {
     PlayerNicknamesCache = {},
 
     IsInvisible = false,
-    WasInvisible = false,
 
     -- Tracers
     BulletTracersEnabled = false,
@@ -4922,7 +4921,6 @@ ToggleInvisibility = function()
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
         end
-        State.WasInvisible = true
     else
         
         -- Отключаем цикл невидимости
@@ -4953,7 +4951,6 @@ ToggleInvisibility = function()
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
         end
-        State.WasInvisible = false
     end
 end
 
