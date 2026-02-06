@@ -87,7 +87,7 @@ local CONFIG = {
         Gun = Color3.fromRGB(255, 200, 50),
         Innocent = Color3.fromRGB(85, 255, 120)
         },
-    Notification = {
+        Notification = {
         Duration = 3,
         FadeTime = 0.4
         }
@@ -292,6 +292,7 @@ local State = {
         PickupGun = Enum.KeyCode.Unknown,
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
+        Invisibility = Enum.KeyCode.Unknown,
     }
 }
 
@@ -5297,7 +5298,7 @@ local function StartAutoFarm()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
 
-                    task.wait(3)
+                    task.wait(2)
 
                     if State.GodModeWithAutoFarm then
                         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -5567,8 +5568,29 @@ ToggleGodMode = function()
                 SetupHealthProtection()
                 SetupDamageBlocker()
             end
+            
+            IsInvisible = false
+            if InvisibilityConnection then
+                InvisibilityConnection:Disconnect()
+                InvisibilityConnection = nil
+            end
+            VisibleParts = {}
+            task.wait(0.1)
+            local character = LocalPlayer.Character
+            if character then
+                local humanoid = character:FindFirstChild("Humanoid")
+                if humanoid then
+                    humanoid.CameraOffset = Vector3.new(0, 0, 0)
+                end
+            end
+            -- Сброс смещения камеры
+            task.wait(0.1)
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid.CameraOffset = Vector3.new(0, 0, 0)
+            end
         end)
-        table.insert(State.GodModeConnections, respawnConnection)  -- ✅ В ОТДЕЛЬНОЕ хранилище
+        table.insert(State.GodModeConnections, respawnConnection)
     else
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",CONFIG.Colors.Text)
@@ -6630,6 +6652,104 @@ local function TeleportToMouse()
     end
 end
 
+-- ============= Глобальные переменные для невидимости =============
+local IsInvisible = false
+local InvisibilityConnection = nil
+local VisibleParts = {} -- Список только видимых частей (Transparency == 0)
+
+-- ============= Инициализация видимых частей =============
+local function InitializeVisibleParts()
+    VisibleParts = {}
+    local Character = LocalPlayer.Character
+    if not Character then return end
+    
+    -- Собираем только части с прозрачностью 0 (полностью видимые)
+    for _, part in pairs(Character:GetDescendants()) do
+        if part:IsA('BasePart') and part.Transparency == 0 then
+            table.insert(VisibleParts, part)
+        end
+    end
+end
+
+-- ============= Функция переключения невидимости =============
+local function ToggleInvisibility()
+    IsInvisible = not IsInvisible
+    
+    if IsInvisible then
+        print("Невидимость: Включена")
+        
+        -- Отключаем старое подключение если есть
+        if InvisibilityConnection then
+            InvisibilityConnection:Disconnect()
+        end
+        
+        -- Инициализируем список видимых частей
+        InitializeVisibleParts()
+        
+        -- Меняем прозрачность всех видимых частей на 0.5
+        for _, part in pairs(VisibleParts) do
+            part.Transparency = 0.5
+        end
+        
+        -- Создаем цикл невидимости
+        InvisibilityConnection = game:GetService('RunService').Heartbeat:Connect(function()
+            if not IsInvisible then return end
+            
+            local Character = LocalPlayer.Character
+            if not Character then return end
+            
+            local RootPart = Character:FindFirstChild('HumanoidRootPart')
+            local Humanoid = Character:FindFirstChild('Humanoid')
+            if not RootPart or not Humanoid then return end
+            
+            -- Сохраняем текущую позицию и смещение камеры
+            local OriginalCFrame = RootPart.CFrame
+            local OriginalCameraOffset = Humanoid.CameraOffset
+            
+            -- Перемещаем персонажа вниз на 200000 единиц
+            local NewCFrame = OriginalCFrame * CFrame.new(0, -200000, 0)
+            local RelativePosition = NewCFrame:ToObjectSpace(CFrame.new(OriginalCFrame.Position)).Position
+
+            -- Применяем новую позицию и корректируем камеру
+            RootPart.CFrame = NewCFrame
+            Humanoid.CameraOffset = RelativePosition
+
+            -- Ждем следующего кадра
+            game:GetService('RunService').RenderStepped:Wait()
+
+            -- Возвращаем персонажа на исходную позицию
+            RootPart.CFrame = OriginalCFrame
+            Humanoid.CameraOffset = OriginalCameraOffset
+        end)
+    else
+        print("Невидимость: Выключена")
+        
+        -- Отключаем цикл невидимости
+        if InvisibilityConnection then
+            InvisibilityConnection:Disconnect()
+            InvisibilityConnection = nil
+        end
+        
+        -- Возвращаем прозрачность всех видимых частей на 0
+        for _, part in pairs(VisibleParts) do
+            if part and part.Parent then
+                part.Transparency = 0
+            end
+        end
+        
+        -- Очищаем список
+        VisibleParts = {}
+        
+        -- Сбрасываем смещение камеры
+        local Character = LocalPlayer.Character
+        if Character then
+            local Humanoid = Character:FindFirstChild('Humanoid')
+            if Humanoid then
+                Humanoid.CameraOffset = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 17: KEYBIND SYSTEM (СТРОКИ 2931-3050)
@@ -6726,30 +6846,69 @@ local function ExecuteInf()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
 end
 
+local respawning = {}
+
 local function respawn(plr)
     local char = plr.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
+    -- Защита от повторного вызова
+    if respawning[plr.UserId] then 
+        return 
+    end
+    respawning[plr.UserId] = true
+
     local ogpos = hrp.CFrame
     local ogpos2 = workspace.CurrentCamera.CFrame
 
+    -- Уникальный ID для этого респавна
+    local respawnId = tick()
+    
     task.spawn(function()
         local newChar = plr.CharacterAdded:Wait()
-        local newHrp = newChar:WaitForChild("HumanoidRootPart", 3)
-        if newHrp then
-            newHrp.Anchored = true  -- Фиксируем на момент телепорта
-            newHrp.CFrame = ogpos
-            workspace.CurrentCamera.CFrame = ogpos2
-            newHrp.Anchored = false  -- Освобождаем
+        
+        -- Проверка что это все еще актуальный респавн
+        if not respawning[plr.UserId] or respawning[plr.UserId] ~= respawnId then 
+            return 
         end
+        
+        local newHrp = newChar:WaitForChild("HumanoidRootPart", 5)
+        local newHum = newChar:WaitForChild("Humanoid", 5)
+        
+        if newHrp and newHum then
+            -- Ждем полной загрузки персонажа
+            if newHum.Health == 0 then
+                newHum.HealthChanged:Wait()
+            end
+            
+            task.wait(0.1) -- Небольшая задержка для загрузки всех частей
+            
+            newHrp.Anchored = true
+            newHrp.CFrame = ogpos
+            
+            -- Обновляем камеру после телепортации
+            task.wait()
+            workspace.CurrentCamera.CFrame = ogpos2
+            
+            task.wait(0.05)
+            newHrp.Anchored = false
+        end
+        
+        -- Очищаем флаг через небольшую задержку
+        task.wait(0.2)
+        respawning[plr.UserId] = nil
     end)
 
+    respawning[plr.UserId] = respawnId
     char:BreakJoints()
 end
 
-
+-- Очистка при выходе игрока
+game.Players.PlayerRemoving:Connect(function(plr)
+    respawning[plr.UserId] = nil
+end)
 
 local function ServerHop()
     -- ═══════════════════════════════════════════════════════════
@@ -7131,6 +7290,10 @@ local function HandleActionInput(input)
         else
             EnableNoClip()
         end
+    end
+
+    if input.KeyCode == State.Keybinds.Invisibility and State.Keybinds.Invisibility ~= Enum.KeyCode.Unknown then
+        pcall(function() ToggleInvisibility() end)
     end
 end
 
@@ -7539,6 +7702,7 @@ do
         MainTab:CreateSection("CAMERA")
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
+        MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
 
         MainTab:CreateSection("TELEPORT & OTHER")
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
