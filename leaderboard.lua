@@ -185,6 +185,7 @@ local State = {
     PlayerNicknamesCache = {},
 
     IsInvisible = false,
+    WasInvisible = false,
 
     -- Tracers
     BulletTracersEnabled = false,
@@ -588,6 +589,7 @@ local function FullShutdown()
         if State.NoClipEnabled then DisableNoClip() end
         if State.AntiFlingEnabled then DisableAntiFling() end
         if State.GodModeEnabled then ToggleGodMode() end
+        if State.ToggleInvisibility then ToggleInvisibility() end
         if State.InstantPickupEnabled then DisableInstantPickup() end
         if State.VoteSpammerEnabled then StopVoteSpammer() end
     end)
@@ -2382,7 +2384,6 @@ local function FlingMurderer()
         end
         return
     end
-    
     FlingPlayer(murderer)
 end
 
@@ -2540,7 +2541,6 @@ local function FlingSheriff()
         end
         return
     end
-    
     FlingPlayer(sheriff)
 end
 
@@ -3475,7 +3475,6 @@ local function StartAutoFarm()
                                     end)
                                 end
 
-                                task.wait(0.3)
                                 if not State.IsInvisible then
                                     pcall(function()
                                         ToggleInvisibility()
@@ -3761,7 +3760,6 @@ local function StartAutoFarm()
                                 end)
                             end
                             
-                            task.wait(0.2)
                             if not State.IsInvisible then
                                 pcall(function()
                                     ToggleInvisibility()
@@ -3826,7 +3824,6 @@ local function StartAutoFarm()
                                 --print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
                             end
                             
-                            task.wait(0.2)
                             if State.InvisibleWithAutoFarm and State.IsInvisible then
                                 pcall(function()
                                     ToggleInvisibility()
@@ -4926,6 +4923,7 @@ ToggleInvisibility = function()
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
         end
+        State.WasInvisible = true
     else
         
         -- Отключаем цикл невидимости
@@ -4956,6 +4954,7 @@ ToggleInvisibility = function()
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
         end
+        State.WasInvisible = false
     end
 end
 
