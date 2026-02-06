@@ -2104,9 +2104,9 @@ local function EnableAntiFling()
                             if obj:IsA("BasePart") then
                                 pcall(function()
                                     obj.CanCollide = false
+                                    obj.Massless = true  -- Вместо CustomPhysicalProperties
                                     obj.AssemblyAngularVelocity = Vector3.zero
                                     obj.AssemblyLinearVelocity = Vector3.zero
-                                    obj.CustomPhysicalProperties = PhysicalProperties.new(0, 0, 0)
                                 end)
                             end
                         end
@@ -2653,7 +2653,7 @@ local function GetCollectedCoinsCount()
             :FindFirstChild("Game")
             :FindFirstChild("CoinBags")
             :FindFirstChild("Container")
-            :FindFirstChild("Coin")  -- ✅ ИЗМЕНЕНО: было "SnowToken"
+            :FindFirstChild("Coin")
             :FindFirstChild("CurrencyFrame")
             :FindFirstChild("Icon")
             :FindFirstChild("Coins")
@@ -2911,7 +2911,6 @@ local function UnfloatCharacter()
     --print("[Auto Farm] 🎈 Левитация выключена")
     return true
 end
-
 
 local function FindSafeAFKSpot()
     local character = LocalPlayer.Character
