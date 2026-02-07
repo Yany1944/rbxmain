@@ -4838,7 +4838,7 @@ local function StartAutoFarm()
             end)
         end
 
-        if State.InvisibleWithAutoFarm and not State.IsInvisible then
+        if State.AutoFarmEnabled and not State.IsInvisible then
             pcall(function()
                 ToggleInvisibility()
             end)
@@ -4874,6 +4874,11 @@ local function StartAutoFarm()
                 pcall(function()
                     UnfloatCharacter()
                 end)
+                if State.AutoFarmEnabled and not State.IsInvisible then
+                    pcall(function()
+                        ToggleInvisibility()
+                    end)
+                end
                 task.wait(2)
                 continue
             end
@@ -4909,7 +4914,7 @@ local function StartAutoFarm()
                                 task.wait(waitTime)
                             end
 
-                            if State.InvisibleWithAutoFarm and State.IsInvisible then
+                            if State.AutoFarmEnabled and State.IsInvisible then
                                 pcall(function()
                                     ToggleInvisibility()
                                 end)
@@ -5033,12 +5038,6 @@ local function StartAutoFarm()
                                 ToggleGodMode()
                             end)
                         end
-
-                        if State.InvisibleWithAutoFarm and State.IsInvisible then
-                            pcall(function()
-                                ToggleInvisibility()
-                            end)
-                        end
                         
                         ResetCharacter()
                         State.CoinBlacklist = {}
@@ -5059,13 +5058,6 @@ local function StartAutoFarm()
                                         ToggleGodMode()
                                     end)
                                 end
-
-                                if not State.IsInvisible then
-                                    pcall(function()
-                                        ToggleInvisibility()
-                                    end)
-                                end
-                                
                                 task.wait(0.3)
                             end
                         end          
@@ -5089,6 +5081,11 @@ local function StartAutoFarm()
                     
                     -- Ждём нового раунда
                     repeat
+                        if not State.IsInvisible then
+                            pcall(function()
+                                ToggleInvisibility()
+                            end)
+                        end
                         task.wait(1)
                     until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
                     
@@ -5320,12 +5317,6 @@ local function StartAutoFarm()
                         end)
                     end
 
-                    if State.InvisibleWithAutoFarm and State.IsInvisible then
-                        pcall(function()
-                            ToggleInvisibility()
-                        end)
-                    end
-
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
@@ -5344,16 +5335,15 @@ local function StartAutoFarm()
                                     ToggleGodMode()
                                 end)
                             end
-                            
-                            if not State.IsInvisible then
-                                pcall(function()
-                                    ToggleInvisibility()
-                                end)
-                            end
                         end
                     end
                     
                     repeat
+                        if not State.IsInvisible then
+                            pcall(function()
+                                ToggleInvisibility()
+                            end)
+                        end
                         task.wait(1)
                     until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
                     
@@ -5379,12 +5369,6 @@ local function StartAutoFarm()
                         end)
                         --print("[Auto Farm] 🛡️ GodMode автоматически выключен")
                     end
-
-                    if State.InvisibleWithAutoFarm and State.IsInvisible then
-                        pcall(function()
-                            ToggleInvisibility()
-                        end)
-                    end
                     
                     ResetCharacter()
                     State.CoinBlacklist = {}
@@ -5408,12 +5392,6 @@ local function StartAutoFarm()
                                 end)
                                 --print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
                             end
-                            
-                            if State.InvisibleWithAutoFarm and State.IsInvisible then
-                                pcall(function()
-                                    ToggleInvisibility()
-                                end)
-                            end
                         end
                     end
 
@@ -5428,7 +5406,13 @@ local function StartAutoFarm()
                     end
 
                     --print("[Auto Farm] ⏳ Раунд закончился, жду начала нового раунда...")
+                    
                     repeat
+                        if not State.IsInvisible then
+                            pcall(function()
+                                ToggleInvisibility()
+                            end)
+                        end
                         task.wait(1)
                     until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
 
@@ -5471,6 +5455,7 @@ local function StopAutoFarm()
 
     --print("[Auto Farm] 🛑 Остановлен")
 end
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- XP FARM SYSTEM
