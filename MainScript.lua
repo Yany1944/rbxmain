@@ -4879,7 +4879,7 @@ local function StartAutoFarm()
                         ToggleInvisibility()
                     end)
                 end
-                task.wait(2)
+                task.wait(1)
                 continue
             end
             
@@ -5602,27 +5602,6 @@ ToggleGodMode = function()
                 ApplyGodMode()
                 SetupHealthProtection()
                 SetupDamageBlocker()
-            end
-            
-            IsInvisible = false
-            if InvisibilityConnection then
-                InvisibilityConnection:Disconnect()
-                InvisibilityConnection = nil
-            end
-            VisibleParts = {}
-            task.wait(0.1)
-            local character = LocalPlayer.Character
-            if character then
-                local humanoid = character:FindFirstChild("Humanoid")
-                if humanoid then
-                    humanoid.CameraOffset = Vector3.new(0, 0, 0)
-                end
-            end
-            -- Сброс смещения камеры
-            task.wait(0.1)
-            local humanoid = character:FindFirstChild("Humanoid")
-            if humanoid then
-                humanoid.CameraOffset = Vector3.new(0, 0, 0)
             end
         end)
         table.insert(State.GodModeConnections, respawnConnection)
@@ -6719,11 +6698,6 @@ ToggleInvisibility = function()
         -- Инициализируем список видимых частей
         InitializeVisibleParts()
         
-        -- Меняем прозрачность всех видимых частей на 0.5
-        for _, part in pairs(VisibleParts) do
-            part.Transparency = 0.5
-        end
-        
         -- Создаем цикл невидимости
         InvisibilityConnection = game:GetService('RunService').Heartbeat:Connect(function()
             if not State.IsInvisible then return end
@@ -6734,6 +6708,15 @@ ToggleInvisibility = function()
             local RootPart = Character:FindFirstChild('HumanoidRootPart')
             local Humanoid = Character:FindFirstChild('Humanoid')
             if not RootPart or not Humanoid then return end
+            
+            -- ✅ ОБНОВЛЯЕМ ПРОЗРАЧНОСТЬ КАЖДЫЙ КАДР
+            for _, part in pairs(Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.Transparency = 0.5
+                elseif part:IsA("Decal") then
+                    part.Transparency = 0.5
+                end
+            end
             
             -- Сохраняем текущую позицию и смещение камеры
             local OriginalCFrame = RootPart.CFrame
@@ -6766,18 +6749,22 @@ ToggleInvisibility = function()
             InvisibilityConnection = nil
         end
         
-        -- Возвращаем прозрачность всех видимых частей на 0
-        for _, part in pairs(VisibleParts) do
-            if part and part.Parent then
-                part.Transparency = 0
+        -- Возвращаем прозрачность всех частей на 0
+        local Character = LocalPlayer.Character
+        if Character then
+            for _, part in pairs(Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.Transparency = 0
+                elseif part:IsA("Decal") then
+                    part.Transparency = 0
+                end
             end
         end
         
-        -- Очищаем список
+        -- Очищаем список (он теперь не нужен, но оставим для совместимости)
         VisibleParts = {}
         
         -- Сбрасываем смещение камеры
-        local Character = LocalPlayer.Character
         if Character then
             local Humanoid = Character:FindFirstChild('Humanoid')
             if Humanoid then
@@ -6790,6 +6777,7 @@ ToggleInvisibility = function()
         end
     end
 end
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 17: KEYBIND SYSTEM (СТРОКИ 2931-3050)
