@@ -7145,30 +7145,27 @@ local function ServerLagger()
             CONFIG.Colors.Text
         )
     end
-   
     pcall(function()
         local GetSyncData = ReplicatedStorage.GetSyncData
         local InvokeServer = GetSyncData.InvokeServer
         local counter = 0
-       
-        while true do
-            for i = 1, 1 do
-                task.spawn(InvokeServer, GetSyncData)
-            end
-           
+    
+        repeat
+            task.spawn(InvokeServer, GetSyncData)
+            
             counter = counter + 1
             if counter == 3 then
                 counter = 0
                 wait(0)
             end
-        end
-    end)
+        until false
+    end)    
 end
 
 local function SpeedGlitch()
     local player = game.Players.LocalPlayer
     player.Character:WaitForChild('Humanoid')
-    wait(0.1)
+    task.wait(0.1)
     
     -- Проверка с новым именем
     if player.Backpack:FindFirstChild("SpeedGlitchTool") or player.Character:FindFirstChild("SpeedGlitchTool") then
