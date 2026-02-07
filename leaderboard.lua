@@ -4015,27 +4015,6 @@ ToggleGodMode = function()
                 SetupHealthProtection()
                 SetupDamageBlocker()
             end
-            
-            State.IsInvisible = false
-            if InvisibilityConnection then
-                InvisibilityConnection:Disconnect()
-                InvisibilityConnection = nil
-            end
-            VisibleParts = {}
-            task.wait(0.1)
-            local character = LocalPlayer.Character
-            if character then
-                local humanoid = character:FindFirstChild("Humanoid")
-                if humanoid then
-                    humanoid.CameraOffset = Vector3.new(0, 0, 0)
-                end
-            end
-            -- Сброс смещения камеры
-            task.wait(0.1)
-            local humanoid = character:FindFirstChild("Humanoid")
-            if humanoid then
-                humanoid.CameraOffset = Vector3.new(0, 0, 0)
-            end
         end)
         table.insert(State.GodModeConnections, respawnConnection)
     else
