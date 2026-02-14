@@ -20,7 +20,7 @@ local AUTOFARM_ENABLED = true
 --serejenkaluv = 10341870648
 local WHITELIST_IDS = {10341870648,6163487250,982594515,2058109987,10340849538}
 
-_G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
+_G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED --and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
 --pcall(function()
 --    loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
