@@ -3163,7 +3163,6 @@ local ToggleGodMode
 
 local function CountPlayersWithKnife()
     local count = 0
-    local Players = game:GetService("Players")
     
     for _, player in ipairs(Players:GetPlayers()) do
         if player.Character then
@@ -5440,204 +5439,132 @@ local function ToggleVoteSpammer(enabled)
 end
 
 local function ServerHop()
-    -- ═══════════════════════════════════════════════════════════
-    -- SERVER HOP SYSTEM v2.0 - Enhanced with file tracking
-    -- ═══════════════════════════════════════════════════════════
-
-    local CONFIG_SH = {
-        FILE_NAME = "server-hop-cache.json",
+    
+    -- Конфигурация
+    local CONFIG = {
         MIN_PLAYERS = 1,
-        MAX_PLAYERS_PERCENT = 0.9,
-        FETCH_LIMIT = 100,
-        MAX_PAGES = 5,
-        TELEPORT_RETRY = 3
+        MAX_PLAYERS_THRESHOLD = 0.95, -- Не заходить на почти полные серверы
+        MAX_ATTEMPTS = 10,
+        RETRY_DELAY = 1
     }
-
-    local visitedServers = {}
-    local currentHour = os.date("!*t").hour
-
-    -- Загрузка кэша
-    local function InitializeCache()
-        local success, data = pcall(function()
-            return HttpService:JSONDecode(readfile(CONFIG_SH.FILE_NAME))
-        end)
-
-        if success and data then
-            if data.hour and data.hour == currentHour and data.servers then
-                visitedServers = data.servers
-                return
+    
+    -- Получение списка серверов
+    local function GetServers()
+        local servers = {}
+        local cursor = ""
+        local attempts = 0
+        
+        while attempts < 3 do -- Максимум 3 страницы (300 серверов)
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
+                game.PlaceId
+            )
+            
+            if cursor ~= "" then
+                url = url .. "&cursor=" .. cursor
             end
-        end
-
-        visitedServers = {}
-        pcall(function()
-            writefile(CONFIG_SH.FILE_NAME, HttpService:JSONEncode({
-                hour = currentHour,
-                servers = {}
-            }))
-        end)
-    end
-
-    -- Сохранение кэша
-    local function SaveCache()
-        pcall(function()
-            writefile(CONFIG_SH.FILE_NAME, HttpService:JSONEncode({
-                hour = currentHour,
-                servers = visitedServers
-            }))
-        end)
-    end
-
-    -- Проверка посещённого сервера
-    local function IsServerVisited(jobId)
-        for _, id in ipairs(visitedServers) do
-            if id == jobId then return true end
-        end
-        return false
-    end
-
-    -- Получение серверов
-    local function FetchServers(cursor)
-        local url = string.format(
-            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=%d",
-            game.PlaceId,
-            CONFIG_SH.FETCH_LIMIT
-        )
-
-        if cursor then url = url .. "&cursor=" .. cursor end
-
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet(url))
-        end)
-
-        return success and result or nil
-    end
-
-    -- Оценка сервера
-    local function CalculateScore(playing, maxPlayers)
-        local fillRatio = playing / maxPlayers
-        local score = (1 - fillRatio) * 100
-
-        if playing >= 2 and playing <= 6 then
-            score = score + 50
-        end
-
-        return score
-    end
-
-    -- Фильтрация серверов
-    local function FilterServers(serverList)
-        local validServers = {}
-
-        for _, server in ipairs(serverList) do
-            local jobId = server.id
-            local playing = server.playing
-            local maxPlayers = server.maxPlayers
-
-            local isNotCurrentServer = jobId ~= game.JobId
-            local isNotVisited = not IsServerVisited(jobId)
-            local hasPlayers = playing >= CONFIG_SH.MIN_PLAYERS
-            local notFull = playing < (maxPlayers * CONFIG_SH.MAX_PLAYERS_PERCENT)
-
-            if isNotCurrentServer and isNotVisited and hasPlayers and notFull then
-                table.insert(validServers, {
-                    id = jobId,
-                    playing = playing,
-                    maxPlayers = maxPlayers,
-                    score = CalculateScore(playing, maxPlayers)
-                })
+            
+            local success, response = pcall(function()
+                return game:HttpGet(url)
+            end)
+            
+            if not success then
+                warn("[ServerHop] Ошибка загрузки серверов:", response)
+                break
             end
+            
+            local data = HttpService:JSONDecode(response)
+            
+            if data and data.data then
+                for _, server in ipairs(data.data) do
+                    -- Фильтрация: не текущий сервер, есть игроки, не переполнен
+                    if server.id ~= game.JobId 
+                        and server.playing >= CONFIG.MIN_PLAYERS 
+                        and server.playing < (server.maxPlayers * CONFIG.MAX_PLAYERS_THRESHOLD) then
+                        table.insert(servers, server)
+                    end
+                end
+            end
+            
+            -- Если нашли достаточно серверов - хватит
+            if #servers >= 10 then
+                break
+            end
+            
+            cursor = data.nextPageCursor or ""
+            if cursor == "" then break end
+            
+            attempts = attempts + 1
+            task.wait(0.1)
         end
-
-        return validServers
+        
+        return servers
     end
-
+    
+    -- Выбор лучшего сервера (предпочтение серверам с меньшим заполнением)
+    local function SelectBestServer(servers)
+        if #servers == 0 then return nil end
+        
+        -- Сортировка по количеству игроков (предпочтение менее заполненным)
+        table.sort(servers, function(a, b)
+            local fillA = a.playing / a.maxPlayers
+            local fillB = b.playing / b.maxPlayers
+            return fillA < fillB
+        end)
+        
+        -- Выбираем случайный из топ-5 лучших серверов
+        local topCount = math.min(5, #servers)
+        return servers[math.random(1, topCount)]
+    end
+    
     -- Телепортация
-    local function TeleportToServer(jobId)
-        for attempt = 1, CONFIG_SH.TELEPORT_RETRY do
-            local success = pcall(function()
+    local function TeleportToJob(jobId)
+        for attempt = 1, 3 do
+            local success, err = pcall(function()
                 TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
             end)
-
+            
             if success then
-                table.insert(visitedServers, jobId)
-                SaveCache()
                 return true
             else
-                task.wait(2)
+                warn("[ServerHop] Попытка", attempt, "не удалась:", err)
+                task.wait(CONFIG.RETRY_DELAY)
             end
         end
-
         return false
     end
-
-    -- Основная логика
-    InitializeCache()
-
-    local allServers = {}
-    local cursor = nil
-    local pagesScanned = 0
-
-    repeat
-        local result = FetchServers(cursor)
-
-        if not result or not result.data then
-            if State.NotificationsEnabled then
-                ShowNotification(
-                    "<font color=\"rgb(255, 85, 85)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Failed to fetch servers</font>",
-                    CONFIG.Colors.Text
-                )
-            end
-            break
-        end
-
-        local filtered = FilterServers(result.data)
-
-        for _, server in ipairs(filtered) do
-            table.insert(allServers, server)
-        end
-
-        cursor = result.nextPageCursor
-        pagesScanned = pagesScanned + 1
-
-        if #allServers >= 20 then break end
-
-        task.wait(0.1)
-
-    until not cursor or pagesScanned >= CONFIG_SH.MAX_PAGES
-
-    if #allServers == 0 then
-        if State.NotificationsEnabled then
-            ShowNotification(
-                "<font color=\"rgb(255, 85, 85)\">ServerHop: </font><font color=\"rgb(220,220,220)\">No suitable servers found</font>",
-                CONFIG.Colors.Text
-            )
-        end
-        return
+    
+    -- ═══════════════════════════════════════════════════════════
+    -- ОСНОВНАЯ ЛОГИКА
+    -- ═══════════════════════════════════════════════════════════
+    
+    print("[ServerHop] Поиск серверов...")
+    
+    local servers = GetServers()
+    
+    if #servers == 0 then
+        warn("[ServerHop] Не найдено подходящих серверов!")
+        return false
     end
-
-    -- Сортировка и выбор
-    table.sort(allServers, function(a, b)
-        return a.score > b.score
-    end)
-
-    local topCount = math.min(3, #allServers)
-    local selectedServer = allServers[math.random(1, topCount)]
-
-    if State.NotificationsEnabled then
-        ShowNotification(
-            string.format(
-                "<font color=\"rgb(85, 255, 120)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Joining %d/%d players (Score: %.0f)</font>",
-                selectedServer.playing,
-                selectedServer.maxPlayers,
-                selectedServer.score
-            ),
-            CONFIG.Colors.Text
-        )
+    
+    print("[ServerHop] Найдено серверов:", #servers)
+    
+    local selectedServer = SelectBestServer(servers)
+    
+    if not selectedServer then
+        warn("[ServerHop] Не удалось выбрать сервер!")
+        return false
     end
-
-    TeleportToServer(selectedServer.id)
+    
+    print(string.format(
+        "[ServerHop] Подключение к серверу: %d/%d игроков",
+        selectedServer.playing,
+        selectedServer.maxPlayers
+    ))
+    
+    return TeleportToJob(selectedServer.id)
 end
+
 
 local function ServerLagger()
     if State.NotificationsEnabled then
