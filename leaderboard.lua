@@ -410,6 +410,78 @@ local function PerformRaycast(origin, direction, maxDistance)
     end
 end
 
+local function CreateTracer(origin, targetPosition, duration)
+    if not origin or not targetPosition then return nil end
+
+    local char = LocalPlayer.Character
+    if not char then return nil end
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local attachment0 = Instance.new("Attachment")
+    attachment0.Name = "BulletTracerStart"
+    attachment0.WorldPosition = origin
+    attachment0.Parent = hrp
+
+    local endPart = Instance.new("Part")
+    endPart.Name = "BulletTracerEnd"
+    endPart.Anchored = true
+    endPart.CanCollide = false
+    endPart.CanQuery = false
+    endPart.CanTouch = false
+    endPart.Transparency = 1
+    endPart.Size = Vector3.new(0.1, 0.1, 0.1)
+    endPart.CFrame = CFrame.new(targetPosition)
+    endPart.Parent = Workspace
+
+    local attachment1 = Instance.new("Attachment")
+    attachment1.Name = "BulletTracerEnd"
+    attachment1.Parent = endPart
+
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Color = ColorSequence.new(CONFIG.Colors.Accent)
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.FaceCamera = true
+    beam.Brightness = 5
+    beam.Width0 = 0.12
+    beam.Width1 = 0.06
+    beam.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.05),
+        NumberSequenceKeypoint.new(1, 0.7)
+    })
+    beam.Parent = attachment0
+
+    local tracerData = {
+        beam = beam,
+        att0 = attachment0,
+        att1 = attachment1,
+        endPart = endPart,
+    }
+    table.insert(State.TracersList, tracerData)
+
+    task.delay(duration or 0.8, function()
+        pcall(function()
+            beam:Destroy()
+            attachment0:Destroy()
+            attachment1:Destroy()
+            endPart:Destroy()
+        end)
+
+        for i = #State.TracersList, 1, -1 do
+            if State.TracersList[i] == tracerData then
+                table.remove(State.TracersList, i)
+                break
+            end
+        end
+    end)
+
+    return tracerData
+end
+
 local function CreateTracerFromTool(tool)
     if not State.BulletTracersEnabled then return end
     if not tool or not tool:IsA("Tool") then return end
@@ -428,7 +500,9 @@ local function CreateTracerFromTool(tool)
     if not mouse then return end
     
     local targetPos = mouse.Hit.Position
-    local direction = (targetPos - origin).Unit
+    local offset = targetPos - origin
+    if offset.Magnitude <= 0.001 then return end
+    local direction = offset.Unit
     
     local hitPos = PerformRaycast(origin, direction, CONFIG.Tracers.MaxDistance)
     for i = 1, CONFIG.Tracers.CountPerShot do
@@ -561,6 +635,9 @@ local function CleanupTracers()
             tracer.beam:Destroy()
             tracer.att0:Destroy()
             tracer.att1:Destroy()
+            if tracer.endPart then
+                tracer.endPart:Destroy()
+            end
         end)
     end
     State.TracersList = {}
