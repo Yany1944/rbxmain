@@ -32,35 +32,6 @@ _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED --and table.find(WHITELIST_IDS, game:GetS
 
 local CONFIG = {
         HideKey = Enum.KeyCode.Q,
-        Tracers = {
-        CountPerShot = 4,
-        MaxDistance = 500,
-        Duration = 0.8,
-        Coin = {
-            Color = Color3.fromRGB(255, 105, 180),
-            Width = 0.3,
-            Texture = "rbxasset://textures/particles/smoke_main.dds",
-            TextureSpeed = 2,
-        }
-        },
-        Defaults = {
-        Humanoid = {
-            WalkSpeed = 16,
-            JumpPower = 50,
-        },
-        Camera = {
-            FieldOfView = 70,
-            MaxZoomDistance = 128,
-        }
-        },
-        CoreGuiTypes = {
-        Enum.CoreGuiType.PlayerList,
-        Enum.CoreGuiType.Health,
-        Enum.CoreGuiType.Backpack,
-        Enum.CoreGuiType.Chat,
-        Enum.CoreGuiType.EmotesMenu,
-        Enum.CoreGuiType.SelfView
-        },
         Colors = {
         Background = Color3.fromRGB(25, 25, 30),
         Section = Color3.fromRGB(35, 35, 40),
@@ -93,12 +64,7 @@ local TweenService = game:GetService("TweenService")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
-local StarterGui = game:GetService("StarterGui")
-local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
-local RayParams = RaycastParams.new()
-RayParams.FilterType = Enum.RaycastFilterType.Exclude
-RayParams.IgnoreWater = true
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 3: STATE MANAGEMENT (СТРОКИ 116-252)
@@ -300,6 +266,14 @@ end
 
 -- ============= COIN TRACER SYSTEM (С АНИМАЦИЕЙ) =============
 local CurrentCoinTracer = nil
+local TracersAccent = Color3.fromRGB(220, 145, 230)
+
+-- ✅ ВЫБЕРИТЕ ОДИН ИЗ ЦВЕТОВ ДЛЯ МОНЕТ:
+-- local CoinTracerColor = Color3.fromRGB(0, 255, 255)      -- 🔵 ЦИАН (контрастирует с фиолетовым)
+-- local CoinTracerColor = Color3.fromRGB(255, 215, 0)   -- 🟡 ЗОЛОТОЙ (классика для монет)
+-- local CoinTracerColor = Color3.fromRGB(144, 238, 144) -- 🟢 СВЕТЛО-ЗЕЛЁНЫЙ (хорошая видимость)
+local CoinTracerColor = Color3.fromRGB(255, 105, 180) -- 💗 РОЗОВЫЙ (гармония с фиолетовым)
+-- local CoinTracerColor = Color3.fromRGB(173, 216, 230) -- 🔵 СВЕТЛО-ГОЛУБОЙ (нежное сочетание)
 
 local function CreateCoinTracer(character, targetCoin)
     if not character or not targetCoin then return end
@@ -331,20 +305,20 @@ local function CreateCoinTracer(character, targetCoin)
     local beam = Instance.new("Beam")
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(CONFIG.Tracers.Coin.Color)
+    beam.Color = ColorSequence.new(CoinTracerColor)
     beam.FaceCamera = true
     beam.LightEmission = 1
     beam.LightInfluence = 0
     beam.Brightness = 5
-    beam.Texture = CONFIG.Tracers.Coin.Texture
+    beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
     beam.TextureMode = Enum.TextureMode.Stretch
-    beam.TextureSpeed = CONFIG.Tracers.Coin.TextureSpeed
+    beam.TextureSpeed = 2
     beam.Transparency = NumberSequence.new({
         NumberSequenceKeypoint.new(0, 0),
         NumberSequenceKeypoint.new(1, 0)
     })
-    beam.Width0 = CONFIG.Tracers.Coin.Width
-    beam.Width1 = CONFIG.Tracers.Coin.Width
+    beam.Width0 = 0.3
+    beam.Width1 = 0.3
     beam.ZOffset = 0.1
     beam.Parent = attachment0
     
@@ -485,6 +459,7 @@ end
 local function CreateTracerFromTool(tool)
     if not State.BulletTracersEnabled then return end
     if not tool or not tool:IsA("Tool") then return end
+    local TRACER_COUNT = 4
     
     -- Проверка cooldown
     local currentTime = tick()
@@ -504,9 +479,10 @@ local function CreateTracerFromTool(tool)
     if offset.Magnitude <= 0.001 then return end
     local direction = offset.Unit
     
-    local hitPos = PerformRaycast(origin, direction, CONFIG.Tracers.MaxDistance)
-    for i = 1, CONFIG.Tracers.CountPerShot do
-        CreateTracer(origin, hitPos, CONFIG.Tracers.Duration)
+    local maxDistance = 500
+    local hitPos = PerformRaycast(origin, direction, maxDistance)
+    for i = 1, TRACER_COUNT do
+        CreateTracer(origin, hitPos, 0.8)
     end
 end
 
@@ -547,7 +523,7 @@ local function SetupKnifeTracers()
         if not equippedTool or not IsKnifeTool(equippedTool) then return end
         
         -- E или кастомная клавиша из настроек
-        local knifeThrowKey = State.Keybinds.knifeThrow or Enum.KeyCode.E
+        local knifeThrowKey = State.knifeThrow or Enum.KeyCode.E
         
         if input.KeyCode == Enum.KeyCode.E or input.KeyCode == knifeThrowKey then
             CreateTracerFromTool(equippedTool)
@@ -604,20 +580,17 @@ local function SetupToolTracers(character)
     SetupKnifeTracers()
 end
 
-local function InitializeToolTracers()
-    TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
-        task.wait(0.5)
-        if State.BulletTracersEnabled then
-            SetupToolTracers(character)
-        end
-    end))
-
-    if LocalPlayer.Character then
-        SetupToolTracers(LocalPlayer.Character)
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
+    task.wait(0.5)
+    if State.BulletTracersEnabled then
+        SetupToolTracers(character)
     end
+end))
+
+if LocalPlayer.Character then
+    SetupToolTracers(LocalPlayer.Character)
 end
 
-InitializeToolTracers()
 
 local function CleanupTracers()
     for _, conn in pairs(toolConnections) do
@@ -654,6 +627,18 @@ local function ToggleBulletTracers(enabled)
         CleanupTracers()
     end
 end
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    task.wait(0.5)
+    if State.BulletTracersEnabled then
+        SetupToolTracers(character)
+    end
+end)
+
+if LocalPlayer.Character then
+    SetupToolTracers(LocalPlayer.Character)
+end
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 4: SYSTEM FUNCTIONS (СТРОКИ 253-410)
@@ -754,19 +739,19 @@ local function FullShutdown()
         if character then
             local humanoid = character:FindFirstChildOfClass("Humanoid")
             if humanoid then
-                humanoid.WalkSpeed = CONFIG.Defaults.Humanoid.WalkSpeed
-                humanoid.JumpPower = CONFIG.Defaults.Humanoid.JumpPower
+                humanoid.WalkSpeed = 16
+                humanoid.JumpPower = 50
             end
             
             local ff = character:FindFirstChild("ForceField")
             if ff then ff:Destroy() end
         end
         
-        LocalPlayer.CameraMaxZoomDistance = CONFIG.Defaults.Camera.MaxZoomDistance
+        LocalPlayer.CameraMaxZoomDistance = 128
         
         local camera = Workspace.CurrentCamera
         if camera then
-            camera.FieldOfView = CONFIG.Defaults.Camera.FieldOfView
+            camera.FieldOfView = 70
         end
     end)
     
@@ -894,8 +879,17 @@ local OptimizationState = {
 local function ApplyUIOptimization()
     pcall(function()
         StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
-
-        for _, guiType in ipairs(CONFIG.CoreGuiTypes) do
+        
+        local coreGuiTypes = {
+            Enum.CoreGuiType.PlayerList,
+            Enum.CoreGuiType.Health,
+            Enum.CoreGuiType.Backpack,
+            Enum.CoreGuiType.Chat,
+            Enum.CoreGuiType.EmotesMenu,
+            Enum.CoreGuiType.SelfView
+        }
+        
+        for _, guiType in ipairs(coreGuiTypes) do
             StarterGui:SetCoreGuiEnabled(guiType, false)
         end
     end)
@@ -1011,8 +1005,17 @@ DisableMaxOptimization = function()
         StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
         
         task.wait(0.1)
-
-        for _, guiType in ipairs(CONFIG.CoreGuiTypes) do
+        
+        local coreGuiTypes = {
+            Enum.CoreGuiType.PlayerList,
+            Enum.CoreGuiType.Health,
+            Enum.CoreGuiType.Backpack,
+            Enum.CoreGuiType.Chat,
+            Enum.CoreGuiType.EmotesMenu,
+            Enum.CoreGuiType.SelfView
+        }
+        
+        for _, guiType in ipairs(coreGuiTypes) do
             StarterGui:SetCoreGuiEnabled(guiType, true)
         end
     end)
@@ -1040,7 +1043,7 @@ DisableMaxOptimization = function()
             Lighting.FogEnd = OptimizationState.savedSettings.Lighting.FogEnd
             Lighting.Technology = OptimizationState.savedSettings.Lighting.Technology
             
-            for _, effect in pairs(OptimizationState.savedSettings.Lighting) do
+            for name, effect in pairs(OptimizationState.savedSettings.Lighting) do
                 if typeof(effect) == "Instance" then
                     effect.Parent = Lighting
                 end
@@ -1074,8 +1077,17 @@ DisableUIOnly = function()
         StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
         
         task.wait(0.1)
-
-        for _, guiType in ipairs(CONFIG.CoreGuiTypes) do
+        
+        local coreGuiTypes = {
+            Enum.CoreGuiType.PlayerList,
+            Enum.CoreGuiType.Health,
+            Enum.CoreGuiType.Backpack,
+            Enum.CoreGuiType.Chat,
+            Enum.CoreGuiType.EmotesMenu,
+            Enum.CoreGuiType.SelfView
+        }
+        
+        for _, guiType in ipairs(coreGuiTypes) do
             StarterGui:SetCoreGuiEnabled(guiType, true)
         end
     end)
