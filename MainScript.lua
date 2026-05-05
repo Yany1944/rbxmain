@@ -2627,6 +2627,8 @@ end
 
 local function CreateNotificationCard(opts)
     -- opts = { title, body, accent, glyph }
+    local accentColor = (typeof(opts.accent) == "Color3") and opts.accent or CONFIG.Colors.NotifAccentInfo
+    local glyphText = opts.glyph or "i"
 
     local card = Instance.new("Frame")
     card.Name = "NotificationItem"
@@ -2660,7 +2662,7 @@ local function CreateNotificationCard(opts)
     accentStripe.Size = UDim2.new(0, CONFIG.Notification.AccentStripe, 1, -8)
     accentStripe.Position = UDim2.new(0, -8, 0.5, 0)
     accentStripe.AnchorPoint = Vector2.new(0, 0.5)
-    accentStripe.BackgroundColor3 = opts.accent
+    accentStripe.BackgroundColor3 = accentColor
     accentStripe.BackgroundTransparency = 0
     accentStripe.BorderSizePixel = 0
     accentStripe.Parent = card
@@ -2700,10 +2702,10 @@ local function CreateNotificationCard(opts)
     iconLabel.Name = "Icon"
     iconLabel.Size = UDim2.new(0, 16, 0, 16)
     iconLabel.BackgroundTransparency = 1
-    iconLabel.Text = opts.glyph
+    iconLabel.Text = glyphText
     iconLabel.Font = Enum.Font.GothamBold
     iconLabel.TextSize = 14
-    iconLabel.TextColor3 = opts.accent
+    iconLabel.TextColor3 = accentColor
     iconLabel.TextTransparency = 0
     iconLabel.LayoutOrder = 1
     iconLabel.Parent = titleRow
@@ -2714,7 +2716,7 @@ local function CreateNotificationCard(opts)
     titleLabel.Size = UDim2.new(0, 0, 0, 18)
     titleLabel.BackgroundTransparency = 1
     titleLabel.RichText = true
-    titleLabel.Text = opts.title
+    titleLabel.Text = opts.title or ""
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 14
     titleLabel.TextColor3 = CONFIG.Colors.NotifInk
@@ -2780,10 +2782,14 @@ local function ShowNotification(arg1, arg2)
         if not container then return end
 
         local typeData = NotificationTypes[typeKey] or NotificationTypes.info
+        local resolvedAccent = typeData.accent
+        if typeof(accentOverride) == "Color3" then
+            resolvedAccent = accentOverride
+        end
         local card = CreateNotificationCard({
             title  = title,
             body   = body,
-            accent = accentOverride or typeData.accent,
+            accent = resolvedAccent,
             glyph  = typeData.glyph,
         })
 
