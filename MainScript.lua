@@ -92,13 +92,8 @@ local CONFIG = {
         FriendTracerFar  = Color3.fromRGB(255, 0, 0),
         },
         Notification = {
-        Duration        = 3,
-        FadeTime        = 0.4,
-        Width           = 360,
-        Padding         = 12,
-        AccentStripe    = 3,
-        CornerRadius    = 12,
-        StrokeThickness = 1,
+        Duration = 3,
+        FadeTime = 0.4
         }
 	}
 
@@ -2574,30 +2569,7 @@ end
 -- БЛОК 6: NOTIFICATION SYSTEM (СТРОКИ 471-610)
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- ══════════════════════════════════════════════════════════════════════════════
--- NOTIFICATION SYSTEM (Linear visual + legacy per-spawn lifecycle)
--- ══════════════════════════════════════════════════════════════════════════════
-
-local NotificationTypes = {
-    info    = { accent = CONFIG.Colors.NotifAccentInfo,    glyph = "i" },
-    success = { accent = CONFIG.Colors.NotifAccentSuccess, glyph = "✓" },
-    warning = { accent = CONFIG.Colors.NotifAccentWarning, glyph = "!" },
-    error   = { accent = CONFIG.Colors.NotifAccentError,   glyph = "×" },
-}
-
-local function DetectNotificationType(richText)
-    if not richText then return "info" end
-    local lower = string.lower(richText)
-    if lower:find("error") or richText:find("rgb%(255,%s*85,%s*85%)") then
-        return "error"
-    elseif lower:find("warning") or lower:find("wait") or richText:find("rgb%(255,%s*165") then
-        return "warning"
-    elseif lower:find("success") or lower:find(">on</font>") or richText:find("rgb%(168,%s*228") then
-        return "success"
-    end
-    return "info"
-end
-
+-- CreateNotificationUI() - Создание UI уведомлений
 local function CreateNotificationUI()
     local notifGui = Instance.new("ScreenGui")
     notifGui.Name = "MM2_Notifications"
@@ -2610,13 +2582,13 @@ local function CreateNotificationUI()
     container.BackgroundTransparency = 1
     container.AnchorPoint = Vector2.new(0.5, 0)
     container.Position = UDim2.new(0.5, 0, 0, 80)
-    container.Size = UDim2.new(0, CONFIG.Notification.Width, 1, -100)
+    container.Size = UDim2.new(0, 340, 1, -100)
     container.Parent = notifGui
 
     local list = Instance.new("UIListLayout")
     list.FillDirection = Enum.FillDirection.Vertical
     list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 8)
+    list.Padding = UDim.new(0, 6)
     list.HorizontalAlignment = Enum.HorizontalAlignment.Center
     list.VerticalAlignment = Enum.VerticalAlignment.Top
     list.Parent = container
@@ -2625,153 +2597,9 @@ local function CreateNotificationUI()
     State.UIElements.NotificationContainer = container
 end
 
-local function CreateNotificationCard(opts)
-    -- opts = { title, body, accent, glyph }
-    local accentColor = (typeof(opts.accent) == "Color3") and opts.accent or CONFIG.Colors.NotifAccentInfo
-    local glyphText = opts.glyph or "i"
-
-    local card = Instance.new("Frame")
-    card.Name = "NotificationItem"
-    card.BackgroundColor3 = CONFIG.Colors.NotifSurface
-    card.BackgroundTransparency = 0.05
-    card.BorderSizePixel = 0
-    card.Size = UDim2.new(1, 0, 0, 0)
-    card.AutomaticSize = Enum.AutomaticSize.Y
-    card.ClipsDescendants = false
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, CONFIG.Notification.CornerRadius)
-    corner.Parent = card
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Thickness = CONFIG.Notification.StrokeThickness
-    stroke.Color = CONFIG.Colors.NotifHairline
-    stroke.Transparency = 0.3
-    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    stroke.Parent = card
-
-    local padding = Instance.new("UIPadding")
-    padding.PaddingTop    = UDim.new(0, 10)
-    padding.PaddingBottom = UDim.new(0, 10)
-    padding.PaddingLeft   = UDim.new(0, 14)
-    padding.PaddingRight  = UDim.new(0, 12)
-    padding.Parent = card
-
-    local accentStripe = Instance.new("Frame")
-    accentStripe.Name = "AccentStripe"
-    accentStripe.Size = UDim2.new(0, CONFIG.Notification.AccentStripe, 1, -8)
-    accentStripe.Position = UDim2.new(0, -8, 0.5, 0)
-    accentStripe.AnchorPoint = Vector2.new(0, 0.5)
-    accentStripe.BackgroundColor3 = accentColor
-    accentStripe.BackgroundTransparency = 0
-    accentStripe.BorderSizePixel = 0
-    accentStripe.Parent = card
-
-    local stripeCorner = Instance.new("UICorner")
-    stripeCorner.CornerRadius = UDim.new(0, 2)
-    stripeCorner.Parent = accentStripe
-
-    local row = Instance.new("Frame")
-    row.Name = "Row"
-    row.BackgroundTransparency = 1
-    row.Size = UDim2.new(1, 0, 0, 0)
-    row.AutomaticSize = Enum.AutomaticSize.Y
-    row.Parent = card
-
-    local rowLayout = Instance.new("UIListLayout")
-    rowLayout.FillDirection = Enum.FillDirection.Vertical
-    rowLayout.Padding = UDim.new(0, 2)
-    rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    rowLayout.Parent = row
-
-    local titleRow = Instance.new("Frame")
-    titleRow.Name = "TitleRow"
-    titleRow.BackgroundTransparency = 1
-    titleRow.Size = UDim2.new(1, 0, 0, 18)
-    titleRow.LayoutOrder = 1
-    titleRow.Parent = row
-
-    local titleRowLayout = Instance.new("UIListLayout")
-    titleRowLayout.FillDirection = Enum.FillDirection.Horizontal
-    titleRowLayout.Padding = UDim.new(0, 8)
-    titleRowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    titleRowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    titleRowLayout.Parent = titleRow
-
-    local iconLabel = Instance.new("TextLabel")
-    iconLabel.Name = "Icon"
-    iconLabel.Size = UDim2.new(0, 16, 0, 16)
-    iconLabel.BackgroundTransparency = 1
-    iconLabel.Text = glyphText
-    iconLabel.Font = Enum.Font.GothamBold
-    iconLabel.TextSize = 14
-    iconLabel.TextColor3 = accentColor
-    iconLabel.TextTransparency = 0
-    iconLabel.LayoutOrder = 1
-    iconLabel.Parent = titleRow
-
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Name = "Title"
-    titleLabel.AutomaticSize = Enum.AutomaticSize.X
-    titleLabel.Size = UDim2.new(0, 0, 0, 18)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.RichText = true
-    titleLabel.Text = opts.title or ""
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 14
-    titleLabel.TextColor3 = CONFIG.Colors.NotifInk
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.TextTransparency = 0
-    titleLabel.LayoutOrder = 2
-    titleLabel.Parent = titleRow
-
-    local bodyLabel = nil
-    if opts.body and opts.body ~= "" then
-        bodyLabel = Instance.new("TextLabel")
-        bodyLabel.Name = "Body"
-        bodyLabel.Size = UDim2.new(1, 0, 0, 0)
-        bodyLabel.AutomaticSize = Enum.AutomaticSize.Y
-        bodyLabel.BackgroundTransparency = 1
-        bodyLabel.RichText = true
-        bodyLabel.Text = opts.body
-        bodyLabel.Font = Enum.Font.Gotham
-        bodyLabel.TextSize = 13
-        bodyLabel.TextColor3 = CONFIG.Colors.NotifInkMuted
-        bodyLabel.TextXAlignment = Enum.TextXAlignment.Left
-        bodyLabel.TextWrapped = true
-        bodyLabel.TextTransparency = 0
-        bodyLabel.LayoutOrder = 2
-        bodyLabel.Parent = row
-    end
-
-    return {
-        frame        = card,
-        accentStripe = accentStripe,
-        stroke       = stroke,
-        iconLabel    = iconLabel,
-        titleLabel   = titleLabel,
-        bodyLabel    = bodyLabel,
-    }
-end
-
-local function ShowNotification(arg1, arg2)
+-- ShowNotification() - Показ уведомления
+local function ShowNotification(richText, defaultColor)
     if not State.NotificationsEnabled then return end
-
-    -- Нормализация аргументов до входа в task.spawn
-    local title, body, typeKey, duration, accentOverride
-    if typeof(arg1) == "table" then
-        title          = arg1.title or arg1.text or ""
-        body           = arg1.body
-        typeKey        = arg1.type or DetectNotificationType((title or "") .. (body or ""))
-        duration       = arg1.duration
-        accentOverride = arg1.color
-    else
-        title          = arg1 or ""
-        body           = nil
-        typeKey        = DetectNotificationType(arg1)
-        duration       = nil
-        accentOverride = nil
-    end
 
     task.spawn(function()
         if not State.UIElements.NotificationGui then
@@ -2781,115 +2609,70 @@ local function ShowNotification(arg1, arg2)
         local container = State.UIElements.NotificationContainer
         if not container then return end
 
-        local typeData = NotificationTypes[typeKey] or NotificationTypes.info
-        local resolvedAccent = typeData.accent
-        if typeof(accentOverride) == "Color3" then
-            resolvedAccent = accentOverride
-        end
-        local card = CreateNotificationCard({
-            title  = title,
-            body   = body,
-            accent = resolvedAccent,
-            glyph  = typeData.glyph,
-        })
+        local notifFrame = Instance.new("Frame")
+        notifFrame.Name = "NotificationItem"
+        notifFrame.BackgroundColor3 = CONFIG.Colors.Section
+        notifFrame.BackgroundTransparency = 0.1
+        notifFrame.Size = UDim2.new(1, 0, 0, 40)
+        notifFrame.Parent = container
 
-        card.frame.Parent = container
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = notifFrame
 
-        -- Стартовое состояние
-        card.frame.AnchorPoint = Vector2.new(0.5, 0)
-        card.frame.Position = UDim2.new(0.5, 0, 0, -50)
-        card.frame.BackgroundTransparency = 1
-        card.titleLabel.TextTransparency = 1
-        card.iconLabel.TextTransparency = 1
-        if card.bodyLabel then
-            card.bodyLabel.TextTransparency = 1
-        end
-        card.accentStripe.BackgroundTransparency = 1
-        card.stroke.Transparency = 1
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 1
+        stroke.Color = CONFIG.Colors.Stroke
+        stroke.Transparency = 0.4
+        stroke.Parent = notifFrame
 
-        -- Tween in
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.RichText = true
+        label.Text = richText or ""
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 16
+        label.TextColor3 = defaultColor or Color3.fromRGB(255, 255, 255)
+        label.TextTransparency = 1
+        label.TextXAlignment = Enum.TextXAlignment.Center
+        label.Size = UDim2.new(1, -20, 1, 0)
+        label.Position = UDim2.new(0, 10, 0, 0)
+        label.Parent = notifFrame
+
+        notifFrame.AnchorPoint = Vector2.new(0.5, 0)
+        notifFrame.Position = UDim2.new(0.5, 0, 0, -50)
+        notifFrame.BackgroundTransparency = 1
+
         TweenService:Create(
-            card.frame,
+            notifFrame,
             TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
             { Position = UDim2.new(0.5, 0, 0, 0),
-              BackgroundTransparency = 0.05 }
+              BackgroundTransparency = 0.1 }
         ):Play()
 
         TweenService:Create(
-            card.titleLabel,
+            label,
             TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
             { TextTransparency = 0 }
         ):Play()
 
-        TweenService:Create(
-            card.iconLabel,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { TextTransparency = 0 }
-        ):Play()
-
-        if card.bodyLabel then
-            TweenService:Create(
-                card.bodyLabel,
-                TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { TextTransparency = 0 }
-            ):Play()
-        end
-
-        TweenService:Create(
-            card.accentStripe,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { BackgroundTransparency = 0 }
-        ):Play()
-
-        TweenService:Create(
-            card.stroke,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { Transparency = 0.3 }
-        ):Play()
-
-        task.wait(duration or CONFIG.Notification.Duration)
+        task.wait(CONFIG.Notification.Duration)
 
         local fadeOut = TweenService:Create(
-            card.frame,
+            notifFrame,
             TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
             { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50) }
         )
         fadeOut:Play()
-
+        
         TweenService:Create(
-            card.titleLabel,
+            label,
             TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
             { TextTransparency = 1 }
         ):Play()
-
-        TweenService:Create(
-            card.iconLabel,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { TextTransparency = 1 }
-        ):Play()
-
-        if card.bodyLabel then
-            TweenService:Create(
-                card.bodyLabel,
-                TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-                { TextTransparency = 1 }
-            ):Play()
-        end
-
-        TweenService:Create(
-            card.accentStripe,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1 }
-        ):Play()
-
-        TweenService:Create(
-            card.stroke,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { Transparency = 1 }
-        ):Play()
-
+        
         fadeOut.Completed:Wait()
-        card.frame:Destroy()
+        notifFrame:Destroy()
     end)
 end
 
