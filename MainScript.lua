@@ -2581,14 +2581,14 @@ local function CreateNotificationUI()
     container.Name = "NotificationContainer"
     container.BackgroundTransparency = 1
     container.AnchorPoint = Vector2.new(0.5, 0)
-    container.Position = UDim2.new(0.5, 0, 0, 30)
-    container.Size = UDim2.new(0, 320, 1, -100)
+    container.Position = UDim2.new(0.5, 0, 0, 80)
+    container.Size = UDim2.new(0, 340, 1, -100)
     container.Parent = notifGui
 
     local list = Instance.new("UIListLayout")
     list.FillDirection = Enum.FillDirection.Vertical
     list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 8)
+    list.Padding = UDim.new(0, 6)
     list.HorizontalAlignment = Enum.HorizontalAlignment.Center
     list.VerticalAlignment = Enum.VerticalAlignment.Top
     list.Parent = container
@@ -2612,58 +2612,40 @@ local function ShowNotification(richText, defaultColor)
         local notifFrame = Instance.new("Frame")
         notifFrame.Name = "NotificationItem"
         notifFrame.BackgroundColor3 = CONFIG.Colors.Section
-        notifFrame.BackgroundTransparency = 0.05
-        notifFrame.Size = UDim2.new(1, 0, 0, 0)
+        notifFrame.BackgroundTransparency = 0.1
+        notifFrame.Size = UDim2.new(1, 0, 0, 40)
         notifFrame.Parent = container
-        notifFrame.AutomaticSize = Enum.AutomaticSize.Y
 
         local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 12)
+        corner.CornerRadius = UDim.new(0, 8)
         corner.Parent = notifFrame
 
         local stroke = Instance.new("UIStroke")
         stroke.Thickness = 1
-        stroke.Color = Color3.fromRGB(255, 255, 255)
-        stroke.Transparency = 0.88
+        stroke.Color = CONFIG.Colors.Stroke
+        stroke.Transparency = 0.4
         stroke.Parent = notifFrame
-
-        local accentBar = Instance.new("Frame")
-        accentBar.Name = "AccentBar"
-        accentBar.BackgroundColor3 = CONFIG.Colors.Accent
-        accentBar.BorderSizePixel = 0
-        accentBar.Position = UDim2.new(0, 0, 0, 0)
-        accentBar.Size = UDim2.new(0, 3, 1, 0)
-        accentBar.ZIndex = 2
-        accentBar.Parent = notifFrame
 
         local label = Instance.new("TextLabel")
         label.BackgroundTransparency = 1
         label.RichText = true
         label.Text = richText or ""
-        label.Font = Enum.Font.GothamMedium
-        label.TextSize = 14
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 16
         label.TextColor3 = defaultColor or Color3.fromRGB(255, 255, 255)
         label.TextTransparency = 1
-        label.TextXAlignment = Enum.TextXAlignment.Left
-        label.Size = UDim2.new(1, -30, 0, 0)
-        label.Position = UDim2.new(0, 16, 0, 0)
+        label.TextXAlignment = Enum.TextXAlignment.Center
+        label.Size = UDim2.new(1, -20, 1, 0)
+        label.Position = UDim2.new(0, 10, 0, 0)
         label.Parent = notifFrame
-        label.AutomaticSize = Enum.AutomaticSize.Y
-        label.TextWrapped = true
-        label.TextYAlignment = Enum.TextYAlignment.Center
-
-        local labelPad = Instance.new("UIPadding")
-        labelPad.PaddingTop = UDim.new(0, 10)
-        labelPad.PaddingBottom = UDim.new(0, 10)
-        labelPad.Parent = label
 
         notifFrame.AnchorPoint = Vector2.new(0.5, 0)
-        notifFrame.Position = UDim2.new(0.5, 0, 0, -20)
+        notifFrame.Position = UDim2.new(0.5, 0, 0, -50)
         notifFrame.BackgroundTransparency = 1
 
         TweenService:Create(
             notifFrame,
-            TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
             { Position = UDim2.new(0.5, 0, 0, 0),
               BackgroundTransparency = 0.1 }
         ):Play()
@@ -2679,7 +2661,7 @@ local function ShowNotification(richText, defaultColor)
         local fadeOut = TweenService:Create(
             notifFrame,
             TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -10) }
+            { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50) }
         )
         fadeOut:Play()
         
