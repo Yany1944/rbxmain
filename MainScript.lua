@@ -90,29 +90,10 @@ local CONFIG = {
         CoinTracer = Color3.fromRGB(255, 105, 180),
         FriendTracerNear = Color3.fromRGB(0, 255, 0),
         FriendTracerFar  = Color3.fromRGB(255, 0, 0),
-        -- Notification design tokens (Linear-style)
-        NotifSurface       = Color3.fromRGB(26, 27, 30),
-        NotifSurfaceAlt    = Color3.fromRGB(35, 36, 40),
-        NotifHairline      = Color3.fromRGB(35, 37, 42),
-        NotifInk           = Color3.fromRGB(247, 248, 248),
-        NotifInkMuted      = Color3.fromRGB(208, 214, 224),
-        NotifInkSubtle     = Color3.fromRGB(138, 143, 152),
-        NotifAccentInfo    = Color3.fromRGB(94, 106, 210),
-        NotifAccentSuccess = Color3.fromRGB(39, 166, 68),
-        NotifAccentWarning = Color3.fromRGB(232, 165, 60),
-        NotifAccentError   = Color3.fromRGB(220, 80, 90),
         },
         Notification = {
-        Duration        = 3.5,
-        InTime          = 0.25,
-        OutTime         = 0.20,
-        LabelFadeIn     = 0.18,
-        MaxVisible      = 4,
-        Width           = 360,
-        Padding         = 12,
-        AccentStripe    = 3,
-        CornerRadius    = 12,
-        StrokeThickness = 1,
+        Duration = 3,
+        FadeTime = 0.4
         }
 	}
 
@@ -291,9 +272,8 @@ local State = {
     ListeningForKeybind = nil,
     
     -- Notifications
-    NotificationQueue = {},          -- активные уведомления, заполняется PushNotification
-    CurrentNotification = nil,       -- (legacy, не используется — оставлен для обратной совместимости)
-    NotificationHeartbeatConn = nil, -- одиночный Heartbeat для GC просроченных
+    NotificationQueue = {},
+    CurrentNotification = nil,
     
     -- Trolling
     OrbitEnabled = false,
@@ -2115,15 +2095,6 @@ local function FullShutdown()
     State.ListeningForKeybind = nil
     
     -- ✅ Очистка Notifications
-    if State.NotificationHeartbeatConn then
-        pcall(function() State.NotificationHeartbeatConn:Disconnect() end)
-        State.NotificationHeartbeatConn = nil
-    end
-    for _, item in ipairs(State.NotificationQueue) do
-        if item.card and item.card.frame then
-            pcall(function() item.card.frame:Destroy() end)
-        end
-    end
     State.NotificationQueue = {}
     State.CurrentNotification = nil
     
@@ -2598,197 +2569,7 @@ end
 -- БЛОК 6: NOTIFICATION SYSTEM (СТРОКИ 471-610)
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- ══════════════════════════════════════════════════════════════════════════════
--- NOTIFICATION SYSTEM (Linear-style redesign)
--- ══════════════════════════════════════════════════════════════════════════════
-
-local NotificationTypes = {
-    info    = { accent = CONFIG.Colors.NotifAccentInfo,    glyph = "i" },
-    success = { accent = CONFIG.Colors.NotifAccentSuccess, glyph = "✓" },
-    warning = { accent = CONFIG.Colors.NotifAccentWarning, glyph = "!" },
-    error   = { accent = CONFIG.Colors.NotifAccentError,   glyph = "×" },
-}
-
-local function DetectNotificationType(richText)
-    if not richText then return "info" end
-    local lower = string.lower(richText)
-    if lower:find("error") or richText:find("rgb%(255,%s*85,%s*85%)") then
-        return "error"
-    elseif lower:find("warning") or lower:find("wait") or richText:find("rgb%(255,%s*165") then
-        return "warning"
-    elseif lower:find("success") or lower:find(">on</font>") or richText:find("rgb%(168,%s*228") then
-        return "success"
-    end
-    return "info"
-end
-
--- forward declaration — RemoveNotification нужен внутри CreateNotificationUI (Heartbeat) и AnimateOut
-local RemoveNotification
-
-local function AnimateIn(card)
-    local inInfo  = TweenInfo.new(CONFIG.Notification.InTime,     Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-    local lblInfo = TweenInfo.new(CONFIG.Notification.LabelFadeIn, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-
-    TweenService:Create(card.frame,        inInfo,  { BackgroundTransparency = 0.05 }):Play()
-    TweenService:Create(card.accentStripe, inInfo,  { BackgroundTransparency = 0 }):Play()
-    TweenService:Create(card.iconLabel,    lblInfo, { TextTransparency = 0 }):Play()
-    TweenService:Create(card.titleLabel,   lblInfo, { TextTransparency = 0 }):Play()
-    if card.bodyLabel then
-        TweenService:Create(card.bodyLabel, lblInfo, { TextTransparency = 0 }):Play()
-    end
-end
-
-local function AnimateOut(card, callback)
-    local outInfo = TweenInfo.new(CONFIG.Notification.OutTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-
-    local fadeOut = TweenService:Create(card.frame, outInfo, { BackgroundTransparency = 1 })
-    TweenService:Create(card.accentStripe, outInfo, { BackgroundTransparency = 1 }):Play()
-    TweenService:Create(card.iconLabel,    outInfo, { TextTransparency = 1 }):Play()
-    TweenService:Create(card.titleLabel,   outInfo, { TextTransparency = 1 }):Play()
-    if card.bodyLabel then
-        TweenService:Create(card.bodyLabel, outInfo, { TextTransparency = 1 }):Play()
-    end
-    if card.stroke then
-        TweenService:Create(card.stroke, outInfo, { Transparency = 1 }):Play()
-    end
-    fadeOut.Completed:Connect(function() callback() end)
-    fadeOut:Play()
-end
-
-local function CreateNotificationCard(opts)
-    -- opts = { title, body, accent, glyph }
-
-    local card = Instance.new("Frame")
-    card.Name = "NotificationItem"
-    card.BackgroundColor3 = CONFIG.Colors.NotifSurface
-    card.BackgroundTransparency = 1
-    card.BorderSizePixel = 0
-    card.Size = UDim2.new(1, 0, 0, 0)
-    card.AutomaticSize = Enum.AutomaticSize.Y
-    card.ClipsDescendants = false
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, CONFIG.Notification.CornerRadius)
-    corner.Parent = card
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Thickness = CONFIG.Notification.StrokeThickness
-    stroke.Color = CONFIG.Colors.NotifHairline
-    stroke.Transparency = 0.3
-    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    stroke.Parent = card
-
-    local padding = Instance.new("UIPadding")
-    padding.PaddingTop    = UDim.new(0, 10)
-    padding.PaddingBottom = UDim.new(0, 10)
-    padding.PaddingLeft   = UDim.new(0, 14)
-    padding.PaddingRight  = UDim.new(0, 12)
-    padding.Parent = card
-
-    local accentStripe = Instance.new("Frame")
-    accentStripe.Name = "AccentStripe"
-    accentStripe.Size = UDim2.new(0, CONFIG.Notification.AccentStripe, 1, -8)
-    accentStripe.Position = UDim2.new(0, -8, 0.5, 0)
-    accentStripe.AnchorPoint = Vector2.new(0, 0.5)
-    accentStripe.BackgroundColor3 = opts.accent
-    accentStripe.BackgroundTransparency = 1
-    accentStripe.BorderSizePixel = 0
-    accentStripe.Parent = card
-
-    local stripeCorner = Instance.new("UICorner")
-    stripeCorner.CornerRadius = UDim.new(0, 2)
-    stripeCorner.Parent = accentStripe
-
-    local row = Instance.new("Frame")
-    row.Name = "Row"
-    row.BackgroundTransparency = 1
-    row.Size = UDim2.new(1, 0, 0, 0)
-    row.AutomaticSize = Enum.AutomaticSize.Y
-    row.Parent = card
-
-    local rowLayout = Instance.new("UIListLayout")
-    rowLayout.FillDirection = Enum.FillDirection.Vertical
-    rowLayout.Padding = UDim.new(0, 2)
-    rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    rowLayout.Parent = row
-
-    local titleRow = Instance.new("Frame")
-    titleRow.Name = "TitleRow"
-    titleRow.BackgroundTransparency = 1
-    titleRow.Size = UDim2.new(1, 0, 0, 18)
-    titleRow.LayoutOrder = 1
-    titleRow.Parent = row
-
-    local titleRowLayout = Instance.new("UIListLayout")
-    titleRowLayout.FillDirection = Enum.FillDirection.Horizontal
-    titleRowLayout.Padding = UDim.new(0, 8)
-    titleRowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    titleRowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    titleRowLayout.Parent = titleRow
-
-    local iconLabel = Instance.new("TextLabel")
-    iconLabel.Name = "Icon"
-    iconLabel.Size = UDim2.new(0, 16, 0, 16)
-    iconLabel.BackgroundTransparency = 1
-    iconLabel.Text = opts.glyph
-    iconLabel.Font = Enum.Font.GothamBold
-    iconLabel.TextSize = 14
-    iconLabel.TextColor3 = opts.accent
-    iconLabel.TextTransparency = 1
-    iconLabel.LayoutOrder = 1
-    iconLabel.Parent = titleRow
-
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Name = "Title"
-    titleLabel.AutomaticSize = Enum.AutomaticSize.X
-    titleLabel.Size = UDim2.new(0, 0, 0, 18)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.RichText = true
-    titleLabel.Text = opts.title
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 14
-    titleLabel.TextColor3 = CONFIG.Colors.NotifInk
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.TextTransparency = 1
-    titleLabel.LayoutOrder = 2
-    titleLabel.Parent = titleRow
-
-    local bodyLabel = nil
-    if opts.body and opts.body ~= "" then
-        bodyLabel = Instance.new("TextLabel")
-        bodyLabel.Name = "Body"
-        bodyLabel.Size = UDim2.new(1, 0, 0, 0)
-        bodyLabel.AutomaticSize = Enum.AutomaticSize.Y
-        bodyLabel.BackgroundTransparency = 1
-        bodyLabel.RichText = true
-        bodyLabel.Text = opts.body
-        bodyLabel.Font = Enum.Font.Gotham
-        bodyLabel.TextSize = 13
-        bodyLabel.TextColor3 = CONFIG.Colors.NotifInkMuted
-        bodyLabel.TextXAlignment = Enum.TextXAlignment.Left
-        bodyLabel.TextWrapped = true
-        bodyLabel.TextTransparency = 1
-        bodyLabel.LayoutOrder = 2
-        bodyLabel.Parent = row
-    end
-
-    return { frame = card, accentStripe = accentStripe, stroke = stroke, iconLabel = iconLabel, titleLabel = titleLabel, bodyLabel = bodyLabel }
-end
-
-RemoveNotification = function(item)
-    if item.removing then return end
-    item.removing = true
-    for i = #State.NotificationQueue, 1, -1 do
-        if State.NotificationQueue[i] == item then
-            table.remove(State.NotificationQueue, i)
-            break
-        end
-    end
-    AnimateOut(item.card, function()
-        pcall(function() item.card.frame:Destroy() end)
-    end)
-end
-
+-- CreateNotificationUI() - Создание UI уведомлений
 local function CreateNotificationUI()
     local notifGui = Instance.new("ScreenGui")
     notifGui.Name = "MM2_Notifications"
@@ -2801,93 +2582,98 @@ local function CreateNotificationUI()
     container.BackgroundTransparency = 1
     container.AnchorPoint = Vector2.new(0.5, 0)
     container.Position = UDim2.new(0.5, 0, 0, 80)
-    container.Size = UDim2.new(0, CONFIG.Notification.Width, 1, -100)
+    container.Size = UDim2.new(0, 340, 1, -100)
     container.Parent = notifGui
 
     local list = Instance.new("UIListLayout")
     list.FillDirection = Enum.FillDirection.Vertical
     list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 8)
+    list.Padding = UDim.new(0, 6)
     list.HorizontalAlignment = Enum.HorizontalAlignment.Center
     list.VerticalAlignment = Enum.VerticalAlignment.Top
     list.Parent = container
 
     State.UIElements.NotificationGui = notifGui
     State.UIElements.NotificationContainer = container
-
-    if not State.NotificationHeartbeatConn then
-        State.NotificationHeartbeatConn = TrackConnection(RunService.Heartbeat:Connect(function()
-            local now = tick()
-            for i = #State.NotificationQueue, 1, -1 do
-                local item = State.NotificationQueue[i]
-                if item and not item.removing and now >= item.expiresAt then
-                    RemoveNotification(item)
-                end
-            end
-        end))
-    end
 end
 
-local function PushNotification(opts)
-    -- opts = { title, body, type, duration, accent }
-    -- error-тип показывается всегда, остальные — только если NotificationsEnabled
-    if not State.NotificationsEnabled and opts.type ~= "error" then return end
+-- ShowNotification() - Показ уведомления
+local function ShowNotification(richText, defaultColor)
+    if not State.NotificationsEnabled then return end
 
-    if not State.UIElements.NotificationContainer then
-        CreateNotificationUI()
-    end
-
-    -- Принудительно убрать самый старый если превышен лимит
-    if #State.NotificationQueue >= CONFIG.Notification.MaxVisible then
-        local oldest = nil
-        for _, item in ipairs(State.NotificationQueue) do
-            if not item.removing then
-                if not oldest or item.expiresAt < oldest.expiresAt then
-                    oldest = item
-                end
-            end
+    task.spawn(function()
+        if not State.UIElements.NotificationGui then
+            CreateNotificationUI()
         end
-        if oldest then RemoveNotification(oldest) end
-    end
 
-    local typeData = NotificationTypes[opts.type] or NotificationTypes.info
-    local card = CreateNotificationCard({
-        title  = opts.title,
-        body   = opts.body,
-        accent = opts.accent or typeData.accent,
-        glyph  = typeData.glyph,
-    })
+        local container = State.UIElements.NotificationContainer
+        if not container then return end
 
-    card.frame.LayoutOrder = math.floor(tick() * 1000)
-    card.frame.Parent = State.UIElements.NotificationContainer
+        local notifFrame = Instance.new("Frame")
+        notifFrame.Name = "NotificationItem"
+        notifFrame.BackgroundColor3 = CONFIG.Colors.Section
+        notifFrame.BackgroundTransparency = 0.1
+        notifFrame.Size = UDim2.new(1, 0, 0, 40)
+        notifFrame.Parent = container
 
-    local item = {
-        card      = card,
-        type      = opts.type,
-        expiresAt = tick() + (opts.duration or CONFIG.Notification.Duration),
-        removing  = false,
-    }
-    table.insert(State.NotificationQueue, item)
-    AnimateIn(card)
-end
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = notifFrame
 
-local function ShowNotification(arg1, arg2)
-    local opts = {}
-    if typeof(arg1) == "table" then
-        opts.title    = arg1.title or arg1.text or ""
-        opts.body     = arg1.body
-        opts.type     = arg1.type or DetectNotificationType((opts.title or "") .. (opts.body or ""))
-        opts.duration = arg1.duration
-        opts.accent   = arg1.color
-    else
-        -- legacy path: ShowNotification(richText, defaultColor)
-        opts.title    = arg1 or ""
-        opts.body     = nil
-        opts.type     = DetectNotificationType(arg1)
-        opts.duration = nil
-        opts.accent   = nil  -- старый defaultColor (серый TEXT) не подходит как accent
-    end
-    PushNotification(opts)
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 1
+        stroke.Color = CONFIG.Colors.Stroke
+        stroke.Transparency = 0.4
+        stroke.Parent = notifFrame
+
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.RichText = true
+        label.Text = richText or ""
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 16
+        label.TextColor3 = defaultColor or Color3.fromRGB(255, 255, 255)
+        label.TextTransparency = 1
+        label.TextXAlignment = Enum.TextXAlignment.Center
+        label.Size = UDim2.new(1, -20, 1, 0)
+        label.Position = UDim2.new(0, 10, 0, 0)
+        label.Parent = notifFrame
+
+        notifFrame.AnchorPoint = Vector2.new(0.5, 0)
+        notifFrame.Position = UDim2.new(0.5, 0, 0, -50)
+        notifFrame.BackgroundTransparency = 1
+
+        TweenService:Create(
+            notifFrame,
+            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+            { Position = UDim2.new(0.5, 0, 0, 0),
+              BackgroundTransparency = 0.1 }
+        ):Play()
+
+        TweenService:Create(
+            label,
+            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { TextTransparency = 0 }
+        ):Play()
+
+        task.wait(CONFIG.Notification.Duration)
+
+        local fadeOut = TweenService:Create(
+            notifFrame,
+            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50) }
+        )
+        fadeOut:Play()
+        
+        TweenService:Create(
+            label,
+            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { TextTransparency = 1 }
+        ):Play()
+        
+        fadeOut.Completed:Wait()
+        notifFrame:Destroy()
+    end)
 end
 
 ----------------------------------------------------------------
