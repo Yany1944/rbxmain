@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '/^local function/{name=$3; start=NR} /^local function|^function |^[^ \\\\t]/{if\\(name && NR>start\\) print name, NR-start; if\\(/^local function/\\){name=$3; start=NR} else {name=\"\"}}' \"D:\\\\Tools\\\\123\\\\rbxmain\\\\MainScript.lua\")",
+      "Bash(sort -k2 -rn)",
+      "Bash(grep -E \"\\(== [0-9]|= [0-9]{3,}|Color3.fromRGB\\\\\\([0-9]+\\)\")",
+      "Bash(ls \"D:\\\\Tools\\\\123\\\\rbxmain\")",
+      "Read(//d/Tools/123/**)"
+    ]
+  }
+}

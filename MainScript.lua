@@ -85,7 +85,11 @@ local CONFIG = {
         Murder = Color3.fromRGB(255, 50, 50),
         Sheriff = Color3.fromRGB(50, 150, 255),
         Gun = Color3.fromRGB(255, 200, 50),
-        Innocent = Color3.fromRGB(85, 255, 120)
+        Innocent = Color3.fromRGB(85, 255, 120),
+        Tracers  = Color3.fromRGB(220, 145, 230),
+        CoinTracer = Color3.fromRGB(255, 105, 180),
+        FriendTracerNear = Color3.fromRGB(0, 255, 0),
+        FriendTracerFar  = Color3.fromRGB(255, 0, 0),
         },
         Notification = {
         Duration = 3,
@@ -246,7 +250,17 @@ local State = {
     BulletTracersEnabled = false,
     TracersList = {},
     LastTracerTime = 0,
-    
+
+    -- Friend Viewer
+    FriendViewerEnabled = false,
+    FriendViewerThreshold = 25,
+    FriendPairs = {},
+    FriendPairCheck = {},
+    FriendBeams = {},
+    FriendScanCoroutine = nil,
+    FriendPlayerAddedConn = nil,
+    FriendPlayerRemovingConn = nil,
+
     -- System
     Connections = {},
     UIElements = {},
@@ -990,396 +1004,358 @@ _G.StopAimbot = StopAimbot
 end -- конец проверки _G.AIMBOT_LOADED
 
 -- ============= PING CHAMS SYSTEM =============
-local PINGCHAMS_BUFFERMAXSECONDS = 3.0
-local PINGCHAMS_PINGUPDATEINTERVAL = 0.2
-local Accent = Color3.fromRGB(220, 145, 230)
+local PingChams = {}
+do
+    local BUFFER_MAX_SECONDS   = 3.0
+    local PING_UPDATE_INTERVAL = 0.2
+    local MATERIAL             = Enum.Material.ForceField
 
-local PINGCHAMS_SETTINGS = {
-    material = Enum.Material.ForceField,
-    rttMultiplier = 0.5,
-    serverPhysicsDelay = 0.050,
-    clientInterpolation = 0.033,
-    extraSafety = 0.010,
-}
-
-local function PingChams_median(tbl)
-    if not tbl or type(tbl) ~= "table" or #tbl == 0 then return nil end
-    local copy = {}
-    for i = 1, #tbl do copy[i] = tbl[i] end
-    table.sort(copy)
-    local n = #copy
-    return n % 2 == 1 and copy[(n+1)/2] or (copy[n/2] + copy[n/2+1]) * 0.5
-end
-
-local function PingChams_pushPing(sec)
-    table.insert(State.PingChamsPingBuf, sec)
-    if #State.PingChamsPingBuf > 20 then
-        table.remove(State.PingChamsPingBuf, 1)
+    function PingChams.median(tbl)
+        if not tbl or type(tbl) ~= "table" or #tbl == 0 then return nil end
+        local copy = {}
+        for i = 1, #tbl do copy[i] = tbl[i] end
+        table.sort(copy)
+        local n = #copy
+        return n % 2 == 1 and copy[(n+1)/2] or (copy[n/2] + copy[n/2+1]) * 0.5
     end
-end
 
-local function PingChams_probePingMsStats()
-    local ms
-    local okPS, ps = pcall(function() return game:GetService("Stats").PerformanceStats end)
-    if okPS and ps and typeof(ps.Ping) == "number" and ps.Ping > 0 then
-        ms = ps.Ping
-    end
-    if not ms then
-        local okItem, item = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"] end)
-        if okItem and item then
-            local okStr, s = pcall(function() return item:GetValueString() end)
-            if okStr and s and tonumber(s) then
-                ms = tonumber(s)
-            else
-                local okVal, v = pcall(function() return item:GetValue() end)
-                if okVal and typeof(v) == "number" then ms = v end
-            end
+    function PingChams.pushPing(sec)
+        table.insert(State.PingChamsPingBuf, sec)
+        if #State.PingChamsPingBuf > 20 then
+            table.remove(State.PingChamsPingBuf, 1)
         end
     end
-    return ms
-end
 
-local function PingChams_updatePing()
-    local now = tick()
-    if now - State.PingChamsLastPingUpdate < PINGCHAMS_PINGUPDATEINTERVAL then return end
-    State.PingChamsLastPingUpdate = now
-    
-    local ms = PingChams_probePingMsStats()
-    if ms then
-        local sec = math.clamp(ms * 0.001, 0.002, 1.0)
-        PingChams_pushPing(sec)
-        local med = PingChams_median(State.PingChamsPingBuf)
-        local alpha = #State.PingChamsPingBuf >= 5 and 0.25 or 0.5
-        if med then
-            State.PingChamsRTT = State.PingChamsRTT * (1 - alpha) + med * alpha
-        else
-            State.PingChamsRTT = sec
+    function PingChams.probePingMs()
+        local ms
+        local okPS, ps = pcall(function() return game:GetService("Stats").PerformanceStats end)
+        if okPS and ps and typeof(ps.Ping) == "number" and ps.Ping > 0 then
+            ms = ps.Ping
         end
-    end
-end
-
-local function PingChams_sizeFromCharacter(char)
-    if not char then return Vector3.new(4,6,2) end
-    local ok, size = pcall(function() return char:GetExtentsSize() end)
-    if ok and size then
-        return Vector3.new(math.max(2, size.X), math.max(3, size.Y), math.max(1, size.Z))
-    end
-    return Vector3.new(4,6,2)
-end
-
-local function PingChams_collectRigParts(char)
-    local parts = {}
-    if not char then return parts end
-    for _, d in ipairs(char:GetDescendants()) do
-        if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
-            table.insert(parts, d)
-        end
-    end
-    return parts
-end
-
-local function PingChams_getRootPart(char)
-    if not char then return nil end
-    return char:FindFirstChild("HumanoidRootPart") or 
-           char:FindFirstChild("Torso") or 
-           char:FindFirstChild("UpperTorso") or 
-           char:FindFirstChild("LowerTorso")
-end
-
-local function PingChams_clearGhostClone()
-    State.PingChamsGhostMap = {}
-    if State.PingChamsGhostClone then
-        pcall(function() State.PingChamsGhostClone:Destroy() end)
-        State.PingChamsGhostClone = nil
-    end
-end
-
-local function PingChams_rebuildGhostClone(char, col, trans)
-    PingChams_clearGhostClone()
-    State.PingChamsGhostClone = Instance.new("Model")
-    State.PingChamsGhostClone.Name = "GhostClone"
-    State.PingChamsGhostClone.Parent = State.PingChamsGhostModel
-    
-    local parts = PingChams_collectRigParts(char)
-    for _, src in ipairs(parts) do
-        local gp
-        if src:IsA("MeshPart") or src:IsA("Part") then
-            gp = src:Clone()
-            for _, d in ipairs(gp:GetDescendants()) do
-                if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("Motor6D") then
-                    pcall(function() d:Destroy() end)
+        if not ms then
+            local okItem, item = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"] end)
+            if okItem and item then
+                local okStr, s = pcall(function() return item:GetValueString() end)
+                if okStr and s and tonumber(s) then
+                    ms = tonumber(s)
+                else
+                    local okVal, v = pcall(function() return item:GetValue() end)
+                    if okVal and typeof(v) == "number" then ms = v end
                 end
             end
-            gp.Size = gp.Size * 1.03
-        else
-            gp = Instance.new("Part")
-            gp.Size = src.Size * 1.03
         end
-        
-        gp.Name = "Ghost_"..src.Name
-        gp.Anchored = true
-        gp.CanCollide = false
-        gp.CanQuery = false
-        gp.CanTouch = false
-        gp.CastShadow = false
-        gp.Material = PINGCHAMS_SETTINGS.material
-        gp.Color = col
-        gp.Transparency = trans
-        gp.Parent = State.PingChamsGhostClone
-        
-        State.PingChamsGhostMap[src.Name] = gp
+        return ms
     end
-end
 
-local function PingChams_ensureGhost()
-    if not State.PingChamsGhostModel then
-        State.PingChamsGhostModel = Instance.new("Model")
-        State.PingChamsGhostModel.Name = "ServerApproxGhost"
-        State.PingChamsGhostModel.Parent = Workspace
-    end
-    
-    if not State.PingChamsGhostPart then
-        State.PingChamsGhostPart = Instance.new("Part")
-        State.PingChamsGhostPart.Name = "ServerApproxPart"
-        State.PingChamsGhostPart.Anchored = true
-        State.PingChamsGhostPart.CanCollide = false
-        State.PingChamsGhostPart.CanQuery = false
-        State.PingChamsGhostPart.CanTouch = false
-        State.PingChamsGhostPart.Transparency = 1
-        State.PingChamsGhostPart.Size = PingChams_sizeFromCharacter(LocalPlayer.Character)
-        State.PingChamsGhostPart.Parent = State.PingChamsGhostModel
-    end
-    
-    if not State.PingChamsGuiAnchor then
-        State.PingChamsGuiAnchor = Instance.new("Part")
-        State.PingChamsGuiAnchor.Name = "GuiAnchor"
-        State.PingChamsGuiAnchor.Anchored = true
-        State.PingChamsGuiAnchor.CanCollide = false
-        State.PingChamsGuiAnchor.CanQuery = false
-        State.PingChamsGuiAnchor.CanTouch = false
-        State.PingChamsGuiAnchor.Transparency = 1
-        State.PingChamsGuiAnchor.Size = Vector3.new(1, 1, 1)
-        State.PingChamsGuiAnchor.Parent = State.PingChamsGhostModel
-    end
-    
-    if not State.PingChamsGUI then
-        State.PingChamsGUI = Instance.new("BillboardGui")
-        State.PingChamsGUI.Name = "PingInfo"
-        State.PingChamsGUI.Size = UDim2.new(0, 180, 0, 30)
-        State.PingChamsGUI.Adornee = State.PingChamsGuiAnchor
-        State.PingChamsGUI.StudsOffset = Vector3.new(0, 0.7, 0)
-        State.PingChamsGUI.AlwaysOnTop = true
-        State.PingChamsGUI.Parent = State.PingChamsGhostModel
-        
-        local lbl = Instance.new("TextLabel")
-        lbl.Name = "Label"
-        lbl.BackgroundTransparency = 1
-        lbl.Size = UDim2.new(1,0,1,0)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextScaled = false
-        lbl.TextSize = 14
-        lbl.TextColor3 = Accent
-        lbl.Text = "Ping -- ms"
-        lbl.TextStrokeTransparency = 0
-        lbl.TextStrokeColor3 = Color3.fromRGB(0,0,0)
-        lbl.Parent = State.PingChamsGUI
-    end
-end
+    function PingChams.updatePing()
+        local now = tick()
+        if now - State.PingChamsLastPingUpdate < PING_UPDATE_INTERVAL then return end
+        State.PingChamsLastPingUpdate = now
 
-local function PingChams_captureOffsets(char, root)
-    local map = {}
-    if not char or not root then return map end
-    for _, d in ipairs(char:GetDescendants()) do
-        if d:IsA("BasePart") and d ~= root then
-            pcall(function()
-                map[d.Name] = root.CFrame:ToObjectSpace(d.CFrame)
-            end)
-        end
-    end
-    return map
-end
-
-local function PingChams_pushSample(tClient, char)
-    local root = PingChams_getRootPart(char)
-    if not root then return end
-    
-    local offsets = PingChams_captureOffsets(char, root)
-    local vel = Vector3.new()
-    
-    local ok1, v = pcall(function() return root.AssemblyLinearVelocity end)
-    if ok1 and typeof(v) == "Vector3" then vel = v end
-    
-    table.insert(State.PingChamsBuffer, {
-        t = tClient,
-        cf = root.CFrame,
-        offsets = offsets,
-        vel = vel
-    })
-    
-    local cutoff = tClient - PINGCHAMS_BUFFERMAXSECONDS
-    while #State.PingChamsBuffer > 0 and State.PingChamsBuffer[1].t < cutoff do
-        table.remove(State.PingChamsBuffer, 1)
-    end
-end
-
-local function PingChams_lerpCFrame(a, b, alpha)
-    local pos = a.Position:Lerp(b.Position, alpha)
-    local ax, ay, az = a:ToOrientation()
-    local bx, by, bz = b:ToOrientation()
-    local dx = math.atan2(math.sin(bx - ax), math.cos(bx - ax))
-    local dy = math.atan2(math.sin(by - ay), math.cos(by - ay))
-    local dz = math.atan2(math.sin(bz - az), math.cos(bz - az))
-    local rx = ax + dx * alpha
-    local ry = ay + dy * alpha
-    local rz = az + dz * alpha
-    return CFrame.new(pos) * CFrame.fromOrientation(rx, ry, rz)
-end
-
-local function PingChams_sampleAtClientTime(target)
-    if #State.PingChamsBuffer == 0 then return nil end
-    
-    for i = 1, #State.PingChamsBuffer do
-        local s = State.PingChamsBuffer[i]
-        if s.t >= target then
-            local p = State.PingChamsBuffer[math.max(i-1, 1)]
-            local n = s
-            
-            if p.t == n.t then
-                return {root = p.cf, offsets = p.offsets}
+        local ms = PingChams.probePingMs()
+        if ms then
+            local sec = math.clamp(ms * 0.001, 0.002, 1.0)
+            PingChams.pushPing(sec)
+            local med   = PingChams.median(State.PingChamsPingBuf)
+            local alpha = #State.PingChamsPingBuf >= 5 and 0.25 or 0.5
+            if med then
+                State.PingChamsRTT = State.PingChamsRTT * (1 - alpha) + med * alpha
+            else
+                State.PingChamsRTT = sec
             end
-            
-            local alpha = math.clamp((target - p.t) / (n.t - p.t), 0, 1)
-            local cf = PingChams_lerpCFrame(p.cf, n.cf, alpha)
-            local offsets = {}
-            
-            if p.offsets or n.offsets then
+        end
+    end
+
+    function PingChams.sizeFromChar(char)
+        if not char then return Vector3.new(4, 6, 2) end
+        local ok, size = pcall(function() return char:GetExtentsSize() end)
+        if ok and size then
+            return Vector3.new(math.max(2, size.X), math.max(3, size.Y), math.max(1, size.Z))
+        end
+        return Vector3.new(4, 6, 2)
+    end
+
+    function PingChams.collectRigParts(char)
+        local parts = {}
+        if not char then return parts end
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
+                table.insert(parts, d)
+            end
+        end
+        return parts
+    end
+
+    function PingChams.getRootPart(char)
+        if not char then return nil end
+        return char:FindFirstChild("HumanoidRootPart")
+            or char:FindFirstChild("Torso")
+            or char:FindFirstChild("UpperTorso")
+            or char:FindFirstChild("LowerTorso")
+    end
+
+    function PingChams.clearGhostClone()
+        State.PingChamsGhostMap = {}
+        if State.PingChamsGhostClone then
+            pcall(function() State.PingChamsGhostClone:Destroy() end)
+            State.PingChamsGhostClone = nil
+        end
+    end
+
+    function PingChams.rebuildGhostClone(char, col, trans)
+        PingChams.clearGhostClone()
+        State.PingChamsGhostClone = Instance.new("Model")
+        State.PingChamsGhostClone.Name = "GhostClone"
+        State.PingChamsGhostClone.Parent = State.PingChamsGhostModel
+
+        for _, src in ipairs(PingChams.collectRigParts(char)) do
+            local gp
+            if src:IsA("MeshPart") or src:IsA("Part") then
+                gp = src:Clone()
+                for _, d in ipairs(gp:GetDescendants()) do
+                    if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("Motor6D") then
+                        pcall(function() d:Destroy() end)
+                    end
+                end
+                gp.Size = gp.Size * 1.03
+            else
+                gp = Instance.new("Part")
+                gp.Size = src.Size * 1.03
+            end
+            gp.Name         = "Ghost_" .. src.Name
+            gp.Anchored     = true
+            gp.CanCollide   = false
+            gp.CanQuery     = false
+            gp.CanTouch     = false
+            gp.CastShadow   = false
+            gp.Material     = MATERIAL
+            gp.Color        = col
+            gp.Transparency = trans
+            gp.Parent       = State.PingChamsGhostClone
+            State.PingChamsGhostMap[src.Name] = gp
+        end
+    end
+
+    function PingChams.ensureGhost()
+        if not State.PingChamsGhostModel then
+            State.PingChamsGhostModel = Instance.new("Model")
+            State.PingChamsGhostModel.Name = "ServerApproxGhost"
+            State.PingChamsGhostModel.Parent = Workspace
+        end
+
+        if not State.PingChamsGhostPart then
+            local p = Instance.new("Part")
+            p.Name         = "ServerApproxPart"
+            p.Anchored     = true
+            p.CanCollide   = false
+            p.CanQuery     = false
+            p.CanTouch     = false
+            p.Transparency = 1
+            p.Size         = PingChams.sizeFromChar(LocalPlayer.Character)
+            p.Parent       = State.PingChamsGhostModel
+            State.PingChamsGhostPart = p
+        end
+
+        if not State.PingChamsGuiAnchor then
+            local a = Instance.new("Part")
+            a.Name         = "GuiAnchor"
+            a.Anchored     = true
+            a.CanCollide   = false
+            a.CanQuery     = false
+            a.CanTouch     = false
+            a.Transparency = 1
+            a.Size         = Vector3.new(1, 1, 1)
+            a.Parent       = State.PingChamsGhostModel
+            State.PingChamsGuiAnchor = a
+        end
+
+        if not State.PingChamsGUI then
+            local gui = Instance.new("BillboardGui")
+            gui.Name        = "PingInfo"
+            gui.Size        = UDim2.new(0, 180, 0, 30)
+            gui.Adornee     = State.PingChamsGuiAnchor
+            gui.StudsOffset = Vector3.new(0, 0.7, 0)
+            gui.AlwaysOnTop = true
+            gui.Parent      = State.PingChamsGhostModel
+            local lbl = Instance.new("TextLabel")
+            lbl.Name                  = "Label"
+            lbl.BackgroundTransparency = 1
+            lbl.Size                  = UDim2.new(1, 0, 1, 0)
+            lbl.Font                  = Enum.Font.GothamBold
+            lbl.TextScaled            = false
+            lbl.TextSize              = 14
+            lbl.TextColor3            = CONFIG.Colors.Accent
+            lbl.Text                  = "Ping -- ms"
+            lbl.TextStrokeTransparency = 0
+            lbl.TextStrokeColor3      = Color3.fromRGB(0, 0, 0)
+            lbl.Parent                = gui
+            State.PingChamsGUI = gui
+        end
+    end
+
+    function PingChams.captureOffsets(char, root)
+        local map = {}
+        if not char or not root then return map end
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("BasePart") and d ~= root then
+                pcall(function()
+                    map[d.Name] = root.CFrame:ToObjectSpace(d.CFrame)
+                end)
+            end
+        end
+        return map
+    end
+
+    function PingChams.pushSample(tClient, char)
+        local root = PingChams.getRootPart(char)
+        if not root then return end
+
+        local offsets = PingChams.captureOffsets(char, root)
+        local vel     = Vector3.new()
+        local ok1, v  = pcall(function() return root.AssemblyLinearVelocity end)
+        if ok1 and typeof(v) == "Vector3" then vel = v end
+
+        table.insert(State.PingChamsBuffer, {
+            t = tClient, cf = root.CFrame, offsets = offsets, vel = vel
+        })
+
+        local cutoff = tClient - BUFFER_MAX_SECONDS
+        while #State.PingChamsBuffer > 0 and State.PingChamsBuffer[1].t < cutoff do
+            table.remove(State.PingChamsBuffer, 1)
+        end
+    end
+
+    function PingChams.lerpCFrame(a, b, alpha)
+        local pos = a.Position:Lerp(b.Position, alpha)
+        local ax, ay, az = a:ToOrientation()
+        local bx, by, bz = b:ToOrientation()
+        local rx = ax + math.atan2(math.sin(bx - ax), math.cos(bx - ax)) * alpha
+        local ry = ay + math.atan2(math.sin(by - ay), math.cos(by - ay)) * alpha
+        local rz = az + math.atan2(math.sin(bz - az), math.cos(bz - az)) * alpha
+        return CFrame.new(pos) * CFrame.fromOrientation(rx, ry, rz)
+    end
+
+    function PingChams.sampleAtTime(target)
+        if #State.PingChamsBuffer == 0 then return nil end
+
+        for i = 1, #State.PingChamsBuffer do
+            local s = State.PingChamsBuffer[i]
+            if s.t >= target then
+                local p = State.PingChamsBuffer[math.max(i - 1, 1)]
+                local n = s
+                if p.t == n.t then
+                    return {root = p.cf, offsets = p.offsets}
+                end
+                local alpha   = math.clamp((target - p.t) / (n.t - p.t), 0, 1)
+                local cf      = PingChams.lerpCFrame(p.cf, n.cf, alpha)
+                local offsets = {}
                 for name, aOff in pairs(p.offsets or {}) do
                     local bOff = n.offsets and n.offsets[name] or aOff
-                    offsets[name] = PingChams_lerpCFrame(aOff, bOff, alpha)
+                    offsets[name] = PingChams.lerpCFrame(aOff, bOff, alpha)
                 end
                 for name, bOff in pairs(n.offsets or {}) do
                     if not offsets[name] then
                         local aOff = p.offsets and p.offsets[name] or bOff
-                        offsets[name] = PingChams_lerpCFrame(aOff, bOff, alpha)
+                        offsets[name] = PingChams.lerpCFrame(aOff, bOff, alpha)
                     end
                 end
+                return {root = cf, offsets = offsets}
             end
-            
-            return {root = cf, offsets = offsets}
         end
+
+        local last = State.PingChamsBuffer[#State.PingChamsBuffer]
+        return {root = last.cf, offsets = last.offsets}
     end
-    
-    local last = State.PingChamsBuffer[#State.PingChamsBuffer]
-    return {root = last.cf, offsets = last.offsets}
-end
+end -- do PingChams
 
 local function StartPingChams()
     if State.PingChamsRenderConn then return end
-    
+
     State.PingChamsRenderConn = RunService.RenderStepped:Connect(function()
         pcall(function()
             if not State.PingChamsEnabled then return end
-            
-            PingChams_updatePing()
-            PingChams_ensureGhost()
-            
+
+            PingChams.updatePing()
+            PingChams.ensureGhost()
+
             local char = LocalPlayer.Character
             if char then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     if not State.PingChamsGhostModel or State.PingChamsGhostClone == nil then
-                        PingChams_rebuildGhostClone(char, Accent, 0.6)
+                        PingChams.rebuildGhostClone(char, CONFIG.Colors.Accent, 0.6)
                     end
-                    PingChams_pushSample(tick(), char)
+                    PingChams.pushSample(tick(), char)
                 end
-                
                 if State.PingChamsGhostPart then
-                    local sz = PingChams_sizeFromCharacter(char)
-                    State.PingChamsGhostPart.Size = sz
+                    State.PingChamsGhostPart.Size = PingChams.sizeFromChar(char)
                 end
             end
-            
-            local oneWayLatency = State.PingChamsRTT * 0.5
+
+            local oneWayLatency      = State.PingChamsRTT * 0.5
             local serverPhysicsDelay = 0.050
-            local clientBuffer = 0.020
-            local totalDelay = oneWayLatency + serverPhysicsDelay + clientBuffer
-            local sampleDelay = math.clamp(totalDelay, 0.06, 0.9)
-            
-            local now = tick()
-            local samplePast = PingChams_sampleAtClientTime(now - sampleDelay)
-            
+            local clientBuffer       = 0.020
+            local totalDelay         = oneWayLatency + serverPhysicsDelay + clientBuffer
+            local sampleDelay        = math.clamp(totalDelay, 0.06, 0.9)
+
+            local now        = tick()
+            local samplePast = PingChams.sampleAtTime(now - sampleDelay)
+
             if not State.PingChamsGhostClone and LocalPlayer.Character then
-                PingChams_rebuildGhostClone(LocalPlayer.Character, Accent, 0.6)
+                PingChams.rebuildGhostClone(LocalPlayer.Character, CONFIG.Colors.Accent, 0.6)
             end
-            
+
             if samplePast and samplePast.root then
-                local rootPast = samplePast.root
-                
-                local lastSmoothT = _G.GhostPastSmoothT or tick()
-                local nowT = tick()
-                local dtSmooth = math.max(0.0001, nowT - lastSmoothT)
+                local rootPast   = samplePast.root
+                local nowT       = tick()
+                local dtSmooth   = math.max(0.0001, nowT - (_G.GhostPastSmoothT or nowT))
                 local smoothAlpha = math.clamp(dtSmooth * 10, 0.12, 0.55)
-                _G.GhostPastSmooth = _G.GhostPastSmooth or rootPast
-                _G.GhostPastSmooth = PingChams_lerpCFrame(_G.GhostPastSmooth, rootPast, smoothAlpha)
+                _G.GhostPastSmooth  = PingChams.lerpCFrame(_G.GhostPastSmooth or rootPast, rootPast, smoothAlpha)
                 _G.GhostPastSmoothT = nowT
-                
+
                 if State.PingChamsGhostPart then
                     State.PingChamsGhostPart.CFrame = _G.GhostPastSmooth
                 end
-                
                 if State.PingChamsGuiAnchor then
                     local yOffset = State.PingChamsGhostPart and (State.PingChamsGhostPart.Size.Y / 2 + 0.5) or 3.5
-                    local guiPos = _G.GhostPastSmooth.Position + Vector3.new(0, yOffset, 0)
-                    State.PingChamsGuiAnchor.CFrame = CFrame.new(guiPos)
+                    State.PingChamsGuiAnchor.CFrame = CFrame.new(_G.GhostPastSmooth.Position + Vector3.new(0, yOffset, 0))
                 end
-                
-                local lpRoot = PingChams_getRootPart(LocalPlayer.Character)
-                local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                local speedMeas = lpRoot and lpRoot.AssemblyLinearVelocity.Magnitude or 0
+
+                local lpRoot     = PingChams.getRootPart(LocalPlayer.Character)
+                local hum        = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                local speedMeas  = lpRoot and lpRoot.AssemblyLinearVelocity.Magnitude or 0
                 local speedIntent = 0
                 if hum and hum.MoveDirection.Magnitude > 0.01 then
                     speedIntent = hum.MoveDirection.Magnitude * (hum.WalkSpeed or 16)
                 end
                 local speed = math.max(speedMeas, speedIntent)
-                
-                local transPast = math.clamp(0.9 - math.min(speed / 16, 1) * 0.65, 0.2, 1)
-                
-                local lastFadeT = _G.GhostPastTransT or tick()
-                local nowFadeT = tick()
-                local dt = math.max(0.0001, nowFadeT - lastFadeT)
-                local a = math.clamp(dt * 5.0, 0.05, 0.5)
-                _G.GhostPastTransSm = _G.GhostPastTransSm or transPast
-                _G.GhostPastTransSm = _G.GhostPastTransSm + (transPast - _G.GhostPastTransSm) * a
-                _G.GhostPastTransT = nowFadeT
-                
+
+                local transPast  = math.clamp(0.9 - math.min(speed / 16, 1) * 0.65, 0.2, 1)
+                local nowFadeT   = tick()
+                local dt         = math.max(0.0001, nowFadeT - (_G.GhostPastTransT or nowFadeT))
+                _G.GhostPastTransSm  = (_G.GhostPastTransSm or transPast) + (transPast - (_G.GhostPastTransSm or transPast)) * math.clamp(dt * 5.0, 0.05, 0.5)
+                _G.GhostPastTransT   = nowFadeT
+
                 for name, gp in pairs(State.PingChamsGhostMap) do
                     local off = samplePast.offsets and samplePast.offsets[name]
-                    gp.Color = Accent
+                    gp.Color        = CONFIG.Colors.Accent
                     gp.Transparency = _G.GhostPastTransSm
-                    gp.Material = PINGCHAMS_SETTINGS.material
-                    if off then
-                        gp.CFrame = _G.GhostPastSmooth * off
-                    end
+                    gp.Material     = Enum.Material.ForceField
+                    if off then gp.CFrame = _G.GhostPastSmooth * off end
                 end
-                
+
                 if State.PingChamsGUI and State.PingChamsGUI:FindFirstChild("Label") then
-                    local realBacktrack = totalDelay * 1000
-                    State.PingChamsGUI.Label.Text = string.format("Backtrack: %.0f ms | Ping: %.0f ms", realBacktrack, State.PingChamsRTT * 1000)
-                    State.PingChamsGUI.Label.TextColor3 = Accent
-                    
-                    local vis = math.clamp((speed - 14) / 1, 0, 1)
-                    local targetTT = 1 - vis
-                    
-                    local lastTT = _G.GhostTextTransT or tick()
-                    local nowTT = tick()
-                    local dtTT = math.max(0.0001, nowTT - lastTT)
-                    local aTT = math.clamp(dtTT * 3, 0.03, 0.25)
-                    _G.GhostTextTransSm = _G.GhostTextTransSm or targetTT
-                    _G.GhostTextTransSm = _G.GhostTextTransSm + (targetTT - _G.GhostTextTransSm) * aTT
-                    _G.GhostTextTransT = nowTT
-                    
-                    State.PingChamsGUI.Label.TextTransparency = _G.GhostTextTransSm
-                    State.PingChamsGUI.Label.TextStrokeTransparency = _G.GhostTextTransSm
+                    local lbl = State.PingChamsGUI.Label
+                    lbl.Text       = string.format("Backtrack: %.0f ms | Ping: %.0f ms", totalDelay * 1000, State.PingChamsRTT * 1000)
+                    lbl.TextColor3 = CONFIG.Colors.Accent
+
+                    local nowTT   = tick()
+                    local dtTT    = math.max(0.0001, nowTT - (_G.GhostTextTransT or nowTT))
+                    local targetTT = 1 - math.clamp((speed - 14) / 1, 0, 1)
+                    _G.GhostTextTransSm  = (_G.GhostTextTransSm or targetTT) + (targetTT - (_G.GhostTextTransSm or targetTT)) * math.clamp(dtTT * 3, 0.03, 0.25)
+                    _G.GhostTextTransT   = nowTT
+                    lbl.TextTransparency      = _G.GhostTextTransSm
+                    lbl.TextStrokeTransparency = _G.GhostTextTransSm
                     State.PingChamsGUI.Enabled = _G.GhostTextTransSm < 0.995
                 end
             else
@@ -1387,7 +1363,7 @@ local function StartPingChams()
                     gp.Transparency = 1
                 end
             end
-            
+
             if not State.PingChamsEnabled then
                 if State.PingChamsGUI and State.PingChamsGUI:FindFirstChild("Label") then
                     State.PingChamsGUI.Label.Visible = false
@@ -1425,14 +1401,13 @@ TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     pcall(function()
         if State.PingChamsGhostPart and LocalPlayer.Character then
-            State.PingChamsGhostPart.Size = PingChams_sizeFromCharacter(LocalPlayer.Character)
+            State.PingChamsGhostPart.Size = PingChams.sizeFromChar(LocalPlayer.Character)
         end
     end)
 end))
 
 
 -- ============= BULLET/KNIFE TRACERS =============
-local TracersAccent = Color3.fromRGB(220, 145, 230)
 local RayParams = RaycastParams.new()
 RayParams.FilterType = Enum.RaycastFilterType.Blacklist
 RayParams.IgnoreWater = true
@@ -1451,7 +1426,7 @@ local function CreateTracer(startPos, endPos, duration)
     local beam = Instance.new("Beam")
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(TracersAccent)
+    beam.Color = ColorSequence.new(CONFIG.Colors.Tracers)
     beam.FaceCamera = true
     beam.LightEmission = 1
     beam.LightInfluence = 0
@@ -1502,16 +1477,8 @@ local function CreateTracer(startPos, endPos, duration)
     end)
 end
 
--- ============= COIN TRACER SYSTEM (С АНИМАЦИЕЙ) =============
+-- ============= COIN TRACER SYSTEM =============
 local CurrentCoinTracer = nil
-local TracersAccent = Color3.fromRGB(220, 145, 230)
-
--- ✅ ВЫБЕРИТЕ ОДИН ИЗ ЦВЕТОВ ДЛЯ МОНЕТ:
--- local CoinTracerColor = Color3.fromRGB(0, 255, 255)      -- 🔵 ЦИАН (контрастирует с фиолетовым)
--- local CoinTracerColor = Color3.fromRGB(255, 215, 0)   -- 🟡 ЗОЛОТОЙ (классика для монет)
--- local CoinTracerColor = Color3.fromRGB(144, 238, 144) -- 🟢 СВЕТЛО-ЗЕЛЁНЫЙ (хорошая видимость)
-local CoinTracerColor = Color3.fromRGB(255, 105, 180) -- 💗 РОЗОВЫЙ (гармония с фиолетовым)
--- local CoinTracerColor = Color3.fromRGB(173, 216, 230) -- 🔵 СВЕТЛО-ГОЛУБОЙ (нежное сочетание)
 
 local function CreateCoinTracer(character, targetCoin)
     if not character or not targetCoin then return end
@@ -1543,7 +1510,7 @@ local function CreateCoinTracer(character, targetCoin)
     local beam = Instance.new("Beam")
     beam.Attachment0 = attachment0
     beam.Attachment1 = attachment1
-    beam.Color = ColorSequence.new(CoinTracerColor)
+    beam.Color = ColorSequence.new(CONFIG.Colors.CoinTracer)
     beam.FaceCamera = true
     beam.LightEmission = 1
     beam.LightInfluence = 0
@@ -1582,23 +1549,185 @@ local function RemoveCoinTracer()
 end
 
 -- Обновление трасера каждый кадр
-RunService.RenderStepped:Connect(function()
+TrackConnection(RunService.RenderStepped:Connect(function()
     if CurrentCoinTracer then
-        -- Проверка валидности монеты
         if not CurrentCoinTracer.coin or not CurrentCoinTracer.coin.Parent then
             RemoveCoinTracer()
             return
         end
-        
-        -- ✅ Проверяем ТОЛЬКО автофарм (без BulletTracersEnabled)
         if not State.AutoFarmEnabled then
             RemoveCoinTracer()
             return
         end
     end
-end)
+end))
 
+-- ============= FRIEND VIEWER SYSTEM =============
 
+local function MakeFriendKey(p1, p2)
+    local a, b = p1.UserId, p2.UserId
+    if a > b then a, b = b, a end
+    return tostring(a) .. "_" .. tostring(b)
+end
+
+local function RemoveFriendBeam(key)
+    local data = State.FriendBeams[key]
+    if data then
+        pcall(function() data.beam:Destroy() end)
+        pcall(function() data.att0:Destroy() end)
+        pcall(function() data.att1:Destroy() end)
+        State.FriendBeams[key] = nil
+    end
+end
+
+local function ClearAllFriendData()
+    for key, _ in pairs(State.FriendBeams) do
+        RemoveFriendBeam(key)
+    end
+    State.FriendBeams = {}
+    State.FriendPairs = {}
+    State.FriendPairCheck = {}
+end
+
+local function CreateFriendBeam(pair)
+    if State.FriendBeams[pair.key] then return end
+    local hrp1 = pair.p1 and pair.p1.Character and pair.p1.Character:FindFirstChild("HumanoidRootPart")
+    local hrp2 = pair.p2 and pair.p2.Character and pair.p2.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp1 or not hrp2 then return end
+
+    local attachment0 = Instance.new("Attachment")
+    attachment0.Name = "FriendTracerStart_" .. pair.key
+    attachment0.Parent = hrp1
+
+    local attachment1 = Instance.new("Attachment")
+    attachment1.Name = "FriendTracerEnd_" .. pair.key
+    attachment1.Parent = hrp2
+
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Color = ColorSequence.new(CONFIG.Colors.FriendTracerFar)
+    beam.FaceCamera = true
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Brightness = 5
+    beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    beam.TextureMode = Enum.TextureMode.Stretch
+    beam.TextureSpeed = 2
+    beam.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    beam.Width0 = 0.3
+    beam.Width1 = 0.3
+    beam.ZOffset = 0.1
+    beam.Parent = attachment0
+
+    State.FriendBeams[pair.key] = { beam = beam, att0 = attachment0, att1 = attachment1, p1 = pair.p1, p2 = pair.p2 }
+end
+
+local TryAddFriendPair -- forward declaration for use in StartFriendViewer
+
+local function ScanAllFriendPairs()
+    local list = Players:GetPlayers()
+    for i = 1, #list do
+        for j = i + 1, #list do
+            TryAddFriendPair(list[i], list[j])
+            task.wait(0.03)
+        end
+    end
+end
+
+local function RemovePlayerFromFriendData(player)
+    for i = #State.FriendPairs, 1, -1 do
+        local pair = State.FriendPairs[i]
+        if pair.p1 == player or pair.p2 == player then
+            RemoveFriendBeam(pair.key)
+            State.FriendPairCheck[pair.key] = nil
+            table.remove(State.FriendPairs, i)
+        end
+    end
+end
+
+TryAddFriendPair = function(p1, p2)
+    if not p1 or not p2 or p1 == p2 then return end
+    local key = MakeFriendKey(p1, p2)
+    if State.FriendPairCheck[key] then return end
+    local ok, isFriend = pcall(function() return p2:IsFriendsWith(p1.UserId) end)
+    if not ok or not isFriend then return end
+    State.FriendPairCheck[key] = true
+    local pair = { key = key, p1 = p1, p2 = p2 }
+    table.insert(State.FriendPairs, pair)
+    if State.FriendViewerEnabled then
+        CreateFriendBeam(pair)
+    end
+end
+
+TrackConnection(RunService.RenderStepped:Connect(function()
+    if not State.FriendViewerEnabled then return end
+    if not next(State.FriendBeams) and #State.FriendPairs == 0 then return end
+
+    for key, data in pairs(State.FriendBeams) do
+        local hrp1 = data.p1 and data.p1.Character and data.p1.Character:FindFirstChild("HumanoidRootPart")
+        local hrp2 = data.p2 and data.p2.Character and data.p2.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp1 or not hrp2 or not data.att0.Parent or not data.att1.Parent then
+            RemoveFriendBeam(key)
+        else
+            local dist = (hrp1.Position - hrp2.Position).Magnitude
+            local alpha = math.clamp(1 / (dist / State.FriendViewerThreshold), 0, 1)
+            local color = CONFIG.Colors.FriendTracerFar:Lerp(CONFIG.Colors.FriendTracerNear, alpha)
+            data.beam.Color = ColorSequence.new(color)
+        end
+    end
+
+    for _, pair in ipairs(State.FriendPairs) do
+        if not State.FriendBeams[pair.key] then
+            local hrp1 = pair.p1 and pair.p1.Character and pair.p1.Character:FindFirstChild("HumanoidRootPart")
+            local hrp2 = pair.p2 and pair.p2.Character and pair.p2.Character:FindFirstChild("HumanoidRootPart")
+            if hrp1 and hrp2 then
+                CreateFriendBeam(pair)
+            end
+        end
+    end
+end))
+
+local function StartFriendViewer()
+    if State.FriendViewerEnabled then return end
+    State.FriendViewerEnabled = true
+
+    State.FriendScanCoroutine = task.spawn(function() ScanAllFriendPairs() end)
+
+    State.FriendPlayerAddedConn = Players.PlayerAdded:Connect(function(newPlayer)
+        task.spawn(function()
+            task.wait(1)
+            for _, other in ipairs(Players:GetPlayers()) do
+                TryAddFriendPair(other, newPlayer)
+                task.wait(0.03)
+            end
+        end)
+    end)
+    TrackConnection(State.FriendPlayerAddedConn)
+
+    State.FriendPlayerRemovingConn = Players.PlayerRemoving:Connect(function(player)
+        RemovePlayerFromFriendData(player)
+    end)
+    TrackConnection(State.FriendPlayerRemovingConn)
+end
+
+local function StopFriendViewer()
+    State.FriendViewerEnabled = false
+    if State.FriendPlayerAddedConn then
+        State.FriendPlayerAddedConn:Disconnect()
+        State.FriendPlayerAddedConn = nil
+    end
+    if State.FriendPlayerRemovingConn then
+        State.FriendPlayerRemovingConn:Disconnect()
+        State.FriendPlayerRemovingConn = nil
+    end
+    ClearAllFriendData()
+end
+
+-- ============= END FRIEND VIEWER SYSTEM =============
 
 local function GetShootOrigin(tool)
     if not tool then return nil end
@@ -1868,6 +1997,17 @@ local function FullShutdown()
             end)
         end
         State.PlayerNicknamesCache = {}
+
+        -- Friend Viewer cleanup
+        if State.FriendPlayerAddedConn then pcall(function() State.FriendPlayerAddedConn:Disconnect() end); State.FriendPlayerAddedConn = nil end
+        if State.FriendPlayerRemovingConn then pcall(function() State.FriendPlayerRemovingConn:Disconnect() end); State.FriendPlayerRemovingConn = nil end
+        for key, data in pairs(State.FriendBeams) do
+            pcall(function() data.beam:Destroy(); data.att0:Destroy(); data.att1:Destroy() end)
+        end
+        State.FriendBeams = {}
+        State.FriendPairs = {}
+        State.FriendPairCheck = {}
+        State.FriendViewerEnabled = false
     end)
 
     pcall(function() GUI.Cleanup() end)
@@ -2640,92 +2780,33 @@ local function UpdatePlayerHighlight(player, role)
     end
 end
 
-local function getMurder()
-    -- Приоритет 1: Реальная проверка предметов
+-- itemName: "Knife"|"Gun"
+-- useServerData: true = fallback to PlayerData (ESP), false = item-only (AutoFarm)
+-- serverRole: "Murderer"|"Sheriff"  (used only when useServerData=true)
+local function findRoleHolder(itemName, useServerData, serverRole)
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character and plr.Character:FindFirstChild("Knife") then
-            return plr
-        end
-    end
-    
-    for _, plr in ipairs(Players:GetPlayers()) do
+        local char    = plr.Character
         local backpack = plr:FindFirstChild("Backpack")
-        if backpack and backpack:FindFirstChild("Knife") then
+        if (char and char:FindFirstChild(itemName))
+        or (backpack and backpack:FindFirstChild(itemName)) then
             return plr
         end
     end
-    
-    -- Приоритет 2: Серверные данные (для ESP)
-    if State.PlayerData then
+    if useServerData and State.PlayerData then
         for playerName, data in pairs(State.PlayerData) do
-            if data.Role == "Murderer" then
+            if data.Role == serverRole then
                 local player = Players:FindFirstChild(playerName)
-                if player then
-                    return player
-                end
+                if player then return player end
             end
         end
     end
-    
     return nil
 end
 
-local function getSheriff()
-    -- Приоритет 1: Реальная проверка предметов
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character and plr.Character:FindFirstChild("Gun") then
-            return plr
-        end
-    end
-    
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local backpack = plr:FindFirstChild("Backpack")
-        if backpack and backpack:FindFirstChild("Gun") then
-            return plr
-        end
-    end
-    
-    -- Приоритет 2: Серверные данные (для ESP)
-    if State.PlayerData then
-        for playerName, data in pairs(State.PlayerData) do
-            if data.Role == "Sheriff" then
-                local player = Players:FindFirstChild(playerName)
-                if player then
-                    return player
-                end
-            end
-        end
-    end
-    
-    return nil
-end
-
--- ✅ НОВЫЕ функции ТОЛЬКО для автофарма (БЕЗ серверных данных)
-local function getMurderForAutoFarm()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        local backpack = plr:FindFirstChild("Backpack")
-
-        if (character and character:FindFirstChild("Knife"))
-            or (backpack and backpack:FindFirstChild("Knife")) then
-            return plr
-        end
-    end
-    return nil
-end
-
-local function getSheriffForAutoFarm()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        local character = plr.Character
-        local backpack = plr:FindFirstChild("Backpack")
-
-        if (character and character:FindFirstChild("Gun"))
-            or (backpack and backpack:FindFirstChild("Gun")) then
-            return plr
-        end
-    end
-    return nil
-end
+local function getMurder()               return findRoleHolder("Knife", true,  "Murderer") end
+local function getSheriff()              return findRoleHolder("Gun",   true,  "Sheriff")  end
+local function getMurderForAutoFarm()    return findRoleHolder("Knife", false, nil)         end
+local function getSheriffForAutoFarm()   return findRoleHolder("Gun",   false, nil)         end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- AVATAR DISPLAY SYSTEM
@@ -3914,7 +3995,7 @@ local gravReset = nil
 -- ═══════════════════════════════════════════════════════════
 
 -- Базовый Fly (PC)
-local function sFLY(vfly)
+local function startBaseFly(vfly)
     local plr = LocalPlayer
     local char = plr.Character or plr.CharacterAdded:Wait()
     local humanoid = char:FindFirstChildOfClass("Humanoid")
@@ -4025,7 +4106,7 @@ local function sFLY(vfly)
 end
 
 -- Отключение базового Fly
-local function NOFLY()
+local function stopBaseFly()
     FLYING = false
     if flyKeyDown or flyKeyUp then 
         flyKeyDown:Disconnect() 
@@ -4046,7 +4127,7 @@ local function NOFLY()
 end
 
 -- CFrame Fly
-local function sCFLY()
+local function startCFrameFly()
     local speaker = LocalPlayer
     local char = speaker.Character or speaker.CharacterAdded:Wait()
     
@@ -4082,7 +4163,7 @@ local function sCFLY()
 end
 
 -- Отключение CFrame Fly
-local function NOCFLY()
+local function stopCFrameFly()
     FLYING = false
     if CFloop then
         CFloop:Disconnect()
@@ -4098,7 +4179,7 @@ local function NOCFLY()
 end
 
 -- Swim
-local function sSwim()
+local function startSwim()
     local speaker = LocalPlayer
     if not swimming and speaker and speaker.Character and speaker.Character:FindFirstChildWhichIsA("Humanoid") then
         oldgrav = Workspace.Gravity
@@ -4136,7 +4217,7 @@ local function sSwim()
 end
 
 -- Отключение Swim
-local function NOSwim()
+local function stopSwim()
     local speaker = LocalPlayer
     if speaker and speaker.Character and speaker.Character:FindFirstChildWhichIsA("Humanoid") then
         Workspace.Gravity = oldgrav
@@ -4171,13 +4252,13 @@ local function StartFly(flyType)
     State.FlyType = flyType
     
     if flyType == "Fly" then
-        sFLY(false)
+        startBaseFly(false)
     elseif flyType == "Vehicle Fly" then
-        sFLY(true)
+        startBaseFly(true)
     elseif flyType == "CFrame Fly" then
-        sCFLY()
+        startCFrameFly()
     elseif flyType == "Swim" then
-        sSwim()
+        startSwim()
     end
     
     if State.NotificationsEnabled then
@@ -4192,11 +4273,11 @@ local function StopFly()
     State.FlyEnabled = false
     
     if currentType == "CFrame Fly" then
-        NOCFLY()
+        stopCFrameFly()
     elseif currentType == "Swim" then
-        NOSwim()
+        stopSwim()
     else
-        NOFLY()
+        stopBaseFly()
     end
     
     if State.NotificationsEnabled then
@@ -4550,9 +4631,6 @@ end
 
 local ToggleInvisibility
 local InitializeVisibleParts
-
-local InvisibilityConnection = nil
-local VisibleParts = {}
 
 local function FindNearestCoin()
     local character = LocalPlayer.Character
@@ -6666,112 +6744,73 @@ local function TeleportToMouse()
     end
 end
 
--- ============= Глобальные переменные для невидимости =============
+-- ============= Невидимость =============
 local InvisibilityConnection = nil
-local VisibleParts = {} -- Список только видимых частей (Transparency == 0)
 
--- ============= Инициализация видимых частей =============
-InitializeVisibleParts = function()
-    VisibleParts = {}
-    local Character = LocalPlayer.Character
-    if not Character then return end
-    
-    -- Собираем только части с прозрачностью 0 (полностью видимые)
-    for _, part in pairs(Character:GetDescendants()) do
-        if part:IsA('BasePart') and part.Transparency == 0 then
-            table.insert(VisibleParts, part)
+local function setCharacterTransparency(char, value)
+    if not char then return end
+    for _, part in pairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            part.Transparency = value
+        elseif part:IsA("Decal") then
+            part.Transparency = value
         end
     end
 end
 
--- ============= Функция переключения невидимости =============
+-- Заглушка для совместимости (больше не собирает VisibleParts — они не используются)
+InitializeVisibleParts = function() end
+
+local INVIS_DEPTH = 200000  -- юнитов вниз, чтобы скрыть от сервера
+
 ToggleInvisibility = function()
     State.IsInvisible = not State.IsInvisible
-    
+
     if State.IsInvisible then
-        
-        -- Отключаем старое подключение если есть
-        if InvisibilityConnection then
-            InvisibilityConnection:Disconnect()
-        end
-        
-        -- Инициализируем список видимых частей
-        InitializeVisibleParts()
-        
-        -- Создаем цикл невидимости
-        InvisibilityConnection = game:GetService('RunService').Heartbeat:Connect(function()
+        if InvisibilityConnection then InvisibilityConnection:Disconnect() end
+
+        InvisibilityConnection = RunService.Heartbeat:Connect(function()
             if not State.IsInvisible then return end
-            
+
             local Character = LocalPlayer.Character
             if not Character then return end
-            
+
             local RootPart = Character:FindFirstChild('HumanoidRootPart')
             local Humanoid = Character:FindFirstChild('Humanoid')
             if not RootPart or not Humanoid then return end
-            
-            -- ✅ ОБНОВЛЯЕМ ПРОЗРАЧНОСТЬ КАЖДЫЙ КАДР
-            for _, part in pairs(Character:GetDescendants()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                    part.Transparency = 0.5
-                elseif part:IsA("Decal") then
-                    part.Transparency = 0.5
-                end
-            end
-            
-            -- Сохраняем текущую позицию и смещение камеры
-            local OriginalCFrame = RootPart.CFrame
+
+            setCharacterTransparency(Character, 0.5)
+
+            local OriginalCFrame       = RootPart.CFrame
             local OriginalCameraOffset = Humanoid.CameraOffset
-            
-            -- Перемещаем персонажа вниз на 200000 единиц
-            local NewCFrame = OriginalCFrame * CFrame.new(0, -200000, 0)
-            local RelativePosition = NewCFrame:ToObjectSpace(CFrame.new(OriginalCFrame.Position)).Position
+            local NewCFrame            = OriginalCFrame * CFrame.new(0, -INVIS_DEPTH, 0)
 
-            -- Применяем новую позицию и корректируем камеру
-            RootPart.CFrame = NewCFrame
-            Humanoid.CameraOffset = RelativePosition
+            RootPart.CFrame     = NewCFrame
+            Humanoid.CameraOffset = NewCFrame:ToObjectSpace(CFrame.new(OriginalCFrame.Position)).Position
 
-            -- Ждем следующего кадра
-            game:GetService('RunService').RenderStepped:Wait()
+            RunService.RenderStepped:Wait()
 
-            -- Возвращаем персонажа на исходную позицию
-            RootPart.CFrame = OriginalCFrame
+            RootPart.CFrame     = OriginalCFrame
             Humanoid.CameraOffset = OriginalCameraOffset
         end)
-        
+
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
         end
     else
-        
-        -- Отключаем цикл невидимости
         if InvisibilityConnection then
             InvisibilityConnection:Disconnect()
             InvisibilityConnection = nil
         end
-        
-        -- Возвращаем прозрачность всех частей на 0
+
         local Character = LocalPlayer.Character
-        if Character then
-            for _, part in pairs(Character:GetDescendants()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                    part.Transparency = 0
-                elseif part:IsA("Decal") then
-                    part.Transparency = 0
-                end
-            end
-        end
-        
-        -- Очищаем список (он теперь не нужен, но оставим для совместимости)
-        VisibleParts = {}
-        
-        -- Сбрасываем смещение камеры
+        setCharacterTransparency(Character, 0)
+
         if Character then
             local Humanoid = Character:FindFirstChild('Humanoid')
-            if Humanoid then
-                Humanoid.CameraOffset = Vector3.new(0, 0, 0)
-            end
+            if Humanoid then Humanoid.CameraOffset = Vector3.new(0, 0, 0) end
         end
-        
+
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
         end
@@ -7439,6 +7478,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         UIOnly = function(on) State.UIOnlyEnabled = on if on then EnableUIOnly() else DisableUIOnly() end end,
         PingChams = function(on) State.PingChamsEnabled = on if on then StartPingChams() else StopPingChams() end end,
         BulletTracers = ToggleBulletTracers,
+        FriendViewer = function(on) if on then StartFriendViewer() else StopFriendViewer() end end,
 
         -- Combat
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
@@ -7795,6 +7835,7 @@ do
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
         VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
 end
 
 do
