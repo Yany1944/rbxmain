@@ -562,7 +562,7 @@ State.AimbotConfig = {
     Distance = 2000,
     Fov = 50,
     PredictionValue = 0.03,
-    Smoothness = 3,
+    Smoothness = 6,
     VerticalOffset = 0.7,
 
     Method = 'Mouse',
