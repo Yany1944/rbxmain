@@ -108,7 +108,7 @@ return function(env)
         AddCorner(header, 12)
 
         local titleLabel = Create("TextLabel", {
-            Text = "MM2 <font color=\"rgb(128, 0, 128)\">for my кошичка жена!</font>",
+            Text = "MM2 <font color=\"rgb(240, 150, 200)\">for my кошичка жена!</font>",
             RichText = true,
             Font = Enum.Font.GothamBold,
             TextSize = 16,
