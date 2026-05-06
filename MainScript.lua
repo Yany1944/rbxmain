@@ -53,26 +53,19 @@ pcall(function()
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
 end)
 
--- ШАГ 6: WARN/ERROR OVERRIDE
 local oldWarn = warn
-local oldError = error
-
 warn = function(...)
-    local msg = tostring(...)
-    if msg:match("useSliderMotionStates") or msg:match("CorePackages") or msg:match("Slider") then
+    local args = {...}
+    local msg = ""
+    pcall(function() msg = tostring(args[1] or "") end)
+    if msg:find("useSliderMotionStates", 1, true) 
+    or msg:find("CorePackages", 1, true) 
+    or msg:find("Slider", 1, true) then
         return
     end
     return oldWarn(...)
 end
 
-error = function(msg, level)
-    if type(msg) == "string" then
-        if msg:match("useSliderMotionStates") or msg:match("CorePackages") or msg:match("Slider") then
-            return
-        end
-    end
-    return oldError(msg, level)
-end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 2: CONFIG & SERVICES (СТРОКИ 65-115)
