@@ -7186,20 +7186,25 @@ local function ServerLagger()
             CONFIG.Colors.Text
         )
     end
-    pcall(function()
-        local GetSyncData = ReplicatedStorage.GetSyncData
-        local counter = 0
+    task.spawn(function()
+        while true do
+            pcall(function()
+                local GetSyncData = ReplicatedStorage.GetSyncData
+                local counter = 0
 
-        repeat
-            task.spawn(function() GetSyncData:InvokeServer() end)
+                repeat
+                    task.spawn(function() GetSyncData:InvokeServer() end)
 
-            counter = counter + 1
-            if counter == 3 then
-                counter = 0
-                task.wait()
-            end
-        until false
-    end)    
+                    counter = counter + 1
+                    if counter == 3 then
+                        counter = 0
+                        task.wait()
+                    end
+                until false
+            end)
+            task.wait()
+        end
+    end)
 end
 
 local function SpeedGlitch()
