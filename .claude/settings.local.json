@@ -5,7 +5,8 @@
       "Bash(sort -k2 -rn)",
       "Bash(grep -E \"\\(== [0-9]|= [0-9]{3,}|Color3.fromRGB\\\\\\([0-9]+\\)\")",
       "Bash(ls \"D:\\\\Tools\\\\123\\\\rbxmain\")",
-      "Read(//d/Tools/123/**)"
+      "Read(//d/Tools/123/**)",
+      "Bash(dir D:\\\\Tools\\\\lua\\\\rbxmain)"
     ]
   }
 }
