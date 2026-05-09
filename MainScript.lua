@@ -7182,7 +7182,7 @@ end
 local function ServerLagger()
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(255, 85, 85)\">Server Lagger: </font><font color=\"rgb(220,220,220)\">Success</font>",
+            "<font color=\"rgb(255, 85, 85)\">Server Lagger: </font><font color=\"rgb(220,220,220)\">Success123</font>",
             CONFIG.Colors.Text
         )
     end
