@@ -7186,19 +7186,19 @@ local function ServerLagger()
             CONFIG.Colors.Text
         )
     end
-    task.spawn(function()
+    pcall(function()
         local GetSyncData = ReplicatedStorage.GetSyncData
         local counter = 0
-        while true do
-            task.spawn(function()
-                pcall(function() GetSyncData:InvokeServer() end)
-            end)
+
+        repeat
+            task.spawn(function() GetSyncData:InvokeServer() end)
+
             counter = counter + 1
             if counter == 3 then
                 counter = 0
                 task.wait()
             end
-        end
+        until false
     end)
 end
 
