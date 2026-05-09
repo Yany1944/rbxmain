@@ -7194,19 +7194,16 @@ local function ServerLagger()
         "GetTradeStatus", "CheckInventory",
     }
     for _, name in ipairs(targets) do
-        task.spawn(function()
-            local rf = ReplicatedStorage:FindFirstChild(name, true)
-            if not rf then return end
-            local counter = 0
-            repeat
-                task.spawn(function() pcall(function() rf:InvokeServer() end) end)
-                counter = counter + 1
-                if counter == 3 then
-                    counter = 0
-                    task.wait()
-                end
-            until false
-        end)
+        local rf = ReplicatedStorage:FindFirstChild(name, true)
+        if rf then
+            for _ = 1, 5 do
+                task.spawn(function()
+                    while true do
+                        pcall(function() rf:InvokeServer() end)
+                    end
+                end)
+            end
+        end
     end
 end
 
