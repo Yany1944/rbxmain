@@ -7186,20 +7186,28 @@ local function ServerLagger()
             CONFIG.Colors.Text
         )
     end
-    pcall(function()
-        local GetData2 = ReplicatedStorage:FindFirstChild("GetData2", true)
-        local counter = 0
-
-        repeat
-            task.spawn(function() GetData2:InvokeServer() end)
-
-            counter = counter + 1
-            if counter == 3 then
-                counter = 0
-                task.wait()
-            end
-        until false
-    end)
+    local targets = {
+        "GetData2", "GetProfileData", "SearchSongs",
+        "GetLeaderboard", "GetLeaderboardData", "GetTimer",
+        "GetRanks", "GetVersion", "GetQueue", "GetItemData",
+        "GetSyncData", "GetPlayerData", "GetLastRoundRewards",
+        "GetTradeStatus", "CheckInventory",
+    }
+    for _, name in ipairs(targets) do
+        task.spawn(function()
+            local rf = ReplicatedStorage:FindFirstChild(name, true)
+            if not rf then return end
+            local counter = 0
+            repeat
+                task.spawn(function() pcall(function() rf:InvokeServer() end) end)
+                counter = counter + 1
+                if counter == 3 then
+                    counter = 0
+                    task.wait()
+                end
+            until false
+        end)
+    end
 end
 
 local function SpeedGlitch()
