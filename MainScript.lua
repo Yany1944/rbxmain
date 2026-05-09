@@ -7179,32 +7179,24 @@ local function ServerHop()
     TeleportToServer(selectedServer.id)
 end
 
+local ServerLaggerRunning = false
 local function ServerLagger()
+    if ServerLaggerRunning then return end
+    ServerLaggerRunning = true
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(255, 85, 85)\">Server Lagger: </font><font color=\"rgb(220,220,220)\">Success123</font>",
+            "<font color=\"rgb(255, 85, 85)\">Server Lagger: </font><font color=\"rgb(220,220,220)\">Success</font>",
             CONFIG.Colors.Text
         )
     end
-    task.spawn(function()
-        while true do
-            pcall(function()
-                local GetSyncData = ReplicatedStorage.GetSyncData
-                local counter = 0
-
-                repeat
-                    task.spawn(function() GetSyncData:InvokeServer() end)
-
-                    counter = counter + 1
-                    if counter == 3 then
-                        counter = 0
-                        task.wait()
-                    end
-                until false
-            end)
-            task.wait()
-        end
-    end)
+    local GetSyncData = ReplicatedStorage.GetSyncData
+    for i = 1, 10 do
+        task.spawn(function()
+            while true do
+                pcall(function() GetSyncData:InvokeServer() end)
+            end
+        end)
+    end
 end
 
 local function SpeedGlitch()
