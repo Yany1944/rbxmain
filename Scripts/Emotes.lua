@@ -15,9 +15,9 @@ if _G.EmotesGUIRunning then
 end
 _G.EmotesGUIRunning = true
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Menu-7yd7/refs/heads/Script/GUIS/Off-site/Notify.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Notify.lua"))()
 pcall(function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/Branch/GUIS/count-emote"))()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/count-emote"))()
 end)
 
 getgenv().Notify({
@@ -1334,7 +1334,7 @@ local function fetchAllEmotes()
     totalEmotesLoaded = 0
 
     local success, result = pcall(function()
-        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/7yd7/sniper-Emote/refs/heads/test/EmoteSniper.json")
+        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/EmoteSniper.json")
         
         if jsonContent and jsonContent ~= "" then
             local data = HttpService:JSONDecode(jsonContent)
@@ -1390,7 +1390,7 @@ local function fetchAllAnimations()
     animationsData = {}
     
     local success, result = pcall(function()
-        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/7yd7/sniper-Emote/refs/heads/test/AnimationSniper.json")
+        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/AnimationSniper.json")
         
         if jsonContent and jsonContent ~= "" then
             local data = HttpService:JSONDecode(jsonContent)
