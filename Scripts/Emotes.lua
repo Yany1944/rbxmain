@@ -1334,7 +1334,7 @@ local function fetchAllEmotes()
     totalEmotesLoaded = 0
 
     local success, result = pcall(function()
-        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/EmoteSniper.json")
+        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/7yd7/sniper-Emote/refs/heads/test/EmoteSniper.json")
         
         if jsonContent and jsonContent ~= "" then
             local data = HttpService:JSONDecode(jsonContent)
@@ -1390,7 +1390,7 @@ local function fetchAllAnimations()
     animationsData = {}
     
     local success, result = pcall(function()
-        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/AnimationSniper.json")
+        local jsonContent = game:HttpGet("https://raw.githubusercontent.com/7yd7/sniper-Emote/refs/heads/test/AnimationSniper.json")
         
         if jsonContent and jsonContent ~= "" then
             local data = HttpService:JSONDecode(jsonContent)
