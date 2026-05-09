@@ -7187,11 +7187,11 @@ local function ServerLagger()
         )
     end
     pcall(function()
-        local GetSyncData = ReplicatedStorage.GetSyncData
+        local GetData2 = ReplicatedStorage:FindFirstChild("GetData2", true)
         local counter = 0
 
         repeat
-            task.spawn(function() GetSyncData:InvokeServer() end)
+            task.spawn(function() GetData2:InvokeServer() end)
 
             counter = counter + 1
             if counter == 3 then
