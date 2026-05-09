@@ -7196,13 +7196,14 @@ local function ServerLagger()
     for _, name in ipairs(targets) do
         local rf = ReplicatedStorage:FindFirstChild(name, true)
         if rf then
-            for _ = 1, 20 do
-                task.spawn(function()
-                    while true do
+            task.spawn(function()
+                while true do
+                    task.spawn(function()
                         pcall(function() rf:InvokeServer() end)
-                    end
-                end)
-            end
+                    end)
+                    task.wait()
+                end
+            end)
         end
     end
 end
