@@ -124,7 +124,8 @@ local State = {
     
     -- Уведомления
     NotificationsEnabled = false,
-    
+    AvatarDisplayEnabled = false,
+
     -- Character settings
     WalkSpeed = 18,
     JumpPower = 50,
@@ -2974,6 +2975,14 @@ local function clearAllAvatars()
     end
     State.currentMurdererUserId = nil
     State.currentSheriffUserId = nil
+end
+
+-- Управление видимостью карточек аватаров (фоновая логика не затрагивается)
+local function SetAvatarDisplayVisibility(on)
+    local gui = State.UIElements.AvatarDisplayGui
+    if gui then
+        gui.Enabled = on and true or false
+    end
 end
 
 
@@ -7465,6 +7474,12 @@ local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmai
         -- Notifications toggle
         NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
 
+        -- Avatar Display toggle (фоновая логика обновления аватаров не зависит от этого флага)
+        AvatarDisplayEnabled = function(on)
+            State.AvatarDisplayEnabled = on
+            SetAvatarDisplayVisibility(on)
+        end,
+
         -- ESP
         GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
         PlayerNicknamesESP = function(on)
@@ -7846,6 +7861,9 @@ do
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
+        VisualsTab:CreateSection("ROLE DISPLAY")
+        VisualsTab:CreateToggle("Avatar Display", "Show Murderer and Sheriff avatar cards on screen", "AvatarDisplayEnabled", false)
+
         VisualsTab:CreateSection("Misc")
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
@@ -7969,6 +7987,7 @@ end)
 
 CreateNotificationUI()
 CreateAvatarUI()
+SetAvatarDisplayVisibility(State.AvatarDisplayEnabled)
 ApplyCharacterSettings()
 SetupGunTracking()
 StartTrapTracking   ()
