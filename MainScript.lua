@@ -149,6 +149,9 @@ local State = {
     ExtendedHitboxSize = 15,
     ExtendedHitboxEnabled = false,
     KillAuraDistance = 2.5,
+    KillAuraRange = 7,
+    KillAuraEnabled = false,
+    KillAuraStatic = false,
     spawnAtPlayer = false,
     CanShootMurderer = true,
     ShootCooldown = 3,
@@ -311,6 +314,7 @@ local State = {
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
         Invisibility = Enum.KeyCode.Unknown,
+        KillAura = Enum.KeyCode.Unknown,
     }
 }
 
@@ -6553,49 +6557,199 @@ local function UpdateHitboxSize(newSize)
     State.ExtendedHitboxSize = newSize
 end
 
+-- Kill Aura Zone Visualization
+local zoneSegments = 48
+local zoneAttachments = {}
+local zoneBeams = {}
+local zoneRayParams = nil
+local zoneRenderConn = nil
+local ApplyKillAuraZoneStyle
+
+local function CreateKillAuraZone()
+    if #zoneAttachments > 0 then return end
+
+    zoneRayParams = RaycastParams.new()
+    zoneRayParams.FilterType = Enum.RaycastFilterType.Exclude
+    zoneRayParams.IgnoreWater = true
+
+    for i = 1, zoneSegments do
+        local att = Instance.new("Attachment")
+        att.Name = "KillAuraZone_" .. i
+        att.Parent = Workspace.Terrain
+        zoneAttachments[i] = att
+    end
+
+    for i = 1, zoneSegments do
+        local nextI = (i % zoneSegments) + 1
+        local beam = Instance.new("Beam")
+        beam.Attachment0 = zoneAttachments[i]
+        beam.Attachment1 = zoneAttachments[nextI]
+        beam.Color = ColorSequence.new(CONFIG.Colors.Accent)
+        beam.FaceCamera = true
+        beam.LightEmission = 1
+        beam.LightInfluence = 0
+        beam.Brightness = 5
+        beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
+        beam.TextureMode = Enum.TextureMode.Stretch
+        beam.TextureSpeed = 2
+        beam.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.5),
+            NumberSequenceKeypoint.new(1, 0.5)
+        })
+        beam.Width0 = 0.3
+        beam.Width1 = 0.3
+        beam.ZOffset = 0.1
+        beam.Parent = zoneAttachments[i]
+        zoneBeams[i] = beam
+    end
+
+    ApplyKillAuraZoneStyle()
+end
+
+local function UpdateKillAuraZone()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp or #zoneAttachments == 0 then return end
+
+    local origin = hrp.Position
+    local radius = State.KillAuraRange or 7
+    zoneRayParams.FilterDescendantsInstances = {char}
+
+    for i = 1, zoneSegments do
+        local angle = (i - 1) * (math.pi * 2) / zoneSegments
+        local dir = Vector3.new(math.cos(angle), 0, math.sin(angle)) * radius
+        local endPos
+        if State.KillAuraStatic then
+            endPos = origin + dir
+        else
+            local result = Workspace:Raycast(origin, dir, zoneRayParams)
+            endPos = (result and result.Position) or (origin + dir)
+        end
+        zoneAttachments[i].WorldPosition = endPos
+    end
+end
+
+local function DestroyKillAuraZone()
+    if zoneRenderConn then
+        zoneRenderConn:Disconnect()
+        zoneRenderConn = nil
+    end
+    for _, beam in ipairs(zoneBeams) do
+        pcall(function() beam:Destroy() end)
+    end
+    for _, att in ipairs(zoneAttachments) do
+        pcall(function() att:Destroy() end)
+    end
+    zoneAttachments = {}
+    zoneBeams = {}
+end
+
+ApplyKillAuraZoneStyle = function()
+    local speed = State.KillAuraStatic and 0 or 2
+    for _, beam in ipairs(zoneBeams) do
+        pcall(function() beam.TextureSpeed = speed end)
+    end
+end
+
 -- ToggleKillAura() - Kill Aura
 local killAuraCon = nil
 local anchoredPlayers = {}
+local auraEquippedKnife = false
 
 local function ToggleKillAura(state)
     if state then
+        State.KillAuraEnabled = true
         anchoredPlayers = {}
-        
+        auraEquippedKnife = false
+
         if killAuraCon then
             killAuraCon:Disconnect()
         end
-        
+
+        CreateKillAuraZone()
+        if zoneRenderConn then
+            zoneRenderConn:Disconnect()
+        end
+        zoneRenderConn = RunService.RenderStepped:Connect(UpdateKillAuraZone)
+
         killAuraCon = RunService.Heartbeat:Connect(function()
+            -- Автоотключение при потере роли мурдерера
+            if getMurder() ~= LocalPlayer then
+                ToggleKillAura(false)
+                return
+            end
+
             local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if not localHRP then return end
-            
+
+            local range = State.KillAuraRange or 7
+            local playersInRange = 0
+
             for _, player in ipairs(Players:GetPlayers()) do
                 if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
                     local hrp = player.Character.HumanoidRootPart
                     local distance = (hrp.Position - localHRP.Position).Magnitude
-                    
-                    -- ✅ Проверяем дистанцию 7 studs для активации
-                    if distance <= 7 then
+
+                    if distance <= range then
+                        playersInRange = playersInRange + 1
+                        local firstCapture = not anchoredPlayers[player]
+
                         pcall(function()
                             hrp.Anchored = true
-                            -- ✅ Телепортируем на безопасную дистанцию из State (2.5 studs)
                             hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * State.KillAuraDistance)
                         end)
-                        
-                        if not anchoredPlayers[player] then
+
+                        if firstCapture then
                             anchoredPlayers[player] = true
+
+                            -- Мгновенный удар ножом — аналог knifeThrow
+                            pcall(function()
+                                local char = LocalPlayer.Character
+                                if not char then return end
+                                local knife = char:FindFirstChild("Knife")
+                                if not knife then
+                                    local bp = LocalPlayer.Backpack:FindFirstChild("Knife")
+                                    if bp then
+                                        local hum = char:FindFirstChild("Humanoid")
+                                        if hum then
+                                            hum:EquipTool(bp)
+                                            knife = char:FindFirstChild("Knife")
+                                            auraEquippedKnife = true
+                                        end
+                                    end
+                                end
+                                if not knife or not knife.Parent then return end
+                                knife:Activate()
+                            end)
                         end
                     end
                 end
             end
+
+            -- Скрываем нож, когда никого нет в зоне (только если мы сами его достали)
+            if playersInRange == 0 and auraEquippedKnife then
+                local char = LocalPlayer.Character
+                if char then
+                    local hum = char:FindFirstChild("Humanoid")
+                    if hum then
+                        pcall(function() hum:UnequipTools() end)
+                    end
+                end
+                auraEquippedKnife = false
+            end
         end)
-        
+
     else
+        State.KillAuraEnabled = false
+
         if killAuraCon then
             killAuraCon:Disconnect()
             killAuraCon = nil
         end
-        
+
+        DestroyKillAuraZone()
+
         -- Освобождаем заанкоренных игроков
         for player, _ in pairs(anchoredPlayers) do
             if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -7383,6 +7537,23 @@ local function HandleActionInput(input)
     if input.KeyCode == State.Keybinds.Invisibility and State.Keybinds.Invisibility ~= Enum.KeyCode.Unknown then
         pcall(function() ToggleInvisibility() end)
     end
+
+    if input.KeyCode == State.Keybinds.KillAura and State.Keybinds.KillAura ~= Enum.KeyCode.Unknown then
+        pcall(function()
+            if State.KillAuraEnabled then
+                ToggleKillAura(false)
+            else
+                if getMurder() ~= LocalPlayer then
+                    if State.NotificationsEnabled then
+                        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You are not the murderer</font>", CONFIG.Colors.Text)
+                    end
+                    State.KillAuraEnabled = false
+                    return
+                end
+                ToggleKillAura(true)
+            end
+        end)
+    end
 end
 
 -- Auto Rejoin on Disconnect
@@ -7514,7 +7685,11 @@ local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmai
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
         ExtendedHitboxSize = function(v) State.ExtendedHitboxSize = v if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end,
         SpawnAtPlayer = function(on) State.spawnAtPlayer = on end,
-        KillAura = ToggleKillAura,
+        KillAuraRange = function(v) State.KillAuraRange = v end,
+        KillAuraStatic = function(on)
+            State.KillAuraStatic = on
+            ApplyKillAuraZoneStyle()
+        end,
         InstantPickup = function(on) if on then EnableInstantPickup() else DisableInstantPickup() end end,
 
         -- Farming
@@ -7881,7 +8056,10 @@ do
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
         CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
-        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+        CombatTab:CreateSection("KILL AURA")
+        CombatTab:CreateKeybindButton("Kill Aura (Toggle)", "killaura", "KillAura")
+        CombatTab:CreateSlider("Kill Aura Range", "Activation distance in studs", 1, 20, State.KillAuraRange, "KillAuraRange", 0.5)
+        CombatTab:CreateToggle("Static Zone", "Simple circle, no geometry checks", "KillAuraStatic", false)
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
         CombatTab:CreateSection("SHERIFF TOOLS")
