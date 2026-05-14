@@ -6693,42 +6693,40 @@ local function ToggleKillAura(state)
 
                     if distance <= range then
                         playersInRange = playersInRange + 1
-                        local firstCapture = not anchoredPlayers[player]
 
                         pcall(function()
                             hrp.Anchored = true
                             hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * State.KillAuraDistance)
                         end)
 
-                        if firstCapture then
-                            anchoredPlayers[player] = true
-
-                            -- Мгновенный удар ножом — аналог knifeThrow
-                            pcall(function()
-                                local char = LocalPlayer.Character
-                                if not char then return end
-                                local knife = char:FindFirstChild("Knife")
-                                if not knife then
-                                    local bp = LocalPlayer.Backpack:FindFirstChild("Knife")
-                                    if bp then
-                                        local hum = char:FindFirstChild("Humanoid")
-                                        if hum then
-                                            hum:EquipTool(bp)
-                                            knife = char:FindFirstChild("Knife")
-                                            auraEquippedKnife = true
-                                        end
-                                    end
-                                end
-                                if not knife or not knife.Parent then return end
-                                knife:Activate()
-                            end)
-                        end
+                        anchoredPlayers[player] = true
                     end
                 end
             end
 
-            -- Скрываем нож, когда никого нет в зоне (только если мы сами его достали)
-            if playersInRange == 0 and auraEquippedKnife then
+            -- Пока в зоне есть кто-то — экипируем нож (если нужно) и бьём каждый Heartbeat
+            if playersInRange > 0 then
+                pcall(function()
+                    local char = LocalPlayer.Character
+                    if not char then return end
+                    local knife = char:FindFirstChild("Knife")
+                    if not knife then
+                        local bp = LocalPlayer.Backpack:FindFirstChild("Knife")
+                        if bp then
+                            local hum = char:FindFirstChild("Humanoid")
+                            if hum then
+                                hum:EquipTool(bp)
+                                knife = char:FindFirstChild("Knife")
+                                auraEquippedKnife = true
+                            end
+                        end
+                    end
+                    if knife and knife.Parent then
+                        knife:Activate()
+                    end
+                end)
+            elseif auraEquippedKnife then
+                -- Зона пуста — убираем нож, если мы его сами достали
                 local char = LocalPlayer.Character
                 if char then
                     local hum = char:FindFirstChild("Humanoid")
