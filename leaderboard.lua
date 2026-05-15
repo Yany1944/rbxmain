@@ -18,7 +18,7 @@ local AUTOFARM_ENABLED = true
 --slonsagg2 = 6163487250
 --0Jl9lra = 2058109987
 --serejenkaluv = 10341870648
-local WHITELIST_IDS = {10341870648,6163487250,982594515,2058109987,10340849538}
+local WHITELIST_IDS = {}
 
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED --and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
@@ -79,7 +79,8 @@ local State = {
     
     -- Уведомления
     NotificationsEnabled = false,
-    
+    AvatarDisplayEnabled = false,
+
     -- Character settings
     WalkSpeed = 18,
     JumpPower = 50,
@@ -114,7 +115,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 60 * 60, -- 25 минут в секундах
+    ReconnectInterval = 30 * 60, -- 30 минут в секундах
     ReconnectThread = nil,
 
     -- Vote Spammer
@@ -127,6 +128,7 @@ local State = {
     IsGoalReached = false,
     TeleportedThisSession = false,
     CurrentTargetPad = nil,
+    AutoVoteSuppressInvis = false,
 
     -- XP Farm
     XPFarmEnabled = false,
@@ -1631,6 +1633,14 @@ local function clearAllAvatars()
     end
     State.currentMurdererUserId = nil
     State.currentSheriffUserId = nil
+end
+
+-- Управление видимостью карточек аватаров (фоновая логика не затрагивается)
+local function SetAvatarDisplayVisibility(on)
+    local gui = State.UIElements.AvatarDisplayGui
+    if gui then
+        gui.Enabled = on and true or false
+    end
 end
 
 
@@ -3250,12 +3260,12 @@ local function StartAutoFarm()
             end)
         end
 
-        if State.AutoFarmEnabled and not State.IsInvisible then
+        if State.AutoFarmEnabled and not State.IsInvisible and not State.AutoVoteSuppressInvis then
             pcall(function()
                 ToggleInvisibility()
             end)
         end
-                
+
         local noCoinsAttempts = 0
         local maxNoCoinsAttempts = 4
         local lastTeleportTime = 0
@@ -3286,7 +3296,7 @@ local function StartAutoFarm()
                 pcall(function()
                     UnfloatCharacter()
                 end)
-                if State.AutoFarmEnabled and not State.IsInvisible then
+                if State.AutoFarmEnabled and not State.IsInvisible and not State.AutoVoteSuppressInvis then
                     pcall(function()
                         ToggleInvisibility()
                     end)
@@ -3490,10 +3500,10 @@ local function StartAutoFarm()
                     
                     CleanupCoinBlacklist()
                     task.wait(5)
-                    
+
                     -- Ждём нового раунда
                     repeat
-                        if not State.IsInvisible then
+                        if not State.IsInvisible and not State.AutoVoteSuppressInvis then
                             pcall(function()
                                 ToggleInvisibility()
                             end)
@@ -3749,20 +3759,20 @@ local function StartAutoFarm()
                             end
                         end
                     end
-                    
+
                     repeat
-                        if not State.IsInvisible then
+                        if not State.IsInvisible and not State.AutoVoteSuppressInvis then
                             pcall(function()
                                 ToggleInvisibility()
                             end)
                         end
                         task.wait(1)
                     until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
-                    
+
                     if not State.AutoFarmEnabled then
                         break
                     end
-                    
+
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     allowFly = false
@@ -3818,9 +3828,9 @@ local function StartAutoFarm()
                     end
 
                     --print("[Auto Farm] ⏳ Раунд закончился, жду начала нового раунда...")
-                    
+
                     repeat
-                        if not State.IsInvisible then
+                        if not State.IsInvisible and not State.AutoVoteSuppressInvis then
                             pcall(function()
                                 ToggleInvisibility()
                             end)
@@ -5225,7 +5235,8 @@ function VoteSpammer.new()
     self.TeleportedThisSession = false
     self.CurrentTargetPad = nil
     self.GodModeWasDisabled = false  -- Флаг что мы выключали GodMode
-    
+    self.InvisibilityWasDisabled = false  -- Флаг что мы выключали инвиз
+
     return self
 end
 
@@ -5281,7 +5292,9 @@ function VoteSpammer:StartAutoSpam()
     
     self.AutoSpam = true
     self.GodModeWasDisabled = false
-    
+    self.InvisibilityWasDisabled = false
+    State.AutoVoteSuppressInvis = false
+
     if State.NotificationsEnabled then
         ShowNotification("Vote Spammer: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
@@ -5317,11 +5330,20 @@ function VoteSpammer:StartAutoSpam()
                         end
                         self.GodModeWasDisabled = false
                     end
+                    -- ✅ Включаем инвиз обратно (голосование закончилось без достижения цели)
+                    if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
+                        task.wait(0.3)
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+                    self.InvisibilityWasDisabled = false
+                    State.AutoVoteSuppressInvis = false
                 end
                 task.wait(2)
                 continue
             end
-            
+
             -- Новое голосование началось
             if self.IsWaitingForVoting then
                 self.CurrentVotingSession = self.CurrentVotingSession + 1
@@ -5335,7 +5357,17 @@ function VoteSpammer:StartAutoSpam()
                     self.GodModeWasDisabled = true
                     task.wait(0.3)
                 end
-                
+
+                -- ✅ Выключаем инвиз и подавляем авто-инвиз AutoFarm на время голосования
+                State.AutoVoteSuppressInvis = true
+                if State.IsInvisible then
+                    pcall(function()
+                        ToggleInvisibility()
+                    end)
+                    self.InvisibilityWasDisabled = true
+                    task.wait(0.2)
+                end
+
                 if targetPad then
                     self.CurrentTargetPad = targetPad
                 end
@@ -5370,6 +5402,15 @@ function VoteSpammer:StartAutoSpam()
                         end
                         self.GodModeWasDisabled = false
                     end
+                    -- ✅ Включаем инвиз обратно (цель достигнута)
+                    if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
+                        task.wait(0.3)
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+                    self.InvisibilityWasDisabled = false
+                    State.AutoVoteSuppressInvis = false
                     self.IsGoalReached = true
                 end
                 task.wait(2)
@@ -5418,7 +5459,16 @@ function VoteSpammer:StopAutoSpam()
         end
         self.GodModeWasDisabled = false
     end
-    
+    -- ✅ Восстанавливаем инвиз при остановке (если выключали)
+    if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
+        task.wait(0.3)
+        pcall(function()
+            ToggleInvisibility()
+        end)
+    end
+    self.InvisibilityWasDisabled = false
+    State.AutoVoteSuppressInvis = false
+
     if State.NotificationsEnabled then
         ShowNotification("Vote Spammer: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
     end
@@ -5814,7 +5864,7 @@ local function HandleAutoReconnect(enabled)
     end
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
+local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a00711753a40645e113d647/1778434195232_gui.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -5837,6 +5887,12 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         -- Notifications toggle
         NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
+
+        -- Avatar Display toggle (фоновая логика обновления аватаров не зависит от этого флага)
+        AvatarDisplayEnabled = function(on)
+            State.AvatarDisplayEnabled = on
+            SetAvatarDisplayVisibility(on)
+        end,
 
         -- ESP
         GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
@@ -6055,9 +6111,12 @@ do
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
 
+        VisualsTab:CreateSection("ROLE DISPLAY")
+        VisualsTab:CreateToggle("Avatar Display", "Show Murderer and Sheriff avatar cards on screen", "AvatarDisplayEnabled", false)
+
         VisualsTab:CreateSection("Misc")
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", false)
-        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 end
 
 do
@@ -6065,7 +6124,7 @@ do
 
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
-        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+        --CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
         CombatTab:CreateSection("SHERIFF TOOLS")
@@ -6085,10 +6144,10 @@ do
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 30 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateInputField("Reconnect interval","Default: 30 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateSection("VOTE SPAM")
-        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", false)
+        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 end
@@ -6147,6 +6206,7 @@ end)
 
 CreateNotificationUI()
 CreateAvatarUI()
+SetAvatarDisplayVisibility(State.AvatarDisplayEnabled)
 ApplyCharacterSettings()
 SetupGunTracking()
 StartTrapTracking   ()
