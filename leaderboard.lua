@@ -96,6 +96,7 @@ local State = {
     
     -- Auto Farm
     AutoFarmEnabled = false,
+    AutoPrestigeEnabled = false,
     CoinFarmThread = nil,
     CoinFarmFlySpeed = 22,
     CoinFarmDelay = 2,
@@ -3898,6 +3899,91 @@ local function StopXPFarm()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
+-- AUTO PRESTIGE SYSTEM (event-only, без require игровых модулей)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ВАЖНО: НЕ вызывать require() на игровых ModuleScript-ах из этого скрипта —
+-- это контаминирует module-cache Roblox и ломает игровые скрипты после респавна
+-- (Cannot require a RobloxScript module from a non RobloxScript context).
+-- Уровень/престиж трекаем только через ProfileDataChangedEvent (это RemoteEvent,
+-- к require не относится).
+local autoPrestigeDone = false
+local autoPrestigeCooldown = false
+local currentLevel = 0
+local currentPrestige = 0
+local PrestigeRemote = nil
+local ProfileDataChangedEvent = nil
+
+local function InitAutoPrestige()
+    pcall(function()
+        local InventoryRemotes = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Inventory", 10)
+        PrestigeRemote = InventoryRemotes:WaitForChild("Prestige", 10)
+        ProfileDataChangedEvent = InventoryRemotes:WaitForChild("ProfileDataChanged", 10)
+    end)
+end
+
+local function IsCharacterReady()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+    return true
+end
+
+local function TryAutoPrestige()
+    if not State.AutoPrestigeEnabled then return false end
+    if currentLevel >= 100 and not autoPrestigeDone and not autoPrestigeCooldown then
+        if not IsCharacterReady() then return false end
+
+        autoPrestigeCooldown = true
+        autoPrestigeDone = true
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 200, 50)\">Level 100 reached → Prestiging...</font>", CONFIG.Colors.Text)
+        end
+        task.wait(0.5)
+        if PrestigeRemote then
+            pcall(function() PrestigeRemote:FireServer() end)
+        end
+        task.wait(2)
+        autoPrestigeCooldown = false
+        return true
+    end
+    return false
+end
+
+-- Заглушка для совместимости с Handler-ом (он вызывает RefreshLevelFromProfile при включении).
+-- Без require мы не можем читать уровень напрямую — он обновляется только через события.
+local function RefreshLevelFromProfile()
+    -- noop: данные приходят через ProfileDataChangedEvent
+end
+
+task.spawn(function()
+    -- Retry init до 10 попыток (Remote-ы могут появляться с задержкой)
+    local attempts = 0
+    while attempts < 10 do
+        InitAutoPrestige()
+        if PrestigeRemote and ProfileDataChangedEvent then break end
+        attempts = attempts + 1
+        task.wait(1)
+    end
+    if not ProfileDataChangedEvent then return end
+
+    local conn = ProfileDataChangedEvent.Event:Connect(function(key, value)
+        pcall(function()
+            if key == "Level" then
+                currentLevel = tonumber(value) or currentLevel
+                if currentLevel < 100 then
+                    autoPrestigeDone = false
+                end
+                TryAutoPrestige()
+            elseif key == "Prestige" then
+                currentPrestige = tonumber(value) or currentPrestige
+            end
+        end)
+    end)
+    table.insert(State.Connections, conn)
+end)
+
+-- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 12: GODMODE SYSTEM (СТРОКИ 1601-1800)
 -- ══════════════════════════════════════════════════════════════════════════════
 local ApplyGodMode, SetupHealthProtection, SetupDamageBlocker
@@ -5938,6 +6024,13 @@ local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a007
             end
         end,
         XPFarm = function(on) State.XPFarmEnabled = on if on then StartXPFarm() else StopXPFarm() end end,
+        AutoPrestige = function(on)
+            State.AutoPrestigeEnabled = on
+            if on then
+                RefreshLevelFromProfile()
+                TryAutoPrestige()
+            end
+        end,
         UndergroundMode = function(on) State.UndergroundMode = on end,
         CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
         CoinFarmDelay = function(v) State.CoinFarmDelay = v end,
@@ -5992,7 +6085,7 @@ local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a007
 
 GUI.Init()
 
--- СИСТЕМА МОНЕТ + НАКОПИТЕЛЬНЫЙ СЧЁТЧИК С ПЕРСИСТЕНТНОСТЬЮ ЧЕРЕЗ РЕКОННЕКТ
+-- СИСТЕМА МОНЕТ (только текущий баланс)
 task.spawn(function()
     task.wait(0.5)
 
@@ -6000,46 +6093,13 @@ task.spawn(function()
     if header then header = header:FindFirstChild("Header") end
     if not header then return end
 
-    local HttpService = game:GetService("HttpService")
-    local SESSION_FILE = "MM2_CoinSession.json"
-    local SESSION_TIMEOUT = 600 -- 10 минут: после этого сессия считается новой
+    -- Best-effort удаление старого файла сессии (от вырезанного накопительного счётчика)
+    pcall(function()
+        if isfile and delfile and isfile("MM2_CoinSession.json") then
+            delfile("MM2_CoinSession.json")
+        end
+    end)
 
-    -- ===== Persistence helpers =====
-    local function loadSession()
-        if not isfile or not readfile then return nil end
-        local ok, exists = pcall(isfile, SESSION_FILE)
-        if not ok or not exists then return nil end
-        local ok2, content = pcall(readfile, SESSION_FILE)
-        if not ok2 or not content then return nil end
-        local ok3, data = pcall(function() return HttpService:JSONDecode(content) end)
-        if not ok3 or type(data) ~= "table" then return nil end
-        if data.totalCollected == nil or data.savedAt == nil then return nil end
-        if (os.time() - data.savedAt) > SESSION_TIMEOUT then return nil end
-        return data
-    end
-
-    local function saveSession(totalCollected, lastSeenCoins)
-        if not writefile then return end
-        pcall(function()
-            writefile(SESSION_FILE, HttpService:JSONEncode({
-                totalCollected = totalCollected,
-                lastSeenCoins = lastSeenCoins,
-                savedAt = os.time(),
-            }))
-        end)
-    end
-
-    -- ===== Session state =====
-    local totalCollected = 0
-    local lastSeenCoins = nil  -- nil = ещё не знаем baseline (выставим при первом чтении)
-
-    local loaded = loadSession()
-    if loaded then
-        totalCollected = loaded.totalCollected or 0
-        lastSeenCoins = loaded.lastSeenCoins
-    end
-
-    -- ===== Format helpers =====
     local function parseNumber(text)
         if not text then return 0 end
         local cleaned = tostring(text):gsub(",", "")
@@ -6050,7 +6110,6 @@ task.spawn(function()
         return tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
     end
 
-    -- ===== UI Label =====
     local coinsLabel = Instance.new("TextLabel")
     coinsLabel.Name = "CoinsDisplay"
     coinsLabel.Text = ""
@@ -6063,35 +6122,18 @@ task.spawn(function()
     coinsLabel.TextScaled = false
     coinsLabel.Parent = header
 
-    local function updateDisplay(coins)
-        -- Обработка дельты: накопление только при росте баланса
-        if lastSeenCoins == nil then
-            lastSeenCoins = coins
-        elseif coins > lastSeenCoins then
-            totalCollected = totalCollected + (coins - lastSeenCoins)
-            lastSeenCoins = coins
-        elseif coins < lastSeenCoins then
-            -- Игрок потратил монеты — не вычитаем, просто обновляем baseline
-            lastSeenCoins = coins
-        end
+    local function updateCoins(coins)
+        local formatted = formatWithCommas(coins)
+        coinsLabel.Text = string.format("Coins: <font color=\"rgb(255, 215, 110)\">%s</font>", formatted)
 
-        local balanceStr = formatWithCommas(coins)
-        local collectedStr = formatWithCommas(totalCollected)
-
-        coinsLabel.Text = string.format(
-            "Coins: <font color=\"rgb(255, 215, 110)\">%s</font> <font color=\"rgb(150, 255, 180)\">(+%s)</font>",
-            balanceStr, collectedStr
-        )
-
-        local displayLength = #balanceStr + #collectedStr + 12  -- "Coins: " + " (+" + ")"
-        local width = math.clamp(60 + (displayLength * 7), 130, 280)
+        local displayLength = #formatted
+        local width = math.clamp(60 + (displayLength * 8), 85, 150)
         coinsLabel.Size = UDim2.new(0, width, 1, 0)
         coinsLabel.Position = UDim2.new(1, -(45 + width), 0, 0)
     end
 
     task.wait(1.5)
 
-    -- ===== Подключение к новому пути кошелька =====
     local success, coinsElement = pcall(function()
         return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 10)
             :WaitForChild("Shop", 10)
@@ -6103,22 +6145,12 @@ task.spawn(function()
     end)
 
     if success and coinsElement then
-        updateDisplay(parseNumber(coinsElement.Text))
+        updateCoins(parseNumber(coinsElement.Text))
 
         local connection = coinsElement:GetPropertyChangedSignal("Text"):Connect(function()
-            updateDisplay(parseNumber(coinsElement.Text))
+            updateCoins(parseNumber(coinsElement.Text))
         end)
         table.insert(State.Connections, connection)
-
-        -- Auto-save цикл: каждые 5 секунд сохраняем сессию на диск
-        task.spawn(function()
-            while coinsLabel.Parent do
-                task.wait(5)
-                if lastSeenCoins ~= nil then
-                    saveSession(totalCollected, lastSeenCoins)
-                end
-            end
-        end)
     else
         coinsLabel.Text = "Coins: <font color=\"rgb(255, 0, 0)\">N/A</font>"
         coinsLabel.Size = UDim2.new(0, 100, 1, 0)
@@ -6195,6 +6227,7 @@ do
         FarmTab:CreateSection("AUTO FARM")
         FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
