@@ -115,7 +115,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 30 * 60, -- 30 минут в секундах
+    ReconnectInterval = 60 * 60, -- 30 минут в секундах
     ReconnectThread = nil,
 
     -- Vote Spammer
@@ -5828,7 +5828,7 @@ local function HandleAutoRejoin(enabled)
     end
 end
 
-local DEFAULT_INTERVAL = 25 * 60
+local DEFAULT_INTERVAL = 60 * 60
 
 -- Функция для установки интервала
 local function SetReconnectInterval(minutes)
@@ -5991,16 +5991,66 @@ local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a007
 })
 
 GUI.Init()
---[[
--- ОПТИМИЗИРОВАННАЯ СИСТЕМА МОНЕТ (с поддержкой запятых)
+
+-- СИСТЕМА МОНЕТ + НАКОПИТЕЛЬНЫЙ СЧЁТЧИК С ПЕРСИСТЕНТНОСТЬЮ ЧЕРЕЗ РЕКОННЕКТ
 task.spawn(function()
     task.wait(0.5)
-    
+
     local header = State.UIElements.MainGui and State.UIElements.MainGui:FindFirstChild("MainFrame")
     if header then header = header:FindFirstChild("Header") end
     if not header then return end
-    
-    -- Создаем label с автоматической шириной
+
+    local HttpService = game:GetService("HttpService")
+    local SESSION_FILE = "MM2_CoinSession.json"
+    local SESSION_TIMEOUT = 600 -- 10 минут: после этого сессия считается новой
+
+    -- ===== Persistence helpers =====
+    local function loadSession()
+        if not isfile or not readfile then return nil end
+        local ok, exists = pcall(isfile, SESSION_FILE)
+        if not ok or not exists then return nil end
+        local ok2, content = pcall(readfile, SESSION_FILE)
+        if not ok2 or not content then return nil end
+        local ok3, data = pcall(function() return HttpService:JSONDecode(content) end)
+        if not ok3 or type(data) ~= "table" then return nil end
+        if data.totalCollected == nil or data.savedAt == nil then return nil end
+        if (os.time() - data.savedAt) > SESSION_TIMEOUT then return nil end
+        return data
+    end
+
+    local function saveSession(totalCollected, lastSeenCoins)
+        if not writefile then return end
+        pcall(function()
+            writefile(SESSION_FILE, HttpService:JSONEncode({
+                totalCollected = totalCollected,
+                lastSeenCoins = lastSeenCoins,
+                savedAt = os.time(),
+            }))
+        end)
+    end
+
+    -- ===== Session state =====
+    local totalCollected = 0
+    local lastSeenCoins = nil  -- nil = ещё не знаем baseline (выставим при первом чтении)
+
+    local loaded = loadSession()
+    if loaded then
+        totalCollected = loaded.totalCollected or 0
+        lastSeenCoins = loaded.lastSeenCoins
+    end
+
+    -- ===== Format helpers =====
+    local function parseNumber(text)
+        if not text then return 0 end
+        local cleaned = tostring(text):gsub(",", "")
+        return tonumber(cleaned) or 0
+    end
+
+    local function formatWithCommas(n)
+        return tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    end
+
+    -- ===== UI Label =====
     local coinsLabel = Instance.new("TextLabel")
     coinsLabel.Name = "CoinsDisplay"
     coinsLabel.Text = ""
@@ -6012,65 +6062,70 @@ task.spawn(function()
     coinsLabel.BackgroundTransparency = 1
     coinsLabel.TextScaled = false
     coinsLabel.Parent = header
-    
-    -- Функция парсинга числа (убирает запятые)
-    local function parseNumber(text)
-        if not text then return 0 end
-        -- Убираем все запятые: "26,292" -> "26292"
-        local cleaned = tostring(text):gsub(",", "")
-        return tonumber(cleaned) or 0
-    end
-    
-    -- Функция обновления позиции и текста
-    local function updateCoins(coins)
-        -- Форматируем с запятыми для читаемости
-        local formatted = tostring(coins):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-        coinsLabel.Text = string.format("Coins: <font color=\"rgb(255, 215, 110)\">%s</font>", formatted)
-        
-        -- Динамический расчет ширины по количеству символов (включая запятые)
-        local displayLength = #formatted
-        local width = math.clamp(60 + (displayLength * 8), 85, 150)
-        
-        -- Позиция: отступ от крестика (35px) + margin (10px) + ширина label
+
+    local function updateDisplay(coins)
+        -- Обработка дельты: накопление только при росте баланса
+        if lastSeenCoins == nil then
+            lastSeenCoins = coins
+        elseif coins > lastSeenCoins then
+            totalCollected = totalCollected + (coins - lastSeenCoins)
+            lastSeenCoins = coins
+        elseif coins < lastSeenCoins then
+            -- Игрок потратил монеты — не вычитаем, просто обновляем baseline
+            lastSeenCoins = coins
+        end
+
+        local balanceStr = formatWithCommas(coins)
+        local collectedStr = formatWithCommas(totalCollected)
+
+        coinsLabel.Text = string.format(
+            "Coins: <font color=\"rgb(255, 215, 110)\">%s</font> <font color=\"rgb(150, 255, 180)\">(+%s)</font>",
+            balanceStr, collectedStr
+        )
+
+        local displayLength = #balanceStr + #collectedStr + 12  -- "Coins: " + " (+" + ")"
+        local width = math.clamp(60 + (displayLength * 7), 130, 280)
         coinsLabel.Size = UDim2.new(0, width, 1, 0)
         coinsLabel.Position = UDim2.new(1, -(45 + width), 0, 0)
     end
-    
+
     task.wait(1.5)
-    
-    -- Подключение к GUI игры
+
+    -- ===== Подключение к новому пути кошелька =====
     local success, coinsElement = pcall(function()
-        return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 5)
-            :WaitForChild("Christmas2025", 5)
-            :WaitForChild("Container", 5)
-            :WaitForChild("Main", 5)
-            :WaitForChild("Gifting", 5)
-            :WaitForChild("Title", 5)
-            :WaitForChild("Tokens", 5)
-            :WaitForChild("Container", 5)
-            :WaitForChild("TextLabel", 5)
+        return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 10)
+            :WaitForChild("Shop", 10)
+            :WaitForChild("Medium", 10)
+            :WaitForChild("Title", 10)
+            :WaitForChild("Coins", 10)
+            :WaitForChild("Container", 10)
+            :WaitForChild("Amount", 10)
     end)
-    
+
     if success and coinsElement then
-        -- Начальное обновление с парсингом
-        local initialCoins = parseNumber(coinsElement.Text)
-        updateCoins(initialCoins)
-        
-        -- ЕДИНСТВЕННОЕ подключение - срабатывает только при изменении
+        updateDisplay(parseNumber(coinsElement.Text))
+
         local connection = coinsElement:GetPropertyChangedSignal("Text"):Connect(function()
-            local coins = parseNumber(coinsElement.Text)
-            updateCoins(coins)
+            updateDisplay(parseNumber(coinsElement.Text))
         end)
-        
-        -- Cleanup при удалении GUI
         table.insert(State.Connections, connection)
+
+        -- Auto-save цикл: каждые 5 секунд сохраняем сессию на диск
+        task.spawn(function()
+            while coinsLabel.Parent do
+                task.wait(5)
+                if lastSeenCoins ~= nil then
+                    saveSession(totalCollected, lastSeenCoins)
+                end
+            end
+        end)
     else
         coinsLabel.Text = "Coins: <font color=\"rgb(255, 0, 0)\">N/A</font>"
         coinsLabel.Size = UDim2.new(0, 100, 1, 0)
         coinsLabel.Position = UDim2.new(1, -145, 0, 0)
     end
 end)
---]]
+
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
 ----------------------------------------------------------------
@@ -6145,7 +6200,7 @@ do
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
         FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 30 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateInputField("Reconnect interval","Default: 30 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+        FarmTab:CreateInputField("Reconnect interval","Default: 60 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateSection("VOTE SPAM")
         FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
