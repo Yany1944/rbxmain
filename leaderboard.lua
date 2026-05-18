@@ -1732,10 +1732,6 @@ local function StartRoleChecking()
                     )
                 end
                 clearAllAvatars()
-
-                if State.RoundEndBindable then
-                    pcall(function() State.RoundEndBindable:Fire() end)
-                end
             end
 
             -- Обнаружение смены шерифа (Hero)
@@ -3903,152 +3899,86 @@ local function StopXPFarm()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- AUTO PRESTIGE SYSTEM (триггер по round-end + UI-детектор уровня)
+-- AUTO PRESTIGE SYSTEM (минималистичный, event-driven)
 -- ══════════════════════════════════════════════════════════════════════════════
-local autoPrestigeDone = false
-local autoPrestigeCooldown = false
-local currentLevel = 0
-local currentPrestige = 0
+-- Подписываемся на ChangeProfileData (server→client RemoteEvent). Когда придёт
+-- Level >= 100 → FireServer Prestige → rejoin. Без polling, без UI-сканов,
+-- без проверок состояния. Любая ошибка изолирована pcall-ом.
+local autoPrestigeBusy = false
 local PrestigeRemote = nil
+local ChangeProfileDataEvent = nil
 local GetProfileDataRemote = nil
 
-local function InitAutoPrestige()
+local function FirePrestigeAndRejoin()
+    if autoPrestigeBusy then return end
+    if not State.AutoPrestigeEnabled then return end
+    if not PrestigeRemote then return end
+    autoPrestigeBusy = true
+
     pcall(function()
-        local InventoryRemotes = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Inventory", 10)
-        PrestigeRemote = InventoryRemotes:WaitForChild("Prestige", 10)
-        GetProfileDataRemote = InventoryRemotes:WaitForChild("GetProfileData", 10)
-    end)
-end
-
-local function parseNumFromText(text)
-    if not text then return nil end
-    local cleaned = tostring(text):gsub(",", ""):gsub("%s", "")
-    return tonumber(cleaned)
-end
-
-local function ReadLevelFromUI()
-    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not pgui then return nil end
-
-    local ok, lbl = pcall(function()
-        return pgui.CrossPlatform.Shop.Medium.Title.Level.Container.Amount
-    end)
-    if ok and lbl and (lbl:IsA("TextLabel") or lbl:IsA("TextButton")) then
-        local n = parseNumFromText(lbl.Text)
-        if n then return n end
-    end
-
-    for _, d in ipairs(pgui:GetDescendants()) do
-        if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Name == "Amount" then
-            local parent = d.Parent
-            while parent and parent ~= pgui do
-                local pname = parent.Name
-                if pname == "Level" or pname == "MyLevel" or pname == "PlayerLevel" then
-                    local n = parseNumFromText(d.Text)
-                    if n then return n end
-                    break
-                end
-                parent = parent.Parent
-            end
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 200, 50)\">Level 100 → Prestiging...</font>", CONFIG.Colors.Text)
         end
-    end
-
-    return nil
-end
-
-local function applyProfile(profile)
-    if type(profile) ~= "table" then return end
-    local lvl = profile.Level or profile.level or profile.NewLevel or profile.CurrentLevel or profile.MyLevel or profile.PlayerLevel
-    if not lvl and type(profile.Stats) == "table" then
-        lvl = profile.Stats.Level
-    end
-    local prst = profile.Prestige or profile.prestige or profile.CurrentPrestige
-
-    if tonumber(lvl) then
-        local n = tonumber(lvl)
-        if n > currentLevel then currentLevel = n end
-    end
-    if tonumber(prst) then
-        currentPrestige = tonumber(prst)
-    end
-end
-
-local function FetchProfileData()
-    if GetProfileDataRemote then
-        pcall(function()
-            local profile = GetProfileDataRemote:InvokeServer()
-            applyProfile(profile)
-        end)
-    end
-    local uiLevel = ReadLevelFromUI()
-    if uiLevel then currentLevel = uiLevel end
-end
-
-local function IsCharacterReady()
-    local char = LocalPlayer.Character
-    if not char then return false end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return false end
-    return true
-end
-
-local function TryAutoPrestige()
-    if not State.AutoPrestigeEnabled then return false end
-    if currentLevel < 100 then return false end
-    if autoPrestigeDone or autoPrestigeCooldown then return false end
-    if not IsCharacterReady() then return false end
-    if not PrestigeRemote then return false end
-
-    autoPrestigeCooldown = true
-    autoPrestigeDone = true
-
-    if State.NotificationsEnabled then
-        ShowNotification("<font color=\"rgb(255, 200, 50)\">Level 100 reached → Prestiging...</font>", CONFIG.Colors.Text)
-    end
-    task.wait(0.5)
+    end)
     pcall(function() PrestigeRemote:FireServer() end)
     task.wait(3)
-    -- Rejoin того же сервера, чтобы prestige применился чисто
     pcall(function()
-        if game.JobId and game.JobId ~= "" then
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-        else
-            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        if State.Rejoin then State.Rejoin() end
+    end)
+    -- Fallback unlock: если Rejoin не сработал, через 10s освобождаем флаг
+    task.wait(10)
+    autoPrestigeBusy = false
+end
+
+-- Используется Handler-ом при включении тумблера (если игрок уже на 100)
+local function CheckAndPrestige()
+    if not State.AutoPrestigeEnabled then return end
+    if not GetProfileDataRemote then return end
+    pcall(function()
+        local profile = GetProfileDataRemote:InvokeServer()
+        if type(profile) ~= "table" then return end
+        local lvl = tonumber(profile.Level or profile.level or profile.NewLevel or profile.CurrentLevel or profile.MyLevel)
+        if lvl and lvl >= 100 then
+            task.spawn(FirePrestigeAndRejoin)
         end
     end)
-    return true
 end
-
--- Для совместимости с Handler-ом, который вызывает RefreshLevelFromProfile()
-local function RefreshLevelFromProfile()
-    FetchProfileData()
-end
-
--- BindableEvent, который фаерит Round-end-блок (см. строку ~1733)
-local roundEndBindable = Instance.new("BindableEvent")
-State.RoundEndBindable = roundEndBindable
 
 task.spawn(function()
     local attempts = 0
     while attempts < 10 do
-        InitAutoPrestige()
-        if PrestigeRemote and GetProfileDataRemote then break end
+        pcall(function()
+            local InventoryRemotes = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Inventory", 10)
+            PrestigeRemote = InventoryRemotes:WaitForChild("Prestige", 10)
+            ChangeProfileDataEvent = InventoryRemotes:WaitForChild("ChangeProfileData", 10)
+            GetProfileDataRemote = InventoryRemotes:WaitForChild("GetProfileData", 10)
+        end)
+        if PrestigeRemote and ChangeProfileDataEvent then break end
         attempts = attempts + 1
         task.wait(1)
     end
-    if not PrestigeRemote then return end
+    if not PrestigeRemote or not ChangeProfileDataEvent then return end
 
-    FetchProfileData()
-
-    -- Главный триггер: окончание раунда
-    local roundConn = roundEndBindable.Event:Connect(function()
-        pcall(function()
-            FetchProfileData()
-            if currentLevel < 100 then autoPrestigeDone = false end
-            TryAutoPrestige()
-        end)
+    -- Единственный listener: server-side level changes
+    local conn = ChangeProfileDataEvent.OnClientEvent:Connect(function(...)
+        if not State.AutoPrestigeEnabled then return end
+        local args = {...}
+        local key, value = args[1], args[2]
+        local lvl
+        if type(key) == "string"
+            and (key == "Level" or key == "NewLevel" or key == "CurrentLevel" or key == "MyLevel") then
+            lvl = tonumber(value)
+        elseif type(key) == "table" then
+            lvl = tonumber(key.Level or key.level or key.NewLevel or key.CurrentLevel)
+        end
+        if lvl and lvl >= 100 then
+            task.spawn(FirePrestigeAndRejoin)
+        end
     end)
-    table.insert(State.Connections, roundConn)
+    table.insert(State.Connections, conn)
+
+    -- Если игрок уже на 100 при старте — престижим сразу
+    CheckAndPrestige()
 end)
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -5178,6 +5108,7 @@ local function Rejoin()
         TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end)
 end
+State.Rejoin = Rejoin
 
 local function ExecuteInf()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
@@ -6094,10 +6025,7 @@ local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a007
         XPFarm = function(on) State.XPFarmEnabled = on if on then StartXPFarm() else StopXPFarm() end end,
         AutoPrestige = function(on)
             State.AutoPrestigeEnabled = on
-            if on then
-                RefreshLevelFromProfile()
-                TryAutoPrestige()
-            end
+            if on then CheckAndPrestige() end
         end,
         UndergroundMode = function(on) State.UndergroundMode = on end,
         CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
