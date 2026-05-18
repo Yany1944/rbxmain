@@ -6227,7 +6227,7 @@ do
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 30 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 60 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateSection("VOTE SPAM")
