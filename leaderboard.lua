@@ -6223,7 +6223,7 @@ do
         FarmTab:CreateSection("AUTO FARM")
         FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", false)
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
