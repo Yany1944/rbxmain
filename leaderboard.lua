@@ -116,7 +116,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 60 * 60, -- 30 минут в секундах
+    ReconnectInterval = 25 * 60, -- 30 минут в секундах
     ReconnectThread = nil,
 
     -- Vote Spammer
@@ -5913,7 +5913,7 @@ local function HandleAutoRejoin(enabled)
     end
 end
 
-local DEFAULT_INTERVAL = 60 * 60
+local DEFAULT_INTERVAL = 25 * 60
 
 -- Функция для установки интервала
 local function SetReconnectInterval(minutes)
@@ -6228,8 +6228,8 @@ do
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 30 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateInputField("Reconnect interval","Default: 60 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateSection("VOTE SPAM")
         FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
