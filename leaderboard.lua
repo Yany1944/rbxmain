@@ -116,7 +116,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 25 * 60, -- 30 минут в секундах
+    ReconnectInterval = 45 * 60, -- 45 минут в секундах
     ReconnectThread = nil,
 
     -- Vote Spammer
@@ -5922,11 +5922,11 @@ local function HandleAutoRejoin(enabled)
     end
 end
 
-local DEFAULT_INTERVAL = 25 * 60
+local DEFAULT_INTERVAL = 45 * 60
 
 -- Функция для установки интервала
 local function SetReconnectInterval(minutes)
-    local mins = tonumber(minutes) or 25
+    local mins = tonumber(minutes) or 45
     State.ReconnectInterval = mins * 60
     print(string.format("[Auto Reconnect] Interval: %d min (%d sec)", mins, State.ReconnectInterval))
     if State.AutoReconnectEnabled then
@@ -6236,8 +6236,8 @@ do
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
+        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 45 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateInputField("Reconnect interval","Default: 45 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateSection("VOTE SPAM")
         FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
