@@ -347,21 +347,18 @@ local function RemoveCoinTracer()
 end
 
 -- Обновление трасера каждый кадр
-RunService.RenderStepped:Connect(function()
-    if CurrentCoinTracer then
-        -- Проверка валидности монеты
-        if not CurrentCoinTracer.coin or not CurrentCoinTracer.coin.Parent then
-            RemoveCoinTracer()
-            return
-        end
-        
-        -- ✅ Проверяем ТОЛЬКО автофарм (без BulletTracersEnabled)
-        if not State.AutoFarmEnabled then
-            RemoveCoinTracer()
-            return
-        end
+local CoinTracerRenderConn
+CoinTracerRenderConn = TrackConnection(RunService.RenderStepped:Connect(function()
+    if not CurrentCoinTracer then return end -- ранний выход, нет трасера — нет работы
+    if not CurrentCoinTracer.coin or not CurrentCoinTracer.coin.Parent then
+        RemoveCoinTracer()
+        return
     end
-end)
+    if not State.AutoFarmEnabled then
+        RemoveCoinTracer()
+        return
+    end
+end))
 
 local function GetShootOrigin(tool)
     if not tool then return nil end
@@ -554,18 +551,6 @@ local function ToggleBulletTracers(enabled)
     end
 end
 
-LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(0.5)
-    if State.BulletTracersEnabled then
-        SetupToolTracers(character)
-    end
-end)
-
-if LocalPlayer.Character then
-    SetupToolTracers(LocalPlayer.Character)
-end
-
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 4: SYSTEM FUNCTIONS (СТРОКИ 253-410)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -637,6 +622,13 @@ local function FullShutdown()
     pcall(function()
         if State.AutoRejoinEnabled then HandleAutoRejoin(false) end
         if State.AutoReconnectEnabled then HandleAutoReconnect(false) end
+    end)
+
+    pcall(function()
+        if State.AutoPrestigeThread then
+            task.cancel(State.AutoPrestigeThread)
+            State.AutoPrestigeThread = nil
+        end
     end)
 
     -- ✅ Очистка всех general connections
@@ -788,10 +780,11 @@ local OptimizationState = {
     afkModeActive = false,
     fpsBoostActive = false,
     uiOnlyActive = false,
-    savedUIState = {},
-    savedUIOnlyState = {},
+    savedUIState = setmetatable({}, {__mode = "k"}),     -- weak keys: GC собирает удалённые ScreenGui
+    savedUIOnlyState = setmetatable({}, {__mode = "k"}), -- weak keys
     savedSettings = {
         Lighting = {},
+        LightingEffects = {}, -- Instance refs отдельно от primitive значений
         Camera = {}
     },
     fpsBoostDescendantConn = nil
@@ -838,9 +831,9 @@ local function ApplyUIOptimization()
 end
 
 -- ОБРАБОТЧИК РЕСПАВНА
-LocalPlayer.CharacterAdded:Connect(function(character)
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
     task.wait(0.5)
-    
+
     if OptimizationState.afkModeActive then
         ApplyUIOptimization()
         pcall(function()
@@ -849,7 +842,7 @@ LocalPlayer.CharacterAdded:Connect(function(character)
     elseif OptimizationState.uiOnlyActive then
         ApplyUIOptimization()
     end
-end)
+end))
 
 -- ==============================
 -- AFK MODE FUNCTIONS
@@ -888,9 +881,10 @@ EnableMaxOptimization = function()
         Lighting.FogEnd = 100
         Lighting.Technology = Enum.Technology.Legacy
         
+        OptimizationState.savedSettings.LightingEffects = {}
         for _, effect in pairs(Lighting:GetChildren()) do
             if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
-                OptimizationState.savedSettings.Lighting[effect.Name] = effect
+                table.insert(OptimizationState.savedSettings.LightingEffects, effect)
                 effect.Parent = nil
             end
         end
@@ -956,9 +950,9 @@ DisableMaxOptimization = function()
                 gui.Enabled = wasEnabled
             end
         end
-        OptimizationState.savedUIState = {}
+        OptimizationState.savedUIState = setmetatable({}, {__mode = "k"})
     end)
-    
+
     -- 3. ВОССТАНОВЛЕНИЕ ОСВЕЩЕНИЯ
     pcall(function()
         if OptimizationState.savedSettings.Lighting.GlobalShadows ~= nil then
@@ -968,13 +962,12 @@ DisableMaxOptimization = function()
             Lighting.OutdoorAmbient = OptimizationState.savedSettings.Lighting.OutdoorAmbient
             Lighting.FogEnd = OptimizationState.savedSettings.Lighting.FogEnd
             Lighting.Technology = OptimizationState.savedSettings.Lighting.Technology
-            
-            for name, effect in pairs(OptimizationState.savedSettings.Lighting) do
-                if typeof(effect) == "Instance" then
-                    effect.Parent = Lighting
-                end
+
+            for _, effect in ipairs(OptimizationState.savedSettings.LightingEffects) do
+                if effect then pcall(function() effect.Parent = Lighting end) end
             end
-            
+            OptimizationState.savedSettings.LightingEffects = {}
+
             OptimizationState.savedSettings.Lighting = {}
         end
     end)
@@ -1030,7 +1023,7 @@ DisableUIOnly = function()
                 end
             end
         end
-        OptimizationState.savedUIOnlyState = {}
+        OptimizationState.savedUIOnlyState = setmetatable({}, {__mode = "k"})
     end)
 end
 
@@ -1090,31 +1083,33 @@ EnableFPSBoost = function()
                 v.Enabled = false
             elseif v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then
                 v.Enabled = false
+            elseif v:IsA("ForceField") then
+                v.Visible = false
             end
         end
     end)
-    
-    -- 5. AUTO-CLEANUP NEW EFFECTS
+
+    -- 5. AUTO-CLEANUP NEW EFFECTS (без task.spawn, без Destroy → нет варнингов на server-replicated)
     OptimizationState.fpsBoostDescendantConn = Workspace.DescendantAdded:Connect(function(child)
         if not OptimizationState.fpsBoostActive then return end
-        
-        task.spawn(function()
-            pcall(function()
-                if child:IsA('ForceField') 
-                    or child:IsA('Sparkles') 
-                    or child:IsA('Smoke') 
-                    or child:IsA('Fire') 
-                then
-                    task.wait()
-                    child:Destroy()
-                elseif child:IsA('ParticleEmitter') or child:IsA('Trail') then
-                    child.Enabled = false
-                end
-            end)
-        end)
+        if child:IsA('ParticleEmitter') or child:IsA('Trail')
+            or child:IsA('Sparkles') or child:IsA('Smoke') or child:IsA('Fire') then
+            child.Enabled = false
+        elseif child:IsA('ForceField') then
+            child.Visible = false
+        end
     end)
-    
+
     TrackConnection(OptimizationState.fpsBoostDescendantConn)
+end
+
+DisableFPSBoost = function()
+    if not OptimizationState.fpsBoostActive then return end
+    OptimizationState.fpsBoostActive = false
+    if OptimizationState.fpsBoostDescendantConn then
+        pcall(function() OptimizationState.fpsBoostDescendantConn:Disconnect() end)
+        OptimizationState.fpsBoostDescendantConn = nil
+    end
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -1284,21 +1279,23 @@ end
 ----------------------------------------------------------------
 
 local function SetupPlayerDataListener()
+    if State._PlayerDataListenerActive then return end
     local success, remotes = pcall(function()
         return game.ReplicatedStorage:WaitForChild("Remotes", 5)
     end)
-    
+
     if not success or not remotes then return end
-    
+
     local gameplay = remotes:FindFirstChild("Gameplay")
     if not gameplay then return end
-    
+
     local dataChanged = gameplay:FindFirstChild("PlayerDataChanged")
     if not dataChanged then return end
-    
-    dataChanged.OnClientEvent:Connect(function(data)
+
+    TrackConnection(dataChanged.OnClientEvent:Connect(function(data)
         State.PlayerData = data or {}
-    end)
+    end))
+    State._PlayerDataListenerActive = true
 end
 
 -- CreateHighlight() - создание Highlight для персонажа
@@ -3899,14 +3896,13 @@ local function StopXPFarm()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- AUTO PRESTIGE SYSTEM (минималистичный, event-driven)
+-- AUTO PRESTIGE SYSTEM (минималистичный, polling каждые 60 сек)
 -- ══════════════════════════════════════════════════════════════════════════════
--- Подписываемся на ChangeProfileData (server→client RemoteEvent). Когда придёт
--- Level >= 100 → FireServer Prestige → rejoin. Без polling, без UI-сканов,
--- без проверок состояния. Любая ошибка изолирована pcall-ом.
+-- Каждые 60 сек: InvokeServer GetProfileData → если Level >= 100 → FireServer
+-- Prestige → rejoin. Без event listener-ов, без UI-сканов.
+-- Любая ошибка изолирована pcall-ом.
 local autoPrestigeBusy = false
 local PrestigeRemote = nil
-local ChangeProfileDataEvent = nil
 local GetProfileDataRemote = nil
 
 local function FirePrestigeAndRejoin()
@@ -3944,41 +3940,54 @@ local function CheckAndPrestige()
     end)
 end
 
+local function StartAutoPrestigePolling()
+    if State.AutoPrestigeThread then return end
+    State.AutoPrestigeThread = task.spawn(function()
+        while State.AutoPrestigeEnabled do
+            task.wait(60)
+            if not State.AutoPrestigeEnabled then break end
+            if autoPrestigeBusy then continue end
+            pcall(function()
+                if not GetProfileDataRemote then return end
+                local profile = GetProfileDataRemote:InvokeServer()
+                if type(profile) ~= "table" then return end
+                local lvl = tonumber(profile.Level or profile.level
+                    or profile.NewLevel or profile.CurrentLevel or profile.MyLevel)
+                if lvl and lvl >= 100 then
+                    FirePrestigeAndRejoin()
+                end
+            end)
+        end
+        State.AutoPrestigeThread = nil
+    end)
+end
+
+local function StopAutoPrestigePolling()
+    if State.AutoPrestigeThread then
+        pcall(task.cancel, State.AutoPrestigeThread)
+        State.AutoPrestigeThread = nil
+    end
+end
+
 task.spawn(function()
     local attempts = 0
     while attempts < 10 do
         pcall(function()
             local InventoryRemotes = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Inventory", 10)
             PrestigeRemote = InventoryRemotes:WaitForChild("Prestige", 10)
-            ChangeProfileDataEvent = InventoryRemotes:WaitForChild("ChangeProfileData", 10)
             GetProfileDataRemote = InventoryRemotes:WaitForChild("GetProfileData", 10)
         end)
-        if PrestigeRemote and ChangeProfileDataEvent then break end
+        if PrestigeRemote and GetProfileDataRemote then break end
         attempts = attempts + 1
         task.wait(1)
     end
-    if not PrestigeRemote or not ChangeProfileDataEvent then return end
+    if not PrestigeRemote or not GetProfileDataRemote then return end
 
-    -- Единственный listener: server-side level changes
-    local conn = ChangeProfileDataEvent.OnClientEvent:Connect(function(...)
-        if not State.AutoPrestigeEnabled then return end
-        local args = {...}
-        local key, value = args[1], args[2]
-        local lvl
-        if type(key) == "string"
-            and (key == "Level" or key == "NewLevel" or key == "CurrentLevel" or key == "MyLevel") then
-            lvl = tonumber(value)
-        elseif type(key) == "table" then
-            lvl = tonumber(key.Level or key.level or key.NewLevel or key.CurrentLevel)
-        end
-        if lvl and lvl >= 100 then
-            task.spawn(FirePrestigeAndRejoin)
-        end
-    end)
-    table.insert(State.Connections, conn)
-
-    -- Если игрок уже на 100 при старте — престижим сразу
-    CheckAndPrestige()
+    -- Если AutoPrestige уже включён при загрузке — стартовать polling + немедленная проверка
+    if State.AutoPrestigeEnabled then
+        StartAutoPrestigePolling()
+        CheckAndPrestige()
+    end
 end)
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -5076,26 +5085,13 @@ end
 
 -- SetupAntiAFK() - VirtualUser:CaptureController()
 local function SetupAntiAFK()
+    if State.IdledConnection then return end -- guard: не дублировать подписку
     local VirtualUser = game:GetService("VirtualUser")
-    LocalPlayer.Idled:Connect(function()
+    State.IdledConnection = LocalPlayer.Idled:Connect(function()
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new())
     end)
-    
-    task.spawn(function()
-        while getgenv().MM2_Script do
-            pcall(function()
-                if getconnections then
-                    for _, connection in next, getconnections(LocalPlayer.Idled) do
-                        if connection.Disable then
-                            connection:Disable()
-                        end
-                    end
-                end
-            end)
-            task.wait(60)
-        end
-    end)
+    TrackConnection(State.IdledConnection)
 end
 
 local function Rejoin()
@@ -5174,9 +5170,9 @@ local function respawn(plr)
 end
 
 -- Очистка при выходе игрока
-game.Players.PlayerRemoving:Connect(function(plr)
+TrackConnection(game.Players.PlayerRemoving:Connect(function(plr)
     respawning[plr.UserId] = nil
-end)
+end))
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -5654,11 +5650,24 @@ local function ServerHop()
     
     -- Телепортация
     local function TeleportToJob(jobId)
+        -- Cleanup активных threads чтобы не было fork "старого" Rejoin после teleport
+        pcall(function()
+            if State.ReconnectThread then
+                task.cancel(State.ReconnectThread)
+                State.ReconnectThread = nil
+            end
+            State.AutoReconnectEnabled = false
+            if State.VoteSpammerThread then
+                pcall(task.cancel, State.VoteSpammerThread)
+                State.VoteSpammerThread = nil
+            end
+        end)
+
         for attempt = 1, 3 do
             local success, err = pcall(function()
                 TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
             end)
-            
+
             if success then
                 return true
             else
@@ -5920,33 +5929,27 @@ local function SetReconnectInterval(minutes)
     local mins = tonumber(minutes) or 25
     State.ReconnectInterval = mins * 60
     print(string.format("[Auto Reconnect] Interval: %d min (%d sec)", mins, State.ReconnectInterval))
+    if State.AutoReconnectEnabled then
+        HandleAutoReconnect(true) -- перезапуск с новым интервалом
+    end
 end
 
 local function HandleAutoReconnect(enabled)
-    State.AutoReconnectEnabled = enabled
-    
-    if enabled then
-        local interval = State.ReconnectInterval or DEFAULT_INTERVAL
-        
-        State.ReconnectThread = task.spawn(function()
-            local elapsed = 0
-            
-            while State.AutoReconnectEnabled do
-                task.wait(1)
-                elapsed += 1
-                
-                if elapsed >= interval then
-                    Rejoin()
-                    return
-                end
-            end
-        end)
-    else
-        if State.ReconnectThread then
-            task.cancel(State.ReconnectThread)
-            State.ReconnectThread = nil
-        end
+    -- Всегда сначала отменяем предыдущий thread (даже при enabled=true)
+    if State.ReconnectThread then
+        pcall(task.cancel, State.ReconnectThread)
+        State.ReconnectThread = nil
     end
+    State.AutoReconnectEnabled = enabled
+    if not enabled then return end
+
+    local interval = State.ReconnectInterval or DEFAULT_INTERVAL
+    State.ReconnectThread = task.delay(interval, function()
+        if State.AutoReconnectEnabled then
+            State.ReconnectThread = nil
+            Rejoin()
+        end
+    end)
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
 local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a00711753a40645e113d647/1778434195232_gui.lua"))()({
@@ -6025,7 +6028,12 @@ local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a007
         XPFarm = function(on) State.XPFarmEnabled = on if on then StartXPFarm() else StopXPFarm() end end,
         AutoPrestige = function(on)
             State.AutoPrestigeEnabled = on
-            if on then CheckAndPrestige() end
+            if on then
+                StartAutoPrestigePolling()
+                CheckAndPrestige()
+            else
+                StopAutoPrestigePolling()
+            end
         end,
         UndergroundMode = function(on) State.UndergroundMode = on end,
         CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
@@ -6167,7 +6175,7 @@ do
 
         MainTab:CreateSection("CAMERA")
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
-        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip", true)
+        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip", false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
 
         MainTab:CreateSection("TELEPORT & OTHER")
@@ -6198,7 +6206,7 @@ do
         VisualsTab:CreateToggle("Avatar Display", "Show Murderer and Sheriff avatar cards on screen", "AvatarDisplayEnabled", false)
 
         VisualsTab:CreateSection("Misc")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", false)
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", true)
         VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 end
 
@@ -6272,7 +6280,7 @@ do
         UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
-LocalPlayer.CharacterAdded:Connect(function()
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
     task.wait(1)
     ApplyCharacterSettings()
@@ -6282,7 +6290,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.heroSent = false
     State.roundStart = true
     State.roundActive = false
-end)
+end))
 
 -- ═══════════════════════════════════════════════════════════════
 --                      ЗАПУСК СКРИПТА
