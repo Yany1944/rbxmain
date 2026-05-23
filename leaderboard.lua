@@ -3930,7 +3930,9 @@ local function GetCurrentLevel()
     if not ProfileData then return nil end
     local xp = ProfileData.NewXP or ProfileData.XP or 0
     if LevelModule and LevelModule.GetLevel then
-        return tonumber(LevelModule.GetLevel(xp)) or tonumber(ProfileData.Level)
+        -- GetLevel возвращает multi-return; локальная переменная обрезает до первого значения
+        local lvl = LevelModule.GetLevel(xp)
+        return tonumber(lvl) or tonumber(ProfileData.Level)
     end
     return tonumber(ProfileData.Level)
 end
