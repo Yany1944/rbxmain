@@ -3908,21 +3908,26 @@ local PrestigeRemote = nil
 local ProfileData = nil
 local LevelModule = nil
 
--- Безопасный require через getloadedmodules() (не ломает PlayerGui после респавна)
-local function safeRequireByName(name)
-    if getloadedmodules then
-        for _, mod in ipairs(getloadedmodules()) do
-            if mod.Name == name then
-                local ok, result = pcall(require, mod)
-                if ok then return result end
+-- Находим ProfileData и LevelModule из GC без require() — require из executor ломает игровые скрипты
+local function findModulesFromGC()
+    if not getgc then return nil, nil end
+    local profile, levelMod = nil, nil
+    for _, v in ipairs(getgc(true)) do
+        if type(v) == "table" then
+            if not profile
+                and rawget(v, "NewXP") ~= nil
+                and rawget(v, "Level") ~= nil
+                and rawget(v, "Prestige") ~= nil then
+                profile = v
+            end
+            if not levelMod
+                and type(rawget(v, "GetLevel")) == "function" then
+                levelMod = v
             end
         end
+        if profile and levelMod then break end
     end
-    local ok, result = pcall(function()
-        return require(ReplicatedStorage:WaitForChild("Modules", 10):WaitForChild(name, 10))
-    end)
-    if ok then return result end
-    return nil
+    return profile, levelMod
 end
 
 local function GetCurrentLevel()
@@ -3992,15 +3997,15 @@ end
 
 task.spawn(function()
     local attempts = 0
-    while not ProfileData and attempts < 10 do
-        ProfileData = safeRequireByName("ProfileData")
+    while not ProfileData and attempts < 15 do
+        ProfileData, LevelModule = findModulesFromGC()
         if ProfileData then break end
         attempts = attempts + 1
         task.wait(1)
     end
-    if not ProfileData then return end
-
-    LevelModule = safeRequireByName("LevelModule")
+    if not ProfileData then
+        ProfileData = {}
+    end
 
     local InventoryRemotes
     pcall(function()
@@ -6085,13 +6090,6 @@ task.spawn(function()
     local header = State.UIElements.MainGui and State.UIElements.MainGui:FindFirstChild("MainFrame")
     if header then header = header:FindFirstChild("Header") end
     if not header then return end
-
-    -- Best-effort удаление старого файла сессии (от вырезанного накопительного счётчика)
-    pcall(function()
-        if isfile and delfile and isfile("MM2_CoinSession.json") then
-            delfile("MM2_CoinSession.json")
-        end
-    end)
 
     local function parseNumber(text)
         if not text then return 0 end
