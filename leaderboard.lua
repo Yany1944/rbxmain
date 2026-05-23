@@ -3896,20 +3896,51 @@ local function StopXPFarm()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- AUTO PRESTIGE SYSTEM (минималистичный, polling каждые 60 сек)
+-- AUTO PRESTIGE SYSTEM (event-driven через ProfileDataChanged + polling fallback)
 -- ══════════════════════════════════════════════════════════════════════════════
--- Каждые 60 сек: InvokeServer GetProfileData → если Level >= 100 → FireServer
--- Prestige → rejoin. Без event listener-ов, без UI-сканов.
--- Любая ошибка изолирована pcall-ом.
+-- Источники:
+--   ProfileData: ReplicatedStorage.Modules.ProfileData (ModuleScript-таблица)
+--   LevelModule: ReplicatedStorage.Modules.LevelModule (GetLevel(xp))
+--   ProfileDataChanged: ReplicatedStorage.Remotes.Inventory.ProfileDataChanged (BindableEvent)
+--   Prestige: ReplicatedStorage.Remotes.Inventory.Prestige (RemoteEvent, FireServer без аргументов)
 local autoPrestigeBusy = false
+local autoPrestigeDone = false
 local PrestigeRemote = nil
-local GetProfileDataRemote = nil
+local ProfileData = nil
+local LevelModule = nil
+
+-- Безопасный require через getloadedmodules() (не ломает PlayerGui после респавна)
+local function safeRequireByName(name)
+    if getloadedmodules then
+        for _, mod in ipairs(getloadedmodules()) do
+            if mod.Name == name then
+                local ok, result = pcall(require, mod)
+                if ok then return result end
+            end
+        end
+    end
+    local ok, result = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Modules", 10):WaitForChild(name, 10))
+    end)
+    if ok then return result end
+    return nil
+end
+
+local function GetCurrentLevel()
+    if not ProfileData then return nil end
+    local xp = ProfileData.NewXP or ProfileData.XP or 0
+    if LevelModule and LevelModule.GetLevel then
+        return tonumber(LevelModule.GetLevel(xp)) or tonumber(ProfileData.Level)
+    end
+    return tonumber(ProfileData.Level)
+end
 
 local function FirePrestigeAndRejoin()
     if autoPrestigeBusy then return end
     if not State.AutoPrestigeEnabled then return end
     if not PrestigeRemote then return end
     autoPrestigeBusy = true
+    autoPrestigeDone = true
 
     pcall(function()
         if State.NotificationsEnabled then
@@ -3921,42 +3952,31 @@ local function FirePrestigeAndRejoin()
     pcall(function()
         if State.Rejoin then State.Rejoin() end
     end)
-    -- Fallback unlock: если Rejoin не сработал, через 10s освобождаем флаг
     task.wait(10)
     autoPrestigeBusy = false
 end
 
--- Используется Handler-ом при включении тумблера (если игрок уже на 100)
-local function CheckAndPrestige()
+local function TryAutoPrestige()
     if not State.AutoPrestigeEnabled then return end
-    if not GetProfileDataRemote then return end
-    pcall(function()
-        local profile = GetProfileDataRemote:InvokeServer()
-        if type(profile) ~= "table" then return end
-        local lvl = tonumber(profile.Level or profile.level or profile.NewLevel or profile.CurrentLevel or profile.MyLevel)
-        if lvl and lvl >= 100 then
-            task.spawn(FirePrestigeAndRejoin)
-        end
-    end)
+    if autoPrestigeBusy or autoPrestigeDone then return end
+    local lvl = GetCurrentLevel()
+    if lvl and lvl >= 100 then
+        task.spawn(FirePrestigeAndRejoin)
+    end
+end
+
+-- Используется Handler-ом при включении тумблера
+local function CheckAndPrestige()
+    TryAutoPrestige()
 end
 
 local function StartAutoPrestigePolling()
     if State.AutoPrestigeThread then return end
     State.AutoPrestigeThread = task.spawn(function()
         while State.AutoPrestigeEnabled do
-            task.wait(60)
+            task.wait(30)
             if not State.AutoPrestigeEnabled then break end
-            if autoPrestigeBusy then continue end
-            pcall(function()
-                if not GetProfileDataRemote then return end
-                local profile = GetProfileDataRemote:InvokeServer()
-                if type(profile) ~= "table" then return end
-                local lvl = tonumber(profile.Level or profile.level
-                    or profile.NewLevel or profile.CurrentLevel or profile.MyLevel)
-                if lvl and lvl >= 100 then
-                    FirePrestigeAndRejoin()
-                end
-            end)
+            TryAutoPrestige()
         end
         State.AutoPrestigeThread = nil
     end)
@@ -3971,22 +3991,47 @@ end
 
 task.spawn(function()
     local attempts = 0
-    while attempts < 10 do
-        pcall(function()
-            local InventoryRemotes = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Inventory", 10)
-            PrestigeRemote = InventoryRemotes:WaitForChild("Prestige", 10)
-            GetProfileDataRemote = InventoryRemotes:WaitForChild("GetProfileData", 10)
-        end)
-        if PrestigeRemote and GetProfileDataRemote then break end
+    while not ProfileData and attempts < 10 do
+        ProfileData = safeRequireByName("ProfileData")
+        if ProfileData then break end
         attempts = attempts + 1
         task.wait(1)
     end
-    if not PrestigeRemote or not GetProfileDataRemote then return end
+    if not ProfileData then return end
 
-    -- Если AutoPrestige уже включён при загрузке — стартовать polling + немедленная проверка
+    LevelModule = safeRequireByName("LevelModule")
+
+    local InventoryRemotes
+    pcall(function()
+        InventoryRemotes = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Inventory", 10)
+    end)
+    if not InventoryRemotes then return end
+
+    pcall(function() PrestigeRemote = InventoryRemotes:WaitForChild("Prestige", 10) end)
+    local ProfileDataChangedEvent
+    pcall(function() ProfileDataChangedEvent = InventoryRemotes:WaitForChild("ProfileDataChanged", 10) end)
+
+    if not PrestigeRemote then return end
+
+    if ProfileDataChangedEvent then
+        local conn = ProfileDataChangedEvent.Event:Connect(function(key, value)
+            if ProfileData and key ~= nil then
+                ProfileData[key] = value
+            end
+            if key == "NewXP" or key == "XP" or key == "Prestige" or key == "Level" then
+                local lvl = GetCurrentLevel()
+                if lvl and lvl < 100 then
+                    autoPrestigeDone = false
+                end
+                TryAutoPrestige()
+            end
+        end)
+        TrackConnection(conn)
+    end
+
     if State.AutoPrestigeEnabled then
         StartAutoPrestigePolling()
-        CheckAndPrestige()
+        TryAutoPrestige()
     end
 end)
 
