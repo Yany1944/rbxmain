@@ -1735,65 +1735,142 @@ end
 -- ============= END FRIEND VIEWER SYSTEM =============
 
 -- ════════════════════════════════════════════════════════════════════════════
--- KNIFE TRAJECTORY: подписка на серверную Model "ThrowingKnife"
+-- KNIFE TRAJECTORY + BULLET TRACER (свой пистолет + shootMurderer)
 -- ════════════════════════════════════════════════════════════════════════════
--- Сервер MM2 спавнит Model "ThrowingKnife" в Workspace при ЛЮБОМ броске ножа.
--- В ней: BladePosition (BasePart) + ThrowDirection (Vector3Value).
--- Рисуем 1 Beam от позиции ножа в направлении броска (100 studs, 2 сек).
+local ToggleBulletTracers  -- forward declaration: используется в Handlers (~стр. 7522)
 
-local function HandleKnifeTrajectory(obj)
-    if not State.BulletTracersEnabled then return end
-    if not obj or obj.Name ~= "ThrowingKnife" or not obj:IsA("Model") then return end
+do
+    local TRACER_COUNT = 3
 
-    local bladePos = obj:WaitForChild("BladePosition", 0.3)
-    if not bladePos or not bladePos:IsA("BasePart") then return end
-
-    local throwDir = obj:FindFirstChild("ThrowDirection")
-    if not throwDir or not throwDir:IsA("Vector3Value") then return end
-
-    local dir = throwDir.Value
-    if dir.Magnitude == 0 then return end
-
-    local startPos = bladePos.Position
-    local endPos = startPos + dir.Unit * 100
-
-    for _ = 1, 4 do
-        CreateTracer(startPos, endPos, 2)
-    end
-end
-
-local knifeTrajectoryConn = nil
-
-local function CleanupTracers()
-    if knifeTrajectoryConn then
-        pcall(function() knifeTrajectoryConn:Disconnect() end)
-        knifeTrajectoryConn = nil
+    local function SpawnTracers(startPos, endPos, duration)
+        if not State.BulletTracersEnabled then return end
+        for i = 1, TRACER_COUNT do
+            CreateTracer(startPos, endPos, duration or 2)
+        end
     end
 
-    for _, tracer in ipairs(State.TracersList) do
-        pcall(function()
-            tracer.beam:Destroy()
-            tracer.att0:Destroy()
-            tracer.att1:Destroy()
+    -- ─── KNIFE: подписка на серверную Model "ThrowingKnife" в Workspace ──────────
+    local function HandleKnifeTrajectory(obj)
+        if not State.BulletTracersEnabled then return end
+        if not obj or obj.Name ~= "ThrowingKnife" or not obj:IsA("Model") then return end
+
+        local bladePos = obj:WaitForChild("BladePosition", 0.3)
+        if not bladePos or not bladePos:IsA("BasePart") then return end
+
+        local throwDir = obj:FindFirstChild("ThrowDirection")
+        if not throwDir or not throwDir:IsA("Vector3Value") then return end
+
+        local dir = throwDir.Value
+        if dir.Magnitude == 0 then return end
+
+        local startPos = bladePos.Position
+        local endPos = startPos + dir.Unit * 100
+
+        SpawnTracers(startPos, endPos, 2)
+    end
+
+    -- ─── BULLET (свой пистолет): Tool.Activated на собственном Gun ───────────────
+    local function IsGunTool(tool)
+        if not tool or not tool:IsA("Tool") then return false end
+        local events = tool:FindFirstChild("Events")
+        local remote = (events and events:FindFirstChild("Shoot"))
+            or tool:FindFirstChild("Shoot")
+            or (tool:FindFirstChild("KnifeServer") and tool.KnifeServer:FindFirstChild("ShootGun"))
+        return remote and remote:IsA("RemoteEvent")
+    end
+
+    local ownToolConnections = {}  -- { [Tool] = Activated connection }
+    local lastGunTracerTime = 0
+
+    local function ConnectOwnGun(tool)
+        if not IsGunTool(tool) then return end
+        if ownToolConnections[tool] then return end
+        local conn = tool.Activated:Connect(function()
+            if not State.BulletTracersEnabled then return end
+            local now = tick()
+            if now - lastGunTracerTime < (State.ShootCooldown or 3) then return end
+            lastGunTracerTime = now
+            local handle = tool:FindFirstChild("Handle")
+            if not handle then return end
+            local mouse = LocalPlayer:GetMouse()
+            if not mouse then return end
+            SpawnTracers(handle.Position, mouse.Hit.Position, 2)
         end)
+        ownToolConnections[tool] = conn
+        TrackConnection(conn)
     end
-    State.TracersList = {}
-end
 
-local function ToggleBulletTracers(enabled)
-    State.BulletTracersEnabled = enabled
+    local function ClearOwnToolConnections()
+        for _, conn in pairs(ownToolConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        ownToolConnections = {}
+    end
 
-    if enabled then
+    local function HookOwnContainer(container)
+        if not container then return end
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") then ConnectOwnGun(tool) end
+        end
+        local conn = container.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then
+                task.wait(0.1)  -- ждём пока в Tool догрузится Events.Shoot
+                ConnectOwnGun(child)
+            end
+        end)
+        TrackConnection(conn)
+    end
+
+    local knifeTrajectoryConn = nil
+    local ownCharAddedConn = nil
+
+    local function CleanupTracers()
         if knifeTrajectoryConn then
             pcall(function() knifeTrajectoryConn:Disconnect() end)
             knifeTrajectoryConn = nil
         end
-        knifeTrajectoryConn = Workspace.ChildAdded:Connect(function(obj)
-            task.spawn(HandleKnifeTrajectory, obj)
-        end)
-        TrackConnection(knifeTrajectoryConn)
-    else
-        CleanupTracers()
+        if ownCharAddedConn then
+            pcall(function() ownCharAddedConn:Disconnect() end)
+            ownCharAddedConn = nil
+        end
+        ClearOwnToolConnections()
+
+        for _, tracer in ipairs(State.TracersList) do
+            pcall(function()
+                tracer.beam:Destroy()
+                tracer.att0:Destroy()
+                tracer.att1:Destroy()
+            end)
+        end
+        State.TracersList = {}
+    end
+
+    ToggleBulletTracers = function(enabled)
+        State.BulletTracersEnabled = enabled
+
+        if enabled then
+            -- Knife: Workspace.ChildAdded
+            if knifeTrajectoryConn then pcall(function() knifeTrajectoryConn:Disconnect() end) end
+            knifeTrajectoryConn = Workspace.ChildAdded:Connect(function(obj)
+                task.spawn(HandleKnifeTrajectory, obj)
+            end)
+            TrackConnection(knifeTrajectoryConn)
+
+            -- Bullet: только свой Gun в Character / Backpack
+            if LocalPlayer.Character then HookOwnContainer(LocalPlayer.Character) end
+            local bp = LocalPlayer:FindFirstChild("Backpack")
+            if bp then HookOwnContainer(bp) end
+
+            -- Респавн — переподписаться на новый Character
+            if ownCharAddedConn then pcall(function() ownCharAddedConn:Disconnect() end) end
+            ownCharAddedConn = LocalPlayer.CharacterAdded:Connect(function(character)
+                task.wait(0.2)
+                HookOwnContainer(character)
+            end)
+            TrackConnection(ownCharAddedConn)
+        else
+            CleanupTracers()
+        end
     end
 end
 
