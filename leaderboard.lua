@@ -89,7 +89,6 @@ local State = {
     
     -- Camera 
     ViewClipEnabled = false,
-    KillAuraDistance = 2.5,
     CanShootMurderer = true,
     ShootCooldown = 3,
     ShootMurdererMode = "Magic",
@@ -4815,12 +4814,24 @@ local function DisableInstantPickup()
     end
 end
 
+-- Найти RemoteEvent HandleTouched внутри Knife (в Character или Backpack).
+-- Tool.Events.HandleTouched доступен и из Backpack — equip не требуется.
+local function GetKnifeHandleTouched()
+    local char = LocalPlayer.Character
+    local knife = char and char:FindFirstChild("Knife")
+    if not knife then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then knife = bp:FindFirstChild("Knife") end
+    end
+    if not knife then return nil end
+    local events = knife:FindFirstChild("Events")
+    if not events then return nil end
+    return events:FindFirstChild("HandleTouched")
+end
+
 InstantKillAll = function()
-    --print("[InstantKillAll] 🔪 Запуск...")
-    
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
-        --print("[InstantKillAll] ❌ Вы не мурдерер!")
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">You are not the murderer</font>",
@@ -4829,31 +4840,9 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local character = LocalPlayer.Character
-    if not character then
-        --print("[InstantKillAll] ❌ Character не найден!")
-        return
-    end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        --print("[InstantKillAll] ❌ HumanoidRootPart не найден!")
-        return
-    end
-    
-    -- ✅ Проверяем есть ли нож
-    if not character:FindFirstChild("Knife") then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid and LocalPlayer.Backpack:FindFirstChild("Knife") then
-            humanoid:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.3)
-        end
-    end
-    
-    local knife = character:FindFirstChild("Knife")
-    if not knife then
-        --print("[InstantKillAll] ❌ Нож не найден!")
+
+    local handleTouched = GetKnifeHandleTouched()
+    if not handleTouched then
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">Knife not found</font>",
@@ -4862,69 +4851,22 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local originalCFrame = hrp.CFrame
-    local teleportedPlayers = 0
-    
-    -- ✅ ИЗМЕНЕНИЕ: Телепортируем игроков ПЕРЕД собой (как в KillAura)
-    local killAuraDistance = State.KillAuraDistance or 2.5
-    
+
+    local killCount = 0
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                -- ✅ Телепортируем игрока ПЕРЕД нами на расстоянии killAuraDistance
-                targetHRP.CFrame = hrp.CFrame + hrp.CFrame.LookVector * killAuraDistance
-                targetHRP.Anchored = true
-                teleportedPlayers = teleportedPlayers + 1
+            local targetPart = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
+            if targetPart then
+                pcall(function() handleTouched:FireServer(targetPart) end)
+                killCount = killCount + 1
+                task.wait(0.05)
             end
         end
     end
-    
+
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll: Players teleported: " .. teleportedPlayers .. ", attacking...</font>",
-            CONFIG.Colors.Text
-        )
-    end
-    
-    --print("[InstantKillAll] 📍 Телепортировано: " .. teleportedPlayers .. " игроков ПЕРЕД собой")
-    
-    task.wait(0.2   )
-    
-    -- ✅ Активируем нож 3 раза
-    for i = 1, 3 do
-        knife = character:FindFirstChild("Knife")
-        if knife and knife.Parent then
-            knife:Activate()
-            --print("[InstantKillAll] 🔪 Активация ножа #" .. i)
-        else
-            --print("[InstantKillAll] ⚠️ Нож пропал во время атаки!")
-            break
-        end
-        
-        if i < 3 then
-            task.wait(1.5)
-        end
-    end
-    
-    task.wait(0.5)
-    
-    -- ✅ Освобождаем игроков
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                targetHRP.Anchored = false
-            end
-        end
-    end
-    
-    --print("[InstantKillAll] ✅ Завершено!")
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Complete!</font>",
+            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Killed " .. killCount .. " players</font>",
             CONFIG.Colors.Green
         )
     end
