@@ -148,7 +148,6 @@ local State = {
     -- Combat
     ExtendedHitboxSize = 15,
     ExtendedHitboxEnabled = false,
-    KillAuraDistance = 2.5,
     KillAuraRange = 7,
     KillAuraEnabled = false,
     KillAuraStatic = false,
@@ -255,7 +254,6 @@ local State = {
     -- Tracers
     BulletTracersEnabled = false,
     TracersList = {},
-    LastTracerTime = 0,
 
     -- Friend Viewer
     FriendViewerEnabled = false,
@@ -1736,175 +1734,42 @@ end
 
 -- ============= END FRIEND VIEWER SYSTEM =============
 
-local function GetShootOrigin(tool)
-    if not tool then return nil end
-    local handle = tool:FindFirstChild("Handle")
-    if handle then
-        return handle.Position
-    end
-    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        return hrp.Position + Vector3.new(0, 1.5, 0)
-    end
-    return nil
-end
+-- ════════════════════════════════════════════════════════════════════════════
+-- KNIFE TRAJECTORY: подписка на серверную Model "ThrowingKnife"
+-- ════════════════════════════════════════════════════════════════════════════
+-- Сервер MM2 спавнит Model "ThrowingKnife" в Workspace при ЛЮБОМ броске ножа.
+-- В ней: BladePosition (BasePart) + ThrowDirection (Vector3Value).
+-- Рисуем 1 Beam от позиции ножа в направлении броска (100 studs, 2 сек).
 
-local function PerformRaycast(origin, direction, maxDistance)
-    RayParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    
-    local raycastResult = Workspace:Raycast(origin, direction * maxDistance, RayParams)
-    if raycastResult then
-        return raycastResult.Position
-    else
-        return origin + (direction * maxDistance)
-    end
-end
-
-local function CreateTracerFromTool(tool)
+local function HandleKnifeTrajectory(obj)
     if not State.BulletTracersEnabled then return end
-    if not tool or not tool:IsA("Tool") then return end
-    local TRACER_COUNT = 4
-    
-    -- Проверка cooldown
-    local currentTime = tick()
-    if currentTime - State.LastTracerTime < State.ShootCooldown then
-        return
-    end
-    State.LastTracerTime = currentTime
-    
-    local origin = GetShootOrigin(tool)
-    if not origin then return end
-    
-    local mouse = LocalPlayer:GetMouse()
-    if not mouse then return end
-    
-    local targetPos = mouse.Hit.Position
-    local direction = (targetPos - origin).Unit
-    
-    local maxDistance = 500
-    local hitPos = PerformRaycast(origin, direction, maxDistance)
-    for i = 1, TRACER_COUNT do
-        CreateTracer(origin, hitPos, 0.8)
+    if not obj or obj.Name ~= "ThrowingKnife" or not obj:IsA("Model") then return end
+
+    local bladePos = obj:WaitForChild("BladePosition", 0.3)
+    if not bladePos or not bladePos:IsA("BasePart") then return end
+
+    local throwDir = obj:FindFirstChild("ThrowDirection")
+    if not throwDir or not throwDir:IsA("Vector3Value") then return end
+
+    local dir = throwDir.Value
+    if dir.Magnitude == 0 then return end
+
+    local startPos = bladePos.Position
+    local endPos = startPos + dir.Unit * 100
+
+    for _ = 1, 4 do
+        CreateTracer(startPos, endPos, 2)
     end
 end
 
-local toolConnections = {}
-local inputConnection = nil
-
--- Проверка, является ли инструмент ножом
-local function IsKnifeTool(tool)
-    if not tool then return false end
-    local name = tool.Name:lower()
-    return name:find("knife") or name:find("blade") or tool:FindFirstChild("Stab")
-end
-
--- Для пистолета (Sheriff) - ЛКМ через Tool.Activated
-local function SetupGunTracers(tool)
-    if IsKnifeTool(tool) then return end
-    
-    local conn = tool.Activated:Connect(function()
-        CreateTracerFromTool(tool)
-    end)
-    toolConnections[tool] = conn
-end
-
--- Для ножа - клавиши E и кастомная
-local function SetupKnifeTracers()
-    if inputConnection then
-        inputConnection:Disconnect()
-    end
-    
-    inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if not State.BulletTracersEnabled then return end
-        
-        local char = LocalPlayer.Character
-        if not char then return end
-        
-        local equippedTool = char:FindFirstChildOfClass("Tool")
-        if not equippedTool or not IsKnifeTool(equippedTool) then return end
-        
-        -- E или кастомная клавиша из настроек
-        local knifeThrowKey = State.knifeThrow or Enum.KeyCode.E
-        
-        if input.KeyCode == Enum.KeyCode.E or input.KeyCode == knifeThrowKey then
-            CreateTracerFromTool(equippedTool)
-        end
-    end)
-end
-
-local function SetupToolTracers(character)
-    if not character then return end
-    
-    for _, conn in pairs(toolConnections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    toolConnections = {}
-    
-    local function connectTool(tool)
-        if not tool:IsA("Tool") then return end
-        if toolConnections[tool] then return end
-        
-        -- Только для пистолета
-        if not IsKnifeTool(tool) then
-            SetupGunTracers(tool)
-        end
-    end
-    
-    for _, tool in ipairs(character:GetChildren()) do
-        connectTool(tool)
-    end
-    
-    local charConn = character.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then
-            task.wait(0.1)
-            connectTool(child)
-        end
-    end)
-    TrackConnection(charConn)
-    
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if backpack then
-        for _, tool in ipairs(backpack:GetChildren()) do
-            connectTool(tool)
-        end
-        
-        local backpackConn = backpack.ChildAdded:Connect(function(child)
-            if child:IsA("Tool") then
-                task.wait(0.1)
-                connectTool(child)
-            end
-        end)
-        TrackConnection(backpackConn)
-    end
-    
-    -- Настройка отслеживания клавиш для ножа
-    SetupKnifeTracers()
-end
-
-TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(0.5)
-    if State.BulletTracersEnabled then
-        SetupToolTracers(character)
-    end
-end))
-
-if LocalPlayer.Character then
-    SetupToolTracers(LocalPlayer.Character)
-end
-
+local knifeTrajectoryConn = nil
 
 local function CleanupTracers()
-    for _, conn in pairs(toolConnections) do
-        pcall(function() conn:Disconnect() end)
+    if knifeTrajectoryConn then
+        pcall(function() knifeTrajectoryConn:Disconnect() end)
+        knifeTrajectoryConn = nil
     end
-    toolConnections = {}
-    
-    if inputConnection then
-        inputConnection:Disconnect()
-        inputConnection = nil
-    end
-    
+
     for _, tracer in ipairs(State.TracersList) do
         pcall(function()
             tracer.beam:Destroy()
@@ -1917,25 +1782,19 @@ end
 
 local function ToggleBulletTracers(enabled)
     State.BulletTracersEnabled = enabled
-    
+
     if enabled then
-        if LocalPlayer.Character then
-            SetupToolTracers(LocalPlayer.Character)
+        if knifeTrajectoryConn then
+            pcall(function() knifeTrajectoryConn:Disconnect() end)
+            knifeTrajectoryConn = nil
         end
+        knifeTrajectoryConn = Workspace.ChildAdded:Connect(function(obj)
+            task.spawn(HandleKnifeTrajectory, obj)
+        end)
+        TrackConnection(knifeTrajectoryConn)
     else
         CleanupTracers()
     end
-end
-
-LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(0.5)
-    if State.BulletTracersEnabled then
-        SetupToolTracers(character)
-    end
-end)
-
-if LocalPlayer.Character then
-    SetupToolTracers(LocalPlayer.Character)
 end
 
 
@@ -1966,7 +1825,7 @@ local function FullShutdown()
         if State.ExtendedHitboxEnabled then DisableExtendedHitbox() end
         if State.GodModeEnabled then ToggleGodMode() end
         if State.InstantPickupEnabled then DisableInstantPickup() end
-        if killAuraCon then ToggleKillAura(false) end
+        if killAuraThread or State.KillAuraEnabled then ToggleKillAura(false) end
     end)
 
     pcall(function()
@@ -6314,7 +6173,19 @@ shootMurderer = function(forceMagic)
             local modeText = useMode == "Magic" and "Magic" or "Silent"
             ShowNotification("<font color=\"rgb(168,228,160)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
         end
-        
+
+        -- Bullet tracer (свой выстрел) — рисуем Beam между точкой выстрела и целью.
+        -- Используем те же 2 CFrame, что отправляем на сервер.
+        if State.BulletTracersEnabled then
+            pcall(function()
+                local startPos = argsShootRemote[1].Position
+                local endPos = argsShootRemote[2].Position
+                for _ = 1, 4 do
+                    CreateTracer(startPos, endPos, 2)
+                end
+            end)
+        end
+
         -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
         task.delay(State.ShootCooldown, function()
             State.CanShootMurderer = true
@@ -6652,120 +6523,81 @@ ApplyKillAuraZoneStyle = function()
     end
 end
 
--- ToggleKillAura() - Kill Aura
-local killAuraCon = nil
-local anchoredPlayers = {}
-local auraEquippedKnife = false
+-- Найти RemoteEvent HandleTouched внутри Knife (в Character или Backpack).
+-- Tool.Events.HandleTouched доступен и из Backpack — equip не требуется.
+local function GetKnifeHandleTouched()
+    local char = LocalPlayer.Character
+    local knife = char and char:FindFirstChild("Knife")
+    if not knife then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then knife = bp:FindFirstChild("Knife") end
+    end
+    if not knife then return nil end
+    local events = knife:FindFirstChild("Events")
+    if not events then return nil end
+    return events:FindFirstChild("HandleTouched")
+end
+
+-- ToggleKillAura() - Kill Aura через HandleTouched:FireServer
+local killAuraThread = nil
 
 local function ToggleKillAura(state)
     if state then
+        if State.KillAuraEnabled then return end
         State.KillAuraEnabled = true
-        anchoredPlayers = {}
-        auraEquippedKnife = false
-
-        if killAuraCon then
-            killAuraCon:Disconnect()
-        end
 
         CreateKillAuraZone()
-        if zoneRenderConn then
-            zoneRenderConn:Disconnect()
-        end
+        if zoneRenderConn then zoneRenderConn:Disconnect() end
         zoneRenderConn = RunService.RenderStepped:Connect(UpdateKillAuraZone)
 
-        killAuraCon = RunService.Heartbeat:Connect(function()
-            -- Автоотключение при потере роли мурдерера
-            if getMurder() ~= LocalPlayer then
-                ToggleKillAura(false)
-                return
-            end
+        killAuraThread = task.spawn(function()
+            while State.KillAuraEnabled do
+                task.wait(0.1)
+                if not State.KillAuraEnabled then break end
 
-            local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not localHRP then return end
-
-            local range = State.KillAuraRange or 7
-            local playersInRange = 0
-
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-                    local hrp = player.Character.HumanoidRootPart
-                    local distance = (hrp.Position - localHRP.Position).Magnitude
-
-                    if distance <= range then
-                        playersInRange = playersInRange + 1
-
-                        pcall(function()
-                            hrp.Anchored = true
-                            hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * State.KillAuraDistance)
-                        end)
-
-                        anchoredPlayers[player] = true
-                    end
+                if getMurder() ~= LocalPlayer then
+                    ToggleKillAura(false)
+                    return
                 end
-            end
 
-            -- Пока в зоне есть кто-то — экипируем нож (если нужно) и бьём каждый Heartbeat
-            if playersInRange > 0 then
-                pcall(function()
-                    local char = LocalPlayer.Character
-                    if not char then return end
-                    local knife = char:FindFirstChild("Knife")
-                    if not knife then
-                        local bp = LocalPlayer.Backpack:FindFirstChild("Knife")
-                        if bp then
-                            local hum = char:FindFirstChild("Humanoid")
-                            if hum then
-                                hum:EquipTool(bp)
-                                knife = char:FindFirstChild("Knife")
-                                auraEquippedKnife = true
+                local char = LocalPlayer.Character
+                local localHRP = char and char:FindFirstChild("HumanoidRootPart")
+                if not localHRP then continue end
+
+                local handleTouched = GetKnifeHandleTouched()
+                if not handleTouched then continue end
+
+                local range = State.KillAuraRange or 7
+
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        local targetChar = player.Character
+                        local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+                        local targetPart = targetChar:FindFirstChild("UpperTorso") or targetChar:FindFirstChild("Torso")
+                        if targetHRP and targetPart then
+                            local distance = (targetHRP.Position - localHRP.Position).Magnitude
+                            if distance <= range then
+                                pcall(function() handleTouched:FireServer(targetPart) end)
                             end
                         end
                     end
-                    if knife and knife.Parent then
-                        knife:Activate()
-                    end
-                end)
-            elseif auraEquippedKnife then
-                -- Зона пуста — убираем нож, если мы его сами достали
-                local char = LocalPlayer.Character
-                if char then
-                    local hum = char:FindFirstChild("Humanoid")
-                    if hum then
-                        pcall(function() hum:UnequipTools() end)
-                    end
                 end
-                auraEquippedKnife = false
             end
+            killAuraThread = nil
         end)
-
     else
         State.KillAuraEnabled = false
-
-        if killAuraCon then
-            killAuraCon:Disconnect()
-            killAuraCon = nil
+        if killAuraThread then
+            pcall(task.cancel, killAuraThread)
+            killAuraThread = nil
         end
-
         DestroyKillAuraZone()
-
-        -- Освобождаем заанкоренных игроков
-        for player, _ in pairs(anchoredPlayers) do
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                pcall(function()
-                    player.Character.HumanoidRootPart.Anchored = false
-                end)
-            end
-        end
-        anchoredPlayers = {}
     end
 end
 
 InstantKillAll = function()
-    --print("[InstantKillAll] 🔪 Запуск...")
-    
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
-        --print("[InstantKillAll] ❌ Вы не мурдерер!")
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">You are not the murderer</font>",
@@ -6774,31 +6606,9 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local character = LocalPlayer.Character
-    if not character then
-        --print("[InstantKillAll] ❌ Character не найден!")
-        return
-    end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        --print("[InstantKillAll] ❌ HumanoidRootPart не найден!")
-        return
-    end
-    
-    -- ✅ Проверяем есть ли нож
-    if not character:FindFirstChild("Knife") then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid and LocalPlayer.Backpack:FindFirstChild("Knife") then
-            humanoid:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.3)
-        end
-    end
-    
-    local knife = character:FindFirstChild("Knife")
-    if not knife then
-        --print("[InstantKillAll] ❌ Нож не найден!")
+
+    local handleTouched = GetKnifeHandleTouched()
+    if not handleTouched then
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">Knife not found</font>",
@@ -6807,69 +6617,22 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local originalCFrame = hrp.CFrame
-    local teleportedPlayers = 0
-    
-    -- ✅ ИЗМЕНЕНИЕ: Телепортируем игроков ПЕРЕД собой (как в KillAura)
-    local killAuraDistance = State.KillAuraDistance or 2.5
-    
+
+    local killCount = 0
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                -- ✅ Телепортируем игрока ПЕРЕД нами на расстоянии killAuraDistance
-                targetHRP.CFrame = hrp.CFrame + hrp.CFrame.LookVector * killAuraDistance
-                targetHRP.Anchored = true
-                teleportedPlayers = teleportedPlayers + 1
+            local targetPart = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
+            if targetPart then
+                pcall(function() handleTouched:FireServer(targetPart) end)
+                killCount = killCount + 1
+                task.wait(0.05)
             end
         end
     end
-    
+
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll: Players teleported: " .. teleportedPlayers .. ", attacking...</font>",
-            CONFIG.Colors.Text
-        )
-    end
-    
-    --print("[InstantKillAll] 📍 Телепортировано: " .. teleportedPlayers .. " игроков ПЕРЕД собой")
-    
-    task.wait(0.2   )
-    
-    -- ✅ Активируем нож 3 раза
-    for i = 1, 3 do
-        knife = character:FindFirstChild("Knife")
-        if knife and knife.Parent then
-            knife:Activate()
-            --print("[InstantKillAll] 🔪 Активация ножа #" .. i)
-        else
-            --print("[InstantKillAll] ⚠️ Нож пропал во время атаки!")
-            break
-        end
-        
-        if i < 3 then
-            task.wait(1.5)
-        end
-    end
-    
-    task.wait(0.5)
-    
-    -- ✅ Освобождаем игроков
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                targetHRP.Anchored = false
-            end
-        end
-    end
-    
-    --print("[InstantKillAll] ✅ Завершено!")
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Complete!</font>",
+            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Killed " .. killCount .. " players</font>",
             CONFIG.Colors.Green
         )
     end
