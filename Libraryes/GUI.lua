@@ -234,8 +234,7 @@ return function(env)
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 ScrollBarThickness = 3,
                 ScrollBarImageColor3 = Color3.fromRGB(120, 90, 150),
-                VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
-                VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Left,
+                VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right,
                 Parent = pageHolder
             })
             local leftLayout = Create("UIListLayout", {
@@ -243,6 +242,7 @@ return function(env)
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = leftPage
             })
+            Create("UIPadding", {PaddingRight = UDim.new(0, 8), Parent = leftPage})
             leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 leftPage.CanvasSize = UDim2.new(0, 0, 0, leftLayout.AbsoluteContentSize.Y + 20)
             end)
@@ -255,7 +255,6 @@ return function(env)
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 ScrollBarThickness = 3,
                 ScrollBarImageColor3 = Color3.fromRGB(120, 90, 150),
-                VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
                 VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right,
                 Parent = pageHolder
             })
@@ -264,6 +263,7 @@ return function(env)
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = rightPage
             })
+            Create("UIPadding", {PaddingRight = UDim.new(0, 8), Parent = rightPage})
             rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 rightPage.CanvasSize = UDim2.new(0, 0, 0, rightLayout.AbsoluteContentSize.Y + 20)
             end)
