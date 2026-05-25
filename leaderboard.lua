@@ -238,7 +238,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/leaderboard.lua?token=GHSAT0AAAAAAD4GJCGHKJT4TVC4SSBQORDY2QUFKSA", true))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/leaderboard.lua", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -5946,7 +5946,7 @@ local function HandleAutoReconnect(enabled)
     end)
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua?token=GHSAT0AAAAAAD4GJCGHF6VPCJSZDTA5KWY62QUFKBA"))()({
+local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -6165,12 +6165,12 @@ do
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip", false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
 
-        MainTab:CreateSection("TELEPORT & OTHER")
+        MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
-        MainTab:CreateSection("Speed Glitch")
+        MainTab:CreateSection("Speed Glitch", "right")
         MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
         ----------------------------------------------------------------------------
         MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
@@ -6192,7 +6192,7 @@ do
         VisualsTab:CreateSection("ROLE DISPLAY")
         VisualsTab:CreateToggle("Avatar Display", "Show Murderer and Sheriff avatar cards on screen", "AvatarDisplayEnabled", false)
 
-        VisualsTab:CreateSection("Misc")
+        VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", true)
         VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 end
@@ -6205,7 +6205,7 @@ do
         --CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
-        CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
@@ -6225,7 +6225,7 @@ do
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 60 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 60 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
-        FarmTab:CreateSection("VOTE SPAM")
+        FarmTab:CreateSection("VOTE SPAM", "right")
         FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
@@ -6241,15 +6241,15 @@ do
         FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
         FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-        FunTab:CreateSection("ANTI-FLING")
+        FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", _G.AUTOEXEC_ENABLED)
 
-        FunTab:CreateSection("FLING PLAYER")
+        FunTab:CreateSection("FLING PLAYER", "right")
         FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
         FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-        FunTab:CreateSection("FLING ROLE")
+        FunTab:CreateSection("FLING ROLE", "right")
         FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
         FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
 end
@@ -6263,7 +6263,7 @@ do
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
-        UtilityTab:CreateSection("DANGER ZONE")
+        UtilityTab:CreateSection("DANGER ZONE", "right")
         UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
