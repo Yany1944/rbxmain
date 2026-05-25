@@ -192,6 +192,7 @@ return function(env)
         local Tabs = {}
         local currentTab = nil
         local searchIndex = {}
+        local sections = {}
 
         ----------------------------------------------------------------
         -- ВНУТРЕННИЙ КОНСТРУКТОР ТАБА + TabFunctions
@@ -264,6 +265,7 @@ return function(env)
             end)
 
             local currentPage = leftPage
+            local currentSectionData = nil
 
             local function Activate()
                 if State.UIElements.OpenDropdowns then
@@ -306,7 +308,7 @@ return function(env)
                 elseif column == "left" then
                     currentPage = leftPage
                 end
-                Create("TextLabel", {
+                local label = Create("TextLabel", {
                     Text = title,
                     Font = Enum.Font.GothamBold,
                     TextSize = 13,
@@ -316,6 +318,8 @@ return function(env)
                     Size = UDim2.new(1, 0, 0, 22),
                     Parent = currentPage
                 })
+                currentSectionData = {label = label, cards = {}}
+                table.insert(sections, currentSectionData)
             end
 
             function TabFunctions:CreateDropdown(title, desc, options, default, handlerKey)
@@ -328,6 +332,7 @@ return function(env)
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
                 table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
+                if currentSectionData then table.insert(currentSectionData.cards, card) end
 
                 Create("TextLabel", {
                     Text = title,
@@ -484,6 +489,7 @@ return function(env)
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
                 table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
+                if currentSectionData then table.insert(currentSectionData.cards, card) end
 
                 Create("TextLabel", {
                     Text = title,
@@ -566,6 +572,7 @@ return function(env)
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
                 table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
+                if currentSectionData then table.insert(currentSectionData.cards, card) end
 
                 Create("TextLabel", {
                     Text = title,
@@ -628,6 +635,7 @@ return function(env)
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
                 table.insert(searchIndex, {card = card, name = title:lower(), desc = description:lower()})
+                if currentSectionData then table.insert(currentSectionData.cards, card) end
 
                 Create("TextLabel", {
                     Text = title,
@@ -656,8 +664,8 @@ return function(env)
                 local sliderBg = Create("Frame", {
                     BackgroundColor3 = Color3.fromRGB(40, 40, 45),
                     BackgroundTransparency = BACK_TRANSPARENCY,
-                    Position = UDim2.new(0, 15, 0, 50),
-                    Size = UDim2.new(1, -95, 0, 6),
+                    Position = UDim2.new(0, 110, 0, 50),
+                    Size = UDim2.new(1, -190, 0, 6),
                     Parent = card
                 })
                 AddCorner(sliderBg, 3)
@@ -745,6 +753,7 @@ return function(env)
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
                 table.insert(searchIndex, {card = card, name = title:lower(), desc = ""})
+                if currentSectionData then table.insert(currentSectionData.cards, card) end
 
                 Create("TextLabel", {
                     Text = title,
@@ -795,6 +804,7 @@ return function(env)
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
                 table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
+                if currentSectionData then table.insert(currentSectionData.cards, card) end
 
                 Create("TextLabel", {
                     Text = title,
@@ -1025,6 +1035,7 @@ return function(env)
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
                 table.insert(searchIndex, {card = card, name = (title or ""):lower(), desc = buttonText:lower()})
+                if currentSectionData then table.insert(currentSectionData.cards, card) end
 
                 if title ~= "" and title ~= nil then
                     Create("TextLabel", {
@@ -1093,16 +1104,26 @@ return function(env)
             TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
         end)
 
-        -- Поиск: фильтрация карточек по тексту
+        -- Поиск: фильтрация карточек по тексту + скрытие пустых секций
         searchBox:GetPropertyChangedSignal("Text"):Connect(function()
             local q = searchBox.Text:lower()
             if q == "" then
                 for _, entry in ipairs(searchIndex) do
                     entry.card.Visible = true
                 end
+                for _, s in ipairs(sections) do
+                    s.label.Visible = true
+                end
             else
                 for _, entry in ipairs(searchIndex) do
                     entry.card.Visible = entry.name:find(q, 1, true) ~= nil or entry.desc:find(q, 1, true) ~= nil
+                end
+                for _, s in ipairs(sections) do
+                    local anyVisible = false
+                    for _, c in ipairs(s.cards) do
+                        if c.Visible then anyVisible = true break end
+                    end
+                    s.label.Visible = anyVisible
                 end
             end
         end)
