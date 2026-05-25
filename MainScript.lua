@@ -23,7 +23,7 @@ local WHITELIST_IDS = {10341870648}
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
 pcall(function()
-    local url = "https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua?token=GHSAT0AAAAAAD4GJCGHVP65QZVEP3QPY67O2QUFGLQ"
+    local url = "https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Emotes.lua"
     local ok, result = pcall(function()
         return game:HttpGet(url, true)
     end)
@@ -329,7 +329,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua?token=GHSAT0AAAAAAD4GJCGHI5VTASIKGAC5RDKE2QUFJSQ", true))()
+                loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/MainScript.lua", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -7458,7 +7458,7 @@ local function HandleAutoReconnect(enabled)
     end
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua?token=GHSAT0AAAAAAD4GJCGHF6VPCJSZDTA5KWY62QUFKBA"))()({
+local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -7811,12 +7811,12 @@ do
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
 
-        MainTab:CreateSection("TELEPORT & OTHER")
+        MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
-        MainTab:CreateSection("Speed Glitch")
+        MainTab:CreateSection("Speed Glitch", "right")
         MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
         MainTab:CreateSection("FLY SETTINGS")
@@ -7845,17 +7845,17 @@ do
         AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
         AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
 
-        AimTab:CreateSection("TARGETING VALUES")
+        AimTab:CreateSection("TARGETING VALUES", "right")
         AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
         AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
         AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
 
-        AimTab:CreateSection("PREDICTION & OFFSET")
+        AimTab:CreateSection("PREDICTION & OFFSET", "right")
         AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
         AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 
-        AimTab:CreateSection("METHOD & ACTIVATION")
+        AimTab:CreateSection("METHOD & ACTIVATION", "right")
         AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
         AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
 end
@@ -7876,7 +7876,7 @@ do
         VisualsTab:CreateSection("ROLE DISPLAY")
         VisualsTab:CreateToggle("Avatar Display", "Show Murderer and Sheriff avatar cards on screen", "AvatarDisplayEnabled", false)
 
-        VisualsTab:CreateSection("Misc")
+        VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
         VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
@@ -7893,13 +7893,13 @@ do
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
         CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
-        CombatTab:CreateSection("KILL AURA")
+        CombatTab:CreateSection("KILL AURA", "right")
         CombatTab:CreateKeybindButton("Kill Aura (Toggle)", "killaura", "KillAura")
         CombatTab:CreateSlider("Kill Aura Range", "Activation distance in studs", 1, 20, State.KillAuraRange, "KillAuraRange", 0.5)
         CombatTab:CreateToggle("Static Zone", "Simple circle, no geometry checks", "KillAuraStatic", false)
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
-        CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
@@ -7914,6 +7914,7 @@ do
         FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
 
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
+        FarmTab:CreateSection("FARM TUNING", "right")
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
@@ -7932,15 +7933,15 @@ do
         FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
         FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-        FunTab:CreateSection("ANTI-FLING")
+        FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", _G.AUTOEXEC_ENABLED)
 
-        FunTab:CreateSection("FLING PLAYER")
+        FunTab:CreateSection("FLING PLAYER", "right")
         FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
         FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-        FunTab:CreateSection("FLING ROLE")
+        FunTab:CreateSection("FLING ROLE", "right")
         FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
         FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
 end
@@ -7962,10 +7963,10 @@ do
         TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
         TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
 
-        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
+        TrollingTab:CreateSection("BLOCK PATH SETTINGS", "right")
         TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
 
-        TrollingTab:CreateSection("ORBIT PRESETS")
+        TrollingTab:CreateSection("ORBIT PRESETS", "right")
         TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
         TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
         TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
@@ -7980,7 +7981,7 @@ do
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
-        UtilityTab:CreateSection("DANGER ZONE")
+        UtilityTab:CreateSection("DANGER ZONE", "right")
         UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
