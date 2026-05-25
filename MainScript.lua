@@ -4284,7 +4284,7 @@ local function GetCollectedCoinsCount()
         return 0
     end)
 
-    if success and coins >= 0 then  -- ✅ >= 0 вместо > 0
+    if success and coins >= 0 then 
         return coins
     end
 
@@ -8025,4 +8025,4 @@ end
 --print("╔════════════════════════════════════════════╗")
 --print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
 --print("║   Press [" .. CONFIG.HideKey.Name .. "] to toggle GUI               ║")
---print("╚════════════════════════════════════════════╝")
+--print("╚════════════════════════════════════════════╝"
