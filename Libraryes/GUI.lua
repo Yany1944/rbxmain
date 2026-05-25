@@ -664,8 +664,8 @@ return function(env)
                 local sliderBg = Create("Frame", {
                     BackgroundColor3 = Color3.fromRGB(40, 40, 45),
                     BackgroundTransparency = BACK_TRANSPARENCY,
-                    Position = UDim2.new(0, 110, 0, 50),
-                    Size = UDim2.new(1, -190, 0, 6),
+                    Position = UDim2.new(0, 150, 0, 50),
+                    Size = UDim2.new(0.39, 0, 0, 6),
                     Parent = card
                 })
                 AddCorner(sliderBg, 3)
@@ -1104,26 +1104,29 @@ return function(env)
             TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
         end)
 
-        -- Поиск: фильтрация карточек по тексту + скрытие пустых секций
+        -- Поиск: фильтрация карточек и заголовков секций по тексту
         searchBox:GetPropertyChangedSignal("Text"):Connect(function()
             local q = searchBox.Text:lower()
             if q == "" then
                 for _, entry in ipairs(searchIndex) do
                     entry.card.Visible = true
                 end
-                for _, s in ipairs(sections) do
-                    s.label.Visible = true
+                for _, sec in ipairs(sections) do
+                    sec.label.Visible = true
                 end
             else
                 for _, entry in ipairs(searchIndex) do
                     entry.card.Visible = entry.name:find(q, 1, true) ~= nil or entry.desc:find(q, 1, true) ~= nil
                 end
-                for _, s in ipairs(sections) do
+                for _, sec in ipairs(sections) do
                     local anyVisible = false
-                    for _, c in ipairs(s.cards) do
-                        if c.Visible then anyVisible = true break end
+                    for _, card in ipairs(sec.cards) do
+                        if card.Visible then
+                            anyVisible = true
+                            break
+                        end
                     end
-                    s.label.Visible = anyVisible
+                    sec.label.Visible = anyVisible
                 end
             end
         end)
