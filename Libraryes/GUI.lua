@@ -195,6 +195,85 @@ return function(env)
         local sections = {}
 
         ----------------------------------------------------------------
+        -- КАСТОМНЫЙ SCROLLBAR (thumb без родного track)
+        -- Цвет/прозрачность/толщина настраиваются здесь:
+        ----------------------------------------------------------------
+        local SCROLL_THUMB_COLOR = Color3.fromRGB(220, 145, 230)
+        local SCROLL_THUMB_TRANSPARENCY = 0.35
+        local SCROLL_THUMB_WIDTH = 4
+
+        local function AttachCustomScrollbar(scrollingFrame, container, anchorX)
+            local thumb = Create("Frame", {
+                Name = "CustomScrollbar",
+                BackgroundColor3 = SCROLL_THUMB_COLOR,
+                BackgroundTransparency = SCROLL_THUMB_TRANSPARENCY,
+                BorderSizePixel = 0,
+                Position = UDim2.new(anchorX.Scale, anchorX.Offset, 0, 0),
+                Size = UDim2.new(0, SCROLL_THUMB_WIDTH, 0, 30),
+                Visible = false,
+                ZIndex = 10,
+                Parent = container
+            })
+            AddCorner(thumb, 2)
+
+            local function update()
+                local canvasH = scrollingFrame.CanvasSize.Y.Offset
+                local viewH = scrollingFrame.AbsoluteSize.Y
+                if canvasH <= viewH or viewH <= 0 then
+                    thumb.Visible = false
+                    return
+                end
+                thumb.Visible = true
+                local thumbH = math.max(20, viewH * (viewH / canvasH))
+                local maxScroll = canvasH - viewH
+                local scrollRatio = maxScroll > 0 and (scrollingFrame.CanvasPosition.Y / maxScroll) or 0
+                local thumbY = scrollRatio * (viewH - thumbH)
+                thumb.Size = UDim2.new(0, SCROLL_THUMB_WIDTH, 0, thumbH)
+                thumb.Position = UDim2.new(anchorX.Scale, anchorX.Offset, 0, thumbY)
+            end
+
+            TrackConnection(scrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(update))
+            TrackConnection(scrollingFrame:GetPropertyChangedSignal("CanvasSize"):Connect(update))
+            TrackConnection(scrollingFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(update))
+
+            local dragging = false
+            local dragStartMouseY = 0
+            local dragStartCanvasY = 0
+
+            thumb.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = true
+                    dragStartMouseY = UserInputService:GetMouseLocation().Y
+                    dragStartCanvasY = scrollingFrame.CanvasPosition.Y
+                end
+            end)
+
+            TrackConnection(UserInputService.InputChanged:Connect(function(input)
+                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                    local canvasH = scrollingFrame.CanvasSize.Y.Offset
+                    local viewH = scrollingFrame.AbsoluteSize.Y
+                    local maxScroll = canvasH - viewH
+                    if maxScroll <= 0 then return end
+                    local thumbH = math.max(20, viewH * (viewH / canvasH))
+                    local trackH = viewH - thumbH
+                    if trackH <= 0 then return end
+                    local deltaY = UserInputService:GetMouseLocation().Y - dragStartMouseY
+                    local newCanvasY = math.clamp(dragStartCanvasY + (deltaY / trackH) * maxScroll, 0, maxScroll)
+                    scrollingFrame.CanvasPosition = Vector2.new(0, newCanvasY)
+                end
+            end))
+
+            TrackConnection(UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = false
+                end
+            end))
+
+            task.defer(update)
+            return thumb
+        end
+
+        ----------------------------------------------------------------
         -- ВНУТРЕННИЙ КОНСТРУКТОР ТАБА + TabFunctions
         ----------------------------------------------------------------
 
@@ -232,11 +311,7 @@ return function(env)
                 Position = UDim2.new(0, 0, 0, 0),
                 Size = UDim2.new(0.5, -6, 1, 0),
                 CanvasSize = UDim2.new(0, 0, 0, 0),
-                ScrollBarThickness = 4,
-                ScrollBarImageColor3 = Color3.fromRGB(150, 110, 200),
-                ScrollBarImageTransparency = 0.35,
-                VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
-                VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right,
+                ScrollBarThickness = 0,
                 Parent = pageHolder
             })
             local leftLayout = Create("UIListLayout", {
@@ -244,10 +319,10 @@ return function(env)
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = leftPage
             })
-            Create("UIPadding", {PaddingRight = UDim.new(0, 6), Parent = leftPage})
             leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 leftPage.CanvasSize = UDim2.new(0, 0, 0, leftLayout.AbsoluteContentSize.Y + 20)
             end)
+            AttachCustomScrollbar(leftPage, pageHolder, UDim.new(0.5, -10))
 
             local rightPage = Create("ScrollingFrame", {
                 Name = name .. "PageRight",
@@ -255,11 +330,7 @@ return function(env)
                 Position = UDim2.new(0.5, 6, 0, 0),
                 Size = UDim2.new(0.5, -6, 1, 0),
                 CanvasSize = UDim2.new(0, 0, 0, 0),
-                ScrollBarThickness = 4,
-                ScrollBarImageColor3 = Color3.fromRGB(150, 110, 200),
-                ScrollBarImageTransparency = 0.35,
-                VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
-                VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right,
+                ScrollBarThickness = 0,
                 Parent = pageHolder
             })
             local rightLayout = Create("UIListLayout", {
@@ -267,10 +338,10 @@ return function(env)
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = rightPage
             })
-            Create("UIPadding", {PaddingRight = UDim.new(0, 6), Parent = rightPage})
             rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 rightPage.CanvasSize = UDim2.new(0, 0, 0, rightLayout.AbsoluteContentSize.Y + 20)
             end)
+            AttachCustomScrollbar(rightPage, pageHolder, UDim.new(1, -4))
 
             local currentPage = leftPage
             local currentSectionData = nil
@@ -485,7 +556,6 @@ return function(env)
             end
 
             function TabFunctions:CreateToggle(title, desc, handlerKey, default)
-                -- Если default не указан, по умолчанию false
                 default = default or false
 
                 local card = Create("Frame", {
