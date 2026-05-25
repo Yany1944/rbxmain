@@ -322,7 +322,7 @@ return function(env)
             leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 leftPage.CanvasSize = UDim2.new(0, 0, 0, leftLayout.AbsoluteContentSize.Y + 20)
             end)
-            AttachCustomScrollbar(leftPage, pageHolder, UDim.new(0.5, -6))
+            AttachCustomScrollbar(leftPage, pageHolder, UDim.new(0.5, -2))
 
             local rightPage = Create("ScrollingFrame", {
                 Name = name .. "PageRight",
@@ -341,7 +341,7 @@ return function(env)
             rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 rightPage.CanvasSize = UDim2.new(0, 0, 0, rightLayout.AbsoluteContentSize.Y + 20)
             end)
-            AttachCustomScrollbar(rightPage, pageHolder, UDim.new(1, 0))
+            AttachCustomScrollbar(rightPage, pageHolder, UDim.new(1, 4))
 
             local currentPage = leftPage
             local currentSectionData = nil
