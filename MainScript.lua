@@ -242,6 +242,7 @@ return function(env)
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = leftPage
             })
+            Create("UIPadding", {PaddingRight = UDim.new(0, 8), Parent = leftPage})
             leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 leftPage.CanvasSize = UDim2.new(0, 0, 0, leftLayout.AbsoluteContentSize.Y + 20)
             end)
@@ -262,6 +263,7 @@ return function(env)
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = rightPage
             })
+            Create("UIPadding", {PaddingRight = UDim.new(0, 8), Parent = rightPage})
             rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                 rightPage.CanvasSize = UDim2.new(0, 0, 0, rightLayout.AbsoluteContentSize.Y + 20)
             end)
