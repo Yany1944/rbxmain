@@ -232,8 +232,9 @@ return function(env)
                 Position = UDim2.new(0, 0, 0, 0),
                 Size = UDim2.new(0.5, -6, 1, 0),
                 CanvasSize = UDim2.new(0, 0, 0, 0),
-                ScrollBarThickness = 6,
-                ScrollBarImageColor3 = CONFIG.Colors.Accent,
+                ScrollBarThickness = 3,
+                ScrollBarImageColor3 = Color3.fromRGB(120, 90, 150),
+                VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
                 Parent = pageHolder
             })
             local leftLayout = Create("UIListLayout", {
@@ -251,8 +252,9 @@ return function(env)
                 Position = UDim2.new(0.5, 6, 0, 0),
                 Size = UDim2.new(0.5, -6, 1, 0),
                 CanvasSize = UDim2.new(0, 0, 0, 0),
-                ScrollBarThickness = 6,
-                ScrollBarImageColor3 = CONFIG.Colors.Accent,
+                ScrollBarThickness = 3,
+                ScrollBarImageColor3 = Color3.fromRGB(120, 90, 150),
+                VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
                 Parent = pageHolder
             })
             local rightLayout = Create("UIListLayout", {
@@ -664,8 +666,8 @@ return function(env)
                 local sliderBg = Create("Frame", {
                     BackgroundColor3 = Color3.fromRGB(40, 40, 45),
                     BackgroundTransparency = BACK_TRANSPARENCY,
-                    Position = UDim2.new(0, 150, 0, 50),
-                    Size = UDim2.new(0.39, 0, 0, 6),
+                    Position = UDim2.new(0, 15, 0, 50),
+                    Size = UDim2.new(1, -95, 0, 6),
                     Parent = card
                 })
                 AddCorner(sliderBg, 3)
