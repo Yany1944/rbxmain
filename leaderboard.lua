@@ -238,7 +238,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/leaderboard.lua", true))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/leaderboard.lua?token=GHSAT0AAAAAAD4GJCGHKJT4TVC4SSBQORDY2QUFKSA", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -5946,7 +5946,7 @@ local function HandleAutoReconnect(enabled)
     end)
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://linkunlocker.com/assets/files/6a00711753a40645e113d647/1778434195232_gui.lua"))()({
+local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua?token=GHSAT0AAAAAAD4GJCGHF6VPCJSZDTA5KWY62QUFKBA"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
