@@ -623,13 +623,6 @@ local function FullShutdown()
         if State.AutoReconnectEnabled then HandleAutoReconnect(false) end
     end)
 
-    pcall(function()
-        if State.AutoPrestigeThread then
-            task.cancel(State.AutoPrestigeThread)
-            State.AutoPrestigeThread = nil
-        end
-    end)
-
     -- ✅ Очистка всех general connections
     pcall(function()
         for _, connection in ipairs(State.Connections) do
@@ -1717,10 +1710,10 @@ local function StartRoleChecking()
                 State.prevMurd    = nil
                 State.prevSher    = nil
                 State.heroSent    = false
-                
+
                 -- Очистка серверных данных
                 State.PlayerData = {}
-                
+
                 if State.NotificationsEnabled then
                     ShowNotification(
                         "<font color=\"rgb(220, 220, 220)\">Round ended</font>",
@@ -1728,6 +1721,7 @@ local function StartRoleChecking()
                     )
                 end
                 clearAllAvatars()
+                task.spawn(CheckAndPrestige)
             end
 
             -- Обнаружение смены шерифа (Hero)
@@ -3895,151 +3889,39 @@ local function StopXPFarm()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- AUTO PRESTIGE SYSTEM (event-driven через ProfileDataChanged + polling fallback)
+-- AUTO PRESTIGE SYSTEM (проверка Level через Attribute в конце каждого раунда)
 -- ══════════════════════════════════════════════════════════════════════════════
--- Источники:
---   ProfileData: ReplicatedStorage.Modules.ProfileData (ModuleScript-таблица)
---   LevelModule: ReplicatedStorage.Modules.LevelModule (GetLevel(xp))
---   ProfileDataChanged: ReplicatedStorage.Remotes.Inventory.ProfileDataChanged (BindableEvent)
---   Prestige: ReplicatedStorage.Remotes.Inventory.Prestige (RemoteEvent, FireServer без аргументов)
 local autoPrestigeBusy = false
-local autoPrestigeDone = false
-local PrestigeRemote = nil
-local ProfileData = nil
-local LevelModule = nil
+local LevelUpRemote = nil
 
--- Находим ProfileData и LevelModule из GC без require() — require из executor ломает игровые скрипты
-local function findModulesFromGC()
-    if not getgc then return nil, nil end
-    local profile, levelMod = nil, nil
-    for _, v in ipairs(getgc(true)) do
-        if type(v) == "table" then
-            if not profile
-                and rawget(v, "NewXP") ~= nil
-                and rawget(v, "Level") ~= nil
-                and rawget(v, "Prestige") ~= nil then
-                profile = v
-            end
-            if not levelMod
-                and type(rawget(v, "GetLevel")) == "function" then
-                levelMod = v
-            end
-        end
-        if profile and levelMod then break end
-    end
-    return profile, levelMod
-end
+task.spawn(function()
+    pcall(function()
+        LevelUpRemote = ReplicatedStorage:WaitForChild("Remotes", 10)
+            :WaitForChild("Extras", 10)
+            :WaitForChild("LevelUp", 10)
+    end)
+end)
 
-local function GetCurrentLevel()
-    if not ProfileData then return nil end
-    local xp = ProfileData.NewXP or ProfileData.XP or 0
-    if LevelModule and LevelModule.GetLevel then
-        -- GetLevel возвращает multi-return; локальная переменная обрезает до первого значения
-        local lvl = LevelModule.GetLevel(xp)
-        return tonumber(lvl) or tonumber(ProfileData.Level)
-    end
-    return tonumber(ProfileData.Level)
-end
-
-local function FirePrestigeAndRejoin()
-    if autoPrestigeBusy then return end
+local function CheckAndPrestige()
     if not State.AutoPrestigeEnabled then return end
-    if not PrestigeRemote then return end
+    if autoPrestigeBusy then return end
+    if not LevelUpRemote then return end
+    local lvl = LocalPlayer:GetAttribute("Level")
+    if not lvl or lvl < 100 then return end
     autoPrestigeBusy = true
-    autoPrestigeDone = true
-
     pcall(function()
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 200, 50)\">Level 100 → Prestiging...</font>", CONFIG.Colors.Text)
         end
     end)
-    pcall(function() PrestigeRemote:FireServer() end)
-    task.wait(3)
-    pcall(function()
-        if State.Rejoin then State.Rejoin() end
-    end)
+    local ok = pcall(function() LevelUpRemote:FireServer() end)
+    if ok then
+        task.wait(2)
+        pcall(function() if State.Rejoin then State.Rejoin() end end)
+    end
     task.wait(10)
     autoPrestigeBusy = false
 end
-
-local function TryAutoPrestige()
-    if not State.AutoPrestigeEnabled then return end
-    if autoPrestigeBusy or autoPrestigeDone then return end
-    local lvl = GetCurrentLevel()
-    if lvl and lvl >= 100 then
-        task.spawn(FirePrestigeAndRejoin)
-    end
-end
-
--- Используется Handler-ом при включении тумблера
-local function CheckAndPrestige()
-    TryAutoPrestige()
-end
-
-local function StartAutoPrestigePolling()
-    if State.AutoPrestigeThread then return end
-    State.AutoPrestigeThread = task.spawn(function()
-        while State.AutoPrestigeEnabled do
-            task.wait(30)
-            if not State.AutoPrestigeEnabled then break end
-            TryAutoPrestige()
-        end
-        State.AutoPrestigeThread = nil
-    end)
-end
-
-local function StopAutoPrestigePolling()
-    if State.AutoPrestigeThread then
-        pcall(task.cancel, State.AutoPrestigeThread)
-        State.AutoPrestigeThread = nil
-    end
-end
-
-task.spawn(function()
-    local attempts = 0
-    while not ProfileData and attempts < 15 do
-        ProfileData, LevelModule = findModulesFromGC()
-        if ProfileData then break end
-        attempts = attempts + 1
-        task.wait(1)
-    end
-    if not ProfileData then
-        ProfileData = {}
-    end
-
-    local InventoryRemotes
-    pcall(function()
-        InventoryRemotes = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Inventory", 10)
-    end)
-    if not InventoryRemotes then return end
-
-    pcall(function() PrestigeRemote = InventoryRemotes:WaitForChild("Prestige", 10) end)
-    local ProfileDataChangedEvent
-    pcall(function() ProfileDataChangedEvent = InventoryRemotes:WaitForChild("ProfileDataChanged", 10) end)
-
-    if not PrestigeRemote then return end
-
-    if ProfileDataChangedEvent then
-        local conn = ProfileDataChangedEvent.Event:Connect(function(key, value)
-            if ProfileData and key ~= nil then
-                ProfileData[key] = value
-            end
-            if key == "NewXP" or key == "XP" or key == "Prestige" or key == "Level" then
-                local lvl = GetCurrentLevel()
-                if lvl and lvl < 100 then
-                    autoPrestigeDone = false
-                end
-                TryAutoPrestige()
-            end
-        end)
-        TrackConnection(conn)
-    end
-
-    if State.AutoPrestigeEnabled then
-        StartAutoPrestigePolling()
-        TryAutoPrestige()
-    end
-end)
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 12: GODMODE SYSTEM (СТРОКИ 1601-1800)
@@ -6022,12 +5904,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         XPFarm = function(on) State.XPFarmEnabled = on if on then StartXPFarm() else StopXPFarm() end end,
         AutoPrestige = function(on)
             State.AutoPrestigeEnabled = on
-            if on then
-                StartAutoPrestigePolling()
-                CheckAndPrestige()
-            else
-                StopAutoPrestigePolling()
-            end
+            if on then task.spawn(CheckAndPrestige) end
         end,
         UndergroundMode = function(on) State.UndergroundMode = on end,
         CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
