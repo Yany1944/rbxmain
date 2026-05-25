@@ -88,8 +88,8 @@ return function(env)
             Name = "MainFrame",
             BackgroundColor3 = CONFIG.Colors.Background,
             BackgroundTransparency = BACK_TRANSPARENCY,
-            Position = UDim2.new(0.5, -225, 0.5, -325),
-            Size = UDim2.new(0, 450, 0, 650),
+            Position = UDim2.new(0.5, -450, 0.5, -325),
+            Size = UDim2.new(0, 900, 0, 650),
             ClipsDescendants = false,
             Active = true,
             Draggable = true,
@@ -116,7 +116,7 @@ return function(env)
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
             Position = UDim2.new(0, 15, 0, 0),
-            Size = UDim2.new(0.8, 0, 1, 0),
+            Size = UDim2.new(0, 350, 1, 0),
             Parent = header
         })
 
@@ -130,6 +130,24 @@ return function(env)
             Size = UDim2.new(0, 35, 0, 40),
             Parent = header
         })
+
+        local searchBox = Create("TextBox", {
+            Name = "SearchBox",
+            PlaceholderText = "Поиск...",
+            Text = "",
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextColor3 = CONFIG.Colors.Text,
+            PlaceholderColor3 = CONFIG.Colors.TextDark,
+            BackgroundColor3 = Color3.fromRGB(45, 45, 50),
+            BackgroundTransparency = BACK_TRANSPARENCY,
+            Position = UDim2.new(1, -250, 0.5, -12),
+            Size = UDim2.new(0, 200, 0, 24),
+            ClearTextOnFocus = false,
+            Parent = header,
+        })
+        AddCorner(searchBox, 6)
+        AddStroke(searchBox, 1, CONFIG.Colors.Accent, 0.6)
 
         local tabContainer = Create("ScrollingFrame", {
             Name = "TabContainer",
@@ -173,6 +191,7 @@ return function(env)
 
         local Tabs = {}
         local currentTab = nil
+        local searchIndex = {}
 
         ----------------------------------------------------------------
         -- ВНУТРЕННИЙ КОНСТРУКТОР ТАБА + TabFunctions
@@ -197,26 +216,54 @@ return function(env)
             ).X
             tabBtn.Size = UDim2.new(0, textWidth + 20, 1, 0)
 
-            local page = Create("ScrollingFrame", {
-                Name = name .. "Page",
+            -- Контейнер двух колонок для этой вкладки
+            local pageHolder = Create("Frame", {
+                Name = name .. "PageHolder",
                 BackgroundTransparency = 1,
                 Size = UDim2.new(1, 0, 1, 0),
-                CanvasSize = UDim2.new(0, 0, 0, 0),
-                ScrollBarThickness = 6,
-                ScrollBarImageColor3 = CONFIG.Colors.Accent,
                 Visible = false,
                 Parent = pagesContainer
             })
 
-            local pageLayout = Create("UIListLayout", {
+            local leftPage = Create("ScrollingFrame", {
+                Name = name .. "PageLeft",
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 0, 0, 0),
+                Size = UDim2.new(0.5, -6, 1, 0),
+                CanvasSize = UDim2.new(0, 0, 0, 0),
+                ScrollBarThickness = 6,
+                ScrollBarImageColor3 = CONFIG.Colors.Accent,
+                Parent = pageHolder
+            })
+            local leftLayout = Create("UIListLayout", {
                 Padding = UDim.new(0, 12),
                 SortOrder = Enum.SortOrder.LayoutOrder,
-                Parent = page
+                Parent = leftPage
             })
-
-            pageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                page.CanvasSize = UDim2.new(0, 0, 0, pageLayout.AbsoluteContentSize.Y + 20)
+            leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+                leftPage.CanvasSize = UDim2.new(0, 0, 0, leftLayout.AbsoluteContentSize.Y + 20)
             end)
+
+            local rightPage = Create("ScrollingFrame", {
+                Name = name .. "PageRight",
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0.5, 6, 0, 0),
+                Size = UDim2.new(0.5, -6, 1, 0),
+                CanvasSize = UDim2.new(0, 0, 0, 0),
+                ScrollBarThickness = 6,
+                ScrollBarImageColor3 = CONFIG.Colors.Accent,
+                Parent = pageHolder
+            })
+            local rightLayout = Create("UIListLayout", {
+                Padding = UDim.new(0, 12),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = rightPage
+            })
+            rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+                rightPage.CanvasSize = UDim2.new(0, 0, 0, rightLayout.AbsoluteContentSize.Y + 20)
+            end)
+
+            local currentPage = leftPage
 
             local function Activate()
                 if State.UIElements.OpenDropdowns then
@@ -230,15 +277,15 @@ return function(env)
                         TweenInfo.new(0.2),
                         {BackgroundColor3 = CONFIG.Colors.Section, TextColor3 = CONFIG.Colors.TextDark}
                     ):Play()
-                    currentTab.Page.Visible = false
+                    currentTab.Holder.Visible = false
                 end
-                currentTab = {Btn = tabBtn, Page = page}
+                currentTab = {Btn = tabBtn, Holder = pageHolder}
                 TweenService:Create(
                     tabBtn,
                     TweenInfo.new(0.2),
                     {BackgroundColor3 = CONFIG.Colors.Accent, TextColor3 = CONFIG.Colors.Text}
                 ):Play()
-                page.Visible = true
+                pageHolder.Visible = true
             end
 
             tabBtn.MouseButton1Click:Connect(Activate)
@@ -246,14 +293,19 @@ return function(env)
             if #Tabs == 0 then
                 Activate()
             end
-            table.insert(Tabs, {Btn = tabBtn, Page = page})
+            table.insert(Tabs, {Btn = tabBtn, Holder = pageHolder})
 
             --------------------------------------------
             -- TabFunctions (1:1, но через Handlers)
             --------------------------------------------
             local TabFunctions = {}
 
-            function TabFunctions:CreateSection(title)
+            function TabFunctions:CreateSection(title, column)
+                if column == "right" then
+                    currentPage = rightPage
+                elseif column == "left" then
+                    currentPage = leftPage
+                end
                 Create("TextLabel", {
                     Text = title,
                     Font = Enum.Font.GothamBold,
@@ -262,7 +314,7 @@ return function(env)
                     TextXAlignment = Enum.TextXAlignment.Left,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, 22),
-                    Parent = page
+                    Parent = currentPage
                 })
             end
 
@@ -271,10 +323,11 @@ return function(env)
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
-                    Parent = page
+                    Parent = currentPage
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+                table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
 
                 Create("TextLabel", {
                     Text = title,
@@ -421,16 +474,17 @@ return function(env)
             function TabFunctions:CreateToggle(title, desc, handlerKey, default)
                 -- Если default не указан, по умолчанию false
                 default = default or false
-            
+
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
-                    Parent = page
+                    Parent = currentPage
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
-            
+                table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
+
                 Create("TextLabel", {
                     Text = title,
                     Font = Enum.Font.GothamMedium,
@@ -442,7 +496,7 @@ return function(env)
                     Size = UDim2.new(0, 250, 0, 20),
                     Parent = card
                 })
-            
+
                 Create("TextLabel", {
                     Text = desc,
                     Font = Enum.Font.Gotham,
@@ -454,7 +508,7 @@ return function(env)
                     Size = UDim2.new(0, 250, 0, 20),
                     Parent = card
                 })
-            
+
                 -- УЛУЧШЕНИЕ: Начальный цвет и позиция зависят от default
                 local toggleBg = Create("TextButton", {
                     Text = "",
@@ -466,7 +520,7 @@ return function(env)
                     Parent = card
                 })
                 AddCorner(toggleBg, 24)
-            
+
                 -- УЛУЧШЕНИЕ: Начальная позиция круга зависит от default
                 local toggleCircle = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Text,
@@ -476,10 +530,10 @@ return function(env)
                     Parent = toggleBg
                 })
                 AddCorner(toggleCircle, 20)
-            
+
                 -- УЛУЧШЕНИЕ: Начальное состояние из параметра default
                 local state = default
-            
+
                 -- УЛУЧШЕНИЕ: Сразу вызываем handler с начальным значением
                 -- Это гарантирует, что State будет синхронизирован с GUI
                 if default then
@@ -487,18 +541,18 @@ return function(env)
                         callHandler(handlerKey, default)
                     end)
                 end
-            
+
                 TrackConnection(toggleBg.MouseButton1Click:Connect(function()
                     state = not state
                     local targetColor = state and CONFIG.Colors.Accent or Color3.fromRGB(50, 50, 55)
                     local targetPos = state and UDim2.new(0, 22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
-            
+
                     TweenService:Create(toggleBg, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
                     TweenService:Create(toggleCircle, TweenInfo.new(0.2), {Position = targetPos}):Play()
-            
+
                     callHandler(handlerKey, state)
                 end))
-            
+
                 return toggleBg
             end
 
@@ -507,10 +561,11 @@ return function(env)
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
-                    Parent = page
+                    Parent = currentPage
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+                table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
 
                 Create("TextLabel", {
                     Text = title,
@@ -568,10 +623,11 @@ return function(env)
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 70),
-                    Parent = page
+                    Parent = currentPage
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+                table.insert(searchIndex, {card = card, name = title:lower(), desc = description:lower()})
 
                 Create("TextLabel", {
                     Text = title,
@@ -684,10 +740,11 @@ return function(env)
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 50),
-                    Parent = page
+                    Parent = currentPage
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+                table.insert(searchIndex, {card = card, name = title:lower(), desc = ""})
 
                 Create("TextLabel", {
                     Text = title,
@@ -733,10 +790,11 @@ return function(env)
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 60),
-                    Parent = page
+                    Parent = currentPage
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+                table.insert(searchIndex, {card = card, name = title:lower(), desc = desc:lower()})
 
                 Create("TextLabel", {
                     Text = title,
@@ -962,10 +1020,11 @@ return function(env)
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 50),
-                    Parent = page
+                    Parent = currentPage
                 })
                 AddCorner(card, 8)
                 AddStroke(card, 1, CONFIG.Colors.Stroke, 0.7)
+                table.insert(searchIndex, {card = card, name = (title or ""):lower(), desc = buttonText:lower()})
 
                 if title ~= "" and title ~= nil then
                     Create("TextLabel", {
@@ -1034,6 +1093,20 @@ return function(env)
             TweenService:Create(closeButton, TweenInfo.new(0.2), {TextColor3 = CONFIG.Colors.TextDark}):Play()
         end)
 
+        -- Поиск: фильтрация карточек по тексту
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            local q = searchBox.Text:lower()
+            if q == "" then
+                for _, entry in ipairs(searchIndex) do
+                    entry.card.Visible = true
+                end
+            else
+                for _, entry in ipairs(searchIndex) do
+                    entry.card.Visible = entry.name:find(q, 1, true) ~= nil or entry.desc:find(q, 1, true) ~= nil
+                end
+            end
+        end)
+
         local inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
             if not processed and input.KeyCode == CONFIG.HideKey then
                 mainFrame.Visible = not mainFrame.Visible
@@ -1075,6 +1148,50 @@ return function(env)
             callHandler("OnMouseClick")
         end)
         table.insert(State.Connections, mouseClickConnection)
+
+        -- ResizeGrip: изменение размера окна мышью
+        local resizeGrip = Create("TextButton", {
+            Name = "ResizeGrip",
+            Text = "↘",
+            Font = Enum.Font.GothamBold,
+            TextSize = 14,
+            TextColor3 = CONFIG.Colors.TextDark,
+            BackgroundColor3 = CONFIG.Colors.Section,
+            BackgroundTransparency = BACK_TRANSPARENCY,
+            Position = UDim2.new(1, -20, 1, -20),
+            Size = UDim2.new(0, 18, 0, 18),
+            AutoButtonColor = false,
+            Active = true,
+            ZIndex = 10,
+            Parent = mainFrame,
+        })
+        AddCorner(resizeGrip, 4)
+
+        local resizing = false
+        local resizeStart = nil
+        local frameStartSize = nil
+
+        resizeGrip.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                resizing = true
+                resizeStart = UserInputService:GetMouseLocation()
+                frameStartSize = mainFrame.AbsoluteSize
+            end
+        end)
+        TrackConnection(UserInputService.InputChanged:Connect(function(input)
+            if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local mouseLoc = UserInputService:GetMouseLocation()
+                local delta = mouseLoc - resizeStart
+                local newW = math.clamp(frameStartSize.X + delta.X, 600, 1400)
+                local newH = math.clamp(frameStartSize.Y + delta.Y, 450, 900)
+                mainFrame.Size = UDim2.new(0, newW, 0, newH)
+            end
+        end))
+        TrackConnection(UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                resizing = false
+            end
+        end))
     end
 
     ----------------------------------------------------------------
