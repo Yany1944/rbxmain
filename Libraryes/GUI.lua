@@ -235,6 +235,7 @@ return function(env)
                 ScrollBarThickness = 3,
                 ScrollBarImageColor3 = Color3.fromRGB(120, 90, 150),
                 VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+                VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Left,
                 Parent = pageHolder
             })
             local leftLayout = Create("UIListLayout", {
@@ -255,6 +256,7 @@ return function(env)
                 ScrollBarThickness = 3,
                 ScrollBarImageColor3 = Color3.fromRGB(120, 90, 150),
                 VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+                VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right,
                 Parent = pageHolder
             })
             local rightLayout = Create("UIListLayout", {
