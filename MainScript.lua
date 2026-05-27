@@ -4284,7 +4284,7 @@ local function GetCollectedCoinsCount()
         return 0
     end)
 
-    if success and coins >= 0 then 
+    if success and coins >= 0 then  -- ✅ >= 0 вместо > 0
         return coins
     end
 
@@ -7810,16 +7810,16 @@ do
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
+        
+        MainTab:CreateSection("Speed Glitch")
+        MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
         MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
-        MainTab:CreateSection("Speed Glitch", "right")
-        MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
-
-        MainTab:CreateSection("FLY SETTINGS")
+        MainTab:CreateSection("FLY SETTINGS", "right")
         MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
         MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 80, State.FlySpeed, "FlySpeed", 5)
         MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
@@ -7840,60 +7840,50 @@ do
         AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
         AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
-        AimTab:CreateSection("ADVANCED OPTIONS")
-        AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
-        AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
-        AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
-
-        AimTab:CreateSection("TARGETING VALUES", "right")
+        AimTab:CreateSection("TARGETING VALUES")
         AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
         AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
         AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
+        AimTab:CreateSection("ADVANCED OPTIONS", "right")
+        AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
+        AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
+        AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
+        AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
+        AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
 
         AimTab:CreateSection("PREDICTION & OFFSET", "right")
         AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
         AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
-
-        AimTab:CreateSection("METHOD & ACTIVATION", "right")
-        AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
-        AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
 end
 
 do
     local VisualsTab = GUI.CreateTab("Visuals")
 
-        VisualsTab:CreateSection("NOTIFICATIONS")
-        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
-
-        VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-        VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+        VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
         VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
-        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
-
-        VisualsTab:CreateSection("ROLE DISPLAY")
-        VisualsTab:CreateToggle("Avatar Display", "Show Murderer and Sheriff avatar cards on screen", "AvatarDisplayEnabled", false)
+        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
+        VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers")
 
         VisualsTab:CreateSection("Misc", "right")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
-        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
 end
 
 do
     local CombatTab = GUI.CreateTab("Combat")
 
-        CombatTab:CreateSection("EXTENDED HITBOX")
-        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
-        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
-
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
         CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
-        CombatTab:CreateSection("KILL AURA", "right")
+
+        CombatTab:CreateSection("KILL AURA")
         CombatTab:CreateKeybindButton("Kill Aura (Toggle)", "killaura", "KillAura")
         CombatTab:CreateSlider("Kill Aura Range", "Activation distance in studs", 1, 20, State.KillAuraRange, "KillAuraRange", 0.5)
         CombatTab:CreateToggle("Static Zone", "Simple circle, no geometry checks", "KillAuraStatic", false)
@@ -7904,21 +7894,25 @@ do
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
+
+        CombatTab:CreateSection("EXTENDED HITBOX", "right")
+        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
+        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
 end
 
 do
     local FarmTab = GUI.CreateTab("Farming")
 
         FarmTab:CreateSection("AUTO FARM")
-        FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
-
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
+
         FarmTab:CreateSection("FARM TUNING", "right")
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("No Render", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 25 min", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 end
@@ -7957,14 +7951,14 @@ do
         TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
         TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
 
+        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
+        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
+
         TrollingTab:CreateSection("ORBIT SETTINGS")
         TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
         TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
         TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
         TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
-
-        TrollingTab:CreateSection("BLOCK PATH SETTINGS", "right")
-        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
 
         TrollingTab:CreateSection("ORBIT PRESETS", "right")
         TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
