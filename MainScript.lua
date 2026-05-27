@@ -21,7 +21,7 @@ local AUTOFARM_ENABLED = false
 local WHITELIST_IDS = {10341870648}
 
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
-
+--[[
 pcall(function()
     local url = "https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Emotes.lua"
     local ok, result = pcall(function()
@@ -34,7 +34,7 @@ pcall(function()
         warn("Emotes.lua failed to load:", result)
     end
 end)
-
+--]]
 -- ШАГ 5: COREGUI TOGGLE FIX
 pcall(function()
     local StarterGui = game:GetService("StarterGui")
