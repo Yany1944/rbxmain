@@ -23,7 +23,7 @@ local WHITELIST_IDS = {10341870648}
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
 pcall(function()
-    local url = "https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Emotes.lua"
+    local url = "https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"
     local ok, result = pcall(function()
         return game:HttpGet(url, true)
     end)
