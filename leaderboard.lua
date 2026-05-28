@@ -97,10 +97,10 @@ local State = {
     AutoFarmEnabled = false,
     AutoPrestigeEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 22.5,
     CoinFarmDelay = 2,
     UndergroundMode = false,
-    UndergroundOffset = 2.5,
+    UndergroundOffset = 3,
     CoinBlacklist = {},
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
@@ -6095,7 +6095,7 @@ do
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
 
         FarmTab:CreateSection("FARM TUNING", "right")
-        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 0.5)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("No Render", "Disable rendering to reduce GPU usage", "AFKMode", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 60 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
