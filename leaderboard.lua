@@ -3892,20 +3892,20 @@ end
 -- AUTO PRESTIGE SYSTEM (проверка Level через Attribute в конце каждого раунда)
 -- ══════════════════════════════════════════════════════════════════════════════
 local autoPrestigeBusy = false
-local LevelUpRemote = nil
+local PrestigeRemote = nil
 
 task.spawn(function()
     pcall(function()
-        LevelUpRemote = ReplicatedStorage:WaitForChild("Remotes", 10)
-            :WaitForChild("Extras", 10)
-            :WaitForChild("LevelUp", 10)
+        PrestigeRemote = ReplicatedStorage:WaitForChild("Remotes", 10)
+            :WaitForChild("Inventory", 10)
+            :WaitForChild("Prestige", 10)
     end)
 end)
 
 local function CheckAndPrestige()
     if not State.AutoPrestigeEnabled then return end
     if autoPrestigeBusy then return end
-    if not LevelUpRemote then return end
+    if not PrestigeRemote then return end
     local lvl = LocalPlayer:GetAttribute("Level")
     if not lvl or lvl < 100 then return end
     autoPrestigeBusy = true
@@ -3914,7 +3914,7 @@ local function CheckAndPrestige()
             ShowNotification("<font color=\"rgb(255, 200, 50)\">Level 100 → Prestiging...</font>", CONFIG.Colors.Text)
         end
     end)
-    local ok = pcall(function() LevelUpRemote:FireServer() end)
+    local ok = pcall(function() PrestigeRemote:FireServer() end)
     if ok then
         task.wait(2)
         pcall(function() if State.Rejoin then State.Rejoin() end end)
