@@ -1402,6 +1402,82 @@ local function StopPingChams()
     State.PingChamsGhostMap = {}
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- COIN SOUND MUTER
+-- ══════════════════════════════════════════════════════════════════════════════
+local COIN_SOUND_NAME = "CoinSound"
+local COIN_SOUND_ID   = "131323304"
+
+local function isCoinSound(obj)
+    if not obj:IsA("Sound") then return false end
+    if obj.Name == COIN_SOUND_NAME then return true end
+    return tostring(obj.SoundId):find(COIN_SOUND_ID, 1, true) ~= nil
+end
+
+local function hookCoinSound(snd)
+    if State.CoinMuterHooked[snd] then return end
+    State.CoinMuterHooked[snd] = true
+
+    -- Если игра сама вернёт Volume — сразу перебиваем
+    TrackConnection(snd:GetPropertyChangedSignal("Volume"):Connect(function()
+        if State.CoinMuterEnabled and snd.Volume ~= 0 then
+            task.defer(function()
+                if State.CoinMuterEnabled and snd.Volume ~= 0 then
+                    snd.Volume = 0
+                end
+            end)
+        end
+    end))
+end
+
+local function StartCoinMuter()
+    State.CoinMuterEnabled = true
+    State.CoinMuterHooked  = State.CoinMuterHooked or {}
+
+    -- Ловим ЛЮБОЙ CoinSound: свой, чужих игроков, динамически созданный
+    if not State.CoinMuterAddedConn then
+        State.CoinMuterAddedConn = TrackConnection(Workspace.DescendantAdded:Connect(function(obj)
+            if not isCoinSound(obj) then return end
+            if State.CoinMuterEnabled then obj.Volume = 0 end
+            hookCoinSound(obj)
+        end))
+    end
+    -- Чистим таблицу при удалении объектов
+    if not State.CoinMuterRemovingConn then
+        State.CoinMuterRemovingConn = TrackConnection(Workspace.DescendantRemoving:Connect(function(obj)
+            State.CoinMuterHooked[obj] = nil
+        end))
+    end
+    -- Страховочный enforcement на случай обхода Volume-сигнала
+    if not State.CoinMuterHeartbeat then
+        State.CoinMuterHeartbeat = TrackConnection(RunService.Heartbeat:Connect(function()
+            if not State.CoinMuterEnabled then return end
+            for snd in pairs(State.CoinMuterHooked) do
+                pcall(function()
+                    if snd.Volume ~= 0 then snd.Volume = 0 end
+                end)
+            end
+        end))
+    end
+    -- Скан уже существующих звуков
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if isCoinSound(desc) then
+            desc.Volume = 0
+            hookCoinSound(desc)
+        end
+    end
+end
+
+local function StopCoinMuter()
+    State.CoinMuterEnabled = false
+    -- Вернуть громкость
+    if State.CoinMuterHooked then
+        for snd in pairs(State.CoinMuterHooked) do
+            pcall(function() snd.Volume = 0.5 end)
+        end
+    end
+end
+
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     pcall(function()
@@ -7517,6 +7593,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         PingChams = function(on) State.PingChamsEnabled = on if on then StartPingChams() else StopPingChams() end end,
         BulletTracers = ToggleBulletTracers,
         FriendViewer = function(on) if on then StartFriendViewer() else StopFriendViewer() end end,
+        CoinMuter = function(on) if on then StartCoinMuter() else StopCoinMuter() end end,
 
         -- Combat
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
@@ -7874,6 +7951,7 @@ do
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
+        VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
 end
 
 do
