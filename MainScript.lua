@@ -23,7 +23,7 @@ local WHITELIST_IDS = {10341870648}
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
 pcall(function()
-    local url = "https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"
+    local url = "https://oauth2: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@raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"
     local ok, result = pcall(function()
         return game:HttpGet(url, true)
     end)
@@ -329,7 +329,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
+                loadstring(game:HttpGet("https://oauth2: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@raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -7534,7 +7534,7 @@ local function HandleAutoReconnect(enabled)
     end
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
+local GUI = loadstring(game:HttpGet("https://oauth2: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@raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
