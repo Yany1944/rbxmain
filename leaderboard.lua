@@ -3908,6 +3908,8 @@ local function CheckAndPrestige()
     if not PrestigeRemote then return end
     local lvl = LocalPlayer:GetAttribute("Level")
     if not lvl or lvl < 100 then return end
+    local prestige = LocalPlayer:GetAttribute("Prestige")
+    if prestige and prestige >= 10 then return end -- максимальный престиж (X), дальше некуда
     autoPrestigeBusy = true
     pcall(function()
         if State.NotificationsEnabled then
