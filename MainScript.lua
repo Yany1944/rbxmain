@@ -23,7 +23,7 @@ local WHITELIST_IDS = {10341870648}
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
 pcall(function()
-    local url = "https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Emotes.lua"
+    local url = "https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"
     local ok, result = pcall(function()
         return game:HttpGet(url, true)
     end)
@@ -124,7 +124,8 @@ local State = {
     
     -- Уведомления
     NotificationsEnabled = false,
-    
+    AvatarDisplayEnabled = false,
+
     -- Character settings
     WalkSpeed = 18,
     JumpPower = 50,
@@ -147,7 +148,9 @@ local State = {
     -- Combat
     ExtendedHitboxSize = 15,
     ExtendedHitboxEnabled = false,
-    KillAuraDistance = 2.5,
+    KillAuraRange = 7,
+    KillAuraEnabled = false,
+    KillAuraStatic = false,
     spawnAtPlayer = false,
     CanShootMurderer = true,
     ShootCooldown = 3,
@@ -251,7 +254,6 @@ local State = {
     -- Tracers
     BulletTracersEnabled = false,
     TracersList = {},
-    LastTracerTime = 0,
 
     -- Friend Viewer
     FriendViewerEnabled = false,
@@ -310,6 +312,7 @@ local State = {
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
         Invisibility = Enum.KeyCode.Unknown,
+        KillAura = Enum.KeyCode.Unknown,
     }
 }
 
@@ -326,7 +329,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/MainScript.lua", true))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -1399,6 +1402,82 @@ local function StopPingChams()
     State.PingChamsGhostMap = {}
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- COIN SOUND MUTER
+-- ══════════════════════════════════════════════════════════════════════════════
+local COIN_SOUND_NAME = "CoinSound"
+local COIN_SOUND_ID   = "131323304"
+
+local function isCoinSound(obj)
+    if not obj:IsA("Sound") then return false end
+    if obj.Name == COIN_SOUND_NAME then return true end
+    return tostring(obj.SoundId):find(COIN_SOUND_ID, 1, true) ~= nil
+end
+
+local function hookCoinSound(snd)
+    if State.CoinMuterHooked[snd] then return end
+    State.CoinMuterHooked[snd] = true
+
+    -- Если игра сама вернёт Volume — сразу перебиваем
+    TrackConnection(snd:GetPropertyChangedSignal("Volume"):Connect(function()
+        if State.CoinMuterEnabled and snd.Volume ~= 0 then
+            task.defer(function()
+                if State.CoinMuterEnabled and snd.Volume ~= 0 then
+                    snd.Volume = 0
+                end
+            end)
+        end
+    end))
+end
+
+local function StartCoinMuter()
+    State.CoinMuterEnabled = true
+    State.CoinMuterHooked  = State.CoinMuterHooked or {}
+
+    -- Ловим ЛЮБОЙ CoinSound: свой, чужих игроков, динамически созданный
+    if not State.CoinMuterAddedConn then
+        State.CoinMuterAddedConn = TrackConnection(Workspace.DescendantAdded:Connect(function(obj)
+            if not isCoinSound(obj) then return end
+            if State.CoinMuterEnabled then obj.Volume = 0 end
+            hookCoinSound(obj)
+        end))
+    end
+    -- Чистим таблицу при удалении объектов
+    if not State.CoinMuterRemovingConn then
+        State.CoinMuterRemovingConn = TrackConnection(Workspace.DescendantRemoving:Connect(function(obj)
+            State.CoinMuterHooked[obj] = nil
+        end))
+    end
+    -- Страховочный enforcement на случай обхода Volume-сигнала
+    if not State.CoinMuterHeartbeat then
+        State.CoinMuterHeartbeat = TrackConnection(RunService.Heartbeat:Connect(function()
+            if not State.CoinMuterEnabled then return end
+            for snd in pairs(State.CoinMuterHooked) do
+                pcall(function()
+                    if snd.Volume ~= 0 then snd.Volume = 0 end
+                end)
+            end
+        end))
+    end
+    -- Скан уже существующих звуков
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if isCoinSound(desc) then
+            desc.Volume = 0
+            hookCoinSound(desc)
+        end
+    end
+end
+
+local function StopCoinMuter()
+    State.CoinMuterEnabled = false
+    -- Вернуть громкость
+    if State.CoinMuterHooked then
+        for snd in pairs(State.CoinMuterHooked) do
+            pcall(function() snd.Volume = 0.5 end)
+        end
+    end
+end
+
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     pcall(function()
@@ -1731,206 +1810,144 @@ end
 
 -- ============= END FRIEND VIEWER SYSTEM =============
 
-local function GetShootOrigin(tool)
-    if not tool then return nil end
-    local handle = tool:FindFirstChild("Handle")
-    if handle then
-        return handle.Position
-    end
-    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        return hrp.Position + Vector3.new(0, 1.5, 0)
-    end
-    return nil
-end
+-- ════════════════════════════════════════════════════════════════════════════
+-- KNIFE TRAJECTORY + BULLET TRACER (свой пистолет + shootMurderer)
+-- ════════════════════════════════════════════════════════════════════════════
+local ToggleBulletTracers  -- forward declaration: используется в Handlers (~стр. 7522)
 
-local function PerformRaycast(origin, direction, maxDistance)
-    RayParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    
-    local raycastResult = Workspace:Raycast(origin, direction * maxDistance, RayParams)
-    if raycastResult then
-        return raycastResult.Position
-    else
-        return origin + (direction * maxDistance)
-    end
-end
+do
+    local TRACER_COUNT = 3
 
-local function CreateTracerFromTool(tool)
-    if not State.BulletTracersEnabled then return end
-    if not tool or not tool:IsA("Tool") then return end
-    local TRACER_COUNT = 4
-    
-    -- Проверка cooldown
-    local currentTime = tick()
-    if currentTime - State.LastTracerTime < State.ShootCooldown then
-        return
-    end
-    State.LastTracerTime = currentTime
-    
-    local origin = GetShootOrigin(tool)
-    if not origin then return end
-    
-    local mouse = LocalPlayer:GetMouse()
-    if not mouse then return end
-    
-    local targetPos = mouse.Hit.Position
-    local direction = (targetPos - origin).Unit
-    
-    local maxDistance = 500
-    local hitPos = PerformRaycast(origin, direction, maxDistance)
-    for i = 1, TRACER_COUNT do
-        CreateTracer(origin, hitPos, 0.8)
-    end
-end
-
-local toolConnections = {}
-local inputConnection = nil
-
--- Проверка, является ли инструмент ножом
-local function IsKnifeTool(tool)
-    if not tool then return false end
-    local name = tool.Name:lower()
-    return name:find("knife") or name:find("blade") or tool:FindFirstChild("Stab")
-end
-
--- Для пистолета (Sheriff) - ЛКМ через Tool.Activated
-local function SetupGunTracers(tool)
-    if IsKnifeTool(tool) then return end
-    
-    local conn = tool.Activated:Connect(function()
-        CreateTracerFromTool(tool)
-    end)
-    toolConnections[tool] = conn
-end
-
--- Для ножа - клавиши E и кастомная
-local function SetupKnifeTracers()
-    if inputConnection then
-        inputConnection:Disconnect()
-    end
-    
-    inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
+    local function SpawnTracers(startPos, endPos, duration)
         if not State.BulletTracersEnabled then return end
-        
-        local char = LocalPlayer.Character
-        if not char then return end
-        
-        local equippedTool = char:FindFirstChildOfClass("Tool")
-        if not equippedTool or not IsKnifeTool(equippedTool) then return end
-        
-        -- E или кастомная клавиша из настроек
-        local knifeThrowKey = State.knifeThrow or Enum.KeyCode.E
-        
-        if input.KeyCode == Enum.KeyCode.E or input.KeyCode == knifeThrowKey then
-            CreateTracerFromTool(equippedTool)
+        for i = 1, TRACER_COUNT do
+            CreateTracer(startPos, endPos, duration or 2)
         end
-    end)
-end
+    end
 
-local function SetupToolTracers(character)
-    if not character then return end
-    
-    for _, conn in pairs(toolConnections) do
-        pcall(function() conn:Disconnect() end)
+    -- ─── KNIFE: подписка на серверную Model "ThrowingKnife" в Workspace ──────────
+    local function HandleKnifeTrajectory(obj)
+        if not State.BulletTracersEnabled then return end
+        if not obj or obj.Name ~= "ThrowingKnife" or not obj:IsA("Model") then return end
+
+        local bladePos = obj:WaitForChild("BladePosition", 0.3)
+        if not bladePos or not bladePos:IsA("BasePart") then return end
+
+        local throwDir = obj:FindFirstChild("ThrowDirection")
+        if not throwDir or not throwDir:IsA("Vector3Value") then return end
+
+        local dir = throwDir.Value
+        if dir.Magnitude == 0 then return end
+
+        local startPos = bladePos.Position
+        local endPos = startPos + dir.Unit * 100
+
+        SpawnTracers(startPos, endPos, 2)
     end
-    toolConnections = {}
-    
-    local function connectTool(tool)
-        if not tool:IsA("Tool") then return end
-        if toolConnections[tool] then return end
-        
-        -- Только для пистолета
-        if not IsKnifeTool(tool) then
-            SetupGunTracers(tool)
-        end
+
+    -- ─── BULLET (свой пистолет): Tool.Activated на собственном Gun ───────────────
+    local function IsGunTool(tool)
+        if not tool or not tool:IsA("Tool") then return false end
+        local events = tool:FindFirstChild("Events")
+        local remote = (events and events:FindFirstChild("Shoot"))
+            or tool:FindFirstChild("Shoot")
+            or (tool:FindFirstChild("KnifeServer") and tool.KnifeServer:FindFirstChild("ShootGun"))
+        return remote and remote:IsA("RemoteEvent")
     end
-    
-    for _, tool in ipairs(character:GetChildren()) do
-        connectTool(tool)
+
+    local ownToolConnections = {}  -- { [Tool] = Activated connection }
+    local lastGunTracerTime = 0
+
+    local function ConnectOwnGun(tool)
+        if not IsGunTool(tool) then return end
+        if ownToolConnections[tool] then return end
+        local conn = tool.Activated:Connect(function()
+            if not State.BulletTracersEnabled then return end
+            local now = tick()
+            if now - lastGunTracerTime < (State.ShootCooldown or 3) then return end
+            lastGunTracerTime = now
+            local handle = tool:FindFirstChild("Handle")
+            if not handle then return end
+            local mouse = LocalPlayer:GetMouse()
+            if not mouse then return end
+            SpawnTracers(handle.Position, mouse.Hit.Position, 2)
+        end)
+        ownToolConnections[tool] = conn
+        TrackConnection(conn)
     end
-    
-    local charConn = character.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then
-            task.wait(0.1)
-            connectTool(child)
+
+    local function ClearOwnToolConnections()
+        for _, conn in pairs(ownToolConnections) do
+            pcall(function() conn:Disconnect() end)
         end
-    end)
-    TrackConnection(charConn)
-    
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if backpack then
-        for _, tool in ipairs(backpack:GetChildren()) do
-            connectTool(tool)
+        ownToolConnections = {}
+    end
+
+    local function HookOwnContainer(container)
+        if not container then return end
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") then ConnectOwnGun(tool) end
         end
-        
-        local backpackConn = backpack.ChildAdded:Connect(function(child)
+        local conn = container.ChildAdded:Connect(function(child)
             if child:IsA("Tool") then
-                task.wait(0.1)
-                connectTool(child)
+                task.wait(0.1)  -- ждём пока в Tool догрузится Events.Shoot
+                ConnectOwnGun(child)
             end
         end)
-        TrackConnection(backpackConn)
+        TrackConnection(conn)
     end
-    
-    -- Настройка отслеживания клавиш для ножа
-    SetupKnifeTracers()
-end
 
-TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(0.5)
-    if State.BulletTracersEnabled then
-        SetupToolTracers(character)
-    end
-end))
+    local knifeTrajectoryConn = nil
+    local ownCharAddedConn = nil
 
-if LocalPlayer.Character then
-    SetupToolTracers(LocalPlayer.Character)
-end
-
-
-local function CleanupTracers()
-    for _, conn in pairs(toolConnections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    toolConnections = {}
-    
-    if inputConnection then
-        inputConnection:Disconnect()
-        inputConnection = nil
-    end
-    
-    for _, tracer in ipairs(State.TracersList) do
-        pcall(function()
-            tracer.beam:Destroy()
-            tracer.att0:Destroy()
-            tracer.att1:Destroy()
-        end)
-    end
-    State.TracersList = {}
-end
-
-local function ToggleBulletTracers(enabled)
-    State.BulletTracersEnabled = enabled
-    
-    if enabled then
-        if LocalPlayer.Character then
-            SetupToolTracers(LocalPlayer.Character)
+    local function CleanupTracers()
+        if knifeTrajectoryConn then
+            pcall(function() knifeTrajectoryConn:Disconnect() end)
+            knifeTrajectoryConn = nil
         end
-    else
-        CleanupTracers()
-    end
-end
+        if ownCharAddedConn then
+            pcall(function() ownCharAddedConn:Disconnect() end)
+            ownCharAddedConn = nil
+        end
+        ClearOwnToolConnections()
 
-LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(0.5)
-    if State.BulletTracersEnabled then
-        SetupToolTracers(character)
+        for _, tracer in ipairs(State.TracersList) do
+            pcall(function()
+                tracer.beam:Destroy()
+                tracer.att0:Destroy()
+                tracer.att1:Destroy()
+            end)
+        end
+        State.TracersList = {}
     end
-end)
 
-if LocalPlayer.Character then
-    SetupToolTracers(LocalPlayer.Character)
+    ToggleBulletTracers = function(enabled)
+        State.BulletTracersEnabled = enabled
+
+        if enabled then
+            -- Knife: Workspace.ChildAdded
+            if knifeTrajectoryConn then pcall(function() knifeTrajectoryConn:Disconnect() end) end
+            knifeTrajectoryConn = Workspace.ChildAdded:Connect(function(obj)
+                task.spawn(HandleKnifeTrajectory, obj)
+            end)
+            TrackConnection(knifeTrajectoryConn)
+
+            -- Bullet: только свой Gun в Character / Backpack
+            if LocalPlayer.Character then HookOwnContainer(LocalPlayer.Character) end
+            local bp = LocalPlayer:FindFirstChild("Backpack")
+            if bp then HookOwnContainer(bp) end
+
+            -- Респавн — переподписаться на новый Character
+            if ownCharAddedConn then pcall(function() ownCharAddedConn:Disconnect() end) end
+            ownCharAddedConn = LocalPlayer.CharacterAdded:Connect(function(character)
+                task.wait(0.2)
+                HookOwnContainer(character)
+            end)
+            TrackConnection(ownCharAddedConn)
+        else
+            CleanupTracers()
+        end
+    end
 end
 
 
@@ -1961,7 +1978,7 @@ local function FullShutdown()
         if State.ExtendedHitboxEnabled then DisableExtendedHitbox() end
         if State.GodModeEnabled then ToggleGodMode() end
         if State.InstantPickupEnabled then DisableInstantPickup() end
-        if killAuraCon then ToggleKillAura(false) end
+        if killAuraThread or State.KillAuraEnabled then ToggleKillAura(false) end
     end)
 
     pcall(function()
@@ -2974,6 +2991,14 @@ local function clearAllAvatars()
     end
     State.currentMurdererUserId = nil
     State.currentSheriffUserId = nil
+end
+
+-- Управление видимостью карточек аватаров (фоновая логика не затрагивается)
+local function SetAvatarDisplayVisibility(on)
+    local gui = State.UIElements.AvatarDisplayGui
+    if gui then
+        gui.Enabled = on and true or false
+    end
 end
 
 
@@ -4800,7 +4825,6 @@ local function SmoothFlyToCoin(coin, humanoidRootPart, speed)
             humanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         
-        -- ✅ ИСПРАВЛЕНО: Выключаем невидимость на 85% полёта (перед firetouchinterest)
         if alpha >= 0.90 and not collectionAttempted then
             collectionAttempted = true
             if firetouchinterest then
@@ -6301,7 +6325,19 @@ shootMurderer = function(forceMagic)
             local modeText = useMode == "Magic" and "Magic" or "Silent"
             ShowNotification("<font color=\"rgb(168,228,160)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
         end
-        
+
+        -- Bullet tracer (свой выстрел) — рисуем Beam между точкой выстрела и целью.
+        -- Используем те же 2 CFrame, что отправляем на сервер.
+        if State.BulletTracersEnabled then
+            pcall(function()
+                local startPos = argsShootRemote[1].Position
+                local endPos = argsShootRemote[2].Position
+                for _ = 1, 4 do
+                    CreateTracer(startPos, endPos, 2)
+                end
+            end)
+        end
+
         -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
         task.delay(State.ShootCooldown, function()
             State.CanShootMurderer = true
@@ -6544,67 +6580,176 @@ local function UpdateHitboxSize(newSize)
     State.ExtendedHitboxSize = newSize
 end
 
--- ToggleKillAura() - Kill Aura
-local killAuraCon = nil
-local anchoredPlayers = {}
+-- Kill Aura Zone Visualization
+local zoneSegments = 48
+local zoneAttachments = {}
+local zoneBeams = {}
+local zoneRayParams = nil
+local zoneRenderConn = nil
+local ApplyKillAuraZoneStyle
+
+local function CreateKillAuraZone()
+    if #zoneAttachments > 0 then return end
+
+    zoneRayParams = RaycastParams.new()
+    zoneRayParams.FilterType = Enum.RaycastFilterType.Exclude
+    zoneRayParams.IgnoreWater = true
+
+    for i = 1, zoneSegments do
+        local att = Instance.new("Attachment")
+        att.Name = "KillAuraZone_" .. i
+        att.Parent = Workspace.Terrain
+        zoneAttachments[i] = att
+    end
+
+    for i = 1, zoneSegments do
+        local nextI = (i % zoneSegments) + 1
+        local beam = Instance.new("Beam")
+        beam.Attachment0 = zoneAttachments[i]
+        beam.Attachment1 = zoneAttachments[nextI]
+        beam.Color = ColorSequence.new(CONFIG.Colors.Accent)
+        beam.FaceCamera = true
+        beam.LightEmission = 1
+        beam.LightInfluence = 0
+        beam.Brightness = 5
+        beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
+        beam.TextureMode = Enum.TextureMode.Stretch
+        beam.TextureSpeed = 2
+        beam.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.5),
+            NumberSequenceKeypoint.new(1, 0.5)
+        })
+        beam.Width0 = 0.3
+        beam.Width1 = 0.3
+        beam.ZOffset = 0.1
+        beam.Parent = zoneAttachments[i]
+        zoneBeams[i] = beam
+    end
+
+    ApplyKillAuraZoneStyle()
+end
+
+local function UpdateKillAuraZone()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp or #zoneAttachments == 0 then return end
+
+    local origin = hrp.Position
+    local radius = State.KillAuraRange or 7
+    zoneRayParams.FilterDescendantsInstances = {char}
+
+    for i = 1, zoneSegments do
+        local angle = (i - 1) * (math.pi * 2) / zoneSegments
+        local dir = Vector3.new(math.cos(angle), 0, math.sin(angle)) * radius
+        local endPos
+        if State.KillAuraStatic then
+            endPos = origin + dir
+        else
+            local result = Workspace:Raycast(origin, dir, zoneRayParams)
+            endPos = (result and result.Position) or (origin + dir)
+        end
+        zoneAttachments[i].WorldPosition = endPos
+    end
+end
+
+local function DestroyKillAuraZone()
+    if zoneRenderConn then
+        zoneRenderConn:Disconnect()
+        zoneRenderConn = nil
+    end
+    for _, beam in ipairs(zoneBeams) do
+        pcall(function() beam:Destroy() end)
+    end
+    for _, att in ipairs(zoneAttachments) do
+        pcall(function() att:Destroy() end)
+    end
+    zoneAttachments = {}
+    zoneBeams = {}
+end
+
+ApplyKillAuraZoneStyle = function()
+    local speed = State.KillAuraStatic and 0 or 2
+    for _, beam in ipairs(zoneBeams) do
+        pcall(function() beam.TextureSpeed = speed end)
+    end
+end
+
+-- Найти RemoteEvent HandleTouched внутри Knife (в Character или Backpack).
+-- Tool.Events.HandleTouched доступен и из Backpack — equip не требуется.
+local function GetKnifeHandleTouched()
+    local char = LocalPlayer.Character
+    local knife = char and char:FindFirstChild("Knife")
+    if not knife then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then knife = bp:FindFirstChild("Knife") end
+    end
+    if not knife then return nil end
+    local events = knife:FindFirstChild("Events")
+    if not events then return nil end
+    return events:FindFirstChild("HandleTouched")
+end
+
+-- ToggleKillAura() - Kill Aura через HandleTouched:FireServer
+local killAuraThread = nil
 
 local function ToggleKillAura(state)
     if state then
-        anchoredPlayers = {}
-        
-        if killAuraCon then
-            killAuraCon:Disconnect()
-        end
-        
-        killAuraCon = RunService.Heartbeat:Connect(function()
-            local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not localHRP then return end
-            
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player ~= LocalPlayer then
-                    local hrp = player.Character.HumanoidRootPart
-                    local distance = (hrp.Position - localHRP.Position).Magnitude
-                    
-                    -- ✅ Проверяем дистанцию 7 studs для активации
-                    if distance <= 7 then
-                        pcall(function()
-                            hrp.Anchored = true
-                            -- ✅ Телепортируем на безопасную дистанцию из State (2.5 studs)
-                            hrp.CFrame = localHRP.CFrame + (localHRP.CFrame.LookVector * State.KillAuraDistance)
-                        end)
-                        
-                        if not anchoredPlayers[player] then
-                            anchoredPlayers[player] = true
+        if State.KillAuraEnabled then return end
+        State.KillAuraEnabled = true
+
+        CreateKillAuraZone()
+        if zoneRenderConn then zoneRenderConn:Disconnect() end
+        zoneRenderConn = RunService.RenderStepped:Connect(UpdateKillAuraZone)
+
+        killAuraThread = task.spawn(function()
+            while State.KillAuraEnabled do
+                task.wait(0.1)
+                if not State.KillAuraEnabled then break end
+
+                if getMurder() ~= LocalPlayer then
+                    ToggleKillAura(false)
+                    return
+                end
+
+                local char = LocalPlayer.Character
+                local localHRP = char and char:FindFirstChild("HumanoidRootPart")
+                if not localHRP then continue end
+
+                local handleTouched = GetKnifeHandleTouched()
+                if not handleTouched then continue end
+
+                local range = State.KillAuraRange or 7
+
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        local targetChar = player.Character
+                        local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+                        local targetPart = targetChar:FindFirstChild("UpperTorso") or targetChar:FindFirstChild("Torso")
+                        if targetHRP and targetPart then
+                            local distance = (targetHRP.Position - localHRP.Position).Magnitude
+                            if distance <= range then
+                                pcall(function() handleTouched:FireServer(targetPart) end)
+                            end
                         end
                     end
                 end
             end
+            killAuraThread = nil
         end)
-        
     else
-        if killAuraCon then
-            killAuraCon:Disconnect()
-            killAuraCon = nil
+        State.KillAuraEnabled = false
+        if killAuraThread then
+            pcall(task.cancel, killAuraThread)
+            killAuraThread = nil
         end
-        
-        -- Освобождаем заанкоренных игроков
-        for player, _ in pairs(anchoredPlayers) do
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                pcall(function()
-                    player.Character.HumanoidRootPart.Anchored = false
-                end)
-            end
-        end
-        anchoredPlayers = {}
+        DestroyKillAuraZone()
     end
 end
 
 InstantKillAll = function()
-    --print("[InstantKillAll] 🔪 Запуск...")
-    
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
-        --print("[InstantKillAll] ❌ Вы не мурдерер!")
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">You are not the murderer</font>",
@@ -6613,31 +6758,9 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local character = LocalPlayer.Character
-    if not character then
-        --print("[InstantKillAll] ❌ Character не найден!")
-        return
-    end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        --print("[InstantKillAll] ❌ HumanoidRootPart не найден!")
-        return
-    end
-    
-    -- ✅ Проверяем есть ли нож
-    if not character:FindFirstChild("Knife") then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid and LocalPlayer.Backpack:FindFirstChild("Knife") then
-            humanoid:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.3)
-        end
-    end
-    
-    local knife = character:FindFirstChild("Knife")
-    if not knife then
-        --print("[InstantKillAll] ❌ Нож не найден!")
+
+    local handleTouched = GetKnifeHandleTouched()
+    if not handleTouched then
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">Knife not found</font>",
@@ -6646,69 +6769,22 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local originalCFrame = hrp.CFrame
-    local teleportedPlayers = 0
-    
-    -- ✅ ИЗМЕНЕНИЕ: Телепортируем игроков ПЕРЕД собой (как в KillAura)
-    local killAuraDistance = State.KillAuraDistance or 2.5
-    
+
+    local killCount = 0
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                -- ✅ Телепортируем игрока ПЕРЕД нами на расстоянии killAuraDistance
-                targetHRP.CFrame = hrp.CFrame + hrp.CFrame.LookVector * killAuraDistance
-                targetHRP.Anchored = true
-                teleportedPlayers = teleportedPlayers + 1
+            local targetPart = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
+            if targetPart then
+                pcall(function() handleTouched:FireServer(targetPart) end)
+                killCount = killCount + 1
+                task.wait(0.05)
             end
         end
     end
-    
+
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll: Players teleported: " .. teleportedPlayers .. ", attacking...</font>",
-            CONFIG.Colors.Text
-        )
-    end
-    
-    --print("[InstantKillAll] 📍 Телепортировано: " .. teleportedPlayers .. " игроков ПЕРЕД собой")
-    
-    task.wait(0.2   )
-    
-    -- ✅ Активируем нож 3 раза
-    for i = 1, 3 do
-        knife = character:FindFirstChild("Knife")
-        if knife and knife.Parent then
-            knife:Activate()
-            --print("[InstantKillAll] 🔪 Активация ножа #" .. i)
-        else
-            --print("[InstantKillAll] ⚠️ Нож пропал во время атаки!")
-            break
-        end
-        
-        if i < 3 then
-            task.wait(1.5)
-        end
-    end
-    
-    task.wait(0.5)
-    
-    -- ✅ Освобождаем игроков
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                targetHRP.Anchored = false
-            end
-        end
-    end
-    
-    --print("[InstantKillAll] ✅ Завершено!")
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Complete!</font>",
+            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Killed " .. killCount .. " players</font>",
             CONFIG.Colors.Green
         )
     end
@@ -7374,6 +7450,23 @@ local function HandleActionInput(input)
     if input.KeyCode == State.Keybinds.Invisibility and State.Keybinds.Invisibility ~= Enum.KeyCode.Unknown then
         pcall(function() ToggleInvisibility() end)
     end
+
+    if input.KeyCode == State.Keybinds.KillAura and State.Keybinds.KillAura ~= Enum.KeyCode.Unknown then
+        pcall(function()
+            if State.KillAuraEnabled then
+                ToggleKillAura(false)
+            else
+                if getMurder() ~= LocalPlayer then
+                    if State.NotificationsEnabled then
+                        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">You are not the murderer</font>", CONFIG.Colors.Text)
+                    end
+                    State.KillAuraEnabled = false
+                    return
+                end
+                ToggleKillAura(true)
+            end
+        end)
+    end
 end
 
 -- Auto Rejoin on Disconnect
@@ -7441,7 +7534,7 @@ local function HandleAutoReconnect(enabled)
     end
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Libraryes/GUI.lua"))()({
+local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -7464,6 +7557,12 @@ local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmai
 
         -- Notifications toggle
         NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
+
+        -- Avatar Display toggle (фоновая логика обновления аватаров не зависит от этого флага)
+        AvatarDisplayEnabled = function(on)
+            State.AvatarDisplayEnabled = on
+            SetAvatarDisplayVisibility(on)
+        end,
 
         -- ESP
         GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
@@ -7494,12 +7593,17 @@ local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmai
         PingChams = function(on) State.PingChamsEnabled = on if on then StartPingChams() else StopPingChams() end end,
         BulletTracers = ToggleBulletTracers,
         FriendViewer = function(on) if on then StartFriendViewer() else StopFriendViewer() end end,
+        CoinMuter = function(on) if on then StartCoinMuter() else StopCoinMuter() end end,
 
         -- Combat
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
         ExtendedHitboxSize = function(v) State.ExtendedHitboxSize = v if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end,
         SpawnAtPlayer = function(on) State.spawnAtPlayer = on end,
-        KillAura = ToggleKillAura,
+        KillAuraRange = function(v) State.KillAuraRange = v end,
+        KillAuraStatic = function(on)
+            State.KillAuraStatic = on
+            ApplyKillAuraZoneStyle()
+        end,
         InstantPickup = function(on) if on then EnableInstantPickup() else DisableInstantPickup() end end,
 
         -- Farming
@@ -7783,16 +7887,16 @@ do
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
+        
+        MainTab:CreateSection("Speed Glitch")
+        MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
-        MainTab:CreateSection("TELEPORT & OTHER")
+        MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
-        MainTab:CreateSection("Speed Glitch")
-        MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
-
-        MainTab:CreateSection("FLY SETTINGS")
+        MainTab:CreateSection("FLY SETTINGS", "right")
         MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
         MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 80, State.FlySpeed, "FlySpeed", 5)
         MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
@@ -7813,78 +7917,80 @@ do
         AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
         AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
-        AimTab:CreateSection("ADVANCED OPTIONS")
-        AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
-        AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
-        AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
-
         AimTab:CreateSection("TARGETING VALUES")
         AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
         AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
         AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
-
-        AimTab:CreateSection("PREDICTION & OFFSET")
-        AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
-        AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
-
-        AimTab:CreateSection("METHOD & ACTIVATION")
+        AimTab:CreateSection("ADVANCED OPTIONS", "right")
+        AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
+        AimTab:CreateToggle("Prediction", "Predict player movement", "AimbotPrediction",true)
+        AimTab:CreateToggle("Deltatime Safe", "FPS-independent smoothing", "AimbotDeltatime")
         AimTab:CreateDropdown("Method", "Aiming method", {"Mouse", "Camera"}, State.AimbotConfig.Method, "AimbotMethod")
         AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
+
+        AimTab:CreateSection("PREDICTION & OFFSET", "right")
+        AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+        AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 end
 
 do
     local VisualsTab = GUI.CreateTab("Visuals")
 
-        VisualsTab:CreateSection("NOTIFICATIONS")
-        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
-
-        VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-        VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+        VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
         VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
-        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
+        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
+        VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers")
 
-        VisualsTab:CreateSection("Misc")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+        VisualsTab:CreateSection("Misc", "right")
+        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
-        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
+        VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
 end
 
 do
     local CombatTab = GUI.CreateTab("Combat")
 
-        CombatTab:CreateSection("EXTENDED HITBOX")
-        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
-        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
-
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
         CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
-        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+
+        CombatTab:CreateSection("KILL AURA")
+        CombatTab:CreateKeybindButton("Kill Aura (Toggle)", "killaura", "KillAura")
+        CombatTab:CreateSlider("Kill Aura Range", "Activation distance in studs", 1, 20, State.KillAuraRange, "KillAuraRange", 0.5)
+        CombatTab:CreateToggle("Static Zone", "Simple circle, no geometry checks", "KillAuraStatic", false)
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
-        CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
+
+        CombatTab:CreateSection("EXTENDED HITBOX", "right")
+        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
+        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
 end
 
 do
     local FarmTab = GUI.CreateTab("Farming")
 
         FarmTab:CreateSection("AUTO FARM")
-        FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
-
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
+
+        FarmTab:CreateSection("FARM TUNING", "right")
         FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("No Render", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 25 min", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 end
@@ -7899,15 +8005,15 @@ do
         FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
         FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-        FunTab:CreateSection("ANTI-FLING")
+        FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", _G.AUTOEXEC_ENABLED)
 
-        FunTab:CreateSection("FLING PLAYER")
+        FunTab:CreateSection("FLING PLAYER", "right")
         FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
         FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-        FunTab:CreateSection("FLING ROLE")
+        FunTab:CreateSection("FLING ROLE", "right")
         FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
         FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
 end
@@ -7923,16 +8029,16 @@ do
         TrollingTab:CreateToggle("Loop Fling", "Fling player every 3s", "LoopFling")
         TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
 
+        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
+        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
+
         TrollingTab:CreateSection("ORBIT SETTINGS")
         TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
         TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
         TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
         TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
 
-        TrollingTab:CreateSection("BLOCK PATH SETTINGS")
-        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
-
-        TrollingTab:CreateSection("ORBIT PRESETS")
+        TrollingTab:CreateSection("ORBIT PRESETS", "right")
         TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
         TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
         TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
@@ -7947,7 +8053,7 @@ do
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
-        UtilityTab:CreateSection("DANGER ZONE")
+        UtilityTab:CreateSection("DANGER ZONE", "right")
         UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
@@ -7969,6 +8075,7 @@ end)
 
 CreateNotificationUI()
 CreateAvatarUI()
+SetAvatarDisplayVisibility(State.AvatarDisplayEnabled)
 ApplyCharacterSettings()
 SetupGunTracking()
 StartTrapTracking   ()

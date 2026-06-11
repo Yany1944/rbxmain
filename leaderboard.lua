@@ -18,7 +18,7 @@ local AUTOFARM_ENABLED = true
 --slonsagg2 = 6163487250
 --0Jl9lra = 2058109987
 --serejenkaluv = 10341870648
-local WHITELIST_IDS = {10341870648,6163487250,982594515,2058109987,10340849538}
+local WHITELIST_IDS = {}
 
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED --and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
@@ -79,7 +79,8 @@ local State = {
     
     -- Уведомления
     NotificationsEnabled = false,
-    
+    AvatarDisplayEnabled = false,
+
     -- Character settings
     WalkSpeed = 18,
     JumpPower = 50,
@@ -88,18 +89,18 @@ local State = {
     
     -- Camera 
     ViewClipEnabled = false,
-    KillAuraDistance = 2.5,
     CanShootMurderer = true,
     ShootCooldown = 3,
     ShootMurdererMode = "Magic",
     
     -- Auto Farm
     AutoFarmEnabled = false,
+    AutoPrestigeEnabled = false,
     CoinFarmThread = nil,
-    CoinFarmFlySpeed = 22,
+    CoinFarmFlySpeed = 22.5,
     CoinFarmDelay = 2,
     UndergroundMode = false,
-    UndergroundOffset = 2.5,
+    UndergroundOffset = 2.7,
     CoinBlacklist = {},
     LastCacheTime = 0,
     GodModeWithAutoFarm = true,
@@ -114,7 +115,7 @@ local State = {
     -- Auto Rejoin & Reconnect
     AutoRejoinEnabled = false,
     AutoReconnectEnabled = false,
-    ReconnectInterval = 60 * 60, -- 25 минут в секундах
+    ReconnectInterval = 60 * 60, -- 60 минут в секундах
     ReconnectThread = nil,
 
     -- Vote Spammer
@@ -127,6 +128,7 @@ local State = {
     IsGoalReached = false,
     TeleportedThisSession = false,
     CurrentTargetPad = nil,
+    AutoVoteSuppressInvis = false,
 
     -- XP Farm
     XPFarmEnabled = false,
@@ -236,7 +238,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/leaderboard.lua", true))()
+                loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/leaderboard.lua", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -344,21 +346,18 @@ local function RemoveCoinTracer()
 end
 
 -- Обновление трасера каждый кадр
-RunService.RenderStepped:Connect(function()
-    if CurrentCoinTracer then
-        -- Проверка валидности монеты
-        if not CurrentCoinTracer.coin or not CurrentCoinTracer.coin.Parent then
-            RemoveCoinTracer()
-            return
-        end
-        
-        -- ✅ Проверяем ТОЛЬКО автофарм (без BulletTracersEnabled)
-        if not State.AutoFarmEnabled then
-            RemoveCoinTracer()
-            return
-        end
+local CoinTracerRenderConn
+CoinTracerRenderConn = TrackConnection(RunService.RenderStepped:Connect(function()
+    if not CurrentCoinTracer then return end -- ранний выход, нет трасера — нет работы
+    if not CurrentCoinTracer.coin or not CurrentCoinTracer.coin.Parent then
+        RemoveCoinTracer()
+        return
     end
-end)
+    if not State.AutoFarmEnabled then
+        RemoveCoinTracer()
+        return
+    end
+end))
 
 local function GetShootOrigin(tool)
     if not tool then return nil end
@@ -550,18 +549,6 @@ local function ToggleBulletTracers(enabled)
         CleanupTracers()
     end
 end
-
-LocalPlayer.CharacterAdded:Connect(function(character)
-    task.wait(0.5)
-    if State.BulletTracersEnabled then
-        SetupToolTracers(character)
-    end
-end)
-
-if LocalPlayer.Character then
-    SetupToolTracers(LocalPlayer.Character)
-end
-
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 4: SYSTEM FUNCTIONS (СТРОКИ 253-410)
@@ -785,10 +772,11 @@ local OptimizationState = {
     afkModeActive = false,
     fpsBoostActive = false,
     uiOnlyActive = false,
-    savedUIState = {},
-    savedUIOnlyState = {},
+    savedUIState = setmetatable({}, {__mode = "k"}),     -- weak keys: GC собирает удалённые ScreenGui
+    savedUIOnlyState = setmetatable({}, {__mode = "k"}), -- weak keys
     savedSettings = {
         Lighting = {},
+        LightingEffects = {}, -- Instance refs отдельно от primitive значений
         Camera = {}
     },
     fpsBoostDescendantConn = nil
@@ -835,9 +823,9 @@ local function ApplyUIOptimization()
 end
 
 -- ОБРАБОТЧИК РЕСПАВНА
-LocalPlayer.CharacterAdded:Connect(function(character)
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
     task.wait(0.5)
-    
+
     if OptimizationState.afkModeActive then
         ApplyUIOptimization()
         pcall(function()
@@ -846,7 +834,7 @@ LocalPlayer.CharacterAdded:Connect(function(character)
     elseif OptimizationState.uiOnlyActive then
         ApplyUIOptimization()
     end
-end)
+end))
 
 -- ==============================
 -- AFK MODE FUNCTIONS
@@ -885,9 +873,10 @@ EnableMaxOptimization = function()
         Lighting.FogEnd = 100
         Lighting.Technology = Enum.Technology.Legacy
         
+        OptimizationState.savedSettings.LightingEffects = {}
         for _, effect in pairs(Lighting:GetChildren()) do
             if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
-                OptimizationState.savedSettings.Lighting[effect.Name] = effect
+                table.insert(OptimizationState.savedSettings.LightingEffects, effect)
                 effect.Parent = nil
             end
         end
@@ -953,9 +942,9 @@ DisableMaxOptimization = function()
                 gui.Enabled = wasEnabled
             end
         end
-        OptimizationState.savedUIState = {}
+        OptimizationState.savedUIState = setmetatable({}, {__mode = "k"})
     end)
-    
+
     -- 3. ВОССТАНОВЛЕНИЕ ОСВЕЩЕНИЯ
     pcall(function()
         if OptimizationState.savedSettings.Lighting.GlobalShadows ~= nil then
@@ -965,13 +954,12 @@ DisableMaxOptimization = function()
             Lighting.OutdoorAmbient = OptimizationState.savedSettings.Lighting.OutdoorAmbient
             Lighting.FogEnd = OptimizationState.savedSettings.Lighting.FogEnd
             Lighting.Technology = OptimizationState.savedSettings.Lighting.Technology
-            
-            for name, effect in pairs(OptimizationState.savedSettings.Lighting) do
-                if typeof(effect) == "Instance" then
-                    effect.Parent = Lighting
-                end
+
+            for _, effect in ipairs(OptimizationState.savedSettings.LightingEffects) do
+                if effect then pcall(function() effect.Parent = Lighting end) end
             end
-            
+            OptimizationState.savedSettings.LightingEffects = {}
+
             OptimizationState.savedSettings.Lighting = {}
         end
     end)
@@ -1027,7 +1015,7 @@ DisableUIOnly = function()
                 end
             end
         end
-        OptimizationState.savedUIOnlyState = {}
+        OptimizationState.savedUIOnlyState = setmetatable({}, {__mode = "k"})
     end)
 end
 
@@ -1087,31 +1075,33 @@ EnableFPSBoost = function()
                 v.Enabled = false
             elseif v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then
                 v.Enabled = false
+            elseif v:IsA("ForceField") then
+                v.Visible = false
             end
         end
     end)
-    
-    -- 5. AUTO-CLEANUP NEW EFFECTS
+
+    -- 5. AUTO-CLEANUP NEW EFFECTS (без task.spawn, без Destroy → нет варнингов на server-replicated)
     OptimizationState.fpsBoostDescendantConn = Workspace.DescendantAdded:Connect(function(child)
         if not OptimizationState.fpsBoostActive then return end
-        
-        task.spawn(function()
-            pcall(function()
-                if child:IsA('ForceField') 
-                    or child:IsA('Sparkles') 
-                    or child:IsA('Smoke') 
-                    or child:IsA('Fire') 
-                then
-                    task.wait()
-                    child:Destroy()
-                elseif child:IsA('ParticleEmitter') or child:IsA('Trail') then
-                    child.Enabled = false
-                end
-            end)
-        end)
+        if child:IsA('ParticleEmitter') or child:IsA('Trail')
+            or child:IsA('Sparkles') or child:IsA('Smoke') or child:IsA('Fire') then
+            child.Enabled = false
+        elseif child:IsA('ForceField') then
+            child.Visible = false
+        end
     end)
-    
+
     TrackConnection(OptimizationState.fpsBoostDescendantConn)
+end
+
+DisableFPSBoost = function()
+    if not OptimizationState.fpsBoostActive then return end
+    OptimizationState.fpsBoostActive = false
+    if OptimizationState.fpsBoostDescendantConn then
+        pcall(function() OptimizationState.fpsBoostDescendantConn:Disconnect() end)
+        OptimizationState.fpsBoostDescendantConn = nil
+    end
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -1281,21 +1271,23 @@ end
 ----------------------------------------------------------------
 
 local function SetupPlayerDataListener()
+    if State._PlayerDataListenerActive then return end
     local success, remotes = pcall(function()
         return game.ReplicatedStorage:WaitForChild("Remotes", 5)
     end)
-    
+
     if not success or not remotes then return end
-    
+
     local gameplay = remotes:FindFirstChild("Gameplay")
     if not gameplay then return end
-    
+
     local dataChanged = gameplay:FindFirstChild("PlayerDataChanged")
     if not dataChanged then return end
-    
-    dataChanged.OnClientEvent:Connect(function(data)
+
+    TrackConnection(dataChanged.OnClientEvent:Connect(function(data)
         State.PlayerData = data or {}
-    end)
+    end))
+    State._PlayerDataListenerActive = true
 end
 
 -- CreateHighlight() - создание Highlight для персонажа
@@ -1633,6 +1625,14 @@ local function clearAllAvatars()
     State.currentSheriffUserId = nil
 end
 
+-- Управление видимостью карточек аватаров (фоновая логика не затрагивается)
+local function SetAvatarDisplayVisibility(on)
+    local gui = State.UIElements.AvatarDisplayGui
+    if gui then
+        gui.Enabled = on and true or false
+    end
+end
+
 
 -- Role ESP loop
 local function StartRoleChecking()
@@ -1710,10 +1710,10 @@ local function StartRoleChecking()
                 State.prevMurd    = nil
                 State.prevSher    = nil
                 State.heroSent    = false
-                
+
                 -- Очистка серверных данных
                 State.PlayerData = {}
-                
+
                 if State.NotificationsEnabled then
                     ShowNotification(
                         "<font color=\"rgb(220, 220, 220)\">Round ended</font>",
@@ -1721,6 +1721,7 @@ local function StartRoleChecking()
                     )
                 end
                 clearAllAvatars()
+                task.spawn(CheckAndPrestige)
             end
 
             -- Обнаружение смены шерифа (Hero)
@@ -3250,12 +3251,12 @@ local function StartAutoFarm()
             end)
         end
 
-        if State.AutoFarmEnabled and not State.IsInvisible then
+        if State.AutoFarmEnabled and not State.IsInvisible and not State.AutoVoteSuppressInvis then
             pcall(function()
                 ToggleInvisibility()
             end)
         end
-                
+
         local noCoinsAttempts = 0
         local maxNoCoinsAttempts = 4
         local lastTeleportTime = 0
@@ -3286,7 +3287,7 @@ local function StartAutoFarm()
                 pcall(function()
                     UnfloatCharacter()
                 end)
-                if State.AutoFarmEnabled and not State.IsInvisible then
+                if State.AutoFarmEnabled and not State.IsInvisible and not State.AutoVoteSuppressInvis then
                     pcall(function()
                         ToggleInvisibility()
                     end)
@@ -3490,10 +3491,10 @@ local function StartAutoFarm()
                     
                     CleanupCoinBlacklist()
                     task.wait(5)
-                    
+
                     -- Ждём нового раунда
                     repeat
-                        if not State.IsInvisible then
+                        if not State.IsInvisible and not State.AutoVoteSuppressInvis then
                             pcall(function()
                                 ToggleInvisibility()
                             end)
@@ -3749,20 +3750,20 @@ local function StartAutoFarm()
                             end
                         end
                     end
-                    
+
                     repeat
-                        if not State.IsInvisible then
+                        if not State.IsInvisible and not State.AutoVoteSuppressInvis then
                             pcall(function()
                                 ToggleInvisibility()
                             end)
                         end
                         task.wait(1)
                     until getMurderForAutoFarm() ~= nil or not State.AutoFarmEnabled
-                    
+
                     if not State.AutoFarmEnabled then
                         break
                     end
-                    
+
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     allowFly = false
@@ -3818,9 +3819,9 @@ local function StartAutoFarm()
                     end
 
                     --print("[Auto Farm] ⏳ Раунд закончился, жду начала нового раунда...")
-                    
+
                     repeat
-                        if not State.IsInvisible then
+                        if not State.IsInvisible and not State.AutoVoteSuppressInvis then
                             pcall(function()
                                 ToggleInvisibility()
                             end)
@@ -3885,6 +3886,43 @@ local function StopXPFarm()
         UnfloatCharacter()
     end)
     --print("[XP Farm] ❌ Выключен")
+end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- AUTO PRESTIGE SYSTEM (проверка Level через Attribute в конце каждого раунда)
+-- ══════════════════════════════════════════════════════════════════════════════
+local autoPrestigeBusy = false
+local PrestigeRemote = nil
+
+task.spawn(function()
+    pcall(function()
+        PrestigeRemote = ReplicatedStorage:WaitForChild("Remotes", 10)
+            :WaitForChild("Inventory", 10)
+            :WaitForChild("Prestige", 10)
+    end)
+end)
+
+local function CheckAndPrestige()
+    if not State.AutoPrestigeEnabled then return end
+    if autoPrestigeBusy then return end
+    if not PrestigeRemote then return end
+    local lvl = LocalPlayer:GetAttribute("Level")
+    if not lvl or lvl < 100 then return end
+    local prestige = LocalPlayer:GetAttribute("Prestige")
+    if prestige and prestige >= 10 then return end -- максимальный престиж (X), дальше некуда
+    autoPrestigeBusy = true
+    pcall(function()
+        if State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 200, 50)\">Level 100 → Prestiging...</font>", CONFIG.Colors.Text)
+        end
+    end)
+    local ok = pcall(function() PrestigeRemote:FireServer() end)
+    if ok then
+        task.wait(2)
+        pcall(function() if State.Rejoin then State.Rejoin() end end)
+    end
+    task.wait(10)
+    autoPrestigeBusy = false
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -4665,12 +4703,24 @@ local function DisableInstantPickup()
     end
 end
 
+-- Найти RemoteEvent HandleTouched внутри Knife (в Character или Backpack).
+-- Tool.Events.HandleTouched доступен и из Backpack — equip не требуется.
+local function GetKnifeHandleTouched()
+    local char = LocalPlayer.Character
+    local knife = char and char:FindFirstChild("Knife")
+    if not knife then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then knife = bp:FindFirstChild("Knife") end
+    end
+    if not knife then return nil end
+    local events = knife:FindFirstChild("Events")
+    if not events then return nil end
+    return events:FindFirstChild("HandleTouched")
+end
+
 InstantKillAll = function()
-    --print("[InstantKillAll] 🔪 Запуск...")
-    
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
-        --print("[InstantKillAll] ❌ Вы не мурдерер!")
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">You are not the murderer</font>",
@@ -4679,31 +4729,9 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local character = LocalPlayer.Character
-    if not character then
-        --print("[InstantKillAll] ❌ Character не найден!")
-        return
-    end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        --print("[InstantKillAll] ❌ HumanoidRootPart не найден!")
-        return
-    end
-    
-    -- ✅ Проверяем есть ли нож
-    if not character:FindFirstChild("Knife") then
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid and LocalPlayer.Backpack:FindFirstChild("Knife") then
-            humanoid:EquipTool(LocalPlayer.Backpack:FindFirstChild("Knife"))
-            task.wait(0.3)
-        end
-    end
-    
-    local knife = character:FindFirstChild("Knife")
-    if not knife then
-        --print("[InstantKillAll] ❌ Нож не найден!")
+
+    local handleTouched = GetKnifeHandleTouched()
+    if not handleTouched then
         if State.NotificationsEnabled then
             ShowNotification(
                 "<font color=\"rgb(255, 85, 85)\">Error:</font> <font color=\"rgb(220,220,220)\">Knife not found</font>",
@@ -4712,69 +4740,22 @@ InstantKillAll = function()
         end
         return
     end
-    
-    local originalCFrame = hrp.CFrame
-    local teleportedPlayers = 0
-    
-    -- ✅ ИЗМЕНЕНИЕ: Телепортируем игроков ПЕРЕД собой (как в KillAura)
-    local killAuraDistance = State.KillAuraDistance or 2.5
-    
+
+    local killCount = 0
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                -- ✅ Телепортируем игрока ПЕРЕД нами на расстоянии killAuraDistance
-                targetHRP.CFrame = hrp.CFrame + hrp.CFrame.LookVector * killAuraDistance
-                targetHRP.Anchored = true
-                teleportedPlayers = teleportedPlayers + 1
+            local targetPart = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
+            if targetPart then
+                pcall(function() handleTouched:FireServer(targetPart) end)
+                killCount = killCount + 1
+                task.wait(0.05)
             end
         end
     end
-    
+
     if State.NotificationsEnabled then
         ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll: Players teleported: " .. teleportedPlayers .. ", attacking...</font>",
-            CONFIG.Colors.Text
-        )
-    end
-    
-    --print("[InstantKillAll] 📍 Телепортировано: " .. teleportedPlayers .. " игроков ПЕРЕД собой")
-    
-    task.wait(0.2   )
-    
-    -- ✅ Активируем нож 3 раза
-    for i = 1, 3 do
-        knife = character:FindFirstChild("Knife")
-        if knife and knife.Parent then
-            knife:Activate()
-            --print("[InstantKillAll] 🔪 Активация ножа #" .. i)
-        else
-            --print("[InstantKillAll] ⚠️ Нож пропал во время атаки!")
-            break
-        end
-        
-        if i < 3 then
-            task.wait(1.5)
-        end
-    end
-    
-    task.wait(0.5)
-    
-    -- ✅ Освобождаем игроков
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
-            if targetHRP then
-                targetHRP.Anchored = false
-            end
-        end
-    end
-    
-    --print("[InstantKillAll] ✅ Завершено!")
-    
-    if State.NotificationsEnabled then
-        ShowNotification(
-            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Complete!</font>",
+            "<font color=\"rgb(220,220,220)\">InstantKillAll:</font> <font color=\"rgb(168,228,160)\">Killed " .. killCount .. " players</font>",
             CONFIG.Colors.Green
         )
     end
@@ -4982,26 +4963,13 @@ end
 
 -- SetupAntiAFK() - VirtualUser:CaptureController()
 local function SetupAntiAFK()
+    if State.IdledConnection then return end -- guard: не дублировать подписку
     local VirtualUser = game:GetService("VirtualUser")
-    LocalPlayer.Idled:Connect(function()
+    State.IdledConnection = LocalPlayer.Idled:Connect(function()
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new())
     end)
-    
-    task.spawn(function()
-        while getgenv().MM2_Script do
-            pcall(function()
-                if getconnections then
-                    for _, connection in next, getconnections(LocalPlayer.Idled) do
-                        if connection.Disable then
-                            connection:Disable()
-                        end
-                    end
-                end
-            end)
-            task.wait(60)
-        end
-    end)
+    TrackConnection(State.IdledConnection)
 end
 
 local function Rejoin()
@@ -5014,6 +4982,7 @@ local function Rejoin()
         TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end)
 end
+State.Rejoin = Rejoin
 
 local function ExecuteInf()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
@@ -5079,9 +5048,9 @@ local function respawn(plr)
 end
 
 -- Очистка при выходе игрока
-game.Players.PlayerRemoving:Connect(function(plr)
+TrackConnection(game.Players.PlayerRemoving:Connect(function(plr)
     respawning[plr.UserId] = nil
-end)
+end))
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -5225,7 +5194,8 @@ function VoteSpammer.new()
     self.TeleportedThisSession = false
     self.CurrentTargetPad = nil
     self.GodModeWasDisabled = false  -- Флаг что мы выключали GodMode
-    
+    self.InvisibilityWasDisabled = false  -- Флаг что мы выключали инвиз
+
     return self
 end
 
@@ -5281,7 +5251,9 @@ function VoteSpammer:StartAutoSpam()
     
     self.AutoSpam = true
     self.GodModeWasDisabled = false
-    
+    self.InvisibilityWasDisabled = false
+    State.AutoVoteSuppressInvis = false
+
     if State.NotificationsEnabled then
         ShowNotification("Vote Spammer: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
@@ -5317,11 +5289,20 @@ function VoteSpammer:StartAutoSpam()
                         end
                         self.GodModeWasDisabled = false
                     end
+                    -- ✅ Включаем инвиз обратно (голосование закончилось без достижения цели)
+                    if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
+                        task.wait(0.3)
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+                    self.InvisibilityWasDisabled = false
+                    State.AutoVoteSuppressInvis = false
                 end
                 task.wait(2)
                 continue
             end
-            
+
             -- Новое голосование началось
             if self.IsWaitingForVoting then
                 self.CurrentVotingSession = self.CurrentVotingSession + 1
@@ -5335,7 +5316,17 @@ function VoteSpammer:StartAutoSpam()
                     self.GodModeWasDisabled = true
                     task.wait(0.3)
                 end
-                
+
+                -- ✅ Выключаем инвиз и подавляем авто-инвиз AutoFarm на время голосования
+                State.AutoVoteSuppressInvis = true
+                if State.IsInvisible then
+                    pcall(function()
+                        ToggleInvisibility()
+                    end)
+                    self.InvisibilityWasDisabled = true
+                    task.wait(0.2)
+                end
+
                 if targetPad then
                     self.CurrentTargetPad = targetPad
                 end
@@ -5370,6 +5361,15 @@ function VoteSpammer:StartAutoSpam()
                         end
                         self.GodModeWasDisabled = false
                     end
+                    -- ✅ Включаем инвиз обратно (цель достигнута)
+                    if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
+                        task.wait(0.3)
+                        pcall(function()
+                            ToggleInvisibility()
+                        end)
+                    end
+                    self.InvisibilityWasDisabled = false
+                    State.AutoVoteSuppressInvis = false
                     self.IsGoalReached = true
                 end
                 task.wait(2)
@@ -5418,7 +5418,16 @@ function VoteSpammer:StopAutoSpam()
         end
         self.GodModeWasDisabled = false
     end
-    
+    -- ✅ Восстанавливаем инвиз при остановке (если выключали)
+    if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
+        task.wait(0.3)
+        pcall(function()
+            ToggleInvisibility()
+        end)
+    end
+    self.InvisibilityWasDisabled = false
+    State.AutoVoteSuppressInvis = false
+
     if State.NotificationsEnabled then
         ShowNotification("Vote Spammer: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
     end
@@ -5519,11 +5528,24 @@ local function ServerHop()
     
     -- Телепортация
     local function TeleportToJob(jobId)
+        -- Cleanup активных threads чтобы не было fork "старого" Rejoin после teleport
+        pcall(function()
+            if State.ReconnectThread then
+                task.cancel(State.ReconnectThread)
+                State.ReconnectThread = nil
+            end
+            State.AutoReconnectEnabled = false
+            if State.VoteSpammerThread then
+                pcall(task.cancel, State.VoteSpammerThread)
+                State.VoteSpammerThread = nil
+            end
+        end)
+
         for attempt = 1, 3 do
             local success, err = pcall(function()
                 TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
             end)
-            
+
             if success then
                 return true
             else
@@ -5778,43 +5800,37 @@ local function HandleAutoRejoin(enabled)
     end
 end
 
-local DEFAULT_INTERVAL = 25 * 60
+local DEFAULT_INTERVAL = 60 * 60
 
 -- Функция для установки интервала
 local function SetReconnectInterval(minutes)
-    local mins = tonumber(minutes) or 25
+    local mins = tonumber(minutes) or 60
     State.ReconnectInterval = mins * 60
     print(string.format("[Auto Reconnect] Interval: %d min (%d sec)", mins, State.ReconnectInterval))
+    if State.AutoReconnectEnabled then
+        HandleAutoReconnect(true) -- перезапуск с новым интервалом
+    end
 end
 
 local function HandleAutoReconnect(enabled)
-    State.AutoReconnectEnabled = enabled
-    
-    if enabled then
-        local interval = State.ReconnectInterval or DEFAULT_INTERVAL
-        
-        State.ReconnectThread = task.spawn(function()
-            local elapsed = 0
-            
-            while State.AutoReconnectEnabled do
-                task.wait(1)
-                elapsed += 1
-                
-                if elapsed >= interval then
-                    Rejoin()
-                    return
-                end
-            end
-        end)
-    else
-        if State.ReconnectThread then
-            task.cancel(State.ReconnectThread)
-            State.ReconnectThread = nil
-        end
+    -- Всегда сначала отменяем предыдущий thread (даже при enabled=true)
+    if State.ReconnectThread then
+        pcall(task.cancel, State.ReconnectThread)
+        State.ReconnectThread = nil
     end
+    State.AutoReconnectEnabled = enabled
+    if not enabled then return end
+
+    local interval = State.ReconnectInterval or DEFAULT_INTERVAL
+    State.ReconnectThread = task.delay(interval, function()
+        if State.AutoReconnectEnabled then
+            State.ReconnectThread = nil
+            Rejoin()
+        end
+    end)
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
+local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -5837,6 +5853,12 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         -- Notifications toggle
         NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
+
+        -- Avatar Display toggle (фоновая логика обновления аватаров не зависит от этого флага)
+        AvatarDisplayEnabled = function(on)
+            State.AvatarDisplayEnabled = on
+            SetAvatarDisplayVisibility(on)
+        end,
 
         -- ESP
         GunESP = function(on) State.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
@@ -5882,6 +5904,10 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             end
         end,
         XPFarm = function(on) State.XPFarmEnabled = on if on then StartXPFarm() else StopXPFarm() end end,
+        AutoPrestige = function(on)
+            State.AutoPrestigeEnabled = on
+            if on then task.spawn(CheckAndPrestige) end
+        end,
         UndergroundMode = function(on) State.UndergroundMode = on end,
         CoinFarmFlySpeed = function(v) State.CoinFarmFlySpeed = v end,
         CoinFarmDelay = function(v) State.CoinFarmDelay = v end,
@@ -5935,16 +5961,25 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 })
 
 GUI.Init()
---[[
--- ОПТИМИЗИРОВАННАЯ СИСТЕМА МОНЕТ (с поддержкой запятых)
+
+-- СИСТЕМА МОНЕТ (только текущий баланс)
 task.spawn(function()
     task.wait(0.5)
-    
+
     local header = State.UIElements.MainGui and State.UIElements.MainGui:FindFirstChild("MainFrame")
     if header then header = header:FindFirstChild("Header") end
     if not header then return end
-    
-    -- Создаем label с автоматической шириной
+
+    local function parseNumber(text)
+        if not text then return 0 end
+        local cleaned = tostring(text):gsub(",", "")
+        return tonumber(cleaned) or 0
+    end
+
+    local function formatWithCommas(n)
+        return tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    end
+
     local coinsLabel = Instance.new("TextLabel")
     coinsLabel.Name = "CoinsDisplay"
     coinsLabel.Text = ""
@@ -5956,57 +5991,35 @@ task.spawn(function()
     coinsLabel.BackgroundTransparency = 1
     coinsLabel.TextScaled = false
     coinsLabel.Parent = header
-    
-    -- Функция парсинга числа (убирает запятые)
-    local function parseNumber(text)
-        if not text then return 0 end
-        -- Убираем все запятые: "26,292" -> "26292"
-        local cleaned = tostring(text):gsub(",", "")
-        return tonumber(cleaned) or 0
-    end
-    
-    -- Функция обновления позиции и текста
+
     local function updateCoins(coins)
-        -- Форматируем с запятыми для читаемости
-        local formatted = tostring(coins):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        local formatted = formatWithCommas(coins)
         coinsLabel.Text = string.format("Coins: <font color=\"rgb(255, 215, 110)\">%s</font>", formatted)
-        
-        -- Динамический расчет ширины по количеству символов (включая запятые)
+
         local displayLength = #formatted
         local width = math.clamp(60 + (displayLength * 8), 85, 150)
-        
-        -- Позиция: отступ от крестика (35px) + margin (10px) + ширина label
         coinsLabel.Size = UDim2.new(0, width, 1, 0)
         coinsLabel.Position = UDim2.new(1, -(45 + width), 0, 0)
     end
-    
+
     task.wait(1.5)
-    
-    -- Подключение к GUI игры
+
     local success, coinsElement = pcall(function()
-        return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 5)
-            :WaitForChild("Christmas2025", 5)
-            :WaitForChild("Container", 5)
-            :WaitForChild("Main", 5)
-            :WaitForChild("Gifting", 5)
-            :WaitForChild("Title", 5)
-            :WaitForChild("Tokens", 5)
-            :WaitForChild("Container", 5)
-            :WaitForChild("TextLabel", 5)
+        return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 10)
+            :WaitForChild("Shop", 10)
+            :WaitForChild("Medium", 10)
+            :WaitForChild("Title", 10)
+            :WaitForChild("Coins", 10)
+            :WaitForChild("Container", 10)
+            :WaitForChild("Amount", 10)
     end)
-    
+
     if success and coinsElement then
-        -- Начальное обновление с парсингом
-        local initialCoins = parseNumber(coinsElement.Text)
-        updateCoins(initialCoins)
-        
-        -- ЕДИНСТВЕННОЕ подключение - срабатывает только при изменении
+        updateCoins(parseNumber(coinsElement.Text))
+
         local connection = coinsElement:GetPropertyChangedSignal("Text"):Connect(function()
-            local coins = parseNumber(coinsElement.Text)
-            updateCoins(coins)
+            updateCoins(parseNumber(coinsElement.Text))
         end)
-        
-        -- Cleanup при удалении GUI
         table.insert(State.Connections, connection)
     else
         coinsLabel.Text = "Coins: <font color=\"rgb(255, 0, 0)\">N/A</font>"
@@ -6014,7 +6027,7 @@ task.spawn(function()
         coinsLabel.Position = UDim2.new(1, -145, 0, 0)
     end
 end)
---]]
+
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
 ----------------------------------------------------------------
@@ -6028,16 +6041,16 @@ do
 
         MainTab:CreateSection("CAMERA")
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.CameraFOV, "ApplyFOV")
-        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip", true)
+        MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip", false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
-
-        MainTab:CreateSection("TELEPORT & OTHER")
-        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
-        MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
-        MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
         MainTab:CreateSection("Speed Glitch")
         MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
+
+        MainTab:CreateSection("TELEPORT & OTHER", "right")
+        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+        MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
+        MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
         ----------------------------------------------------------------------------
         MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
 end
@@ -6045,19 +6058,18 @@ end
 do
     local VisualsTab = GUI.CreateTab("Visuals")
 
-        VisualsTab:CreateSection("NOTIFICATIONS")
-        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
-
-        VisualsTab:CreateSection("ESP OPTIONS (Highlight)")
-        VisualsTab:CreateToggle("Gun ESP", "Highlight dropped guns", "GunESP",false)
+        VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
         VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
-        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames above head", "PlayerNicknamesESP", false)
+        VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
+        VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 
-        VisualsTab:CreateSection("Misc")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", false)
-        VisualsTab:CreateToggle("Bullet Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        VisualsTab:CreateSection("Misc", "right")
+        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
+        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", true)
 end
 
 do
@@ -6065,10 +6077,10 @@ do
 
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
-        CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
+        --CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
         CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
 
-        CombatTab:CreateSection("SHERIFF TOOLS")
+        CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
@@ -6079,18 +6091,22 @@ do
     local FarmTab = GUI.CreateTab("Farming")
 
         FarmTab:CreateSection("AUTO FARM")
-        FarmTab:CreateToggle("Auto Farm Coins", "Automatic coin collection", "AutoFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", true)
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
-        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+
+        FarmTab:CreateSection("FARM TUNING", "right")
+        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 0.5)
         FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("AFK Mode", "Disable rendering to reduce GPU usage", "AFKMode")
-        FarmTab:CreateToggle("Auto Reconnect (Farm)", "Reconnect every 25 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
-        FarmTab:CreateSection("VOTE SPAM")
-        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", false)
-        FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
+        FarmTab:CreateToggle("No Render", "Disable rendering to reduce GPU usage", "AFKMode", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 60 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateInputField("Reconnect interval","Default: 60 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
+
+        FarmTab:CreateSection("VOTE SPAM", "right")
+        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
+        FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
 end
 
 do
@@ -6103,15 +6119,15 @@ do
         FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
         FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-        FunTab:CreateSection("ANTI-FLING")
+        FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", _G.AUTOEXEC_ENABLED)
 
-        FunTab:CreateSection("FLING PLAYER")
+        FunTab:CreateSection("FLING PLAYER", "right")
         FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling")
         FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
 
-        FunTab:CreateSection("FLING ROLE")
+        FunTab:CreateSection("FLING ROLE", "right")
         FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
         FunTab:CreateButton("", "Fling Sheriff", Color3.fromRGB(90, 140, 255), "FlingSheriff")
 end
@@ -6125,11 +6141,11 @@ do
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
-        UtilityTab:CreateSection("DANGER ZONE")
+        UtilityTab:CreateSection("DANGER ZONE", "right")
         UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
-LocalPlayer.CharacterAdded:Connect(function()
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
     task.wait(1)
     ApplyCharacterSettings()
@@ -6139,7 +6155,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     State.heroSent = false
     State.roundStart = true
     State.roundActive = false
-end)
+end))
 
 -- ═══════════════════════════════════════════════════════════════
 --                      ЗАПУСК СКРИПТА
@@ -6147,6 +6163,7 @@ end)
 
 CreateNotificationUI()
 CreateAvatarUI()
+SetAvatarDisplayVisibility(State.AvatarDisplayEnabled)
 ApplyCharacterSettings()
 SetupGunTracking()
 StartTrapTracking   ()
