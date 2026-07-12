@@ -688,7 +688,7 @@ function SafeLoad(url, name)
     return res
 end
 
-SafeLoad("https://raw.githubusercontent.com/7yd7/Menu-7yd7/refs/heads/Script/GUIS/Off-site/Notify.lua", "Notify System")
+SafeLoad("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Notify.lua", "Notify System")
 
 function GetAsset(asset)
     if not asset or asset == "" then return "" end
@@ -898,7 +898,7 @@ getgenv().Notify = function(data)
     end
 end
 
-local SettingsLib = SafeLoad("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Settings.lua", "Settings Library")
+local SettingsLib = SafeLoad("https://github.com/Yany1944/rbxmain/blob/main/Scripts/Settings.lua", "Settings Library")
 
 local ToggleContainer = Instance.new("Frame")
 ToggleContainer.Name = "open/Close"
