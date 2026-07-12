@@ -1,5708 +1,8656 @@
---Made by Zyrovell Roblox:Oyuncu15q Discord:_ege.
--- V4.3 Better UI
--- OPEN SOURCE FOREVER!
+--[[ 
+    Source script taken from: https://github.com/Roblox/creator-docs/blob/main/content/en-us/characters/emotes.md
 
---[[
-
-
-
-$$\    $$\ $$$$$$$$\ $$\   $$\ $$$$$$$\   $$$$$$\         $$$$$$\  $$\   $$\       $$$$$$$$\  $$$$$$\  $$$$$$$\        $$\ 
-$$ |   $$ |$$  _____|$$ |  $$ |$$  __$$\ $$  __$$\       $$  __$$\ $$$\  $$ |      \__$$  __|$$  __$$\ $$  __$$\       $$ |
-$$ |   $$ |$$ |      \$$\ $$  |$$ |  $$ |$$ /  $$ |      $$ /  $$ |$$$$\ $$ |         $$ |   $$ /  $$ |$$ |  $$ |      $$ |
-\$$\  $$  |$$$$$\     \$$$$  / $$$$$$$  |$$ |  $$ |      $$ |  $$ |$$ $$\$$ |         $$ |   $$ |  $$ |$$$$$$$  |      $$ |
- \$$\$$  / $$  __|    $$  $$<  $$  __$$< $$ |  $$ |      $$ |  $$ |$$ \$$$$ |         $$ |   $$ |  $$ |$$  ____/       \__|
-  \$$$  /  $$ |      $$  /\$$\ $$ |  $$ |$$ |  $$ |      $$ |  $$ |$$ |\$$$ |         $$ |   $$ |  $$ |$$ |                
-   \$  /   $$$$$$$$\ $$ /  $$ |$$ |  $$ | $$$$$$  |       $$$$$$  |$$ | \$$ |         $$ |    $$$$$$  |$$ |            $$\ 
-    \_/    \________|\__|  \__|\__|  \__| \______/        \______/ \__|  \__|         \__|    \______/ \__|            \__|
-                                                                                                                           
-                                                                                                                           
-                                                                                                                           
+    scriptblox: https://scriptblox.com/script/Universal-Script-7yd7-I-Emote-Script-48024
 ]]
 
--- Önceki instance temizle (re-run desteği)
-pcall(function()
-	local b = game:GetService("Lighting"):FindFirstChild("VexroGlassBlur")
-	if b then b:Destroy() end
-end)
-local _genv = (type(getgenv) == "function") and getgenv or function() return {} end
-if _genv().VexroEmotesCleanup then
-	pcall(_genv().VexroEmotesCleanup)
-	_genv().VexroEmotesCleanup = nil
-end
 
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
+if _G.EmotesGUIRunning then
+    getgenv().Notify({
+        Title = '7yd7 | Emote',
+        Content = '⚠️ It works It actually works',
+        Duration = 5
+    })
+    return
+end
+_G.EmotesGUIRunning = true
+local offsaleAnimationJson = true
+
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local GuiService = game:GetService("GuiService")
+local ContentProvider = game:GetService("ContentProvider")
+local StarterGui = game:GetService("StarterGui")
+local request = http_request or (syn and syn.request) or request
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui", 10)
-if not playerGui then return end
-
-local old = playerGui:FindFirstChild("VexroEmotes")
-if old then old:Destroy() end
-
--- ===============================================================
--- DATA SYSTEM
--- ===============================================================
-
-local DATA_FILE = "VexroEmotes_Data.json"
-local Settings = {theme = "Dark", speed = 1, notifications = true, loopEmote = true, language = nil, copyEmoteEnabled = false, stopOnWalk = true, showHUD = true}
-
-local FriendData = {
-	friends        = {},   -- [userId:string] = {name, syncEnabled}
-	autoReject     = false,
-	acceptRequests = true,
-	playFriendEmote = true,
-	syncEmote      = true,
-	addModeActive  = false,
-	currentSyncPartner = nil,
-}
-local _friendConns = {}
-local RefreshFriendList  -- forward declaration
-local ShowFriendRequestPanel  -- forward declaration
-local Favorites = {}
-local Keybinds = {}
-local RecentEmotes = {}
--- Bridge: _VexroExtend içindeki HUD fonksiyonlarını dış kapsama bağlar
-local _onSpeedChanged  -- function(); HUD hız butonlarını + info panel'i günceller
-local _onPauseStateChanged  -- function(isPaused); HUD duraklat butonunu günceller
-local MAX_RECENT = 20
-
-local _savePending = false
-local function SaveData()
-	if _savePending then return end
-	_savePending = true
-	task.delay(0.25, function()
-		_savePending = false
-		pcall(function()
-			if writefile then
-				writefile(DATA_FILE, HttpService:JSONEncode({
-					favorites = Favorites,
-					recent = RecentEmotes,
-					settings = Settings,
-					keybinds = Keybinds
-				}))
-			end
-		end)
-	end)
-end
-
-local function LoadData()
-	pcall(function()
-		if readfile and isfile and isfile(DATA_FILE) then
-			local data = HttpService:JSONDecode(readfile(DATA_FILE))
-			if data then
-				-- FIX: ID
-				Favorites = {}
-				if data.favorites then
-					for _, v in pairs(data.favorites) do
-						table.insert(Favorites, tonumber(v)) 
-					end
-				end
-				
-				RecentEmotes = {}
-				if data.recent then
-					for _, v in pairs(data.recent) do
-						table.insert(RecentEmotes, tonumber(v))
-					end
-				end
-
-				if data.settings then
-					Settings.theme = data.settings.theme or "Dark"
-					Settings.speed = data.settings.speed or 1
-					Settings.notifications = data.settings.notifications ~= false
-					Settings.loopEmote = data.settings.loopEmote ~= false
-					Settings.language = data.settings.language or nil
-					-- copyEmoteEnabled intentionally NOT loaded — always starts off
-					Settings.stopOnWalk = data.settings.stopOnWalk ~= false
-					Settings.showHUD = data.settings.showHUD ~= false
-				end
-
-				Keybinds = {}
-				if data.keybinds then
-					for k, v in pairs(data.keybinds) do
-						Keybinds[tonumber(k)] = v  -- {name="...", key="E"}
-					end
-				end
-			end
-		end
-	end)
-end
-
-LoadData()
-
--- Hash set for O(1) favorite lookups
-local FavoritesSet = {}
-for _, v in ipairs(Favorites) do FavoritesSet[v] = true end
-
--- Keybind lookup table
-local KeybindsSet = {}
-for k, v in pairs(Keybinds) do KeybindsSet[tonumber(k)] = v end
-local function GetKeybind(emoteId) return KeybindsSet[emoteId] end
-local function SetKeybind(emoteId, name, keyStr)
-	KeybindsSet[emoteId] = {name = name, key = keyStr}
-	Keybinds[emoteId] = {name = name, key = keyStr}
-	SaveData()
-end
-local function RemoveKeybind(emoteId)
-	KeybindsSet[emoteId] = nil
-	Keybinds[emoteId] = nil
-	SaveData()
-end
-
--- Lookup table for O(1) emote-by-ID access (populated after emotes load)
-local EmotesById = {}
-
--- Cache for async-fetched Roblox catalog metadata (keyed by numeric asset ID)
-local _emoteMetaCache = {}
-
--- ===============================================================
--- UTILITIES
--- ===============================================================
-
-local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-
--- Auto Image/Decal resolver with cache
-local _resolvedCache = {}
-local function ResolveAssetImage(assetIdOrUrl)
-	if not assetIdOrUrl then return "" end
-	local str = tostring(assetIdOrUrl)
-	local rawId = str:gsub("rbxassetid://", ""):gsub("[^%d]", "")
-	if rawId == "" then return str end
-	if _resolvedCache[rawId] then return _resolvedCache[rawId] end
-	local resolved = nil
-	pcall(function()
-		local objects = game:GetObjects("rbxassetid://" .. rawId)
-		if objects and #objects > 0 then
-			local obj = objects[1]
-			if obj:IsA("Decal") or obj:IsA("Texture") then
-				resolved = obj.Texture
-			elseif obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
-				resolved = obj.Image
-			end
-		end
-	end)
-	if not resolved or resolved == "" then
-		resolved = "rbxthumb://type=Asset&id=" .. rawId .. "&w=420&h=420"
-	end
-	_resolvedCache[rawId] = resolved
-	return resolved
-end
-
-local logo = [[
-
-                                                                                  
-                                                                               ▄▄ 
-██  ██ ██████ ██  ██ █████▄  ▄████▄   ▄████▄ ███  ██   ██████ ▄████▄ █████▄    ██ 
-██▄▄██ ██▄▄    ████  ██▄▄██▄ ██  ██   ██  ██ ██ ▀▄██     ██   ██  ██ ██▄▄█▀    ██ 
- ▀██▀  ██▄▄▄▄ ██  ██ ██   ██ ▀████▀   ▀████▀ ██   ██     ██   ▀████▀ ██        ▄▄ 
-                                                                                                                                                                                                            
-]]
-
-print(logo)
-
--- ===============================================================
--- THEMES
--- ===============================================================
-
-local Themes = {
-	-- Kontrast yapısı: primary(dip) → sidebar(+4) → secondary(+8) → tertiary(+12)
-	-- Her tema kendi renk kişiliğiyle aynı mantığı izler.
-
-	Dark = {
-		primary     = Color3.fromRGB(0,  0,  0 ),   -- #000000  AMOLED siyah
-		sidebar     = Color3.fromRGB(0,  0,  0 ),   -- #000000  AMOLED siyah
-		secondary   = Color3.fromRGB(0,  0,  0 ),   -- #000000  AMOLED siyah
-		tertiary    = Color3.fromRGB(22, 22, 22),   -- #161616  butonlar için koyu gri
-		accent      = Color3.fromRGB(200, 200, 200), -- #C8C8C8  aktif sekme vurgusu
-		text        = Color3.fromRGB(255, 255, 255), -- #FFFFFF  ana yazı
-		textDim     = Color3.fromRGB(140, 140, 140), -- #8C8C8C  pasif yazı
-		stroke      = Color3.fromRGB(22, 22, 22),   -- #161616  kenarlık / bölücü
-		strokeHover = Color3.fromRGB(65, 65, 65),   -- #414141  kart hover kenarlık
-		critical    = Color3.fromRGB(196, 30, 30),   -- #C41E1E  kapat butonu
-		success     = Color3.fromRGB(80, 200, 100)
-	},
-	Purple = {
-		primary     = Color3.fromRGB(10, 6, 18),
-		sidebar     = Color3.fromRGB(14, 9, 24),
-		secondary   = Color3.fromRGB(20, 13, 34),
-		tertiary    = Color3.fromRGB(28, 18, 48),
-		accent      = Color3.fromRGB(138, 43, 226),
-		text        = Color3.fromRGB(255, 255, 255),
-		textDim     = Color3.fromRGB(180, 155, 220),
-		stroke      = Color3.fromRGB(55, 22, 90),
-		strokeHover = Color3.fromRGB(110, 45, 190),
-		critical    = Color3.fromRGB(255, 60, 100),
-		success     = Color3.fromRGB(100, 240, 120)
-	},
-	Blue = {
-		primary     = Color3.fromRGB(8, 11, 20),
-		sidebar     = Color3.fromRGB(11, 15, 27),
-		secondary   = Color3.fromRGB(16, 21, 36),
-		tertiary    = Color3.fromRGB(22, 30, 50),
-		accent      = Color3.fromRGB(0, 160, 255),
-		text        = Color3.fromRGB(255, 255, 255),
-		textDim     = Color3.fromRGB(150, 180, 220),
-		stroke      = Color3.fromRGB(28, 55, 110),
-		strokeHover = Color3.fromRGB(60, 130, 220),
-		critical    = Color3.fromRGB(250, 60, 80),
-		success     = Color3.fromRGB(60, 230, 140)
-	},
-	Green = {
-		primary     = Color3.fromRGB(8, 14, 10),
-		sidebar     = Color3.fromRGB(11, 18, 13),
-		secondary   = Color3.fromRGB(14, 24, 17),
-		tertiary    = Color3.fromRGB(20, 34, 24),
-		accent      = Color3.fromRGB(0, 220, 110),
-		text        = Color3.fromRGB(255, 255, 255),
-		textDim     = Color3.fromRGB(150, 215, 170),
-		stroke      = Color3.fromRGB(22, 80, 40),
-		strokeHover = Color3.fromRGB(40, 180, 80),
-		critical    = Color3.fromRGB(240, 80, 80),
-		success     = Color3.fromRGB(120, 255, 120)
-	},
-	Red = {
-		primary     = Color3.fromRGB(18, 7, 8),
-		sidebar     = Color3.fromRGB(22, 9, 11),
-		secondary   = Color3.fromRGB(28, 12, 14),
-		tertiary    = Color3.fromRGB(38, 17, 20),
-		accent      = Color3.fromRGB(255, 60, 80),
-		text        = Color3.fromRGB(255, 255, 255),
-		textDim     = Color3.fromRGB(220, 155, 165),
-		stroke      = Color3.fromRGB(100, 28, 36),
-		strokeHover = Color3.fromRGB(200, 55, 75),
-		critical    = Color3.fromRGB(255, 30, 30),
-		success     = Color3.fromRGB(80, 240, 100)
-	},
-	Light = {
-		primary     = Color3.fromRGB(238, 238, 244),
-		sidebar     = Color3.fromRGB(230, 230, 238),
-		secondary   = Color3.fromRGB(248, 248, 252),
-		tertiary    = Color3.fromRGB(255, 255, 255),
-		accent      = Color3.fromRGB(75, 80, 105),
-		text        = Color3.fromRGB(24, 24, 30),
-		textDim     = Color3.fromRGB(115, 115, 128),
-		stroke      = Color3.fromRGB(196, 196, 210),
-		strokeHover = Color3.fromRGB(130, 130, 150),
-		critical    = Color3.fromRGB(220, 50, 50),
-		success     = Color3.fromRGB(50, 175, 75)
-	},
-	MaterialYou = {
-		primary     = Color3.fromRGB(16, 18, 26),
-		sidebar     = Color3.fromRGB(20, 22, 32),
-		secondary   = Color3.fromRGB(24, 27, 38),
-		tertiary    = Color3.fromRGB(32, 36, 52),
-		accent      = Color3.fromRGB(130, 177, 255),
-		text        = Color3.fromRGB(225, 228, 240),
-		textDim     = Color3.fromRGB(138, 143, 163),
-		stroke      = Color3.fromRGB(45, 52, 78),
-		strokeHover = Color3.fromRGB(100, 130, 200),
-		critical    = Color3.fromRGB(255, 130, 120),
-		success     = Color3.fromRGB(120, 210, 160)
-	},
-	FrostedGlass = {
-		primary     = Color3.fromRGB(198, 208, 228),
-		sidebar     = Color3.fromRGB(188, 200, 222),
-		secondary   = Color3.fromRGB(212, 222, 240),
-		tertiary    = Color3.fromRGB(224, 232, 248),
-		accent      = Color3.fromRGB(75, 125, 215),
-		text        = Color3.fromRGB(18, 22, 38),
-		textDim     = Color3.fromRGB(85, 96, 126),
-		stroke      = Color3.fromRGB(155, 175, 212),
-		strokeHover = Color3.fromRGB(110, 150, 218),
-		critical    = Color3.fromRGB(210, 45, 55),
-		success     = Color3.fromRGB(35, 175, 95)
-	},
-	DarkGlass = {
-		primary     = Color3.fromRGB(13, 13, 17),
-		sidebar     = Color3.fromRGB(17, 17, 22),
-		secondary   = Color3.fromRGB(22, 22, 28),
-		tertiary    = Color3.fromRGB(28, 28, 36),
-		accent      = Color3.fromRGB(175, 196, 255),
-		text        = Color3.fromRGB(228, 233, 255),
-		textDim     = Color3.fromRGB(128, 138, 168),
-		stroke      = Color3.fromRGB(52, 56, 88),
-		strokeHover = Color3.fromRGB(118, 138, 220),
-		critical    = Color3.fromRGB(255, 75, 85),
-		success     = Color3.fromRGB(75, 218, 128)
-	}
+local State = {
+    currentMode = "emote",
+    emotesWalkEnabled = false,
+    favoriteEnabled = false,
+    hudEditorActive = false,
+    speedEmoteEnabled = false,
+    isLoading = false,
+    favoriteSetVersion = 0,
+    favoriteSetBuiltVersion = -1,
+    emoteCacheVersion = 0,
+    animationCacheVersion = 0,
+    isGUICreated = false,
+    isMonitoringClicks = false,
+    lastRadialActionTime = 0,
+    lastWheelVisibleTime = 0,
+    lastActionTick = 0,
+    lastRandomEmoteId = nil,
+    lastRandomAnimationId = nil,
+    lastRandomVisualSpam = 0,
+    randomSpamConn = nil,
+    animImageSpamConn = nil,
+    animImageSpamMap = nil,
+    animImageSpamTicks = nil,
+    animImageSpamToken = 0,
+    animImageRetry = 0,
+    randomSlotBlockerConn = nil,
+    totalEmotesLoaded = 0,
+    currentPage = 1,
+    totalPages = 1,
+    itemsPerPage = 8,
+    emoteSearchTerm = "",
+    animationSearchTerm = "",
+    currentEmoteTrack = nil,
+    currentCharacter = nil,
+    emoteClickConnections = {},
+    guiConnections = {},
+    animationsData = {},
+    originalAnimationsData = {},
+    filteredAnimations = {},
+    favoriteAnimations = {},
+    favoriteAnimationsFileName = "FavoriteAnimations.json",
+    emotesData = {},
+    originalEmotesData = {},
+    filteredEmotes = {},
+    scannedEmotes = {},
+    favoriteEmotes = {},
+    favoriteFileName = "FavoriteEmotes.json",
+    speedEmoteConfigFile = "SpeedEmoteConfig.json",
+    favoriteEmoteSet = {},
+    favoriteAnimationSet = {},
+    emotePageCache = { version = nil, normal = {}, favorites = {} },
+    animationPageCache = { version = nil, normal = {}, favorites = {} },
+    suppressSearch = false,
+    emoteMonitorToken = 0,
+    animationMonitorToken = 0,
+    imageUpdateToken = 0,
+    defaultButtonImage = "rbxassetid://71408678974152",
+    enabledButtonImage = "rbxassetid://106798555684020",
+    favoriteIconId = "rbxassetid://97307461910825",
+    notFavoriteIconId = "rbxassetid://124025954365505",
+    EmoteTheme = nil,
+    isApplyingTheme = false,
+    targetImages = {},
+    AnimationCachePath = "7yd7/AnimationCache.json",
+    AnimationCache = {},
+    AnimationListCachePath = "7yd7/AnimationListCache.json",
+    EmoteListCachePath = "7yd7/EmoteListCache.json",
+    CustomAnimationPath = "7yd7/CustomAnimations.json",
+    CustomAnimations = {},
+    currentCustomAnimationName = "Default",
+    customAnimationEditorActive = false,
+    customAnimationEditingKey = nil,
+    customAnimationEditingName = nil,
+    EmotePagePath = "7yd7/EmotePages.json",
+    EmotePages = {},
+    currentEmotePageName = "Default",
+    AnimationPagePath = "7yd7/AnimationPages.json",
+    AnimationPages = {},
+    currentAnimationPageName = "Default",
+    EmoteDataCachePath = "7yd7/EmoteDataCache.json"
 }
 
-local currentTheme = Themes[Settings.theme] or Themes.Dark
-local themeElements = {}
-local mainStrokeGrad, miniIconGrad -- Forward declaration for the theme system
-local UpdateTabStyles
-local UpdateTabData
-local _updateTitleGrad  -- forward declared; assigned after title label is created
-
-local function RegisterTheme(el, prop, key)
-	if el then themeElements[#themeElements + 1] = {el = el, prop = prop, key = key} end
-end
-
-local function Notify(title, text, iconId)
-	if not Settings.notifications then return end
-	pcall(function()
-		local screenGui = playerGui:FindFirstChild("VexroEmotes") or game:GetService("CoreGui"):FindFirstChild("VexroEmotes")
-		if not screenGui then
-			game:GetService("StarterGui"):SetCore("SendNotification", {Title = title, Text = text, Duration = 3})
-			return
-		end
-		
-		local container = screenGui:FindFirstChild("NotificationContainer")
-		if not container then
-			container = Instance.new("Frame")
-			container.Name = "NotificationContainer"
-			container.Size = UDim2.new(0, 300, 1, -40)
-			container.Position = UDim2.new(0.5, -150, 0, 20)
-			container.BackgroundTransparency = 1
-			container.ZIndex = 30000
-			container.Parent = screenGui
-			
-			local uiList = Instance.new("UIListLayout")
-			uiList.Padding = UDim.new(0, 10)
-			uiList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-			uiList.VerticalAlignment = Enum.VerticalAlignment.Top
-			uiList.Parent = container
-		end
-		
-		local theme = currentTheme or Themes.Dark
-		
-		-- Wrapper for animation compatibility with UIListLayout
-		local wrapper = Instance.new("Frame")
-		wrapper.BackgroundTransparency = 1
-		wrapper.Size = UDim2.new(1, 0, 0, 60)
-		wrapper.ClipsDescendants = true
-		wrapper.Parent = container
-		
-		local toast = Instance.new("Frame")
-		toast.Size = UDim2.new(1, 0, 1, 0)
-		toast.Position = UDim2.new(0, 0, -1, -20)
-		toast.BackgroundColor3 = theme.secondary
-		toast.ZIndex = 30001
-		toast.Parent = wrapper
-		Instance.new("UICorner", toast).CornerRadius = UDim.new(0, 10)
-		
-		local toastStroke = Instance.new("UIStroke")
-		toastStroke.Color = theme.stroke
-		toastStroke.Thickness = 2
-		toastStroke.Parent = toast
-		
-		local iconOffset = 0
-		if iconId then
-			local notifIcon = Instance.new("ImageLabel")
-			notifIcon.Size = UDim2.new(0, 22, 0, 22)
-			notifIcon.AnchorPoint = Vector2.new(0, 0.5)
-			notifIcon.Position = UDim2.new(0, 10, 0, 16)
-			notifIcon.BackgroundTransparency = 1
-			notifIcon.Image = ResolveAssetImage("rbxassetid://" .. tostring(iconId))
-			notifIcon.ZIndex = 30003
-			notifIcon.Parent = toast
-			iconOffset = 28
-		end
-
-		local titleLbl = Instance.new("TextLabel")
-		titleLbl.Size = UDim2.new(1, -(15 + iconOffset), 0, 25)
-		titleLbl.Position = UDim2.new(0, 10 + iconOffset, 0, 5)
-		titleLbl.BackgroundTransparency = 1
-		titleLbl.Text = title
-		titleLbl.Font = Enum.Font.GothamBold
-		titleLbl.TextSize = 15
-		titleLbl.TextColor3 = theme.text
-		titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-		titleLbl.ZIndex = 30002
-		titleLbl.Parent = toast
-		
-		local textLbl = Instance.new("TextLabel")
-		textLbl.Size = UDim2.new(1, -15, 0, 25)
-		textLbl.Position = UDim2.new(0, 10, 0, 30)
-		textLbl.BackgroundTransparency = 1
-		textLbl.Text = text
-		textLbl.Font = Enum.Font.Gotham
-		textLbl.TextSize = 13
-		textLbl.TextColor3 = theme.textDim
-		textLbl.TextXAlignment = Enum.TextXAlignment.Left
-		textLbl.TextWrapped = true
-		textLbl.ZIndex = 30002
-		textLbl.Parent = toast
-		
-		-- Tween inside wrapper
-		TweenService:Create(toast, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, 0)}):Play()
-		
-		task.delay(3, function()
-			local outTween = TweenService:Create(toast, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Position = UDim2.new(0, 0, -1, -20)})
-			outTween:Play()
-			task.wait(0.4)
-			wrapper:Destroy()
-		end)
-	end)
-end
-
-local function ApplyTheme(name)
-	currentTheme = Themes[name] or Themes.Dark
-	-- Clean up destroyed elements and apply theme
-	local alive = {}
-	for i = 1, #themeElements do
-		local t = themeElements[i]
-		if t.el and t.el.Parent then
-			alive[#alive + 1] = t
-			if currentTheme[t.key] then
-				pcall(function()
-					TweenService:Create(t.el, TweenInfo.new(0.3), {[t.prop] = currentTheme[t.key]}):Play()
-				end)
-			end
-		end
-	end
-	themeElements = alive
-	
-	if mainStrokeGrad then
-		mainStrokeGrad.Color = ColorSequence.new{
-			ColorSequenceKeypoint.new(0, currentTheme.stroke),
-			ColorSequenceKeypoint.new(0.33, currentTheme.accent),
-			ColorSequenceKeypoint.new(0.66, currentTheme.stroke),
-			ColorSequenceKeypoint.new(1, currentTheme.accent)
-		}
-	end
-	
-	if miniIconGrad then
-		miniIconGrad.Color = ColorSequence.new{
-			ColorSequenceKeypoint.new(0, currentTheme.stroke),
-			ColorSequenceKeypoint.new(0.33, currentTheme.accent),
-			ColorSequenceKeypoint.new(0.66, currentTheme.stroke),
-			ColorSequenceKeypoint.new(1, currentTheme.accent)
-		}
-	end
-
-	if _updateTitleGrad then pcall(_updateTitleGrad) end
-	if UpdateTabStyles then UpdateTabStyles() end
-end
-
--- ===============================================================
--- GUI
--- ===============================================================
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "VexroEmotes"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.DisplayOrder = 999
-gui.Parent = playerGui
-
--- ===============================================================
--- LANGUAGE SELECTION
--- ===============================================================
-
-local selectedLang = nil
-local rememberLang = false
-
--- Kayıtlı dil varsa direkt kullan, dil ekranını atla
-if Settings.language and Settings.language ~= "" then
-	selectedLang = Settings.language
-end
-
-if not selectedLang then
-
--- Dil ekranı her zaman kaydedilmiş temayı kullanır; tema yoksa Dark varsayılan
-local langTheme = Themes[Settings.theme] or Themes.Dark
--- Eğer kaydedilmiş tema yoksa (ilk kez) veya tema Dark ise, Dark'ı zorla
-if not Settings.theme or Settings.theme == "" then langTheme = Themes.Dark end
-
-local langScreen = Instance.new("Frame")
-langScreen.Size = UDim2.fromScale(1, 1)
-langScreen.BackgroundColor3 = langTheme.primary
-langScreen.ZIndex = 20000
-langScreen.Parent = gui
-
-for i = 1, 15 do
-	local particle = Instance.new("Frame")
-	local s = math.random(3, 8)
-	particle.Size = UDim2.new(0, s, 0, s)
-	particle.Position = UDim2.new(math.random(), 0, math.random(), 0)
-	particle.BackgroundColor3 = langTheme.accent
-	particle.BackgroundTransparency = math.random(5, 8) / 10
-	particle.ZIndex = 20000
-	particle.Parent = langScreen
-	Instance.new("UICorner", particle).CornerRadius = UDim.new(1, 0)
-	
-	task.spawn(function()
-		while particle.Parent do
-			TweenService:Create(particle, TweenInfo.new(math.random(3, 6), Enum.EasingStyle.Sine), {
-				Position = UDim2.new(math.random(), 0, math.random(), 0)
-			}):Play()
-			task.wait(math.random(3, 6))
-		end
-	end)
-end
-
-local langBox = Instance.new("Frame")
-langBox.Size = UDim2.new(0, 0, 0, 0)
-langBox.Position = UDim2.fromScale(0.5, 0.5)
-langBox.AnchorPoint = Vector2.new(0.5, 0.5)
-langBox.BackgroundColor3 = langTheme.secondary
-langBox.ZIndex = 20001
-langBox.Rotation = -15
-langBox.Parent = langScreen
-Instance.new("UICorner", langBox).CornerRadius = UDim.new(0, 20)
-
-local langBoxStroke = Instance.new("UIStroke")
-langBoxStroke.Color = langTheme.stroke
-langBoxStroke.Thickness = 2
-langBoxStroke.Parent = langBox
-
-local langStrokeGrad = Instance.new("UIGradient")
-langStrokeGrad.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0, langTheme.accent),
-	ColorSequenceKeypoint.new(0.5, langTheme.stroke),
-	ColorSequenceKeypoint.new(1, langTheme.accent)
+Config = {
+    NotifyEnabled = true,
+    SearchVisible = true,
+    FavVisible = true,
+    ModeVisible = true,
+    FreezeVisible = true,
+    SpeedVisible = true,
+    NavVisible = true,
+    EmoteSpeed = 1,
+    EmoteSpeedEnabled = false,
+    SelectedTheme = "Default",
+    EmotePage = 1,
+    AnimationPage = 1,
+    RandomEnabled = true,
+    RandomMode = "All",
+    AuthenticFirstPage = false,
+    HUDPositions = {},
+    HUDSizes = {},
+    HUDProperties = {},
+    CustomFrames = {},
+    AutoReloadEnabled = false,
+    LastPlayedAnimationData = nil,
+    DiscordVisible = true
 }
-langStrokeGrad.Parent = langBoxStroke
 
-task.spawn(function()
-	local rot = 0
-	while langBoxStroke.Parent do
-		rot = rot + 360
-		TweenService:Create(langStrokeGrad, TweenInfo.new(2, Enum.EasingStyle.Linear), {Rotation = rot}):Play()
-		task.wait(2)
-	end
+HUD = {
+    Connections = {},
+    IsUnlocked = false,
+    DefaultPositions = {},
+    DefaultSizes = {},
+    DefaultTexts = {},
+    DefaultPlaceholders = {},
+    Layouts = {},
+    LayoutsRemoved = {},
+    SelectionGui = nil,
+    SelectedElement = nil,
+    ResizeHandles = {},
+    ResizeConnections = {},
+    FriendlyNames = {
+        ["Under.1left"] = "PrevPage",
+        ["Under.9right"] = "NextPage",
+        ["Under.4pages"] = "TotalPages",
+        ["Under.3TextLabel"] = "Divider",
+        ["Under.2Route-number"] = "CurrentPage",
+        ["Top.Search"] = "Search",
+        ["EmoteWalkButton"] = "Freeze",
+        ["Favorite"] = "Favorite",
+        ["SpeedEmote"] = "SpeedEmote",
+        ["SpeedBox"] = "SpeedBox",
+        ["Changepage"] = "ChangePage",
+        ["Reload"] = "AutoReload",
+        ["Top"] = "Top",
+        ["Under"] = "Under"
+    }
+}
+
+local DEFAULT_IDLE_ICON_ID = "rbxassetid://106798555684020"
+local DEFAULT_IDLE_ICON_COLOR = Color3.fromRGB(0, 255, 150)
+
+function DeepCopy(original)
+    if type(original) ~= "table" then return original end
+    local copy = {}
+    for k, v in pairs(original) do
+        if type(v) == "table" then
+            v = DeepCopy(v)
+        end
+        copy[k] = v
+    end
+    return copy
+end
+
+function ColorToTable(color)
+    return {color.R, color.G, color.B}
+end
+
+function TableToColor(tbl)
+    if not tbl or type(tbl) ~= "table" or #tbl < 3 then return Color3.new(1,1,1) end
+    return Color3.new(tbl[1], tbl[2], tbl[3])
+end
+
+function loadAnimationCache()
+    if isfile and isfile(State.AnimationCachePath) then
+        local success, decoded = pcall(function()
+            return HttpService:JSONDecode(readfile(State.AnimationCachePath))
+        end)
+        if success and type(decoded) == "table" then
+            State.AnimationCache = decoded
+        end
+    end
+end
+
+function saveAnimationCache()
+    if writefile then
+        pcall(function()
+            if not isfolder("7yd7") then makefolder("7yd7") end
+            writefile(State.AnimationCachePath, HttpService:JSONEncode(State.AnimationCache))
+        end)
+    end
+end
+
+function resolveAnimationMappings(bundledItems)
+    local mappings = {}
+    for _, assetIds in pairs(bundledItems) do
+        for _, assetId in pairs(assetIds) do
+            local success, objects = pcall(function()
+                return game:GetObjects("rbxassetid://" .. assetId)
+            end)
+            if success and objects then
+                local function searchTree(parent, parentPath)
+                    for _, child in pairs(parent:GetChildren()) do
+                        if child:IsA("Animation") then
+                            local animationPath = parentPath .. "." .. child.Name
+                            local pathParts = animationPath:split(".")
+                            local weightVals = {}
+                            for _, wChild in ipairs(child:GetChildren()) do
+                                if wChild:IsA("NumberValue") and wChild.Name == "Weight" then
+                                    table.insert(weightVals, wChild.Value)
+                                end
+                            end
+                            table.insert(mappings, {
+                                category = pathParts[#pathParts - 1],
+                                name = pathParts[#pathParts],
+                                animationId = child.AnimationId,
+                                weights = weightVals
+                            })
+                        elseif #child:GetChildren() > 0 then
+                            searchTree(child, parentPath .. "." .. child.Name)
+                        end
+                    end
+                end
+                for _, obj in pairs(objects) do
+                    searchTree(obj, obj.Name)
+                    obj.Parent = workspace
+                    task.delay(1, function()
+                        if obj then obj:Destroy() end
+                    end)
+                end
+            end
+        end
+    end
+    return mappings
+end
+
+function buildCustomSetMappings(setName)
+    if type(setName) == "string" then
+        setName = setName:gsub("%s*%-.*$", "")
+    end
+    local set = State.CustomAnimations and State.CustomAnimations.Sets and State.CustomAnimations.Sets[setName]
+    if not set then return {} end
+    local mappings = {}
+    for cat, anims in pairs(set) do
+        if cat ~= "__meta" then
+            for name, id in pairs(anims) do
+                if tostring(id) ~= "0" then
+                    table.insert(mappings, {category = cat, name = name, animationId = "rbxassetid://" .. id})
+                end
+            end
+        end
+    end
+    return mappings
+end
+
+
+
+loadAnimationCache()
+
+
+local UI = {
+    CustomFrames = {},
+    Under = nil, 
+    _1left = nil, 
+    _9right = nil, 
+    _4pages = nil, 
+    _3TextLabel = nil, 
+    _2Routenumber = nil, 
+    Top = nil, 
+    EmoteWalkButton = nil,
+    Search = nil, 
+    Favorite = nil, 
+    SpeedEmote = nil, 
+    SpeedBox = nil, 
+    Changepage = nil,
+    Reload = nil,
+    Background = nil
+}
+
+local HUD = { 
+    Connections = {},
+    Strokes = {},
+    ResizeHandles = {},
+    ResizeConnections = {},
+    UndoStack = {},
+    SelectedElement = nil,
+    Overlay = nil,
+    IsUnlocked = false,
+    ForceVisibleConn = nil,
+    Layouts = {},
+    LayoutsRemoved = {},
+    FriendlyNames = {
+        ["Under.1left"] = "Left Arrow",
+        ["Under.9right"] = "Right Arrow",
+        ["Under.4pages"] = "Total Pages",
+        ["Under.3TextLabel"] = "Separator Label",
+        ["Under.2Route-number"] = "Page Number Box",
+        ["Top.Search"] = "Search/ID Box",
+    },
+    DefaultPositions = {
+        Top = UDim2.new(0.127499998, 0, -0.109999999, 0),
+        Under = UDim2.new(0.129999995, 0, 1, 0),
+        EmoteWalkButton = UDim2.new(0.889999986, 0, -0.107500002, 0),
+        Favorite = UDim2.new(0.0189999994, 0, -0.108000003, 0),
+        SpeedEmote = UDim2.new(0.888999999, 0, 0, 0),
+        SpeedBox = UDim2.new(0.0189999398, 0, -0.000499992399, 0),
+        Changepage = UDim2.new(0.019, 0, 1.021, 0),
+        Reload = UDim2.new(0.888999999, 0, 1.02100003, 0),
+        ["Left Arrow"] = UDim2.new(0, 0, 0.028, 0),
+        ["Right Arrow"] = UDim2.new(0.169, 0, 0.028, 0),
+        ["Total Pages"] = UDim2.new(0.339, 0, 0.094, 0), 
+        ["Separator Label"] = UDim2.new(0.498, 0, 0.028, 0),
+        ["Page Number Box"] = UDim2.new(0.837, 0, 0.094, 0),
+        ["Search/ID Box"] = UDim2.new(0.01, 0, 0.092, 0),
+    },
+    DefaultSizes = {
+        Top = UDim2.new(0.737500012, 0, 0.0949999914, 0),
+        Under = UDim2.new(0.737500012, 0, 0.132499993, 0),
+        EmoteWalkButton = UDim2.new(0.0874999985, 0, 0.0874999985, 0),
+        Favorite = UDim2.new(0.0874999985, 0, 0.0874999985, 0),
+        SpeedEmote = UDim2.new(0.0874999985, 0, 0.0874999985, 0),
+        SpeedBox = UDim2.new(0.0874999985, 0, 0.0874999985, 0),
+        Changepage = UDim2.new(0.087, 0, 0.087, 0),
+        Reload = UDim2.new(0.0869999975, 0, 0.0869999975, 0),
+        ["Left Arrow"] = UDim2.new(0.169491529, 0, 0.94339627, 0),
+        ["Right Arrow"] = UDim2.new(0.169491529, 0, 0.94339627, 0),
+        ["Total Pages"] = UDim2.new(0.159322038, 0, 0.811320841, 0),
+        ["Separator Label"] = UDim2.new(0.338983059, 0, 0.94339627, 0),
+        ["Page Number Box"] = UDim2.new(0.159322038, 0, 0.811320841, 0),
+        ["Search/ID Box"] = UDim2.new(0.864406765, 0, 0.81578958, 0),
+    },
+    DefaultTexts = {
+        ["Left Arrow"] = "",
+        ["Right Arrow"] = "",
+        ["Total Pages"] = "1",
+        ["Separator Label"] = " ------ ",
+        ["Page Number Box"] = "1",
+        ["Search/ID Box"] = "",
+        ["SpeedBox"] = "1",
+    },
+    DefaultPlaceholders = {
+        ["Search/ID Box"] = "Search/ID",
+    }
+}
+
+function getAllHUDObjects()
+    local elems = {}
+    if UI.Top then elems["Top"] = UI.Top end
+    if UI.Under then elems["Under"] = UI.Under end
+    if UI.EmoteWalkButton then elems["EmoteWalkButton"] = UI.EmoteWalkButton end
+    if UI.Favorite then elems["Favorite"] = UI.Favorite end
+    if UI.SpeedEmote then elems["SpeedEmote"] = UI.SpeedEmote end
+    if UI.SpeedBox then elems["SpeedBox"] = UI.SpeedBox end
+    if UI.Changepage then elems["Changepage"] = UI.Changepage end
+    if UI.Reload then elems["Reload"] = UI.Reload end
+    if UI.CustomFrames then
+        for n, f in pairs(UI.CustomFrames) do
+            elems[n] = f
+        end
+    end
+
+    if UI.Top then
+        for _, child in pairs(UI.Top:GetChildren()) do
+            if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UICorner") then
+                local internalName = "Top." .. child.Name
+                elems[HUD.FriendlyNames[internalName] or internalName] = child
+            end
+        end
+    end
+    if UI.Under then
+        for _, child in pairs(UI.Under:GetChildren()) do
+            if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UICorner") then
+                local internalName = "Under." .. child.Name
+                elems[HUD.FriendlyNames[internalName] or internalName] = child
+            end
+        end
+    end
+    return elems
+end
+
+function getMovableElements()
+    local all = getAllHUDObjects()
+    local movable = {}
+    
+    for name, el in pairs(all) do
+        local isChild = false
+        for _, friendly in pairs(HUD.FriendlyNames) do 
+            if name == friendly then isChild = true; break end 
+        end
+        
+        if not isChild or HUD.IsUnlocked then
+            movable[name] = el
+        end
+    end
+    return movable
+end
+
+function ColorToTable(c) return {math.round(c.R*255), math.round(c.G*255), math.round(c.B*255)} end
+function TableToColor(t)
+    if type(t) ~= "table" then
+        return Color3.fromRGB(255, 255, 255)
+    end
+    local r = tonumber(t[1]) or 255
+    local g = tonumber(t[2]) or 255
+    local b = tonumber(t[3]) or 255
+    return Color3.fromRGB(r, g, b)
+end
+
+local function isThemeDefaultRGB(r, g, b)
+    return r == 28 and g == 30 and b == 32
+end
+
+local AnimationSystem = {
+    Cache = {},
+    currentThemeName = "Default"
+}   
+
+AnimationSystem.LooksLikeGif = function(url)
+    if not url then return false end
+    url = string.lower(tostring(url))
+    return url:find(".gif") or url:find("gif") or url:find("format=gif") or url:find("image/gif")
+end
+
+AnimationSystem.NormalizeUrl = function(url)
+    if not url or url == "" then return url end
+    local targetUrl = tostring(url)
+    
+    targetUrl = targetUrl:gsub("%?raw=true", "")
+    
+    if targetUrl:find("github%.com/") and not targetUrl:find("raw.githubusercontent%.com") then
+        targetUrl = targetUrl:gsub("github%.com/", "raw.githubusercontent.com/")
+        targetUrl = targetUrl:gsub("/blob/", "/")
+        targetUrl = targetUrl:gsub("/raw/", "/")
+    end
+    
+    if targetUrl:find(" ") and not targetUrl:find("%%20") then
+        targetUrl = targetUrl:gsub(" ", "%%20")
+    end
+    
+    if not targetUrl:find("://") then
+        local id = targetUrl:match("id=(%d+)") or targetUrl:match("^(%d+)$")
+        if id then return "rbxassetid://" .. id end
+    end
+    return targetUrl
+end
+
+AnimationSystem.ParseGifInfo = function(bytes)
+    if not bytes or #bytes < 13 then return nil end
+    if bytes:sub(1, 3) ~= "GIF" then return nil end
+    local function u16le(pos)
+        local b1 = bytes:byte(pos) or 0
+        local b2 = bytes:byte(pos + 1) or 0
+        return b1 + b2 * 256
+    end
+    local width = u16le(7)
+    local height = u16le(9)
+    local packed = bytes:byte(11) or 0
+    local gctFlag = bit32.band(packed, 0x80) ~= 0
+    local gctSize = bit32.band(packed, 0x07)
+    local offset = 13
+    if gctFlag then
+        offset = offset + (3 * (2 ^ (gctSize + 1)))
+    end
+
+    local frames = 0
+    local delays = {}
+    local pendingDelay = nil
+
+    local function skipSubBlocks(pos)
+        while pos <= #bytes do
+            local size = bytes:byte(pos) or 0
+            pos = pos + 1
+            if size == 0 then break end
+            pos = pos + size
+        end
+        return pos
+    end
+
+    while offset <= #bytes do
+        local b = bytes:byte(offset)
+        if not b then break end
+        if b == 0x3B then
+            break
+        elseif b == 0x21 then
+            local label = bytes:byte(offset + 1) or 0
+            if label == 0xF9 then
+                local delay = u16le(offset + 4)
+                pendingDelay = delay
+                offset = offset + 8
+            else
+                offset = skipSubBlocks(offset + 2)
+            end
+        elseif b == 0x2C then
+            frames = frames + 1
+            if pendingDelay then
+                table.insert(delays, pendingDelay)
+                pendingDelay = nil
+            end
+            local packedImg = bytes:byte(offset + 9) or 0
+            local lctFlag = bit32.band(packedImg, 0x80) ~= 0
+            local lctSize = bit32.band(packedImg, 0x07)
+            offset = offset + 10
+            if lctFlag then
+                offset = offset + (3 * (2 ^ (lctSize + 1)))
+            end
+            offset = offset + 1
+            offset = skipSubBlocks(offset)
+        else
+            offset = offset + 1
+        end
+    end
+
+    local totalDelay = 0
+    for _, d in ipairs(delays) do totalDelay = totalDelay + d end
+    local avgDelay = (#delays > 0) and (totalDelay / #delays) or 10
+
+    return {
+        width = width,
+        height = height,
+        frames = frames > 0 and frames or #delays,
+        totalDelayCs = totalDelay,
+        avgDelayCs = avgDelay
+    }
+end
+
+AnimationSystem.ParsePngInfo = function(bytes)
+    if not bytes or #bytes < 24 then return nil end
+    if bytes:sub(1, 8) ~= "\137PNG\r\n\26\n" then return nil end
+    local function u32be(pos)
+        local b1 = bytes:byte(pos) or 0
+        local b2 = bytes:byte(pos + 1) or 0
+        local b3 = bytes:byte(pos + 2) or 0
+        local b4 = bytes:byte(pos + 3) or 0
+        return ((b1 * 256 + b2) * 256 + b3) * 256 + b4
+    end
+    local width = u32be(17)
+    local height = u32be(21)
+    if width <= 0 or height <= 0 then return nil end
+    return { width = width, height = height }
+end
+
+AnimationSystem.StopGif = function()
+    if State.currentWheelAnimToken then
+        State.currentWheelAnimToken = State.currentWheelAnimToken + 1
+    end
+end
+
+AnimationSystem.SetImageMode = function(img, custom)
+    if not img then return end
+    if custom then
+        img.ScaleType = Enum.ScaleType.Stretch
+        img.SliceCenter = Rect.new(0, 0, 0, 0)
+        img.SliceScale = 1
+    else
+        img.ScaleType = Enum.ScaleType.Fit
+    end
+end
+
+AnimationSystem.StartGif = function(img, data)
+    AnimationSystem.StopGif()
+    if not img or not data or not data.sprite then return end
+    
+    State.currentWheelAnimToken = (State.currentWheelAnimToken or 0) + 1
+    local token = State.currentWheelAnimToken
+    
+    local frames = data.frames or 1
+    local frameW = data.frameW or 0
+    local frameH = data.frameH or 0
+    local cols = data.cols or 1
+    local rows = data.rows or 1
+    local delay = data.delay or 0.1
+    local sheetW = data.sheetW or (cols * frameW)
+    local sheetH = data.sheetH or (rows * frameH)
+    
+    img.Image = data.sprite
+    img.ImageRectSize = Vector2.new(frameW, frameH)
+    img.ImageRectOffset = Vector2.new(0, 0)
+    pcall(function() ContentProvider:PreloadAsync({img}) end)
+    
+    local current = 0
+    local acc = 0
+    local connection
+    connection = RunService.Heartbeat:Connect(function(dt)
+        if token ~= State.currentWheelAnimToken then
+            connection:Disconnect()
+            return
+        end
+        acc = acc + dt
+        if acc < delay then return end
+        acc = 0
+        current = (current + 1) % frames
+        local col = current % cols
+        local row = math.floor(current / cols)
+        local offsetX = math.min(col * frameW, math.max(0, sheetW - frameW))
+        local offsetY = math.min(row * frameH, math.max(0, sheetH - frameH))
+        img.ImageRectOffset = Vector2.new(offsetX, offsetY)
+    end)
+end
+
+AnimationSystem.AreMetaEqual = function(a, b)
+    if not a or not b then return a == b end
+    return a.GifUrl == b.GifUrl and a.SheetUrl == b.SheetUrl and a.Enabled == b.Enabled
+end
+
+AnimationSystem.MakeKey = function(gif, sheet)
+    return tostring(gif) .. "|" .. tostring(sheet)
+end
+
+function ApplyFreezeButtonVisual()
+    if not UI.EmoteWalkButton then return end
+    UI.EmoteWalkButton.Image = State.emotesWalkEnabled and State.enabledButtonImage or State.defaultButtonImage
+end
+
+AnimationSystem.GetIconColor = function(key)
+    if themes and themes[AnimationSystem.currentThemeName] then
+        local theme = themes[AnimationSystem.currentThemeName]
+        if theme.IconColors and theme.IconColors[key] then
+            return TableToColor(theme.IconColors[key])
+        end
+        return TableToColor(theme.ImageColor or {255, 255, 255})
+    elseif State.EmoteTheme then
+        local theme = State.EmoteTheme
+        if theme.IconColors and theme.IconColors[key] then
+            return TableToColor(theme.IconColors[key])
+        end
+        return theme.ImageColor or Color3.new(1, 1, 1)
+    end
+    return Color3.fromRGB(255, 255, 255)
+end
+
+AnimationSystem.ResetRandomSlot = function(frontFrame)
+    if not frontFrame then return end
+    local slot = frontFrame:FindFirstChild("1")
+    if slot and slot:IsA("ImageLabel") then
+        slot.ImageColor3 = Color3.fromRGB(255, 255, 255)
+        slot.Image = ""
+        local idValue = slot:FindFirstChild("AnimationID")
+        if idValue then idValue:Destroy() end
+    end
+end
+
+function SafeLoad(url, name)
+    local success, content
+    for i = 1, 3 do
+        success, content = pcall(function() return game:HttpGet(url) end)
+        if success and content and content ~= "" then break end
+        task.wait(0.5)
+    end
+    
+    if not success or not content or content == "" then
+        getgenv().Notify({
+            Title = '7yd7 | Error',
+            Content = 'Failed to download ' .. (name or "script") .. ' after 3 attempts.',
+            Duration = 5
+        })
+        return function() end
+    end
+
+    local func, err = loadstring(content)
+    if not func then
+        warn("7yd7 | SafeLoad: Failed to parse " .. (name or "script") .. ": " .. tostring(err))
+        return function() end
+    end
+
+    local ok, res = pcall(func)
+    if not ok then
+        warn("7yd7 | SafeLoad: Error executing " .. (name or "script") .. ": " .. tostring(res))
+        return function() end
+    end
+    return res
+end
+
+SafeLoad("https://raw.githubusercontent.com/7yd7/Menu-7yd7/refs/heads/Script/GUIS/Off-site/Notify.lua", "Notify System")
+
+function GetAsset(asset)
+    if not asset or asset == "" then return "" end
+    local assetStr = tostring(asset)
+    
+    _G.AssetCache = _G.AssetCache or {}
+    if _G.AssetCache[assetStr] then return _G.AssetCache[assetStr] end
+
+    if not assetStr:find("://") and tonumber(assetStr) then
+        local id = "rbxassetid://" .. assetStr
+        _G.AssetCache[assetStr] = id
+        return id
+    end
+    
+    if assetStr:find("rbxassetid://") or assetStr:find("rbxasset://") or assetStr:find("rbxthumb://") then
+        return assetStr
+    end
+    
+    if assetStr:find("http") then
+        local targetUrl = AnimationSystem.NormalizeUrl(assetStr)
+
+        local filename = targetUrl:match("([^/]+)$") or "asset.png"
+        filename = filename:match("([^%?]+)") or filename
+        
+        filename = filename:gsub("[%c%*%?%\"%<%>%|]", "_")
+        
+        if filename:lower():find("%.gif$") then
+            filename = filename:gsub("%.[gG][iI][fF]$", ".png")
+        end
+        if not filename:find("%.") then filename = filename .. ".png" end
+        
+        local path = "7yd7/Assets/" .. filename
+        
+        if isfile(path) then
+            local success, result = pcall(function() return getcustomasset(path) end)
+            if success and result then
+                _G.AssetCache[assetStr] = result
+                return result
+            end
+        else
+            if not isfolder("7yd7/Assets") then 
+                pcall(function()
+                    if not isfolder("7yd7") then makefolder("7yd7") end
+                    makefolder("7yd7/Assets") 
+                end)
+            end
+            
+            local success, content = pcall(function() return game:HttpGet(targetUrl) end)
+            if success and content and content ~= "" then
+                local low = content:sub(1, 100):lower()
+                if low:find("<!doctype") or low:find("<html") or low:find("<head") then
+                    warn("7yd7 | GetAsset: Downloaded content appears to be HTML. Link might be incorrect: " .. targetUrl)
+                    return ""
+                end
+                
+                pcall(function() writefile(path, content) end)
+                task.wait(0.2) 
+                
+                local s, result = pcall(function() return getcustomasset(path) end)
+                if s and result then
+                    _G.AssetCache[assetStr] = result
+                    return result
+                end
+            end
+        end
+    end
+    
+    return assetStr
+end
+
+local function estimateRobloxResizedSize(origW, origH)
+    if origW <= 0 or origH <= 0 then return origW, origH end
+    local longest = math.max(origW, origH)
+    local scale = 1
+    if longest > 1024 then
+        scale = 1024 / longest
+    end
+    return origW * scale, origH * scale
+end
+
+local function getExactImageSize(asset)
+    local AssetService = game:GetService("AssetService")
+    local ok, editImage = pcall(function()
+        return AssetService:CreateEditableImageAsync(asset)
+    end)
+    if ok and editImage then
+        local w = editImage.Size.X
+        local h = editImage.Size.Y
+        editImage:Destroy()
+        if w > 0 and h > 0 then
+            return w, h
+        end
+    end
+    return nil
+end
+
+local DEFAULT_WHEEL_BG = "rbxasset://textures/ui/Emotes/Large/SegmentedCircle.png"
+local RANDOM_SLOT_ICON = "rbxassetid://109283577128136"
+local RANDOM_SLOT_COLOR = Color3.fromRGB(188, 188, 188)
+local DEFAULT_IDLE_ICON_ID = "98513150727403"
+local DEFAULT_IDLE_ICON_COLOR = Color3.fromRGB(188, 188, 188)
+local wheelImgState = setmetatable({}, { __mode = "k" })
+local checkEmotesMenuExists
+local playEmote
+local playRandomEmote
+local handleSectorAction
+local calculateTotalPages
+local updatePageDisplay
+local updateEmotes
+local isInFavorites
+local toggleFavorite
+local toggleFavoriteAnimation
+local refreshCustomAnimationState
+local findCustomAnimationDataByName
+local applyAnimation
+
+local ConfigPath = "7yd7/EmoteSettings.json"
+
+function updateHUDLayouts()
+    if not Config then return end
+    local function toggleLayout(parent, unlocked)
+        if not parent then return end
+        local key = parent.Name
+        local l = parent:FindFirstChildOfClass("UIListLayout") or HUD.Layouts[key]
+        
+        if l then
+            HUD.Layouts[key] = l
+            
+            local hasCustomP = false
+            for _, child in pairs(parent:GetChildren()) do
+                if child:IsA("GuiObject") then
+                    local internalName = key .. "." .. child.Name
+                    local friendly = HUD.FriendlyNames[internalName] or internalName
+                    if Config.HUDPositions and Config.HUDPositions[friendly] then
+                        hasCustomP = true
+                        break
+                    end
+                end
+            end
+
+            if HUD.IsUnlocked then
+                l.Parent = nil
+            elseif hasCustomP or (HUD.LayoutsRemoved and HUD.LayoutsRemoved[key]) then
+                l.Parent = nil 
+            else
+                l.Parent = parent
+            end
+        end
+    end
+    
+    toggleLayout(UI.Top, HUD.IsUnlocked)
+    toggleLayout(UI.Under, HUD.IsUnlocked)
+end
+
+function applySavedPositions() end 
+local enterHUDEditor, exitHUDEditor
+
+local function updateSpeedBoxVisibility()
+    if not UI.SpeedBox then return end
+    if State.hudEditorActive then
+        UI.SpeedBox.Visible = Config.SpeedVisible
+    else
+        UI.SpeedBox.Visible = (Config.SpeedVisible and State.speedEmoteEnabled)
+    end
+end
+
+function ApplyUIVisibility()
+    pcall(function()
+        if UI.Search and UI.Top then UI.Top.Visible = Config.SearchVisible end
+        if UI.Favorite then UI.Favorite.Visible = Config.FavVisible end
+        if UI.Changepage then UI.Changepage.Visible = Config.ModeVisible end
+        if UI.EmoteWalkButton then UI.EmoteWalkButton.Visible = Config.FreezeVisible end
+        if UI.SpeedEmote then UI.SpeedEmote.Visible = Config.SpeedVisible end
+        updateSpeedBoxVisibility()
+        if UI.Under then UI.Under.Visible = Config.NavVisible end
+        if UI.Reload then 
+            if State.hudEditorActive then
+                UI.Reload.Visible = true
+            else
+                UI.Reload.Visible = (State.currentMode == "animation" and Config.NavVisible) 
+            end
+        end
+    end)
+end
+
+function SaveConfig()
+    if not isfolder("7yd7") then makefolder("7yd7") end
+    writefile(ConfigPath, HttpService:JSONEncode(Config))
+end
+
+function LoadConfig()
+    if isfile(ConfigPath) then
+        local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(ConfigPath)) end)
+        if success and type(decoded) == "table" then
+            for k, v in pairs(decoded) do Config[k] = v end
+        end
+    end
+    getgenv().autoReloadEnabled = Config.AutoReloadEnabled or false
+    getgenv().lastPlayedAnimation = Config.LastPlayedAnimationData
+end
+LoadConfig()
+
+local rawNotify = getgenv().Notify
+getgenv().Notify = function(data)
+    if Config.NotifyEnabled then
+        rawNotify(data)
+    end
+end
+
+local SettingsLib = SafeLoad("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Settings.lua", "Settings Library")
+
+local ToggleContainer = Instance.new("Frame")
+ToggleContainer.Name = "open/Close"
+ToggleContainer.Parent = SettingsLib.UI
+ToggleContainer.BackgroundTransparency = 1
+ToggleContainer.Size = UDim2.fromScale(1, 1)
+ToggleContainer.ZIndex = 5000
+ToggleContainer.Visible = false
+ToggleContainer.Active = false
+ToggleContainer.Selectable = false
+
+local ToggleBtn = Instance.new("ImageButton")
+ToggleBtn.Name = "ToggleSettings"
+ToggleBtn.Parent = ToggleContainer
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+ToggleBtn.BackgroundTransparency = 0.4
+ToggleBtn.Position = UDim2.new(0, 10, 1, -52)
+ToggleBtn.Size = UDim2.fromOffset(42, 42)
+ToggleBtn.Image = "rbxassetid://79568054778195"
+
+local DiscordBtn = Instance.new("ImageButton")
+DiscordBtn.Name = "DiscordButton"
+DiscordBtn.Parent = ToggleContainer
+DiscordBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+DiscordBtn.BackgroundTransparency = 0.4
+DiscordBtn.Position = UDim2.new(0, 57, 1, -52)
+DiscordBtn.Size = UDim2.fromOffset(42, 42)
+DiscordBtn.Image = "rbxassetid://98681818461563"
+
+local DiscordCorner = Instance.new("UICorner")
+DiscordCorner.CornerRadius = UDim.new(0, 10)
+DiscordCorner.Parent = DiscordBtn
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 10)
+ToggleCorner.Parent = ToggleBtn
+
+function getSettingsMainFrame()
+    if SettingsLib and SettingsLib.UI then
+        return SettingsLib.UI:FindFirstChild("MainFrame")
+    end
+    return nil
+end
+
+function applySettingsToggleStyle()
+    local main = getSettingsMainFrame()
+    local bgColor
+    if main then
+        bgColor = main.BackgroundColor3
+    elseif State.EmoteTheme and State.EmoteTheme.Background then
+        bgColor = State.EmoteTheme.Background
+    end
+
+    if bgColor then
+        ToggleBtn.BackgroundColor3 = bgColor
+        DiscordBtn.BackgroundColor3 = bgColor
+    end
+end
+
+function syncToggleVisibility()
+    local main = getSettingsMainFrame()
+    if main then
+        ToggleContainer.Visible = not main.Visible
+    else
+        ToggleContainer.Visible = true
+    end
+end
+
+function syncDiscordVisibility()
+    DiscordBtn.Visible = Config.DiscordVisible
+end
+
+DiscordBtn.MouseButton1Click:Connect(function()
+    setclipboard("https://discord.gg/kRfzv2kV7X")
+    getgenv().Notify({Title = "Discord", Content = "The Discord invite has been copied", Duration = 3})
 end)
 
-local langTitle = Instance.new("TextLabel")
-langTitle.Size = UDim2.new(1, 0, 0, 45)
-langTitle.Position = UDim2.new(0, 0, 0, 20)
-langTitle.BackgroundTransparency = 1
-langTitle.Text = "🌐 Select Language"
-langTitle.TextColor3 = Color3.new(1, 1, 1)
-langTitle.Font = Enum.Font.GothamBold
-langTitle.TextScaled = true
-langTitle.ZIndex = 20002
-langTitle.Parent = langBox
-
-local function MakeLangBtn(txt, index, lang)
-	local col = index <= 4 and 0 or 1
-	local row = (index - 1) % 4
-	local x = col == 0 and 0.04 or 0.52
-	local y = 80 + (row * 65)
-
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0.44, 0, 0, 55)
-	btn.Position = UDim2.new(x, 0, 0, y)
-	btn.BackgroundColor3 = langTheme.tertiary
-	btn.Text = txt
-	btn.TextColor3 = langTheme.text
-	btn.Font = Enum.Font.GothamBold
-	btn.TextSize = isMobile and 14 or 16
-	btn.ZIndex = 20003
-	btn.Parent = langBox
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 12)
-
-	local btnStroke = Instance.new("UIStroke")
-	btnStroke.Color = langTheme.stroke
-	btnStroke.Transparency = 0.5
-	btnStroke.Parent = btn
-	
-	local shine = Instance.new("Frame")
-	shine.Size = UDim2.new(0, 0, 1, 0)
-	shine.BackgroundColor3 = Color3.new(1, 1, 1)
-	shine.BackgroundTransparency = 0.9
-	shine.ZIndex = 20004
-	shine.Parent = btn
-	Instance.new("UICorner", shine).CornerRadius = UDim.new(0, 12)
-	
-	btn.MouseEnter:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = langTheme.accent}):Play()
-		TweenService:Create(btnStroke, TweenInfo.new(0.2), {Transparency = 0, Color = langTheme.accent}):Play()
-		TweenService:Create(shine, TweenInfo.new(0.3), {Size = UDim2.new(1, 0, 1, 0)}):Play()
-	end)
-	btn.MouseLeave:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = langTheme.tertiary}):Play()
-		TweenService:Create(btnStroke, TweenInfo.new(0.2), {Transparency = 0.5, Color = langTheme.stroke}):Play()
-		TweenService:Create(shine, TweenInfo.new(0.3), {Size = UDim2.new(0, 0, 1, 0)}):Play()
-	end)
-	btn.MouseButton1Click:Connect(function()
-		local ripple = Instance.new("Frame")
-		ripple.Size = UDim2.new(0, 0, 0, 0)
-		ripple.Position = UDim2.new(0.5, 0, 0.5, 0)
-		ripple.AnchorPoint = Vector2.new(0.5, 0.5)
-		ripple.BackgroundColor3 = langTheme.accent
-		ripple.BackgroundTransparency = 0.7
-		ripple.ZIndex = 20005
-		ripple.Parent = btn
-		Instance.new("UICorner", ripple).CornerRadius = UDim.new(1, 0)
-
-		TweenService:Create(ripple, TweenInfo.new(0.4), {Size = UDim2.new(2, 0, 2, 0), BackgroundTransparency = 1}):Play()
-		TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = langTheme.accent}):Play()
-		task.delay(0.4, function() ripple:Destroy() end)
-		task.wait(0.15)
-		selectedLang = lang
-	end)
-end
-
-MakeLangBtn("🇹🇷  Türkçe",   1, "TR")
-MakeLangBtn("🇬🇧  English",  2, "EN")
-MakeLangBtn("🇪🇸  Español",  3, "ES")
-MakeLangBtn("🇸🇦  العربية",  4, "AR")
-MakeLangBtn("🇫🇷  Français", 5, "FR")
-MakeLangBtn("🇮🇳  हिन्दी",   6, "HI")
-MakeLangBtn("🇵🇹  Português",7, "PT")
-MakeLangBtn("🇷🇺  Русский",  8, "RU")
-
--- Remember Language butonu
-local rememberBtn = Instance.new("TextButton")
-rememberBtn.Size = UDim2.new(0.92, 0, 0, 40)
-rememberBtn.Position = UDim2.new(0.04, 0, 1, -50)
-rememberBtn.BackgroundColor3 = langTheme.tertiary
-rememberBtn.Text = "💾  Remember Language"
-rememberBtn.TextColor3 = langTheme.textDim
-rememberBtn.Font = Enum.Font.GothamBold
-rememberBtn.TextSize = isMobile and 13 or 15
-rememberBtn.ZIndex = 20003
-rememberBtn.Parent = langBox
-Instance.new("UICorner", rememberBtn).CornerRadius = UDim.new(0, 12)
-
-local rememberStroke = Instance.new("UIStroke")
-rememberStroke.Color = langTheme.stroke
-rememberStroke.Transparency = 0.5
-rememberStroke.Parent = rememberBtn
-
-rememberBtn.MouseButton1Click:Connect(function()
-	rememberLang = not rememberLang
-	if rememberLang then
-		TweenService:Create(rememberBtn, TweenInfo.new(0.2),
-			{BackgroundColor3 = langTheme.success}):Play()
-		rememberBtn.Text       = "✅  Remember Language"
-		rememberBtn.TextColor3 = Color3.new(1, 1, 1)
-	else
-		TweenService:Create(rememberBtn, TweenInfo.new(0.2),
-			{BackgroundColor3 = langTheme.tertiary}):Play()
-		rememberBtn.Text       = "💾  Remember Language"
-		rememberBtn.TextColor3 = langTheme.textDim
-	end
+ToggleBtn.MouseButton1Click:Connect(function()
+    local main = getSettingsMainFrame()
+    if main then
+        main.Visible = not main.Visible
+        syncToggleVisibility()
+    else
+        SettingsLib.UI.Enabled = not SettingsLib.UI.Enabled
+    end
 end)
 
-local targetSize = isMobile and UDim2.new(0, 380, 0, 410) or UDim2.new(0, 480, 0, 410)
-TweenService:Create(langBox, TweenInfo.new(0.6, Enum.EasingStyle.Back), {Size = targetSize, Rotation = 0}):Play()
-
-repeat task.wait(0.1) until selectedLang
-
--- Dil hatırlama seçiliyse kaydet
-if rememberLang then
-	Settings.language = selectedLang
-	SaveData()
-end
-
-TweenService:Create(langBox, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Size = UDim2.new(0, 0, 0, 0), Rotation = 360}):Play()
-TweenService:Create(langScreen, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
-task.wait(0.4)
-langScreen:Destroy()
-
-end -- if not selectedLang
-
--- ===============================================================
--- LANGUAGE
--- ===============================================================
-
-local isTR, isES, isAR, isFR, isHI, isPT, isRU = selectedLang == "TR", selectedLang == "ES", selectedLang == "AR", selectedLang == "FR", selectedLang == "HI", selectedLang == "PT", selectedLang == "RU"
-local L = {
-	r6Msg = isTR and "Sadece R15!" or (isES and "Solo R15!" or (isAR and "R15 فقط!" or (isFR and "R15 uniquement!" or (isHI and "केवल R15!" or (isPT and "Apenas R15!" or (isRU and "Только R15!" or "R15 only!")))))),
-	loading = isTR and "Yükleniyor..." or (isES and "Cargando..." or (isAR and "جار التحميل..." or (isFR and "Chargement..." or (isHI and "लोड हो रहा है..." or (isPT and "Carregando..." or (isRU and "Загрузка..." or "Loading...")))))),
-	madeBy = isTR and "Oyuncu15q tarafından yapıldı" or (isES and "Hecho por Oyuncu15q" or (isAR and "صنع بواسطة Oyuncu15q" or (isFR and "Fait par Oyuncu15q" or (isHI and "Oyuncu15q द्वारा निर्मित" or (isPT and "Feito por Oyuncu15q" or (isRU and "Сделано Oyuncu15q" or "Made by Oyuncu15q")))))),
-	search = isTR and "Ara..." or (isES and "Buscar..." or (isAR and "بحث..." or (isFR and "Rechercher..." or (isHI and "खोजें..." or (isPT and "Pesquisar..." or (isRU and "Поиск..." or "Search...")))))),
-	playing = isTR and "Oynatılıyor" or (isES and "Reproduciendo" or (isAR and "تشغيل" or (isFR and "En lecture" or (isHI and "चल रहा है" or (isPT and "Reproduzindo" or (isRU and "Воспроизведение" or "Playing")))))),
-	stopped = isTR and "Durduruldu" or (isES and "Detenido" or (isAR and "توقف" or (isFR and "Arrêté" or (isHI and "रुक गया" or (isPT and "Parado" or (isRU and "Остановлено" or "Stopped")))))),
-	ready = isTR and "Hazır!" or (isES and "Listo!" or (isAR and "جاهز!" or (isFR and "Prêt!" or (isHI and "तैयार!" or (isPT and "Pronto!" or (isRU and "Готово!" or "Ready!")))))),
-	emotes = isTR and "Emoteler" or (isES and "Emotes" or (isAR and "رقصات" or (isFR and "Emotes" or (isHI and "इमोट्स" or (isPT and "Emotes" or (isRU and "Эмоции" or "Emotes")))))),
-	favorites = isTR and "Favoriler" or (isES and "Favoritos" or (isAR and "المفضلة" or (isFR and "Favoris" or (isHI and "पसंदीदा" or (isPT and "Favoritos" or (isRU and "Избранное" or "Favorites")))))),
-	recent = isTR and "Son Kullanılanlar" or (isES and "Recientes" or (isAR and "الأخيرة" or (isFR and "Récents" or (isHI and "हाल ही के" or (isPT and "Recentes" or (isRU and "Недавние" or "Recent")))))),
-	settings = isTR and "Ayarlar" or (isES and "Ajustes" or (isAR and "الإعدادات" or (isFR and "Paramètres" or (isHI and "सेटिंग्स" or (isPT and "Configurações" or (isRU and "Настройки" or "Settings")))))),
-	noFav = isTR and "Favori yok" or (isES and "Sin favoritos" or (isAR and "لا يوجد مفضلة" or (isFR and "Pas de favoris" or (isHI and "कोई पसंदीदा नहीं" or (isPT and "Sem favoritos" or (isRU and "Нет избранного" or "No favorites")))))),
-	noRecent = isTR and "Geçmiş yok" or (isES and "Sin recientes" or (isAR and "لا يوجد سجل" or (isFR and "Pas de récents" or (isHI and "कोई हाल का नहीं" or (isPT and "Sem recentes" or (isRU and "Нет недавних" or "No recent")))))),
-	theme = isTR and "Tema" or (isES and "Tema" or (isAR and "المظهر" or (isFR and "Thème" or (isHI and "थीम" or (isPT and "Tema" or (isRU and "Тема" or "Theme")))))),
-	speed = isTR and "Hız" or (isES and "Velocidad" or (isAR and "السرعة" or (isFR and "Vitesse" or (isHI and "गति" or (isPT and "Velocidade" or (isRU and "Скорость" or "Speed")))))),
-	notif = isTR and "Bildirimler" or (isES and "Notificaciones" or (isAR and "الإشعارات" or (isFR and "Notifications" or (isHI and "सूचनाएं" or (isPT and "Notificações" or (isRU and "Уведомления" or "Notifications")))))),
-	on = isTR and "Açık" or (isES and "On" or (isAR and "تشغيل" or (isFR and "Activé" or (isHI and "चालू" or (isPT and "Ligado" or (isRU and "Вкл" or "On")))))),
-	off = isTR and "Kapalı" or (isES and "Off" or (isAR and "إيقاف" or (isFR and "Désactivé" or (isHI and "बंद" or (isPT and "Desligado" or (isRU and "Выкл" or "Off")))))),
-	copied = isTR and "Kopyalandı!" or (isES and "Copiado!" or (isAR and "تم النسخ!" or (isFR and "Copié!" or (isHI and "कॉपी किया गया!" or (isPT and "Copiado!" or (isRU and "Скопировано!" or "Copied!")))))),
-	loopText    = isTR and "Döngü"         or (isES and "Bucle"         or (isAR and "تكرار"        or (isFR and "Boucle"          or (isHI and "लूप"           or (isPT and "Loop"        or (isRU and "Цикл"         or "Loop")))))),
-	comboTitle  = isTR and "Combo Sırası" or (isES and "Cola de Combo" or (isAR and "قائمة الكومبو" or (isFR and "File Combo"       or (isHI and "कॉम्बो कतार"    or (isPT and "Fila de Combo" or (isRU and "Очередь комбо" or "Combo Queue")))))),
-	addEmote    = isTR and "+ Ekle"       or (isES and "+ Añadir"      or (isAR and "+ إضافة"       or (isFR and "+ Ajouter"        or (isHI and "+ जोड़ें"       or (isPT and "+ Adicionar"   or (isRU and "+ Добавить"    or "+ Add")))))),
-	playCombo   = isTR and "Oynat"        or (isES and "Reproducir"    or (isAR and "تشغيل"         or (isFR and "Jouer"            or (isHI and "चलाएं"         or (isPT and "Reproduzir"    or (isRU and "Играть"        or "Play")))))),
-	clearCombo  = isTR and "Temizle"      or (isES and "Limpiar"       or (isAR and "مسح"           or (isFR and "Effacer"          or (isHI and "साफ़ करें"      or (isPT and "Limpar"        or (isRU and "Очистить"      or "Clear")))))),
-	selectFirst = isTR and "Önce seç!"      or (isES and "¡Selecciona!"   or (isAR and "اختر أولاً!"    or (isFR and "Choisir d'abord!" or (isHI and "पहले चुनें!"    or (isPT and "Selecione!"     or (isRU and "Выберите!"      or "Select first!")))))),
-	slotLabel   = isTR and "Slot"           or (isES and "Ranura"         or (isAR and "خانة"           or (isFR and "Slot"             or (isHI and "स्लॉट"          or (isPT and "Slot"           or (isRU and "Слот"           or "Slot")))))),
-	-- Bilgi paneli
-	infoTitle   = isTR and "Emote Bilgisi" or (isES and "Info del Emote" or (isAR and "معلومات الحركة" or (isFR and "Infos de l'Emote" or (isHI and "इमोट जानकारी"   or (isPT and "Info do Emote"  or (isRU and "Инфо Эмоции"    or "Emote Info")))))),
-	noDesc      = isTR and "Açıklama yok"  or (isES and "Sin descripción" or (isAR and "لا يوجد وصف"   or (isFR and "Sans description" or (isHI and "कोई विवरण नहीं" or (isPT and "Sem descrição"   or (isRU and "Нет описания"   or "No description")))))),
-	freePrice   = isTR and "Ücretsiz"      or (isES and "Gratis"          or (isAR and "مجاني"          or (isFR and "Gratuit"          or (isHI and "मुफ़्त"          or (isPT and "Grátis"          or (isRU and "Бесплатно"      or "Free")))))),
-	copyId           = isTR and "ID Kopyala"         or (isES and "Copiar ID"              or (isAR and "نسخ المعرف"          or (isFR and "Copier ID"             or (isHI and "ID कॉपी करें"      or (isPT and "Copiar ID"            or (isRU and "Скопировать ID"    or "Copy ID")))))),
-	copyEmote        = isTR and "Emote Kopyala"      or (isES and "Copiar Emote"           or (isAR and "نسخ الحركة"           or (isFR and "Copier Emote"          or (isHI and "इमोट कॉपी करें"    or (isPT and "Copiar Emote"         or (isRU and "Скопировать"       or "Copy Emote")))))),
-	favLimit         = isTR and "Maksimum 25 favori!" or (isES and "¡Máximo 25 favoritos!"  or (isAR and "الحد الأقصى 25!"       or (isFR and "Maximum 25 favoris!"   or (isHI and "अधिकतम 25 पसंदीदा!" or (isPT and "Máximo 25 favoritos!" or (isRU and "Максимум 25!"       or "Max 25 favorites!")))))),
-	copyEmoteDesc    = isTR and "Bir oyuncunun kullandığı emote'u kopyalar" or (isES and "Copia el emote que usa otro jugador" or (isAR and "ينسخ حركة يستخدمها لاعب آخر" or (isFR and "Copie l'émote utilisé par un autre joueur" or (isHI and "किसी खिलाड़ी का इमोट कॉपी करता है" or (isPT and "Copia o emote de outro jogador" or (isRU and "Копирует эмоцию другого игрока" or "Copies the emote used by another player")))))),
-	stopOnWalk       = isTR and "Yürüyünce emote'u durdur" or (isES and "Parar emote al caminar" or (isAR and "ايقاف الحركة عند المشي" or (isFR and "Arreter emote en marchant" or (isHI and "चलने पर इमोट रोकें" or (isPT and "Parar emote ao andar" or (isRU and "Остановить эмоцию при ходьбе" or "Stop emote when walking")))))),
-	stopOnWalkDesc   = isTR and "Oyuncu yürüdüğü zaman emote durur" or (isES and "El emote se detiene al caminar" or (isAR and "تتوقف الحركة تلقائيا عند المشي" or (isFR and "L'emote s'arrete automatiquement en marchant" or (isHI and "चलने पर इमोट अपने आप रुक जाता है" or (isPT and "O emote para automaticamente ao andar" or (isRU and "Эмоция останавливается при ходьбе" or "Emote stops automatically when walking")))))),
-	showHUD          = isTR and "Oynatma barını göster" or (isES and "Mostrar barra de reproducción" or (isAR and "إظهار شريط التشغيل" or (isFR and "Afficher la barre de lecture" or (isHI and "प्लेबार दिखाएं" or (isPT and "Mostrar barra de reprodução" or (isRU and "Показать панель воспроизведения" or "Show playback bar")))))),
-	friendTab        = isTR and "Arkadaşlar"                       or (isES and "Amigos"                  or (isAR and "الأصدقاء"            or (isFR and "Amis"                  or (isHI and "दोस्त"                  or (isPT and "Amigos"                 or (isRU and "Друзья"                 or "Friends")))))),
-	accept           = isTR and "Kabul Et"                         or (isES and "Aceptar"                 or (isAR and "قبول"                  or (isFR and "Accepter"              or (isHI and "स्वीकार करें"              or (isPT and "Aceitar"                or (isRU and "Принять"                or "Accept")))))),
-	reject           = isTR and "Reddet"                           or (isES and "Rechazar"                or (isAR and "رفض"                   or (isFR and "Refuser"               or (isHI and "अस्वीकार करें"              or (isPT and "Rejeitar"               or (isRU and "Отклонить"              or "Reject")))))),
-	friendAlreadySyncing = isTR and "Hata! Oyuncu zaten başka birisiyle beraber emote oynuyor." or (isES and "Error! El jugador ya está sincronizado con otro." or (isAR and "خطأ! اللاعب يلعب مع شخص آخر." or (isFR and "Erreur! Le joueur est déjà synchronisé avec quelqu'un d'autre." or (isHI and "त्रुटि! खिलाड़ी पहले से किसी और के साथ खेल रहा है।" or (isPT and "Erro! O jogador já está sincronizado com outro." or (isRU and "Ошибка! Игрок уже играет с другим." or "Error! Player is already syncing with someone else.")))))),
-	showHUDDesc      = isTR and "Emote oynarken altta oynatma barı görünsün" or (isES and "Muestra la barra de control al reproducir emotes" or (isAR and "يظهر شريط التحكم أسفل الشاشة أثناء تشغيل الحركة" or (isFR and "Affiche la barre de controle en bas lors de la lecture" or (isHI and "इमोट चलाते समय नीचे प्लेबार दिखाता है" or (isPT and "Exibe a barra de controle na parte inferior ao reproduzir" or (isRU and "Показывает панель управления внизу при воспроизведении" or "Shows the playback control bar while emote plays")))))),
-	keybinds         = isTR and "Keybindler"           or (isES and "Teclas"               or (isAR and "اختصارات"             or (isFR and "Raccourcis"           or (isHI and "कीबाइंड"              or (isPT and "Teclas"               or (isRU and "Горячие клавиши"     or "Keybinds")))))),
-	newKeybind       = isTR and "Yeni Keybind Oluştur" or (isES and "Crear Nuevo Keybind"  or (isAR and "إنشاء اختصار جديد"    or (isFR and "Nouveau Raccourci"     or (isHI and "नया कीबाइंड बनाएं"   or (isPT and "Novo Keybind"         or (isRU and "Новая клавиша"        or "New Keybind")))))),
-	editKeybind      = isTR and "Keybind Değiştir"     or (isES and "Cambiar Keybind"      or (isAR and "تغيير الاختصار"        or (isFR and "Modifier Raccourci"    or (isHI and "कीबाइंड बदलें"       or (isPT and "Alterar Keybind"      or (isRU and "Изменить клавишу"     or "Edit Keybind")))))),
-	kbName           = isTR and "İsim"                 or (isES and "Nombre"               or (isAR and "الاسم"                 or (isFR and "Nom"                   or (isHI and "नाम"                  or (isPT and "Nome"                 or (isRU and "Название"            or "Name")))))),
-	kbAssign         = isTR and "Atama"                or (isES and "Asignación"           or (isAR and "التعيين"               or (isFR and "Attribution"           or (isHI and "असाइन करें"           or (isPT and "Atribuição"           or (isRU and "Назначение"          or "Assign")))))),
-	kbRecording      = isTR and "Tuşa Bas"             or (isES and "Presiona Tecla"       or (isAR and "اضغط مفتاحاً"          or (isFR and "Appuyez sur Touche"    or (isHI and "कुंजी दबाएं"          or (isPT and "Pressione Tecla"      or (isRU and "Нажмите клавишу"     or "Press Key")))))),
-	kbCancel         = isTR and "İptal"                or (isES and "Cancelar"             or (isAR and "إلغاء"                 or (isFR and "Annuler"               or (isHI and "रद्द करें"             or (isPT and "Cancelar"             or (isRU and "Отмена"              or "Cancel")))))),
-	kbSave           = isTR and "Kaydet"               or (isES and "Guardar"              or (isAR and "حفظ"                   or (isFR and "Enregistrer"           or (isHI and "सहेजें"               or (isPT and "Salvar"               or (isRU and "Сохранить"           or "Save")))))),
-	kbEmpty          = isTR and "Henüz keybind yok"    or (isES and "Sin keybinds aún"     or (isAR and "لا توجد اختصارات بعد"  or (isFR and "Aucun raccourci"        or (isHI and "कोई कीबाइंड नहीं"    or (isPT and "Nenhum keybind ainda" or (isRU and "Нет горячих клавиш"  or "No keybinds yet")))))),
-	noSearch         = isTR and "Sonuç bulunamadı"     or (isES and "Sin resultados"        or (isAR and "لا توجد نتائج"            or (isFR and "Aucun résultat"         or (isHI and "कोई परिणाम नहीं"      or (isPT and "Sem resultados"       or (isRU and "Ничего не найдено"   or "No results found")))))),
-	kbInvalidKey     = isTR and "Geçersiz tuş!"        or (isES and "¡Tecla inválida!"      or (isAR and "مفتاح غير صالح!"          or (isFR and "Touche invalide!"       or (isHI and "अमान्य कुंजी!"         or (isPT and "Tecla inválida!"      or (isRU and "Недопустимая клавиша!" or "Invalid key!")))))),
-	autoRejectLbl    = isTR and "Arkadaş isteklerini otomatik reddet."     or (isES and "Rechazar solicitudes automáticamente."  or (isAR and "رفض طلبات الصداقة تلقائياً."         or (isFR and "Refuser les demandes automatiquement."    or (isHI and "मित्र अनुरोध स्वचालित रूप से अस्वीकार करें।" or (isPT and "Rejeitar pedidos automaticamente."      or (isRU and "Автоматически отклонять запросы."      or "Auto-reject friend requests.")))))),
-	addFriendBtn     = isTR and "+ Arkadaş Ekle"                           or (isES and "+ Añadir Amigo"                         or (isAR and "+ إضافة صديق"                          or (isFR and "+ Ajouter Ami"                          or (isHI and "+ मित्र जोड़ें"                              or (isPT and "+ Adicionar Amigo"                    or (isRU and "+ Добавить друга"                     or "+ Add Friend")))))),
-	blocked          = isTR and "Engellendi"                                or (isES and "Bloqueado"                              or (isAR and "محظور"                                 or (isFR and "Bloqué"                                  or (isHI and "ब्लॉक किया"                               or (isPT and "Bloqueado"                             or (isRU and "Заблокирован"                          or "Blocked")))))),
-	requestSent      = isTR and "✓ İstek Gönderildi"                       or (isES and "✓ Solicitud Enviada"                    or (isAR and "✓ تم إرسال الطلب"                       or (isFR and "✓ Demande Envoyée"                        or (isHI and "✓ अनुरोध भेजा"                            or (isPT and "✓ Pedido Enviado"                      or (isRU and "✓ Запрос отправлен"                    or "✓ Request Sent")))))),
-	addFriendMode    = isTR and "+ Arkadaş Ekle Modu"                      or (isES and "+ Modo Añadir Amigo"                    or (isAR and "+ وضع إضافة الأصدقاء"                  or (isFR and "+ Mode Ajout Ami"                         or (isHI and "+ मित्र जोड़ें मोड"                         or (isPT and "+ Modo Adicionar Amigo"               or (isRU and "+ Режим добавления друга"             or "+ Add Friend Mode")))))),
-	friendInfoTxt    = isTR and "Arkadaş eklemek aynı emote'u arkadaşlarınızla veya arkadaşınızla beraber senkronize oynamanızı sağlar." or (isES and "Agregar amigos permite sincronizar emotes juntos." or (isAR and "إضافة أصدقاء تتيح مزامنة الحركات معاً." or (isFR and "Ajouter des amis permet de synchroniser les emotes ensemble." or (isHI and "मित्र जोड़ने से एक साथ इमोट सिंक्रनाइज़ करना संभव होता है।" or (isPT and "Adicionar amigos permite sincronizar emotes juntos." or (isRU and "Добавление друзей позволяет синхронизировать эмоции вместе." or "Adding friends lets you sync emotes together.")))))),
-	friendListHeader = isTR and "Arkadaş Listesi"                          or (isES and "Lista de Amigos"                        or (isAR and "قائمة الأصدقاء"                         or (isFR and "Liste d'Amis"                             or (isHI and "मित्र सूची"                               or (isPT and "Lista de Amigos"                       or (isRU and "Список друзей"                         or "Friend List")))))),
-	noFriends        = isTR and "Henüz arkadaş yok. Arkadaş Ekle butonunu kullan!" or (isES and "Sin amigos. ¡Usa el botón Añadir Amigo!" or (isAR and "لا أصدقاء بعد. استخدم زر إضافة صديق!" or (isFR and "Aucun ami. Utilisez le bouton Ajouter Ami!" or (isHI and "कोई मित्र नहीं। मित्र जोड़ें बटन का उपयोग करें!" or (isPT and "Sem amigos. Use o botão Adicionar Amigo!" or (isRU and "Нет друзей. Используйте кнопку добавления!" or "No friends yet. Use Add Friend button!")))))),
-	emoteLoadFail    = isTR and "Emote yüklenemedi!"                        or (isES and "¡Error al cargar emote!"                or (isAR and "فشل تحميل الحركة!"                      or (isFR and "Échec du chargement!"                     or (isHI and "इमोट लोड नहीं हुआ!"                         or (isPT and "Falha ao carregar emote!"               or (isRU and "Ошибка загрузки эмоции!"               or "Failed to load emote!")))))),
-	alreadyFriends   = isTR and "Zaten arkadaşsınız!"                       or (isES and "¡Ya son amigos!"                        or (isAR and "أنتم أصدقاء بالفعل!"                    or (isFR and "Vous êtes déjà amis!"                     or (isHI and "पहले से मित्र हैं!"                          or (isPT and "Já são amigos!"                        or (isRU and "Вы уже друзья!"                        or "Already friends!")))))),
-	spamProtect      = isTR and "Spam koruması aktif! %ds bekle"            or (isES and "¡Protección spam! Espera %ds"           or (isAR and "حماية من الإسبام! انتظر %dث"            or (isFR and "Anti-spam actif! Attends %ds"             or (isHI and "स्पैम सुरक्षा! %dस प्रतीक्षा करें"            or (isPT and "Proteção spam! Aguarde %ds"             or (isRU and "Спам-защита! Подожди %dс"               or "Spam protection! Wait %ds")))))),
-	waitRequest      = isTR and "Bu oyuncuya istek için %ds bekle"          or (isES and "Espera %ds para enviar solicitud"       or (isAR and "انتظر %dث لإرسال طلب لهذا اللاعب"       or (isFR and "Attends %ds pour envoyer demande"         or (isHI and "इस खिलाड़ी को अनुरोध के लिए %dस प्रतीक्षा करें" or (isPT and "Aguarde %ds para enviar pedido"          or (isRU and "Жди %dс для запроса"                   or "Wait %ds to send request")))))),
-	tooFastRequest   = isTR and "Çok hızlı istek! %ds timeout"             or (isES and "¡Demasiado rápido! %ds timeout"         or (isAR and "طلب سريع جداً! %dث مهلة"                or (isFR and "Trop rapide! %ds timeout"                 or (isHI and "बहुत तेज़ अनुरोध! %dस टाइमआउट"              or (isPT and "Muito rápido! %ds timeout"              or (isRU and "Слишком быстро! %dс таймаут"            or "Too fast! %ds timeout")))))),
-	friendReqSent    = isTR and "%s adlı oyuncuya arkadaşlık isteği gönderildi!" or (isES and "¡Solicitud enviada a %s!"         or (isAR and "تم إرسال طلب صداقة إلى %s!"              or (isFR and "Demande envoyée à %s!"                    or (isHI and "%s को मित्र अनुरोध भेजा!"                    or (isPT and "Pedido enviado para %s!"                or (isRU and "Запрос отправлен %s!"                  or "Friend request sent to %s!")))))),
-	friendReqAcceptedYou = isTR and "%s arkadaşlık isteğini kabul ettin!"   or (isES and "¡Aceptaste la solicitud de %s!"        or (isAR and "قبلت طلب %s!"                            or (isFR and "Vous avez accepté la demande de %s!"      or (isHI and "आपने %s का अनुरोध स्वीकार किया!"              or (isPT and "Você aceitou o pedido de %s!"           or (isRU and "Вы приняли запрос %s!"                 or "You accepted %s's request!")))))),
-	friendReqAcceptedThem = isTR and "%s arkadaşlık isteğini kabul etti!"   or (isES and "¡%s aceptó tu solicitud!"              or (isAR and "قبل %s طلبك!"                            or (isFR and "%s a accepté votre demande!"               or (isHI and "%s ने आपका अनुरोध स्वीकार किया!"              or (isPT and "%s aceitou seu pedido!"                 or (isRU and "%s принял ваш запрос!"                 or "%s accepted your request!")))))),
-	acceptRequestsLbl  = isTR and "Arkadaş istekleri al"           or (isES and "Aceptar solicitudes"          or (isAR and "قبول طلبات الصداقة"       or (isFR and "Accepter les demandes"       or (isHI and "मित्र अनुरोध स्वीकार करें"    or (isPT and "Aceitar pedidos"              or (isRU and "Принимать запросы"            or "Accept friend requests")))))),
-	resetLangLbl       = isTR and "Dil Sıfırla"                    or (isES and "Restablecer idioma"           or (isAR and "إعادة تعيين اللغة"        or (isFR and "Réinitialiser la langue"     or (isHI and "भाषा रीसेट करें"               or (isPT and "Redefinir idioma"             or (isRU and "Сбросить язык"                or "Reset Language")))))),
-	resetLangDesc      = isTR and "Dili sıfırla ve yeniden seç"    or (isES and "Restablecer y reseleccionar"  or (isAR and "إعادة التعيين وإعادة الاختيار" or (isFR and "Réinitialiser et resélectionner" or (isHI and "रीसेट करें और पुनः चुनें"      or (isPT and "Redefinir e selecionar novamente" or (isRU and "Сбросить и выбрать снова"     or "Reset and reselect language")))))),
-}
-
-local Icons = {
-	Emote = "rbxassetid://138124492647096",
-	Sort = "rbxassetid://113816420281431", 
-	Refresh = "rbxassetid://105648271243690",
-	Info = "rbxassetid://84622089809608",
-	Crown = "rbxassetid://73989246452336",
-	Minus = "rbxassetid://113043537756950", 
-	Close = "rbxassetid://71734731066706", -- X
-	Search = "rbxassetid://100759629447583",
-	FavoriteEmpty = "rbxassetid://139336655769578",
-	FavoriteFull = "rbxassetid://114412745011584",
-	Stop = "STOP_SHAPE",
-	Keybind = "rbxassetid://122679509852670",
-	KeybindActive = "rbxassetid://133187471200337",
-	KeybindRemove = "rbxassetid://119388907849573",
-	Settings = "rbxassetid://94488099205692", 
-	Recent = "rbxassetid://89358357551545", 
-	Check = "rbxassetid://71514022902819",
-	Quatrefoil = "rbxassetid://98400541052448", 
-}
-
--- ===============================================================
--- R15 CHECK
--- ===============================================================
-
-local char = player.Character or player.CharacterAdded:Wait()
-local hum = char:WaitForChild("Humanoid", 5)
-if not hum or hum.RigType == Enum.HumanoidRigType.R6 then
-	Notify(utf8.char(0x274C), L.r6Msg)
-	gui:Destroy()
-	return
-end
-
--- Emotes must be declared at top scope (used by later code)
-local Emotes = {}
-
--- ===============================================================
--- SPLASH SCREEN
--- ===============================================================
+applySettingsToggleStyle()
+syncToggleVisibility()
+syncDiscordVisibility()
 
 do
-local _splashTheme = Themes[Settings.theme] or Themes.Dark
-local _splashPrimary = _splashTheme.primary
-local _splashAccent  = _splashTheme.accent
-local _splashIsGlass = Settings.theme == "FrostedGlass" or Settings.theme == "DarkGlass"
+    local main = getSettingsMainFrame()
+    if main then
+        main:GetPropertyChangedSignal("Visible"):Connect(syncToggleVisibility)
+    end
+end
 
--- BlurEffect loading ekranı arkası için (sadece splash süresince)
-local splashBlur = Instance.new("BlurEffect")
-splashBlur.Size = 24
-splashBlur.Parent = game:GetService("Lighting")
+local TogglesUI = {}
+local GeneralTab = SettingsLib.CreateTab("General", 1)
+TogglesUI.NotifyEnabled = SettingsLib.AddToggle(GeneralTab, "Show Notifications", "Receive alerts and feedback", Config.NotifyEnabled, function(v)
+    Config.NotifyEnabled = v
+    SaveConfig()
+end)
 
-local splash = Instance.new("Frame")
-splash.Size = UDim2.fromScale(1, 1)
-splash.BackgroundColor3 = _splashPrimary
--- Blur'un görünmesi için her temada yarı saydam, glass'ta daha saydam
-splash.BackgroundTransparency = _splashIsGlass and 0.55 or 0.35
-splash.ZIndex = 10000
-splash.Parent = gui
+TogglesUI.AuthenticFirstPage = SettingsLib.AddToggle(GeneralTab, "Authentic Emotes Page", "Show owned emotes on page 1", Config.AuthenticFirstPage, function(v)
+    Config.AuthenticFirstPage = v
+    State.totalPages = calculateTotalPages()
+    if State.currentPage > State.totalPages then
+        State.currentPage = State.totalPages
+    end
+    updatePageDisplay()
+    updateEmotes()
+    SaveConfig()
+end)
 
-local splashBgGrad = Instance.new("UIGradient")
-splashBgGrad.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0,   _splashPrimary),
-	ColorSequenceKeypoint.new(0.5, Color3.new(
-		math.clamp(_splashPrimary.R + _splashAccent.R * 0.15, 0, 1),
-		math.clamp(_splashPrimary.G + _splashAccent.G * 0.15, 0, 1),
-		math.clamp(_splashPrimary.B + _splashAccent.B * 0.20, 0, 1)
-	)),
-	ColorSequenceKeypoint.new(1,   _splashPrimary)
+local randomModes = { "All", "Favorites" }
+local randomDropdown = SettingsLib.AddDropdown(GeneralTab, "Random Source", randomModes, Config.RandomMode or "All", function(v)
+    Config.RandomMode = v
+    SaveConfig()
+end)
+if randomDropdown and randomDropdown.Button then
+    randomDropdown.Button.Text = (Config.RandomMode or "All") .. "  ▼"
+end
+
+TogglesUI.RandomEnabled = SettingsLib.AddToggle(GeneralTab, "Random Enabled", "Enable/disable random", Config.RandomEnabled, function(v)
+    Config.RandomEnabled = v
+    if not v then
+        pcall(function()
+            local frontFrame = game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+            local slot1 = frontFrame and frontFrame:FindFirstChild("1")
+            local slot2 = frontFrame and frontFrame:FindFirstChild("2")
+            if slot1 and slot1:IsA("ImageLabel") and slot2 and slot2:IsA("ImageLabel") then
+                local img2 = slot2.Image
+                if img2 and img2 ~= "" then
+                    slot1.Image = img2
+                end
+            end
+        end)
+    end
+    State.totalPages = calculateTotalPages()
+    if State.currentPage > State.totalPages then
+        State.currentPage = State.totalPages
+    end
+    updatePageDisplay()
+    updateEmotes()
+    SaveConfig()
+end)
+
+local ButtonsTab = SettingsLib.CreateTab("Buttons", 2)
+
+TogglesUI.SearchVisible = SettingsLib.AddToggle(ButtonsTab, "Search Bar", "Show/Hide the search input", Config.SearchVisible, function(v)
+    Config.SearchVisible = v
+    ApplyUIVisibility()
+    SaveConfig()
+end)
+
+TogglesUI.FavVisible = SettingsLib.AddToggle(ButtonsTab, "Favorites Button", "Show/Hide the star button", Config.FavVisible, function(v)
+    Config.FavVisible = v
+    ApplyUIVisibility()
+    SaveConfig()
+end)
+
+TogglesUI.ModeVisible = SettingsLib.AddToggle(ButtonsTab, "Mode Switcher", "Show/Hide animation mode button", Config.ModeVisible, function(v)
+    Config.ModeVisible = v
+    ApplyUIVisibility()
+    SaveConfig()
+end)
+
+TogglesUI.FreezeVisible = SettingsLib.AddToggle(ButtonsTab, "Freeze Button", "Show/Hide emote freeze button", Config.FreezeVisible, function(v)
+    Config.FreezeVisible = v
+    ApplyUIVisibility()
+    SaveConfig()
+end)
+
+TogglesUI.SpeedVisible = SettingsLib.AddToggle(ButtonsTab, "Speed Button", "Show/Hide the speed controller", Config.SpeedVisible, function(v)
+    Config.SpeedVisible = v
+    ApplyUIVisibility()
+    SaveConfig()
+end)
+
+TogglesUI.NavVisible = SettingsLib.AddToggle(ButtonsTab, "Page Controls", "Show/Hide navigation buttons", Config.NavVisible, function(v)
+    Config.NavVisible = v
+    ApplyUIVisibility()
+    SaveConfig()
+end)
+
+TogglesUI.DiscordVisible = SettingsLib.AddToggle(ButtonsTab, "Discord Button", "Show/Hide the discord link button", Config.DiscordVisible, function(v)
+    Config.DiscordVisible = v
+    syncDiscordVisibility()
+    SaveConfig()
+end)
+
+local cachedOverlay = nil
+local hudEditorItem = SettingsLib.AddItem(ButtonsTab, "HUD Editor", "Reposition buttons & UI elements")
+hudEditorItem.LayoutOrder = -10
+local hudEditorBtn = SettingsLib:Create("TextButton", {
+    Parent = hudEditorItem,
+    BackgroundColor3 = Color3.fromRGB(0, 255, 150),
+    Position = UDim2.new(1, -80, 0.5, -12),
+    Size = UDim2.new(0, 70, 0, 24),
+    Font = Enum.Font.GothamBold,
+    Text = "EDIT",
+    TextColor3 = Color3.fromRGB(24, 25, 28),
+    TextSize = 11
+}, { SettingsLib:Create("UICorner", {CornerRadius = UDim.new(0, 6)}) })
+
+hudEditorBtn.MouseButton1Click:Connect(function()
+    if enterHUDEditor then enterHUDEditor() end
+end)
+function getBackgroundOverlay()
+    if cachedOverlay and cachedOverlay.Parent then return cachedOverlay end
+    
+    local success, result = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Back.Background
+                   .BackgroundCircleOverlay
+    end)
+    if success and result then
+        cachedOverlay = result
+        return result
+    end
+    return nil
+end
+
+function DeepCopy(t)
+    local copy = {}
+    for k, v in pairs(t) do
+        if type(v) == "table" then
+            copy[k] = DeepCopy(v)
+        else
+            copy[k] = v
+        end
+    end
+    return copy
+end
+
+local ApplyFavoriteButtonVisual
+function updateGUIColors()
+    local backgroundOverlay = getBackgroundOverlay()
+    if not backgroundOverlay then
+        return
+    end
+
+    local theme = State.EmoteTheme
+    if not theme then return end
+    
+    local bgColor = theme.Background
+    local accentColor = theme.Accent
+    local imgColor = theme.ImageColor
+    local bgTransparency = backgroundOverlay.BackgroundTransparency
+
+    local function getIconColor(key)
+        if theme.IconColors and theme.IconColors[key] then
+            return TableToColor(theme.IconColors[key])
+        end
+        return imgColor
+    end
+
+    if UI._1left then
+        UI._1left.ImageColor3 = getIconColor("Left")
+        UI._1left.ImageTransparency = bgTransparency
+        UI._1left.BackgroundTransparency = 1 
+    end
+
+    if UI._9right then
+        UI._9right.ImageColor3 = getIconColor("Right")
+        UI._9right.ImageTransparency = bgTransparency
+        UI._9right.BackgroundTransparency = 1
+    end
+
+    if UI._4pages then
+        UI._4pages.TextColor3 = bgColor 
+        UI._4pages.TextTransparency = bgTransparency
+    end
+
+    if UI._3TextLabel then
+        UI._3TextLabel.TextColor3 = bgColor
+        UI._3TextLabel.TextTransparency = bgTransparency
+    end
+
+    if UI._2Routenumber then
+        UI._2Routenumber.TextColor3 = bgColor
+        UI._2Routenumber.PlaceholderColor3 = bgColor
+        UI._2Routenumber.TextTransparency = bgTransparency
+    end
+
+    if UI.Under then
+        UI.Under.BackgroundTransparency = 1
+    end
+
+    if UI.Top then
+        UI.Top.BackgroundColor3 = bgColor
+        UI.Top.BackgroundTransparency = bgTransparency
+    end
+
+    if UI.EmoteWalkButton then
+        UI.EmoteWalkButton.BackgroundColor3 = bgColor
+        UI.EmoteWalkButton.BackgroundTransparency = bgTransparency
+    end
+
+    if UI.CustomFrames then
+        for _, frame in pairs(UI.CustomFrames) do
+            frame.BackgroundColor3 = bgColor
+            frame.BackgroundTransparency = bgTransparency
+        end
+    end
+
+    if UI.SpeedEmote then
+        UI.SpeedEmote.BackgroundColor3 = bgColor
+        UI.SpeedEmote.BackgroundTransparency = bgTransparency
+    end
+
+     if UI.Changepage then
+        UI.Changepage.BackgroundColor3 = bgColor
+        UI.Changepage.BackgroundTransparency = bgTransparency
+    end
+
+    if UI.SpeedBox then
+        UI.SpeedBox.BackgroundColor3 = bgColor
+        UI.SpeedBox.BackgroundTransparency = bgTransparency
+    end
+
+    if UI.Favorite then
+        UI.Favorite.BackgroundColor3 = bgColor
+        UI.Favorite.BackgroundTransparency = bgTransparency
+    end
+
+    if UI.Reload then
+        UI.Reload.BackgroundColor3 = bgColor
+        UI.Reload.BackgroundTransparency = bgTransparency
+    end
+    
+    if ApplyFavoriteButtonVisual then
+        ApplyFavoriteButtonVisual()
+    end
+
+    local function applyHUDProperties()
+        if not Config.HUDProperties then return end
+        local allMovable = getAllHUDObjects()
+        for name, uiExt in pairs(allMovable) do
+            local props = Config.HUDProperties[name]
+            if props then
+                if props.ZIndex ~= nil then pcall(function() uiExt.ZIndex = props.ZIndex end) end
+                if props.BgTrans ~= nil then pcall(function() uiExt.BackgroundTransparency = props.BgTrans end) end
+                if props.ImgTrans ~= nil and (uiExt:IsA("ImageLabel") or uiExt:IsA("ImageButton")) then pcall(function() uiExt.ImageTransparency = props.ImgTrans end) end
+                if props.BgColor and type(props.BgColor) == "table" then
+                    local r, g, b = props.BgColor[1], props.BgColor[2], props.BgColor[3]
+                    if r and g and b and not isThemeDefaultRGB(r, g, b) then
+                        pcall(function() uiExt.BackgroundColor3 = Color3.fromRGB(r, g, b) end)
+                    end
+                end
+                if props.ImgColor and type(props.ImgColor) == "table" and (uiExt:IsA("ImageLabel") or uiExt:IsA("ImageButton")) then
+                    local r, g, b = props.ImgColor[1], props.ImgColor[2], props.ImgColor[3]
+                    if r and g and b and not isThemeDefaultRGB(r, g, b) then
+                        pcall(function() uiExt.ImageColor3 = Color3.fromRGB(r, g, b) end)
+                    end
+                end
+                if props.TxtColor and type(props.TxtColor) == "table" and (uiExt:IsA("TextLabel") or uiExt:IsA("TextBox")) then
+                    local r, g, b = props.TxtColor[1], props.TxtColor[2], props.TxtColor[3]
+                    if r and g and b and not isThemeDefaultRGB(r, g, b) then
+                        pcall(function() uiExt.TextColor3 = Color3.fromRGB(r, g, b) end)
+                    end
+                end
+                if props.Radius and uiExt:FindFirstChildWhichIsA("UICorner") then
+                    local s1, o1 = props.Radius:match("{%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*}")
+                    if s1 then pcall(function() uiExt:FindFirstChildWhichIsA("UICorner").CornerRadius = UDim.new(tonumber(s1), tonumber(o1)) end) end
+                end
+            end
+        end
+    end
+    
+    applyHUDProperties()
+    ApplyUIVisibility()
+    applySettingsToggleStyle()
+end
+
+ApplyFavoriteButtonVisual = function()
+    if not UI.Favorite then return end
+    local isOn = State.favoriteEnabled
+    local image = isOn and State.favoriteIconId or State.notFavoriteIconId
+    if image and image ~= "" then
+        UI.Favorite.Image = image
+    end
+    local colorKey = isOn and "Favorite" or "NotFavorite"
+    UI.Favorite.ImageColor3 = AnimationSystem.GetIconColor(colorKey)
+end
+
+-- Optimizing performance: Removed RenderStepped loop
+-- game:GetService("RunService").RenderStepped:Connect(function()
+--     updateGUIColors()
+-- end)
+
+local ThemeTab = SettingsLib.CreateTab("Theme", 3)
+
+local DiscordPromo = SettingsLib.AddItem(ThemeTab, "WANT THEMES?", "Join our Discord for themes!")
+DiscordPromo.LayoutOrder = -1
+
+local CopyBtn = SettingsLib:Create("TextButton", {
+    Parent = DiscordPromo,
+    BackgroundColor3 = Color3.fromRGB(0, 255, 150),
+    Position = UDim2.new(1, -95, 0.5, -12),
+    Size = UDim2.new(0, 85, 0, 24),
+    Font = Enum.Font.GothamBold,
+    Text = "COPY LINK",
+    TextColor3 = Color3.fromRGB(24, 25, 28),
+    TextSize = 11
+}, { SettingsLib:Create("UICorner", {CornerRadius = UDim.new(0, 6)}) })
+
+CopyBtn.MouseButton1Click:Connect(function()
+    setclipboard("https://discord.gg/kRfzv2kV7X")
+    getgenv().Notify({Title = "Discord", Content = "Link copied to clipboard!", Duration = 3})
+end)
+
+local ThemeConfigPath = "7yd7/EmoteThemes.json"
+
+local lastSaveTime = 0
+local saveDebounce = 1
+local pendingSave = false
+
+function SaveThemesImplementation(themes)
+    if not isfolder("7yd7") then makefolder("7yd7") end
+    local toSave = { Themes = {}, Order = {}, Selected = themes.Selected or AnimationSystem.currentThemeName }
+    
+    toSave.Order = themes.Order or {}
+    
+    for name, data in pairs(themes) do
+        if name ~= "Default" and name ~= "Order" and name ~= "Selected" then
+            toSave.Themes[name] = data
+        end
+    end
+    writefile(ThemeConfigPath, HttpService:JSONEncode(toSave))
+end
+
+function SaveThemes(themes)
+    if pendingSave then 
+        pendingSave = "queued"
+        return 
+    end
+    pendingSave = true
+    task.delay(0.5, function()
+        SaveThemesImplementation(themes)
+        local wasQueued = pendingSave == "queued"
+        pendingSave = false
+        if wasQueued then
+            SaveThemes(themes)
+        end
+    end)
+end
+
+function LoadThemes()
+    local defaultTheme = {
+        Background = {28, 30, 32},
+        Accent = {0, 255, 150},
+        ImageColor = {255, 255, 255},
+        IconColors = {
+            Left = {0, 0, 0},
+            Right = {0, 0, 0}
+        },
+        Icons = {
+            Left = "93111945058621",
+            Right = "107938916240738",
+            Walk = "71408678974152",
+            Favorite = "97307461910825",
+            NotFavorite = "124025954365505",
+            Speed = "116056570415896",
+            Page = "13285615740",
+            Reload = "127493377027615"
+        },
+        Wheel = {
+            BackgroundImage = "rbxasset://textures/ui/Emotes/Large/SegmentedCircle.png",
+            BackgroundImageColor = {255, 255, 255},
+            SelectionGradient = "rbxasset://textures/ui/Emotes/Large/SelectedGradient.png",
+            SelectionGradientColor = {255, 255, 255},
+            SelectionLine = "rbxasset://textures/ui/Emotes/Large/SelectedLine.png",
+            SelectionLineColor = {255, 255, 255}
+        }
+    }
+    
+    local loaded = { Default = defaultTheme, Order = {"Default"} }
+    
+    if isfile(ThemeConfigPath) then
+        local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(ThemeConfigPath)) end)
+        if success and type(decoded) == "table" then
+            local themesTable = decoded.Themes or decoded 
+            local orderTable = decoded.Order or {}
+            
+            for name, data in pairs(themesTable) do
+                if not data.Icons then data.Icons = DeepCopy(defaultTheme.Icons) end
+                if not data.Wheel then data.Wheel = DeepCopy(defaultTheme.Wheel) end
+                loaded[name] = data
+                
+                if name == "Default" then
+                    if not data.IconColors then data.IconColors = {} end
+                    data.IconColors.Left = {0, 0, 0}
+                    data.IconColors.Right = {0, 0, 0}
+                end
+
+                if not decoded.Order and name ~= "Default" then
+                    table.insert(loaded.Order, name)
+                end
+            end
+            
+            if decoded.Order then
+                loaded.Order = {"Default"}
+                for _, name in ipairs(decoded.Order) do
+                    if name ~= "Default" and loaded[name] then
+                        table.insert(loaded.Order, name)
+                    end
+                end
+            end
+            
+            if decoded.Selected and loaded[decoded.Selected] then
+                loaded.Selected = decoded.Selected
+            end
+            
+            return loaded
+        end
+    end
+    return loaded
+end
+
+State.pendingCustomAnimSave = false
+State.SaveCustomAnimationsImplementation = function(animData)
+    if not isfolder("7yd7") then makefolder("7yd7") end
+    local toSave = { Sets = {}, Order = animData.Order or {"Default"}, Selected = animData.Selected or "Default" }
+    for name, data in pairs(animData.Sets) do
+        if name ~= "Default" then
+            toSave.Sets[name] = data
+        end
+    end
+    writefile(State.CustomAnimationPath, HttpService:JSONEncode(toSave))
+end
+
+State.SaveCustomAnimations = function(animData)
+    if State.pendingCustomAnimSave then
+        State.pendingCustomAnimSave = "queued"
+        return
+    end
+    State.pendingCustomAnimSave = true
+    task.delay(0.5, function()
+        State.SaveCustomAnimationsImplementation(animData)
+        local wasQueued = State.pendingCustomAnimSave == "queued"
+        State.pendingCustomAnimSave = false
+        if wasQueued then State.SaveCustomAnimations(animData) end
+    end)
+end
+
+State.LoadCustomAnimations = function()
+    local defaultAnim = {
+        idle = { Animation1 = 0, Animation2 = 0 },
+        walk = { WalkAnim = 0 },
+        run = { RunAnim = 0 },
+        jump = { JumpAnim = 0 },
+        fall = { FallAnim = 0 },
+        climb = { ClimbAnim = 0 },
+        swimidle = { SwimIdle = 0 },
+        swim = { Swim = 0 },
+        __meta = { IconImage = DEFAULT_IDLE_ICON_ID, IconColor = ColorToTable(DEFAULT_IDLE_ICON_COLOR) }
+    }
+    local loaded = { Sets = { Default = defaultAnim }, Order = {"Default"}, Selected = "Default" }
+    
+    if isfile(State.CustomAnimationPath) then
+        local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(State.CustomAnimationPath)) end)
+        if success and type(decoded) == "table" then
+            local setsTable = decoded.Sets or {}
+            for name, data in pairs(setsTable) do
+                loaded.Sets[name] = data
+            end
+            
+            if decoded.Order then
+                loaded.Order = {"Default"}
+                for _, name in ipairs(decoded.Order) do
+                    if name ~= "Default" and loaded.Sets[name] then
+                        table.insert(loaded.Order, name)
+                    end
+                end
+            end
+            
+            if decoded.Selected and loaded.Sets[decoded.Selected] then
+                loaded.Selected = decoded.Selected
+            end
+        end
+    end
+    
+    return loaded
+end
+
+State.SaveEmotePages = function(pageData)
+    if not isfolder("7yd7") then makefolder("7yd7") end
+    local toSave = { 
+        Sets = {}, 
+        Order = pageData.Order or {"Default"}, 
+        Selected = pageData.Selected or "Default" 
+    }
+    for name, data in pairs(pageData.Sets) do
+        if name ~= "Default" then
+            toSave.Sets[name] = data
+        end
+    end
+    writefile(State.EmotePagePath, HttpService:JSONEncode(toSave))
+    
+    if pageData.Sets["Default"] then
+        writefile(State.favoriteFileName, HttpService:JSONEncode(pageData.Sets["Default"]))
+    end
+end
+
+State.SaveAnimationPages = function(pageData)
+    if not isfolder("7yd7") then makefolder("7yd7") end
+    local toSave = { 
+        Sets = {}, 
+        Order = pageData.Order or {"Default"}, 
+        Selected = pageData.Selected or "Default" 
+    }
+    for name, data in pairs(pageData.Sets) do
+        if name ~= "Default" then
+            toSave.Sets[name] = data
+        end
+    end
+    writefile(State.AnimationPagePath, HttpService:JSONEncode(toSave))
+    
+    if pageData.Sets["Default"] then
+        writefile(State.favoriteAnimationsFileName, HttpService:JSONEncode(pageData.Sets["Default"]))
+    end
+end
+
+function SwitchEmotePage(pageName)
+    if not State.EmotePages.Sets[pageName] then return end
+    
+    State.currentEmotePageName = pageName
+    State.EmotePages.Selected = pageName
+    
+    local pageData = State.EmotePages.Sets[pageName]
+    State.favoriteEmotes = DeepCopy(pageData) or {}
+    
+    State.favoriteEmoteSet = {}
+    for _, fav in pairs(State.favoriteEmotes) do
+        State.favoriteEmoteSet[tostring(fav.id)] = true
+    end
+    
+    State.favoriteSetVersion = State.favoriteSetVersion + 1
+    State.totalPages = calculateTotalPages()
+    if State.currentPage > State.totalPages then
+        State.currentPage = State.totalPages
+    end
+    
+    updatePageDisplay()
+    if State.currentMode == "emote" then
+        updateEmotes()
+    end
+    updateAllFavoriteIcons()
+end
+
+function SwitchAnimationPage(pageName)
+    if not State.AnimationPages.Sets[pageName] then return end
+    
+    State.currentAnimationPageName = pageName
+    State.AnimationPages.Selected = pageName
+    
+    local pageData = State.AnimationPages.Sets[pageName]
+    State.favoriteAnimations = DeepCopy(pageData) or {}
+    
+    State.favoriteAnimationSet = {}
+    for _, fav in pairs(State.favoriteAnimations) do
+        State.favoriteAnimationSet[tostring(fav.id)] = true
+    end
+    
+    State.favoriteSetVersion = State.favoriteSetVersion + 1
+    State.totalPages = calculateTotalPages()
+    if State.currentPage > State.totalPages then
+        State.currentPage = State.totalPages
+    end
+    
+    updatePageDisplay()
+    if State.currentMode == "animation" then
+        updateAnimations()
+    end
+    updateAllFavoriteIcons()
+end
+
+State.LoadEmotePages = function()
+    local defaultFavorites = {}
+    
+    if isfile(State.favoriteFileName) then
+        local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(State.favoriteFileName)) end)
+        if ok and type(decoded) == "table" then
+            defaultFavorites = decoded
+        end
+    end
+
+    local loaded = { Sets = { Default = defaultFavorites }, Order = {"Default"}, Selected = "Default" }
+    
+    if isfile(State.EmotePagePath) then
+        local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(State.EmotePagePath)) end)
+        if success and type(decoded) == "table" then
+            local setsTable = decoded.Sets or {}
+            for name, data in pairs(setsTable) do
+                if name ~= "Default" then
+                    loaded.Sets[name] = data
+                end
+            end
+            
+            if decoded.Order then
+                loaded.Order = {"Default"}
+                for _, name in ipairs(decoded.Order) do
+                    if name ~= "Default" and loaded.Sets[name] then
+                        table.insert(loaded.Order, name)
+                    end
+                end
+            end
+            
+            if decoded.Selected and (loaded.Sets[decoded.Selected] or decoded.Selected == "Default") then
+                loaded.Selected = decoded.Selected
+            end
+        end
+    end
+    
+    return loaded
+end
+
+State.LoadAnimationPages = function()
+    local defaultFavorites = {}
+    
+    if isfile(State.favoriteAnimationsFileName) then
+        local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(State.favoriteAnimationsFileName)) end)
+        if ok and type(decoded) == "table" then
+            defaultFavorites = decoded
+        end
+    end
+
+    local loaded = { Sets = { Default = defaultFavorites }, Order = {"Default"}, Selected = "Default" }
+    
+    if isfile(State.AnimationPagePath) then
+        local success, decoded = pcall(function() return HttpService:JSONDecode(readfile(State.AnimationPagePath)) end)
+        if success and type(decoded) == "table" then
+            local setsTable = decoded.Sets or {}
+            for name, data in pairs(setsTable) do
+                if name ~= "Default" then
+                    loaded.Sets[name] = data
+                end
+            end
+            
+            if decoded.Order then
+                loaded.Order = {"Default"}
+                for _, name in ipairs(decoded.Order) do
+                    if name ~= "Default" and loaded.Sets[name] then
+                        table.insert(loaded.Order, name)
+                    end
+                end
+            end
+            
+            if decoded.Selected and (loaded.Sets[decoded.Selected] or decoded.Selected == "Default") then
+                loaded.Selected = decoded.Selected
+            end
+        end
+    end
+    
+    return loaded
+end
+
+State.EmotePages = State.LoadEmotePages()
+State.currentEmotePageName = State.EmotePages.Selected or "Default"
+if not State.EmotePages.Sets[State.currentEmotePageName] then 
+    State.currentEmotePageName = "Default" 
+end
+
+State.favoriteEmotes = DeepCopy(State.EmotePages.Sets[State.currentEmotePageName]) or {}
+State.favoriteEmoteSet = {}
+for _, fav in pairs(State.favoriteEmotes) do
+    State.favoriteEmoteSet[tostring(fav.id)] = true
+end
+
+State.AnimationPages = State.LoadAnimationPages()
+State.currentAnimationPageName = State.AnimationPages.Selected or "Default"
+if not State.AnimationPages.Sets[State.currentAnimationPageName] then 
+    State.currentAnimationPageName = "Default" 
+end
+
+State.favoriteAnimations = DeepCopy(State.AnimationPages.Sets[State.currentAnimationPageName]) or {}
+State.favoriteAnimationSet = {}
+for _, fav in pairs(State.favoriteAnimations) do
+    State.favoriteAnimationSet[tostring(fav.id)] = true
+end
+
+
+State.CustomAnimations = State.LoadCustomAnimations()
+State.currentCustomAnimationName = State.CustomAnimations.Selected or "Default"
+if not State.CustomAnimations.Sets[State.currentCustomAnimationName] then 
+    State.currentCustomAnimationName = "Default" 
+end
+
+local themes = LoadThemes()
+local currentThemeName = Config.SelectedTheme or themes.Selected or "Default"
+if not themes[currentThemeName] then currentThemeName = "Default" end
+
+local themeDropdown
+
+function GetNames()
+    local n = {}
+    if themes.Order then
+        for _, name in ipairs(themes.Order) do
+            if name ~= "Order" and name ~= "Selected" and themes[name] then 
+                table.insert(n, name) 
+            end
+        end
+    end
+    for name, _ in pairs(themes) do
+        if name ~= "Order" and name ~= "Selected" and not table.find(n, name) then
+            table.insert(n, name)
+        end
+    end
+    return n
+end
+
+local UIElements = {
+    Background = {},
+    Accent = {},
+    ImageColor = {},
+    Icons = {},
+    Wheel = {}
 }
-splashBgGrad.Rotation = 45
-splashBgGrad.Parent = splash
+
+function ApplyWheelBackgroundImage(bgImg, wheel)
+    if not bgImg or not wheel then return end
+    local bgSrc = wheel.BackgroundImage or ""
+    local isCustomBg = tostring(bgSrc) ~= DEFAULT_WHEEL_BG
+
+    local gifUrl, sheetUrl = nil, nil
+    if bgSrc and tostring(bgSrc):find("\n") then
+        local lines = {}
+        for line in tostring(bgSrc):gmatch("[^\r\n]+") do
+            line = line:match("^%s*(.-)%s*$")
+            if line ~= "" then table.insert(lines, line) end
+        end
+        gifUrl = lines[1]
+        sheetUrl = lines[2]
+    elseif tostring(bgSrc):find("|") then
+        local parts = {}
+        for part in tostring(bgSrc):gmatch("[^|]+") do
+            part = part:match("^%s*(.-)%s*$")
+            if part ~= "" then table.insert(parts, part) end
+        end
+        gifUrl = parts[1]
+        sheetUrl = parts[2]
+    elseif AnimationSystem.LooksLikeGif(bgSrc) then
+        gifUrl = bgSrc
+    end
+ 
+    local targetUrl = AnimationSystem.NormalizeUrl(bgSrc)
+    if gifUrl then gifUrl = AnimationSystem.NormalizeUrl(gifUrl) end
+    if sheetUrl then sheetUrl = AnimationSystem.NormalizeUrl(sheetUrl) end
+ 
+    if gifUrl and sheetUrl and sheetUrl ~= "" then
+        local cacheKey = AnimationSystem.MakeKey(gifUrl, sheetUrl)
+        local meta = wheel.Animation
+        if meta and meta.GifUrl == gifUrl and meta.SheetUrl == sheetUrl then
+            AnimationSystem.Cache[cacheKey] = meta
+        else
+            meta = AnimationSystem.Cache[cacheKey]
+        end
+ 
+        if meta and meta.Enabled == false then
+            AnimationSystem.StopGif()
+            AnimationSystem.SetImageMode(bgImg, false)
+            bgImg.Image = DEFAULT_WHEEL_BG
+            bgImg.ImageRectSize = Vector2.new(0, 0)
+            bgImg.ImageRectOffset = Vector2.new(0, 0)
+            return
+        end
+ 
+        if meta and meta.Enabled == true then
+            if (meta.FrameWidth or 0) > 0 and (meta.FrameHeight or 0) > 0 then
+                local frames = tonumber(meta.Frames) or 0
+                local cols = tonumber(meta.Cols) or 0
+                local rows = tonumber(meta.Rows) or 0
+                local frameW = tonumber(meta.FrameWidth) or 0
+                local frameH = tonumber(meta.FrameHeight) or 0
+                local fps = tonumber(meta.FPS) or 10
+                local delay = fps > 0 and (1 / fps) or 0.1
+                local rawSheetW = tonumber(meta.SheetWidth) or (cols * frameW)
+                local rawSheetH = tonumber(meta.SheetHeight) or (rows * frameH)
+                local sheetAsset = GetAsset(sheetUrl)
+                if sheetAsset and sheetAsset ~= "" then
+                    local resizedW, resizedH = estimateRobloxResizedSize(rawSheetW, rawSheetH)
+                    local adjFrameW = frameW * (resizedW / rawSheetW)
+                    local adjFrameH = frameH * (resizedH / rawSheetH)
+
+                    local spriteData = {
+                        sprite = sheetAsset,
+                        frames = frames,
+                        frameW = adjFrameW,
+                        frameH = adjFrameH,
+                        cols = cols,
+                        rows = rows,
+                        sheetW = resizedW,
+                        sheetH = resizedH,
+                        delay = delay
+                    }
+                    AnimationSystem.SetImageMode(bgImg, true)
+                    AnimationSystem.StartGif(bgImg, spriteData)
+                    return
+                end
+            end
+        end
+
+        bgImg.Image = DEFAULT_WHEEL_BG
+        bgImg.ImageRectSize = Vector2.new(0, 0)
+        bgImg.ImageRectOffset = Vector2.new(0, 0)
+
+        task.spawn(function()
+            local okGif, gifBytes = pcall(function() return game:HttpGet(gifUrl) end)
+            local gifInfo = okGif and gifBytes and AnimationSystem.ParseGifInfo(gifBytes) or nil
+
+            local okSheet, sheetBytes = pcall(function() return game:HttpGet(sheetUrl) end)
+            local sheetInfo = okSheet and sheetBytes and AnimationSystem.ParsePngInfo(sheetBytes) or nil
+            local sheetAsset = GetAsset(sheetUrl)
+
+            if gifInfo and sheetInfo and sheetAsset and sheetAsset ~= "" then
+                local frameW = gifInfo.width
+                local frameH = gifInfo.height
+                local cols = math.max(1, math.floor(sheetInfo.width / frameW + 0.0001))
+                local rows = math.max(1, math.floor(sheetInfo.height / frameH + 0.0001))
+                local maxFrames = cols * rows
+                local frames = math.min(gifInfo.frames or maxFrames, maxFrames)
+                local fps = (gifInfo.avgDelayCs and gifInfo.avgDelayCs > 0) and (100 / gifInfo.avgDelayCs) or 10
+
+                local resizedW, resizedH = estimateRobloxResizedSize(sheetInfo.width, sheetInfo.height)
+                local scaleX = resizedW / sheetInfo.width
+                local scaleY = resizedH / sheetInfo.height
+                local adjFrameW = frameW * scaleX
+                local adjFrameH = frameH * scaleY
+
+                local spriteData = {
+                    sprite = sheetAsset,
+                    frames = frames,
+                    frameW = adjFrameW,
+                    frameH = adjFrameH,
+                    cols = cols,
+                    rows = rows,
+                    sheetW = resizedW,
+                    sheetH = resizedH,
+                    gifInfo = gifInfo
+                }
+                AnimationSystem.SetImageMode(bgImg, true)
+                AnimationSystem.StartGif(bgImg, spriteData)
+
+                local newMeta = {
+                    Enabled = true,
+                    FrameWidth = frameW,
+                    FrameHeight = frameH,
+                    FPS = math.floor(fps + 0.5),
+                    Frames = frames,
+                    Cols = cols,
+                    Rows = rows,
+                    SheetWidth = sheetInfo.width,
+                    SheetHeight = sheetInfo.height,
+                    GifUrl = gifUrl,
+                    SheetUrl = sheetUrl
+                }
+                if not AnimationSystem.AreMetaEqual(wheel.Animation, newMeta) then
+                    wheel.Animation = newMeta
+                    AnimationSystem.Cache[cacheKey] = newMeta
+                    if AnimationSystem.currentThemeName and AnimationSystem.currentThemeName ~= "Default" then
+                        SaveThemes(themes)
+                    end
+                end
+                return
+            else
+                AnimationSystem.StopGif()
+                AnimationSystem.SetImageMode(bgImg, false)
+
+                local newMeta = {
+                    Enabled = false,
+                    FrameWidth = 0,
+                    FrameHeight = 0,
+                    FPS = 10,
+                    Frames = 1,
+                    Cols = 0,
+                    Rows = 0,
+                    GifUrl = gifUrl,
+                    SheetUrl = sheetUrl
+                }
+                if not AnimationSystem.AreMetaEqual(wheel.Animation, newMeta) then
+                    wheel.Animation = newMeta
+                    AnimationSystem.Cache[cacheKey] = newMeta
+                    if AnimationSystem.currentThemeName and AnimationSystem.currentThemeName ~= "Default" then
+                        SaveThemes(themes)
+                    end
+                end
+                return
+            end
+        end)
+        return
+    end
+ 
+    AnimationSystem.StopGif()
+    AnimationSystem.SetImageMode(bgImg, isCustomBg)
+    bgImg.Image = GetAsset(targetUrl)
+    bgImg.ImageRectSize = Vector2.new(0, 0)
+    bgImg.ImageRectOffset = Vector2.new(0, 0)
+end
+
+function ApplyTheme(themeData)
+    if State.isApplyingTheme then return end
+    if not themeData then
+        warn("7yd7 | ApplyTheme: themeData is nil. Falling back to Default.")
+        themeData = themes and themes["Default"] or nil
+        if not themeData then return end
+    end
+    
+    State.isApplyingTheme = true
+    
+    local ok, err = pcall(function()
+        if themeData.Background then
+            State.EmoteTheme = {
+                Background = TableToColor(themeData.Background),
+                Accent = TableToColor(themeData.Accent or {0, 255, 150}),
+                ImageColor = TableToColor(themeData.ImageColor or {255, 255, 255}),
+                Icons = themeData.Icons or {},
+                IconColors = themeData.IconColors or {},
+                Wheel = themeData.Wheel or {}
+            }
+            
+            local function getIconColor(key)
+                if State.EmoteTheme.IconColors and State.EmoteTheme.IconColors[key] then
+                    return TableToColor(State.EmoteTheme.IconColors[key])
+                end
+                return State.EmoteTheme.ImageColor 
+            end
+            
+            State.favoriteIconId = GetAsset(State.EmoteTheme.Icons.Favorite)
+            State.notFavoriteIconId = GetAsset(State.EmoteTheme.Icons.NotFavorite)
+            
+            updateGUIColors()
+            
+            if UI._1left then UI._1left.Image = GetAsset(State.EmoteTheme.Icons.Left); UI._1left.ImageColor3 = getIconColor("Left") end
+            if UI._9right then UI._9right.Image = GetAsset(State.EmoteTheme.Icons.Right); UI._9right.ImageColor3 = getIconColor("Right") end
+            if UI.EmoteWalkButton then 
+                UI.EmoteWalkButton.ImageColor3 = getIconColor("Walk") 
+                ApplyFreezeButtonVisual()
+            end
+            if UI.SpeedEmote then UI.SpeedEmote.Image = GetAsset(State.EmoteTheme.Icons.Speed); UI.SpeedEmote.ImageColor3 = getIconColor("Speed") end
+            if UI.Changepage then UI.Changepage.Image = GetAsset(State.EmoteTheme.Icons.Page); UI.Changepage.ImageColor3 = getIconColor("Page") end
+            if UI.Reload then UI.Reload.Image = GetAsset(State.EmoteTheme.Icons.Reload); UI.Reload.ImageColor3 = getIconColor("Reload") end
+            
+            if UI.Favorite then ApplyFavoriteButtonVisual() end 
+
+            
+            if UI.Background and UI.Background.Main then UI.Background.Main.SetValue(State.EmoteTheme.Background) end
+            
+            for key, comp in pairs(UIElements.Icons) do
+                local iconVal = State.EmoteTheme.Icons[key] or ""
+                local specificColor = State.EmoteTheme.IconColors and State.EmoteTheme.IconColors[key]
+                local colorVal
+                
+                if specificColor then
+                    colorVal = TableToColor(specificColor)
+                else
+                    colorVal = State.EmoteTheme.ImageColor 
+                end
+                
+                if comp then comp.SetValue(iconVal, colorVal) end
+            end
+
+            local function applyWheel()
+                pcall(function()
+                    local root = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+                    if not root then return end
+                    root = root:FindFirstChild("EmotesMenu")
+                    if not root then return end
+                    root = root.Children.Main.EmotesWheel.Back.Background
+                    
+                    local wheel = State.EmoteTheme.Wheel
+                    if not wheel then return end
+
+                    local function getAsset(id)
+                        return GetAsset(id)
+                    end
+
+                    local bgImg = root:FindFirstChild("BackgroundImage")
+                    if bgImg then
+                        ApplyWheelBackgroundImage(bgImg, wheel)
+                        bgImg.ImageColor3 = TableToColor(wheel.BackgroundImageColor or {255,255,255})
+                    end
+
+                    local gradContainer = root:FindFirstChild("BackgroundGradient")
+                    local selectionGrad = gradContainer and gradContainer:FindFirstChild("SelectionGradient")
+                    local grad = selectionGrad and selectionGrad:FindFirstChild("SelectedGradient")
+                    if grad then
+                        grad.Image = getAsset(wheel.SelectionGradient)
+                        grad.ImageColor3 = TableToColor(wheel.SelectionGradientColor or {255,255,255})
+                    end
+
+                    local selection = root:FindFirstChild("Selection")
+                    local selectionEffect = selection and selection:FindFirstChild("SelectionEffect")
+                    local line = selectionEffect and selectionEffect:FindFirstChild("SelectedLine")
+                    if line then
+                        line.Image = getAsset(wheel.SelectionLine)
+                        line.ImageColor3 = TableToColor(wheel.SelectionLineColor or {255,255,255})
+                    end
+                end)
+            end
+            applyWheel()
+
+            for key, comp in pairs(UIElements.Wheel) do
+                local imgVal = State.EmoteTheme.Wheel[key] or ""
+                local colorVal = TableToColor(State.EmoteTheme.Wheel[key.."Color"] or {255, 255, 255})
+                if comp then comp.SetValue(imgVal, colorVal) end
+            end
+        end
+        
+        for name, data in pairs(themes) do
+            if data == themeData then
+                AnimationSystem.currentThemeName = name
+                break
+            end
+        end
+    end)
+    
+    State.isApplyingTheme = false
+    
+    if not ok then
+        warn("7yd7 | ApplyTheme error: " .. tostring(err))
+    end
+end
+
+checkEmotesMenuExists = function()
+    local coreGui = game:GetService("CoreGui")
+    local robloxGui = coreGui:FindFirstChild("RobloxGui")
+    if not robloxGui then
+        return false
+    end
+
+    local emotesMenu = robloxGui:FindFirstChild("EmotesMenu")
+    if not emotesMenu then
+        return false
+    end
+
+    local children = emotesMenu:FindFirstChild("Children")
+    if not children then
+        return false
+    end
+
+    local main = children:FindFirstChild("Main")
+    if not main then
+        return false
+    end
+
+    local emotesWheel = main:FindFirstChild("EmotesWheel")
+    if not emotesWheel then
+        return false
+    end
+
+    return true, emotesWheel
+end
 
 task.spawn(function()
-	local rot = 0
-	while splash.Parent do
-		rot = (rot + 1) % 360
-		splashBgGrad.Rotation = rot
-		task.wait(0.05)
-	end
+    local attempts = 0
+    while attempts < 30 do
+        local exists, emotesWheel = checkEmotesMenuExists()
+        if exists and emotesWheel then
+            ApplyTheme(themes[currentThemeName])
+            
+            emotesWheel:GetPropertyChangedSignal("Visible"):Connect(function()
+                if emotesWheel.Visible then
+                    task.wait(0.05)
+                    ApplyTheme(themes[currentThemeName])
+                end
+            end)
+            break
+        end
+        attempts = attempts + 1
+        task.wait(1)
+    end
 end)
 
-local splashBox = Instance.new("Frame")
-splashBox.Size = UDim2.new(0, 0, 0, 0)
-splashBox.Position = UDim2.fromScale(0.5, 0.5)
-splashBox.AnchorPoint = Vector2.new(0.5, 0.5)
-splashBox.BackgroundColor3 = _splashTheme.secondary
-splashBox.BackgroundTransparency = _splashIsGlass and 0.45 or 0.08
-splashBox.Rotation = -180
-splashBox.ZIndex = 10001
-splashBox.Parent = splash
-Instance.new("UICorner", splashBox).CornerRadius = UDim.new(0, 22)
+themeDropdown = SettingsLib.AddDropdown(ThemeTab, "Select Theme", GetNames(), currentThemeName, function(v)
+    currentThemeName = v
+    Config.SelectedTheme = v
+    SaveConfig()
+    if themes[v] then
+        SaveThemes(themes) 
+        task.wait(0.1)
+        ApplyTheme(themes[v])
+    end
+end)
+if themeDropdown and themeDropdown.Button and themeDropdown.Button.Parent and themeDropdown.Button.Parent.Parent then
+   themeDropdown.Button.Parent.Parent.LayoutOrder = 0
+end
 
-local splashStroke = Instance.new("UIStroke")
-splashStroke.Color = _splashAccent
-splashStroke.Thickness = 3
-splashStroke.Parent = splashBox
+local BtnItem = SettingsLib.AddItem(ThemeTab, "Theme Management", "Manage your themes")
+BtnItem.LayoutOrder = 1 
+BtnItem.BackgroundColor3 = Color3.fromRGB(35, 38, 42)
+BtnItem.Size = UDim2.new(0.95, 0, 0, 70) 
 
-local splashStrokeGrad = Instance.new("UIGradient")
-splashStrokeGrad.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0,    _splashAccent),
-	ColorSequenceKeypoint.new(0.33, _splashTheme.stroke),
-	ColorSequenceKeypoint.new(0.66, _splashAccent),
-	ColorSequenceKeypoint.new(1,    _splashAccent)
-}
-splashStrokeGrad.Parent = splashStroke
+for _, v in pairs(BtnItem:GetChildren()) do if v.Name == "Title" or v.Name == "Desc" then v:Destroy() end end
 
-task.spawn(function()
-	local rot = 0
-	while splashStroke.Parent do
-		rot = rot + 360
-		TweenService:Create(splashStrokeGrad, TweenInfo.new(1.5, Enum.EasingStyle.Linear), {Rotation = rot}):Play()
-		task.wait(1.5)
-	end
+local ManagementContainer = Instance.new("Frame")
+ManagementContainer.Parent = BtnItem
+ManagementContainer.BackgroundTransparency = 1
+ManagementContainer.Size = UDim2.new(1, 0, 1, 0)
+
+local Layout = Instance.new("UIListLayout")
+Layout.FillDirection = Enum.FillDirection.Horizontal
+Layout.Padding = UDim.new(0, 15)
+Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+Layout.VerticalAlignment = Enum.VerticalAlignment.Center
+Layout.Parent = ManagementContainer
+
+local BtnRow = ManagementContainer 
+
+function CreatePopup(title, size)
+    local panel = Instance.new("Frame")
+    panel.Size = size or UDim2.fromOffset(280, 140)
+    panel.Position = UDim2.fromScale(0.5, 0.5)
+    panel.AnchorPoint = Vector2.new(0.5, 0.5)
+    panel.BackgroundColor3 = Color3.fromHex("18191c")
+    panel.ZIndex = 2000
+    panel.Parent = SettingsLib.UI
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = panel
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Parent = panel
+    stroke.Color = (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150)
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.5
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = panel
+    lbl.Size = UDim2.new(1, 0, 0, 35)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = title:upper()
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 13
+    lbl.TextColor3 = Color3.new(1,1,1)
+    
+    local content = Instance.new("Frame")
+    content.Name = "Content"
+    content.Parent = panel
+    content.BackgroundTransparency = 1
+    content.Position = UDim2.new(0, 0, 0, 35)
+    content.Size = UDim2.new(1, 0, 1, -35)
+    
+    return panel, content
+end
+
+function CreateInput(parent, placeholder, text, isMulti)
+    local box = Instance.new("TextBox")
+    box.Size = isMulti and UDim2.new(0.9, 0, 0, 100) or UDim2.new(0.9, 0, 0, 35)
+    box.Position = UDim2.new(0.05, 0, 0, 5)
+    box.BackgroundColor3 = Color3.fromRGB(35, 38, 41)
+    box.TextColor3 = Color3.new(1,1,1)
+    box.PlaceholderText = placeholder or ""
+    box.Text = text or ""
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 12
+    box.MultiLine = isMulti
+    box.TextWrapped = isMulti
+    box.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = box
+    
+    return box
+end
+
+function CreateButton(parent, text, color, pos, size)
+    local btn = Instance.new("TextButton")
+    btn.Size = size or UDim2.new(0.4, 0, 0, 32)
+    btn.Position = pos
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextColor3 = (color.R + color.G + color.B < 1.5) and Color3.new(1,1,1) or Color3.new(0,0,0)
+    btn.TextSize = 12
+    btn.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
+    
+    return btn
+end
+
+SettingsLib.AddIconButton(BtnRow, "108445456753346", function()
+    local popup, content = CreatePopup("Create Theme")
+    local In = CreateInput(content, "Theme Name...")
+    
+    local Save = CreateButton(content, "SAVE", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Cancel.TextColor3 = Color3.new(1,1,1)
+
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not themes[In.Text] then
+            themes[In.Text] = DeepCopy(themes[currentThemeName])
+            if not themes[In.Text].IconColors then themes[In.Text].IconColors = {} end
+            table.insert(themes.Order, In.Text)
+            
+            table.sort(themes.Order, function(a, b)
+                if a == "Default" then return true end
+                if b == "Default" then return false end
+                return a:lower() < b:lower()
+            end)
+            
+            SaveThemes(themes)
+            currentThemeName = In.Text
+            themeDropdown.Refresh(GetNames())
+            themeDropdown.Button.Text = currentThemeName .. "  ▼"
+            ApplyTheme(themes[currentThemeName])
+            popup:Destroy()
+        end
+    end)
+    
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
 end)
 
-local avatarHolder = Instance.new("Frame")
-avatarHolder.Size = UDim2.new(1, -24, 0, 50)
-avatarHolder.Position = UDim2.new(0, 12, 0, 12)
-avatarHolder.BackgroundTransparency = 1
-avatarHolder.ZIndex = 10002
-avatarHolder.Parent = splashBox
-
-local avatar = Instance.new("ImageLabel")
-avatar.Size = UDim2.new(0, 44, 0, 44)
-avatar.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
-avatar.Image = "https://www.roblox.com/headshot-thumbnail/image?userId=3164346931&width=150&height=150&format=png"
-avatar.ZIndex = 10003
-avatar.Parent = avatarHolder
-Instance.new("UICorner", avatar).CornerRadius = UDim.new(1, 0)
-
-local avatarGlow = Instance.new("UIStroke")
-avatarGlow.Color = Color3.fromRGB(138, 43, 226)
-avatarGlow.Thickness = 2
-avatarGlow.Parent = avatar
-
-task.spawn(function()
-	while avatar.Parent do
-		TweenService:Create(avatarGlow, TweenInfo.new(1, Enum.EasingStyle.Sine), {Color = Color3.fromRGB(186, 85, 211)}):Play()
-		task.wait(1)
-		TweenService:Create(avatarGlow, TweenInfo.new(1, Enum.EasingStyle.Sine), {Color = Color3.fromRGB(138, 43, 226)}):Play()
-		task.wait(1)
-	end
+SettingsLib.AddIconButton(BtnRow, "71829270056766", function()
+    if currentThemeName ~= "Default" then
+        local idx = table.find(themes.Order, currentThemeName)
+        if idx then table.remove(themes.Order, idx) end
+        
+        themes[currentThemeName] = nil
+        SaveThemes(themes)
+        currentThemeName = "Default"
+        themeDropdown.Refresh(GetNames())
+        themeDropdown.Button.Text = "Default  ▼"
+        ApplyTheme(themes["Default"])
+    end
 end)
 
-local madeByLbl = Instance.new("TextLabel")
-madeByLbl.Size = UDim2.new(1, -54, 1, 0)
-madeByLbl.Position = UDim2.new(0, 52, 0, 0)
-madeByLbl.BackgroundTransparency = 1
-madeByLbl.Text = L.madeBy
-madeByLbl.TextColor3 = _splashTheme.textDim
-madeByLbl.Font = Enum.Font.GothamBold
-madeByLbl.TextScaled = true
-madeByLbl.TextXAlignment = Enum.TextXAlignment.Left
-madeByLbl.ZIndex = 10003
-madeByLbl.Parent = avatarHolder
+SettingsLib.AddIconButton(BtnRow, "117761881427472", function()
+    if currentThemeName == "Default" then return end
+    
+    local popup, content = CreatePopup("Rename Theme")
+    local In = CreateInput(content, "New Name...", currentThemeName)
+    
+    local Save = CreateButton(content, "RENAME", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Cancel.TextColor3 = Color3.new(1,1,1)
 
-local logo = Instance.new("TextLabel")
-logo.Size = UDim2.new(1, -24, 0, 60)
-logo.Position = UDim2.new(0, 12, 0, 70)
-logo.BackgroundTransparency = 1
-logo.Text = "Vexro Emotes"
-logo.TextColor3 = _splashTheme.text
-logo.Font = Enum.Font.GothamBlack
-logo.TextScaled = true
-logo.ZIndex = 10003
-logo.Parent = splashBox
-
-local logoGrad = Instance.new("UIGradient")
-logoGrad.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0,    _splashAccent),
-	ColorSequenceKeypoint.new(0.25, _splashTheme.stroke),
-	ColorSequenceKeypoint.new(0.5,  _splashAccent),
-	ColorSequenceKeypoint.new(0.75, _splashTheme.stroke),
-	ColorSequenceKeypoint.new(1,    _splashAccent)
-}
-logoGrad.Parent = logo
-
-task.spawn(function()
-	while logo.Parent do
-		TweenService:Create(logoGrad, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {Offset = Vector2.new(1, 0)}):Play()
-		task.wait(2)
-		TweenService:Create(logoGrad, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {Offset = Vector2.new(-1, 0)}):Play()
-		task.wait(2)
-	end
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not themes[In.Text] then
+            local idx = table.find(themes.Order, currentThemeName)
+            if idx then themes.Order[idx] = In.Text end
+            
+            themes[In.Text] = themes[currentThemeName]
+            themes[currentThemeName] = nil
+            currentThemeName = In.Text
+            SaveThemes(themes)
+            themeDropdown.Refresh(GetNames())
+            themeDropdown.Button.Text = currentThemeName .. "  ▼"
+            popup:Destroy()
+        end
+    end)
+    
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
 end)
 
-local loadingLbl = Instance.new("TextLabel")
-loadingLbl.Size = UDim2.new(1, 0, 0, 30)
-loadingLbl.Position = UDim2.new(0, 0, 0, 140)
-loadingLbl.BackgroundTransparency = 1
-loadingLbl.Text = L.loading
-loadingLbl.TextColor3 = _splashTheme.textDim
-loadingLbl.Font = Enum.Font.GothamBold
-loadingLbl.TextSize = 16
-loadingLbl.ZIndex = 10003
-loadingLbl.Parent = splashBox
+SettingsLib.AddIconButton(BtnRow, "78317476576895", function()
+    local popup, content = CreatePopup("Import Theme", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "Paste Theme JSON here...", "", true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    
+    local imp = CreateButton(content, "IMPORT THEME", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
 
-task.spawn(function()
-	local dots = {"", ".", "..", "..."}
-	local i = 1
-	while loadingLbl.Parent do
-		loadingLbl.Text = "Vexro Emotes " .. L.loading .. dots[i]
-		i = i % 4 + 1
-		task.wait(0.4)
-	end
+    imp.MouseButton1Click:Connect(function()
+        local s, d = pcall(function() return HttpService:JSONDecode(box.Text) end)
+        if s and type(d) == "table" and d.name then
+            if d.name == "Default" then
+                getgenv().Notify({Title = "Error", Content = "Cannot overwrite 'Default' theme.", Duration = 3})
+                return
+            end
+            if not themes[d.name] then
+                table.insert(themes.Order, d.name)
+            end
+            themes[d.name] = d.data
+            SaveThemes(themes)
+            themeDropdown.Refresh(GetNames())
+            popup:Destroy()
+        else
+            getgenv().Notify({Title = "Error", Content = "Invalid JSON Format!", Duration = 3})
+        end
+    end)
+    
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "×"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
 end)
 
-local loadingBarBg = Instance.new("Frame")
-loadingBarBg.Size = UDim2.new(0.8, 0, 0, 6)
-loadingBarBg.Position = UDim2.new(0.1, 0, 0, 175)
-loadingBarBg.BackgroundColor3 = _splashTheme.tertiary
-loadingBarBg.ZIndex = 10003
-loadingBarBg.Parent = splashBox
-Instance.new("UICorner", loadingBarBg).CornerRadius = UDim.new(1, 0)
+SettingsLib.AddIconButton(BtnRow, "107588515524752", function()
+    local exportData = { name = currentThemeName, data = themes[currentThemeName] }
+    local json = HttpService:JSONEncode(exportData)
+    
+    local popup, content = CreatePopup("Export Theme", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "", json, true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    box.TextEditable = false
+    
+    local copy = CreateButton(content, "COPY TO CLIPBOARD", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
 
-local loadingBar = Instance.new("Frame")
-loadingBar.Size = UDim2.new(0, 0, 1, 0)
-loadingBar.BackgroundColor3 = _splashAccent
-loadingBar.ZIndex = 10004
-loadingBar.Parent = loadingBarBg
-Instance.new("UICorner", loadingBar).CornerRadius = UDim.new(1, 0)
-
-local loadingBarGrad = Instance.new("UIGradient")
-loadingBarGrad.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0, _splashAccent),
-	ColorSequenceKeypoint.new(0.5, _splashTheme.stroke),
-	ColorSequenceKeypoint.new(1, _splashAccent)
-}
-loadingBarGrad.Parent = loadingBar
-
-local discordBtn = Instance.new("TextButton")
-discordBtn.Size = UDim2.new(0.85, 0, 0, 42)
-discordBtn.Position = UDim2.new(0.075, 0, 1, -55)
-discordBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
-discordBtn.Text = "Discord: 4Bs9WYSabf"
-discordBtn.TextColor3 = Color3.new(1, 1, 1)
-discordBtn.Font = Enum.Font.GothamBold
-discordBtn.TextSize = 14
-discordBtn.ZIndex = 10003
-discordBtn.Parent = splashBox
-Instance.new("UICorner", discordBtn).CornerRadius = UDim.new(0, 10)
-
-discordBtn.MouseButton1Click:Connect(function()
-	pcall(function() if setclipboard then setclipboard("https://discord.gg/4Bs9WYSabf") end end)
-	Notify(utf8.char(0x2705), L.copied)
+    copy.MouseButton1Click:Connect(function()
+        setclipboard(json)
+        copy.Text = "COPIED!"
+        task.delay(1, function() copy.Text = "COPY TO CLIPBOARD" end)
+    end)
+    
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "×"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
 end)
 
-local splashSize = isMobile and UDim2.new(0, 300, 0, 240) or UDim2.new(0, 400, 0, 280)
-TweenService:Create(splashBox, TweenInfo.new(0.7, Enum.EasingStyle.Back), {Size = splashSize, Rotation = 0}):Play()
 
--- ===============================================================
--- EMOTE LOADING
--- ===============================================================
+function SmartUpdate(key, subkey, val)
+    if currentThemeName == "Default" then
+        getgenv().Notify({Title = "Theme", Content = "Cannot modify Default theme. Create a new one!", Duration = 2})
+        return
+    end
 
-TweenService:Create(loadingBar, TweenInfo.new(0.5), {Size = UDim2.new(0.3, 0, 1, 0)}):Play()
-task.wait(0.3)
-
-local function LoadEmotes()
-	local success, result = pcall(function()
-		local response = game:HttpGet("https://raw.githubusercontent.com/zyrovell/Vexro/main/emotes.json")
-		return HttpService:JSONDecode(response)
-	end)
-	
-	if success and result then
-		local data = type(result) == "table" and (result.data or result)
-		local _seenIds = {}
-		for _, emote in ipairs(data) do
-			if emote.id and emote.name then
-				local numId = tonumber(emote.id)
-				if numId and not _seenIds[numId] then
-					_seenIds[numId] = true
-					Emotes[#Emotes + 1] = {
-						name          = tostring(emote.name),
-						id            = numId,
-						creatorName   = tostring(emote.creatorName      or ""),
-						description   = tostring(emote.description      or ""),
-						price         = emote.price,
-						priceStatus   = tostring(emote.priceStatus      or ""),
-						favoriteCount = emote.favoriteCount,
-						createdUtc    = tostring(emote.itemCreatedUtc   or ""),
-					}
-				end
-			end
-		end
-	end
-	
-	if #Emotes == 0 then
-		Emotes = {
-			{name = "Wave", id = 3576686446},
-			{name = "Point", id = 3576823880},
-			{name = "Dance", id = 3576720708},
-			{name = "Laugh", id = 3576777185},
-			{name = "Cheer", id = 3576738018}
-		}
-	end
+    if themes[currentThemeName] then
+        if not themes[currentThemeName][key] then themes[currentThemeName][key] = {} end
+        
+        if subkey then
+            themes[currentThemeName][key][subkey] = val
+        else
+            themes[currentThemeName][key] = val
+        end
+        SaveThemes(themes)
+        ApplyTheme(themes[currentThemeName])
+    end
 end
 
-LoadEmotes()
+local WheelFolder = SettingsLib.AddFolder(ThemeTab, "Wheel Settings")
+WheelFolder.Parent.LayoutOrder = 1.1
 
--- Build lookup table for O(1) emote access by ID
--- Pre-compute lowercase names so search never calls .lower() at runtime
-for _, emote in ipairs(Emotes) do
-	EmotesById[emote.id] = emote
-	emote._lname = emote.name:lower()
-end
-TweenService:Create(loadingBar, TweenInfo.new(1), {Size = UDim2.new(1, 0, 1, 0)}):Play()
-task.wait(1)
+function AddWheelInput(title, wheelKey)
+    local initialData = themes["Default"].Wheel[wheelKey]
+    local initialColor = TableToColor(themes["Default"].Wheel[wheelKey.."Color"])
+    
+    local current = (themes[currentThemeName].Wheel and themes[currentThemeName].Wheel[wheelKey]) or initialData
+    local currentColor = TableToColor((themes[currentThemeName].Wheel and themes[currentThemeName].Wheel[wheelKey.."Color"]) or themes["Default"].Wheel[wheelKey.."Color"])
+    
+    local comp = SettingsLib.AddAssetColor(WheelFolder, title, "Asset ID...", current, currentColor, function(text, color)
+        if currentThemeName == "Default" then
+            getgenv().Notify({Title = "Theme", Content = "Cannot modify Default theme!", Duration = 2})
+            return
+        end
+        
+        if themes[currentThemeName] then
+            if not themes[currentThemeName].Wheel then themes[currentThemeName].Wheel = {} end
+            themes[currentThemeName].Wheel[wheelKey] = text
+            themes[currentThemeName].Wheel[wheelKey.."Color"] = ColorToTable(color)
+            
+            SaveThemes(themes)
+            ApplyTheme(themes[currentThemeName])
+        end
+    end)
+    UIElements.Wheel[wheelKey] = comp
 
-loadingLbl.Text = utf8.char(0x2705) .. " " .. #Emotes .. " emotes!"
-task.wait(1)
-
-TweenService:Create(splash, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
-TweenService:Create(splashBox, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Size = UDim2.new(0, 0, 0, 0), Rotation = 720}):Play()
-task.wait(0.5)
-pcall(function() splashBlur:Destroy() end)
-splash:Destroy()
-end -- SPLASH SCREEN scope
-
--- Forward declarations (dosya genelinde erişilebilir olması için)
-local MakeRow, MakeSectionHeader, MakePillToggle
-
--- ===============================================================
--- UI SIZE SETTINGS
--- ===============================================================
-local ICON_SCALE = 1.5     -- İkonların resim boyutu (1.0 = normal, 1.5 = %50 daha büyük)
-local BUTTON_SCALE = 1.1   -- Kırpılmayı önlemek için buton kutusunu büyütme (1.0 = normal)
-local FONT_SCALE = 1.2     -- Yazı karakteri ve zar/menü sembol boyutu
-
--- ===============================================================
--- VARIABLES
--- ===============================================================
-
-local EMOTE_ICON = "rbxassetid://120313093991132"
-local currentData, filtered = Emotes, Emotes
-local currentTab = "emotes"
-local page, perPage, pages, cols = 1, 14, 1, 7 -- Default to 7 cols
-local cards = {}
-local sideBarW = math.floor((isMobile and 50 or 60) * BUTTON_SCALE)
-local bottomBarH = isMobile and 26 or 22
-local currentCardSize = 0 -- Dynamic card size
-local _badEmotes = {}     -- [tostring(id)] = true  →  asset failed to load
-local _refreshPending = false
-
--- ===============================================================
--- FAVORITES & RECENT
--- ===============================================================
-
-local function IsFavorite(id)
-	return FavoritesSet[tonumber(id)] == true
+    local resetBtn = SettingsLib:Create("ImageButton", {
+        Parent = comp.Item,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -120, 0.5, -10),
+        Size = UDim2.fromOffset(20, 20),
+        Image = "rbxassetid://127493377027615",
+        ScaleType = Enum.ScaleType.Fit,
+        ZIndex = 10
+    })
+    
+    resetBtn.MouseButton1Click:Connect(function()
+        if currentThemeName == "Default" then return end
+        comp.SetValue(initialData, initialColor)
+        if themes[currentThemeName] then
+            if not themes[currentThemeName].Wheel then themes[currentThemeName].Wheel = {} end
+            themes[currentThemeName].Wheel[wheelKey] = initialData
+            themes[currentThemeName].Wheel[wheelKey.."Color"] = ColorToTable(initialColor)
+            SaveThemes(themes)
+            ApplyTheme(themes[currentThemeName])
+        end
+    end)
 end
 
-local MAX_FAVORITES = 25
+AddWheelInput("Wheel Background", "BackgroundImage")
+AddWheelInput("Selection Gradient", "SelectionGradient")
+AddWheelInput("Selection Line", "SelectionLine")
 
-local function ToggleFavorite(id)
-	id = tonumber(id)
-	if FavoritesSet[id] then
-		FavoritesSet[id] = nil
-		for i = #Favorites, 1, -1 do
-			if Favorites[i] == id then
-				table.remove(Favorites, i)
-				break
-			end
-		end
-		SaveData()
-		return false
-	end
-	if #Favorites >= MAX_FAVORITES then
-		Notify("⭐ " .. L.favLimit, "")
-		return false
-	end
-	FavoritesSet[id] = true
-	Favorites[#Favorites + 1] = id
-	SaveData()
-	return true
-end
-
-local function AddToRecent(id)
-	id = tonumber(id)
-	for i = #RecentEmotes, 1, -1 do
-		if RecentEmotes[i] == id then
-			table.remove(RecentEmotes, i)
-		end
-	end
-	table.insert(RecentEmotes, 1, id)
-	while #RecentEmotes > MAX_RECENT do
-		table.remove(RecentEmotes)
-	end
-	SaveData()
-end
-
--- ===============================================================
--- EMOTE & SPEED SYSTEM
--- ===============================================================
-
-local currentAnimTrack = nil
-local lastEmoteTime = 0
-
-local function GetAnimator()
-	local character = player.Character
-	if not character then return nil end
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then return nil end
-	local animator = humanoid:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = humanoid
-	end
-	return animator
-end
-
-local function StopAllTracks()
-	local animator = GetAnimator()
-	if animator then
-		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-			pcall(function() 
-				track:Stop(0.1)
-			end)
-		end
-	end
-	currentAnimTrack = nil
-end
-
-local function ApplySpeedToAllTracks()
-	local animator = GetAnimator()
-	if animator then
-		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-			pcall(function() track:AdjustSpeed(Settings.speed) end)
-		end
-	end
-end
-
-
-local function StopEmote(showNotif)
-	StopAllTracks()
-	if showNotif then Notify(L.stopped, "", 113416463749658) end
-	if _genv().VexroBroadcastStop then
-		pcall(_genv().VexroBroadcastStop)
-	end
-end
-
-local _heartbeatConn = RunService.Heartbeat:Connect(function()
-	if Settings.stopOnWalk and currentAnimTrack and currentAnimTrack.IsPlaying then
-		local character = player.Character
-		if character then
-			local humanoid = character:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.MoveDirection.Magnitude > 0 then
-				StopEmote(false)
-			end
-		end
-	end
+local BackgroundFolder = SettingsLib.AddFolder(ThemeTab, "Background Settings")
+BackgroundFolder.Parent.LayoutOrder = 2
+UIElements.Background.Main = SettingsLib.AddColorPicker(BackgroundFolder, "Main Background", TableToColor(themes[currentThemeName].Background), function(c)
+    SmartUpdate("Background", nil, ColorToTable(c))
 end)
 
--- Animation objesi cache (her emote ID için bir kez GetObjects çağrılır, lag önlenir)
-local _animCache = {}
+local IconSettingsFolder = SettingsLib.AddFolder(ThemeTab, "Icon Settings")
+IconSettingsFolder.Parent.LayoutOrder = 3
 
-local function PlayEmote(id, name, silent)
-	local animator = GetAnimator()
-	if not animator then return end
-	
-	-- FIX: Yeni emote çalmadan önce eski emoteyi durdur (hareket etmeden geçişte takılmayı önler)
-	StopAllTracks()
-	
-	-- MODIFIED: Save last played emote for Auto-Reload (Continue)
-	_genv().lastVexroEmote = {id = id, name = name}
-	
-	-- FIX: Catalog ID'leri direkt LoadAnimation ile çalışmadığı için game:GetObjects ile asıl Animation'ı çekiyoruz.
-	-- Cache kullanarak tekrarlanan çağrılardan kaynaklanan kasılmayı önlüyoruz.
-	local success, err = pcall(function()
-		local anim = _animCache[id]
-		
-		if not anim then
-			local successObj, objects = pcall(function()
-				return game:GetObjects("rbxassetid://" .. id)
-			end)
-			
-			if successObj and objects and #objects > 0 then
-				local item = objects[1]
-				if item:IsA("Animation") then
-					anim = item
-				else
-					-- Folder içindeki asıl Animation objesini bul (Face animasyonları yerine vücudu bulur)
-					anim = item:FindFirstChildWhichIsA("Animation", true)
-				end
-			end
-			
-			-- Eğer exploit GetObjects desteklemiyorsa veya çalışmazsa normal şekilde dene
-			if not anim then
-				anim = Instance.new("Animation")
-				anim.AnimationId = "rbxassetid://" .. id
-			end
-			
-			_animCache[id] = anim
-		end
-		
-		local track = animator:LoadAnimation(anim)
-		track.Priority = Enum.AnimationPriority.Action4
-		track.Looped = Settings.loopEmote
-		track:Play(0.1)
-		
-		task.delay(0.05, function()
-			track:AdjustSpeed(Settings.speed)
-		end)
-		
-		currentAnimTrack = track
-		AddToRecent(id)
-	end)
-	
-	if success then
-		if not silent then
-			local speedTxt = Settings.speed ~= 1 and " (" .. Settings.speed .. "x)" or ""
-			Notify(L.playing .. speedTxt, name, 129338178452237)
-		end
-		lastEmoteTime = tick()
-		-- Arkadaşlara sync gönder
-		if _genv().VexroBroadcastSync then
-			pcall(_genv().VexroBroadcastSync, id, name)
-		end
-	else
-		Notify(utf8.char(0x274C), L.emoteLoadFail)
-	end
+function AddAssetInput(title, iconKey)
+    local current = (themes[currentThemeName].Icons and themes[currentThemeName].Icons[iconKey]) or ""
+    local defaultText = (themes["Default"].Icons and themes["Default"].Icons[iconKey]) or ""
+    
+    local currentColor = Color3.new(1,1,1)
+    if themes[currentThemeName].IconColors and themes[currentThemeName].IconColors[iconKey] then
+        currentColor = TableToColor(themes[currentThemeName].IconColors[iconKey])
+    elseif themes[currentThemeName].ImageColor then
+        currentColor = TableToColor(themes[currentThemeName].ImageColor)
+    end
+    
+    local defaultColor = Color3.new(1,1,1)
+    if themes["Default"].IconColors and themes["Default"].IconColors[iconKey] then
+        defaultColor = TableToColor(themes["Default"].IconColors[iconKey])
+    elseif themes["Default"].ImageColor then
+        defaultColor = TableToColor(themes["Default"].ImageColor)
+    end
+    
+    local comp = SettingsLib.AddInputWithColor(IconSettingsFolder, title, "Asset ID...", defaultText, defaultColor, function(text, color)
+        local s, err = pcall(function()
+            if currentThemeName == "Default" then
+                getgenv().Notify({Title = "Theme", Content = "Cannot modify Default theme!", Duration = 2})
+                return
+            end
+            
+            if themes[currentThemeName] then
+                if not themes[currentThemeName].Icons then themes[currentThemeName].Icons = {} end
+                if not themes[currentThemeName].IconColors then themes[currentThemeName].IconColors = {} end
+                
+                local cTable = ColorToTable(color)
+                themes[currentThemeName].Icons[iconKey] = text
+                themes[currentThemeName].IconColors[iconKey] = cTable
+                
+                SaveThemes(themes)
+                ApplyTheme(themes[currentThemeName])
+            end
+        end)
+        if not s then
+            warn("Theme Save Error: " .. tostring(err))
+            getgenv().Notify({Title = "Error", Content = "Failed to save color!", Duration = 3})
+        end
+    end)
+    comp.SetValue(current, currentColor)
+    UIElements.Icons[iconKey] = comp
 end
 
--- ===============================================================
--- MAIN MENU
--- ===============================================================
+AddAssetInput("Left Arrow", "Left")
+AddAssetInput("Right Arrow", "Right")
+AddAssetInput("Walk Icon", "Walk")
+AddAssetInput("Speed Icon", "Speed")
+AddAssetInput("Page Icon", "Page")
+AddAssetInput("Reload Icon", "Reload")
+AddAssetInput("Favorite (Star)", "Favorite")
+AddAssetInput("Not Favorite", "NotFavorite")
 
--- TARGET CARD SIZES (Made larger for better visibility)
-local TARGET_PC_CARD = 75 -- Was 75
-local TARGET_MOBILE_CARD = 55 -- Was 55
+State.exitCustomAnimationEditor = function()
+    if not State.customAnimationEditorActive then return end
+    State.customAnimationEditorActive = false
+    State.customAnimationEditingKey = nil
+    State.customAnimationEditingName = nil
 
-local function GetDefaultSize()
-	-- Calculate width needed for 7 columns exactly + padding
-	local PAD = isMobile and 4 or 6
-	local targetCard = isMobile and TARGET_MOBILE_CARD or TARGET_PC_CARD
-	
-	-- Width for 7 cards + sidebar
-	local perfectWidth = (targetCard * 7) + (PAD * 6) + sideBarW + 20
-	
-	local vp = workspace.CurrentCamera.ViewportSize
-	local finalW = math.clamp(perfectWidth, 400, vp.X * 0.95)
-	
-	-- Height for 2 rows approx
-	local cardH = targetCard + (targetCard * 0.3 * 2) + PAD -- approx card total height
-	local perfectHeight = (cardH * 2) + 60 + bottomBarH + 20
-	
-	local finalH = math.clamp(perfectHeight, 300, vp.Y * 0.8)
-	
-	return UDim2.new(0, finalW, 0, finalH)
+    for _, conn in pairs(State.CustomAnimEditorConnections or {}) do
+        pcall(function() conn:Disconnect() end)
+    end
+    State.CustomAnimEditorConnections = {}
+
+    if State.CustomAnimOverlay and State.CustomAnimOverlay.Parent then 
+        State.CustomAnimOverlay:Destroy() 
+    end
+    State.CustomAnimOverlay = nil
+
+    if State.CustomAnimForceVisibleConn then 
+        State.CustomAnimForceVisibleConn:Disconnect()
+        State.CustomAnimForceVisibleConn = nil 
+    end
+
+    if UI.Search then UI.Search.TextEditable = true; UI.Search.Active = true end
+    if UI.SpeedBox then UI.SpeedBox.TextEditable = true; UI.SpeedBox.Active = true end
+    if UI._2Routenumber then UI._2Routenumber.TextEditable = true; UI._2Routenumber.Active = true end
+    
+    pcall(function() game:GetService("GuiService"):SetEmotesMenuOpen(false) end)
+    pcall(function() game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Visible = false end)
+
+    local main = getSettingsMainFrame()
+    if main then main.Visible = true end
+    if syncToggleVisibility then syncToggleVisibility() end
+
+    if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+
+    if State.currentMode ~= "animation" then
+        State.currentMode = "animation"
+        State.suppressSearch = true
+        if UI.Search then UI.Search.Text = State.animationSearchTerm end
+        State.suppressSearch = false
+        State.currentPage = Config.AnimationPage or 1
+        State.totalPages = calculateTotalPages()
+        updatePageDisplay()
+        updateEmotes()
+        if updateScriptPriorityOverlay then updateScriptPriorityOverlay() end
+        State.animationMonitorToken = State.animationMonitorToken + 1
+        local token = State.animationMonitorToken
+        State.isMonitoringClicks = true
+        if monitorAnimations then
+            task.spawn(function() monitorAnimations(token) end)
+        end
+    end
 end
 
-local main = Instance.new("Frame")
-main.Name = "MainMenu"
-main.Size = UDim2.new(0, 0, 0, 0)
-main.Position = UDim2.fromScale(0.5, 0.5)
-main.AnchorPoint = Vector2.new(0.5, 0.5)
-main.BackgroundColor3 = currentTheme.primary
-main.BackgroundTransparency = 0 -- Saydamlığı kaldırdık ki içi dolsun
-main.ClipsDescendants = true
-main.Parent = gui
-Instance.new("UICorner", main).CornerRadius = UDim.new(0, 20) -- Daha yumuşak köşeler
-RegisterTheme(main, "BackgroundColor3", "primary")
+State.enterCustomAnimationEditor = function(category, animName)
+    if State.customAnimationEditorActive then return end
+    if State.currentCustomAnimationName == "Default" then
+        getgenv().Notify({ Title = "7yd7 | Error", Content = "Cannot edit Default Animation set. Create a new one!", Duration = 3 })
+        return
+    end
 
--- Tema gradyan renkleri [üst-sol, alt-sağ, rotasyon]
-local ThemeGradients = {
-	Dark        = {Color3.fromRGB(22, 22, 30),  Color3.fromRGB(10, 10, 14),  135},
-	Purple      = {Color3.fromRGB(28, 18, 48),  Color3.fromRGB(10, 6, 18),   135},
-	Blue        = {Color3.fromRGB(18, 28, 52),  Color3.fromRGB(6, 10, 20),   135},
-	Green       = {Color3.fromRGB(16, 32, 22),  Color3.fromRGB(6, 12, 8),    135},
-	Red         = {Color3.fromRGB(48, 16, 18),  Color3.fromRGB(18, 6, 8),    135},
-	Light       = {Color3.fromRGB(255, 255, 255), Color3.fromRGB(228, 228, 238), 135},
-	MaterialYou = {Color3.fromRGB(30, 34, 50),  Color3.fromRGB(12, 14, 20),  135},
-	FrostedGlass= {Color3.fromRGB(230, 238, 255), Color3.fromRGB(190, 205, 235), 135},
-	DarkGlass   = {Color3.fromRGB(24, 24, 34),  Color3.fromRGB(8, 8, 12),    135},
-}
+    State.customAnimationEditorActive = true
+    State.customAnimationEditingKey = category
+    State.customAnimationEditingName = animName
+    
+    if State.currentMode ~= "animation" then
+        State.currentMode = "animation"
+        State.suppressSearch = true
+        if UI.Search then UI.Search.Text = State.animationSearchTerm end
+        State.suppressSearch = false
+        State.currentPage = Config.AnimationPage or 1
+        State.totalPages = calculateTotalPages()
+        updatePageDisplay()
+        updateEmotes()
+        if updateScriptPriorityOverlay then updateScriptPriorityOverlay() end
+        State.animationMonitorToken = State.animationMonitorToken + 1
+        local token = State.animationMonitorToken
+        State.isMonitoringClicks = true
+        if monitorAnimations then
+            task.spawn(function()
+                monitorAnimations(token)
+            end)
+        end
+        
+        local beforeVersion = State.animationCacheVersion
+        task.spawn(function()
+            if fetchAllAnimations then
+                fetchAllAnimations()
+            else
+                return
+            end
+            if State.currentMode ~= "animation" then return end
+            if State.animationCacheVersion ~= beforeVersion then
+                State.suppressSearch = true
+                if UI.Search then UI.Search.Text = State.animationSearchTerm end
+                State.suppressSearch = false
+                State.currentPage = Config.AnimationPage or 1
+                State.totalPages = calculateTotalPages()
+                updatePageDisplay()
+                updateEmotes()
+                if updateScriptPriorityOverlay then updateScriptPriorityOverlay() end
+            end
+        end)
+    end
 
--- Buzlu cam + gradyan wrapper
-local _glassApplyBase = ApplyTheme
-ApplyTheme = function(name)
-	_glassApplyBase(name)
-	local isGlass = name == "FrostedGlass" or name == "DarkGlass"
-	-- Eski blur varsa temizle
-	pcall(function()
-		local b = game:GetService("Lighting"):FindFirstChild("VexroGlassBlur")
-		if b then b:Destroy() end
-	end)
-	-- Şeffaflık
-	TweenService:Create(main, TweenInfo.new(0.3), {BackgroundTransparency = isGlass and 0.18 or 0}):Play()
-	-- Noise overlay (cam temaları)
-	local noiseOverlay = main:FindFirstChild("VexroGlassNoise")
-	if isGlass then
-		if not noiseOverlay then
-			noiseOverlay = Instance.new("ImageLabel")
-			noiseOverlay.Name = "VexroGlassNoise"
-			noiseOverlay.Size = UDim2.new(1, 0, 1, 0)
-			noiseOverlay.BackgroundTransparency = 1
-			noiseOverlay.Image = "rbxassetid://9968344672"
-			noiseOverlay.ScaleType = Enum.ScaleType.Tile
-			noiseOverlay.TileSize = UDim2.new(0, 64, 0, 64)
-			noiseOverlay.ZIndex = 1
-			noiseOverlay.Parent = main
-		end
-		noiseOverlay.ImageTransparency = name == "FrostedGlass" and 0.82 or 0.88
-	elseif noiseOverlay then
-		noiseOverlay:Destroy()
-	end
-	-- Gradyan: ayrı bir arka plan frame içinde (BackgroundColor3 tween'iyle çakışmaz)
-	local gradFrame = main:FindFirstChild("VexroGradFrame")
-	if not gradFrame then
-		gradFrame = Instance.new("Frame")
-		gradFrame.Name = "VexroGradFrame"
-		gradFrame.Size = UDim2.new(1, 0, 1, 0)
-		gradFrame.BackgroundColor3 = Color3.new(1, 1, 1)
-		gradFrame.BackgroundTransparency = 0
-		gradFrame.BorderSizePixel = 0
-		gradFrame.ZIndex = 1
-		gradFrame.Parent = main
-		Instance.new("UICorner", gradFrame).CornerRadius = UDim.new(0, 20)
-		local grad = Instance.new("UIGradient")
-		grad.Name = "VexroMainGrad"
-		grad.Parent = gradFrame
-	end
-	-- Cam temalarında gradyan frame'i yarı saydam yap ki arkası görünsün
-	TweenService:Create(gradFrame, TweenInfo.new(0.3), {BackgroundTransparency = isGlass and 0.45 or 0}):Play()
-	local grad = gradFrame:FindFirstChild("VexroMainGrad")
-	if grad then
-		local g = ThemeGradients[name] or ThemeGradients.Dark
-		grad.Color = ColorSequence.new{
-			ColorSequenceKeypoint.new(0, g[1]),
-			ColorSequenceKeypoint.new(1, g[2]),
-		}
-		grad.Rotation = g[3]
-	end
+    GuiService:SetEmotesMenuOpen(false)
+    task.wait(0.15)
+
+    local exists, emotesWheel = checkEmotesMenuExists()
+    if not exists then State.customAnimationEditorActive = false; return end
+    emotesWheel.Visible = true
+
+    State.CustomAnimForceVisibleConn = RunService.Heartbeat:Connect(function()
+        if not State.customAnimationEditorActive then return end
+        pcall(function()
+            local _, ew = checkEmotesMenuExists()
+            if ew then ew.Visible = true end
+        end)
+    end)
+
+    local main = getSettingsMainFrame()
+    if main then main.Visible = false end
+    if syncToggleVisibility then syncToggleVisibility() end
+
+    local overlay = Instance.new("Frame")
+    overlay.Name = "CustomAnimOverlay"
+    overlay.Parent = SettingsLib.UI
+    overlay.BackgroundTransparency = 1
+    overlay.Size = UDim2.fromScale(1, 1)
+    overlay.ZIndex = 6000
+    overlay.Active = false
+    State.CustomAnimOverlay = overlay
+
+    local bc = Instance.new("Frame")
+    bc.Parent = overlay
+    bc.BackgroundTransparency = 1
+    bc.AnchorPoint = Vector2.new(1, 0)
+    bc.Position = UDim2.new(1, -10, 0, 10)
+    bc.Size = UDim2.fromOffset(42, 42)
+    bc.ZIndex = 6000
+
+    local backBtn = Instance.new("ImageButton")
+    backBtn.Name = "CustomAnimBackBtn"
+    backBtn.Size = UDim2.fromOffset(42, 42)
+    backBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    backBtn.BackgroundTransparency = 0.4
+    backBtn.Image = "rbxassetid://79024388644722"
+    backBtn.ZIndex = 6001
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = backBtn
+    
+    backBtn.Parent = bc
+    
+    State.CustomAnimEditorConnections = State.CustomAnimEditorConnections or {}
+    table.insert(State.CustomAnimEditorConnections, backBtn.MouseButton1Click:Connect(function()
+        State.exitCustomAnimationEditor()
+    end))
+
+    if UI._2Routenumber then UI._2Routenumber.TextEditable = false; UI._2Routenumber.Active = false; pcall(function() UI._2Routenumber:ReleaseFocus() end) end
+
+    getgenv().Notify({ Title = "7yd7 | Animation Editor", Content = "🖱️ Select an animation from the wheel to set for " .. animName, Duration = 5 })
 end
 
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.new(1, 1, 1) -- Gradient kullanılacak
-mainStroke.Thickness = 3
-mainStroke.Transparency = 0
-mainStroke.Parent = main
+State.CustomAnimTab = SettingsLib.CreateTab("Animation", 4)
+State.CustomAnimDropdown = SettingsLib.AddDropdown(State.CustomAnimTab, "Select Animation", State.CustomAnimations.Order, State.currentCustomAnimationName, function(v)
+    State.currentCustomAnimationName = v
+    State.CustomAnimations.Selected = v
+    State.SaveCustomAnimations(State.CustomAnimations)
+    if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+    if State.ApplyCustomAnimIconUI then State.ApplyCustomAnimIconUI() end
+    if refreshCustomAnimationState then refreshCustomAnimationState(false) end
+end)
+if State.CustomAnimDropdown and State.CustomAnimDropdown.Button and State.CustomAnimDropdown.Button.Parent and State.CustomAnimDropdown.Button.Parent.Parent then
+   State.CustomAnimDropdown.Button.Parent.Parent.LayoutOrder = 0
+end
 
-mainStrokeGrad = Instance.new("UIGradient")
-mainStrokeGrad.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0, currentTheme.stroke),
-	ColorSequenceKeypoint.new(0.33, currentTheme.accent),
-	ColorSequenceKeypoint.new(0.66, currentTheme.stroke),
-	ColorSequenceKeypoint.new(1, currentTheme.accent)
-}
-mainStrokeGrad.Parent = mainStroke
+local CustomAnimBtnItem = SettingsLib.AddItem(State.CustomAnimTab, "Animation Management", "Manage your animations")
+CustomAnimBtnItem.LayoutOrder = 1 
+CustomAnimBtnItem.BackgroundColor3 = Color3.fromRGB(35, 38, 42)
+CustomAnimBtnItem.Size = UDim2.new(0.95, 0, 0, 70) 
+for _, v in pairs(CustomAnimBtnItem:GetChildren()) do if v.Name == "Title" or v.Name == "Desc" then v:Destroy() end end
 
--- Animasyonu başlat
-task.spawn(function()
-	local rot = 0
-	while mainStroke.Parent do
-		rot = rot + 360
-		TweenService:Create(mainStrokeGrad, TweenInfo.new(2, Enum.EasingStyle.Linear), {Rotation = rot}):Play()
-		task.wait(2)
-	end
+local CustomAnimMgtContainer = Instance.new("Frame")
+CustomAnimMgtContainer.Parent = CustomAnimBtnItem
+CustomAnimMgtContainer.BackgroundTransparency = 1
+CustomAnimMgtContainer.Size = UDim2.new(1, 0, 1, 0)
+
+local CustomAnimLayout = Instance.new("UIListLayout")
+CustomAnimLayout.FillDirection = Enum.FillDirection.Horizontal
+CustomAnimLayout.Padding = UDim.new(0, 15)
+CustomAnimLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+CustomAnimLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+CustomAnimLayout.Parent = CustomAnimMgtContainer
+
+function NormalizeCustomAnimationData(animData)
+    local defaultAnim = {
+        idle = { Animation1 = 0, Animation2 = 0 },
+        walk = { WalkAnim = 0 },
+        run = { RunAnim = 0 },
+        jump = { JumpAnim = 0 },
+        fall = { FallAnim = 0 },
+        swimidle = { SwimIdle = 0 },
+        swim = { Swim = 0 },
+        __meta = { IconImage = DEFAULT_IDLE_ICON_ID, IconColor = ColorToTable(DEFAULT_IDLE_ICON_COLOR) }
+    }
+    
+    local result = { Sets = { Default = DeepCopy(defaultAnim) }, Order = {"Default"}, Selected = "Default" }
+    if type(animData) ~= "table" then return result end
+    
+    local setsTable = animData.Sets or animData
+    if type(setsTable) == "table" then
+        for name, data in pairs(setsTable) do
+            if type(data) == "table" then
+                if name == "Default" then
+                    result.Sets.Default = data
+                else
+                    result.Sets[name] = data
+                end
+                data.__meta = data.__meta or {}
+                if data.__meta.IconImage == nil then data.__meta.IconImage = DEFAULT_IDLE_ICON_ID end
+                if data.__meta.IconColor == nil then data.__meta.IconColor = ColorToTable(DEFAULT_IDLE_ICON_COLOR) end
+            end
+        end
+    end
+    
+    local order = animData.Order
+    if type(order) == "table" then
+        for _, name in ipairs(order) do
+            if name ~= "Default" and result.Sets[name] then
+                table.insert(result.Order, name)
+            end
+        end
+    else
+        for name, _ in pairs(result.Sets) do
+            if name ~= "Default" then table.insert(result.Order, name) end
+        end
+    end
+    
+    local selected = animData.Selected
+    if type(selected) == "string" and result.Sets[selected] then
+        result.Selected = selected
+    end
+    
+    return result
+end
+
+function MakeUniqueSetName(baseSets, desiredName)
+    if not baseSets[desiredName] then return desiredName end
+    local i = 2
+    local candidate = desiredName .. " (Imported)"
+    if not baseSets[candidate] then return candidate end
+    while true do
+        candidate = desiredName .. " (Imported " .. i .. ")"
+        if not baseSets[candidate] then return candidate end
+        i = i + 1
+    end
+end
+
+SettingsLib.AddIconButton(CustomAnimMgtContainer, "108445456753346", function()
+    local popup, content = CreatePopup("Create Animation")
+    local In = CreateInput(content, "Animation Name...")
+    
+    local Save = CreateButton(content, "SAVE", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Cancel.TextColor3 = Color3.new(1,1,1)
+
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not State.CustomAnimations.Sets[In.Text] then
+            local defaultAnim = {
+                idle = { Animation1 = 0, Animation2 = 0 },
+                walk = { WalkAnim = 0 },
+                run = { RunAnim = 0 },
+                jump = { JumpAnim = 0 },
+                fall = { FallAnim = 0 },
+                swimidle = { SwimIdle = 0 },
+                swim = { Swim = 0 },
+                __meta = { IconImage = DEFAULT_IDLE_ICON_ID, IconColor = ColorToTable(DEFAULT_IDLE_ICON_COLOR) }
+            }
+            State.CustomAnimations.Sets[In.Text] = defaultAnim
+            table.insert(State.CustomAnimations.Order, In.Text)
+            
+            table.sort(State.CustomAnimations.Order, function(a, b)
+                if a == "Default" then return true end
+                if b == "Default" then return false end
+                return a:lower() < b:lower()
+            end)
+            
+            State.currentCustomAnimationName = In.Text
+            State.CustomAnimations.Selected = In.Text
+            State.SaveCustomAnimations(State.CustomAnimations)
+            if State.CustomAnimDropdown then
+                State.CustomAnimDropdown.Refresh(State.CustomAnimations.Order)
+                State.CustomAnimDropdown.Button.Text = State.currentCustomAnimationName .. "  ▼"
+            end
+            if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+            if State.ApplyCustomAnimIconUI then State.ApplyCustomAnimIconUI() end
+            if refreshCustomAnimationState then refreshCustomAnimationState(false) end
+            popup:Destroy()
+        end
+    end)
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
 end)
 
--- Background Particles
-local bgParticles = Instance.new("Frame")
-bgParticles.Name = "BgParticles"
-bgParticles.Size = UDim2.new(1, 0, 1, 0)
-bgParticles.BackgroundTransparency = 1
-bgParticles.ZIndex = 1
-bgParticles.Parent = main
+SettingsLib.AddIconButton(CustomAnimMgtContainer, "71829270056766", function()
+    if State.currentCustomAnimationName ~= "Default" then
+        local idx = table.find(State.CustomAnimations.Order, State.currentCustomAnimationName)
+        if idx then table.remove(State.CustomAnimations.Order, idx) end
+        
+        State.CustomAnimations.Sets[State.currentCustomAnimationName] = nil
+        State.currentCustomAnimationName = "Default"
+        State.CustomAnimations.Selected = "Default"
+        State.SaveCustomAnimations(State.CustomAnimations)
+        if State.CustomAnimDropdown then
+            State.CustomAnimDropdown.Refresh(State.CustomAnimations.Order)
+            State.CustomAnimDropdown.Button.Text = "Default  ▼"
+        end
+        if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+        if State.ApplyCustomAnimIconUI then State.ApplyCustomAnimIconUI() end
+        if refreshCustomAnimationState then refreshCustomAnimationState(false) end
+    end
+end)
 
-for i = 1, 20 do
-	local particle = Instance.new("Frame")
-	local s = math.random(5, 12)
-	particle.Size = UDim2.new(0, s, 0, s)
-	particle.Position = UDim2.new(math.random(), 0, math.random(), 0)
-	particle.BackgroundColor3 = currentTheme.accent
-	particle.BackgroundTransparency = math.random(4, 8) / 10
-	particle.ZIndex = 1
-	particle.Parent = bgParticles
-	Instance.new("UICorner", particle).CornerRadius = UDim.new(1, 0)
-	
-	RegisterTheme(particle, "BackgroundColor3", "accent")
-	
-	task.spawn(function()
-		while particle.Parent do
-			TweenService:Create(particle, TweenInfo.new(math.random(4, 8), Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-				Position = UDim2.new(math.random(), 0, math.random(), 0)
-			}):Play()
-			task.wait(math.random(4, 8))
-		end
-	end)
+SettingsLib.AddIconButton(CustomAnimMgtContainer, "117761881427472", function()
+    if State.currentCustomAnimationName == "Default" then return end
+    
+    local popup, content = CreatePopup("Rename Animation")
+    local In = CreateInput(content, "New Name...", State.currentCustomAnimationName)
+    
+    local Save = CreateButton(content, "RENAME", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Cancel.TextColor3 = Color3.new(1,1,1)
+
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not State.CustomAnimations.Sets[In.Text] then
+            local idx = table.find(State.CustomAnimations.Order, State.currentCustomAnimationName)
+            if idx then State.CustomAnimations.Order[idx] = In.Text end
+            
+            State.CustomAnimations.Sets[In.Text] = State.CustomAnimations.Sets[State.currentCustomAnimationName]
+            State.CustomAnimations.Sets[State.currentCustomAnimationName] = nil
+            State.currentCustomAnimationName = In.Text
+            State.CustomAnimations.Selected = In.Text
+            State.SaveCustomAnimations(State.CustomAnimations)
+            if State.CustomAnimDropdown then
+                State.CustomAnimDropdown.Refresh(State.CustomAnimations.Order)
+                State.CustomAnimDropdown.Button.Text = State.currentCustomAnimationName .. "  ▼"
+            end
+            if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+            if State.ApplyCustomAnimIconUI then State.ApplyCustomAnimIconUI() end
+            if refreshCustomAnimationState then refreshCustomAnimationState(false) end
+            popup:Destroy()
+        end
+    end)
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(CustomAnimMgtContainer, "107588515524752", function()
+    local currentSet = State.CustomAnimations.Sets[State.currentCustomAnimationName]
+    local data = {
+        Type = "CustomAnimationSet",
+        Name = State.currentCustomAnimationName,
+        Data = currentSet
+    }
+    local json = HttpService:JSONEncode(data)
+    
+    local popup, content = CreatePopup("Export Animations", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "", json, true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    box.TextEditable = false
+    
+    local copy = CreateButton(content, "COPY TO CLIPBOARD", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+    copy.MouseButton1Click:Connect(function()
+        setclipboard(json)
+        copy.Text = "COPIED!"
+        task.delay(1, function() copy.Text = "COPY TO CLIPBOARD" end)
+    end)
+    
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "X"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(CustomAnimMgtContainer, "78317476576895", function()
+    local popup, content = CreatePopup("Import Animations", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "Paste Animation JSON here...", "", true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    
+    local imp = CreateButton(content, "IMPORT DATA", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+    imp.MouseButton1Click:Connect(function()
+        local s, d = pcall(function() return HttpService:JSONDecode(box.Text) end)
+        if s and type(d) == "table" then
+            if d.Type and d.Type ~= "CustomAnimationSet" then
+                getgenv().Notify({ Title = "Error", Content = "Backup type mismatch!", Duration = 3 })
+                return
+            end
+            if type(d.Data) ~= "table" then
+                getgenv().Notify({ Title = "Error", Content = "Invalid JSON", Duration = 3 })
+                return
+            end
+            State.CustomAnimations = NormalizeCustomAnimationData(State.CustomAnimations)
+            local sourceName = d.Name or "Imported"
+            local targetName = MakeUniqueSetName(State.CustomAnimations.Sets, sourceName)
+            local imported = d.Data
+            imported.__meta = imported.__meta or {}
+            if imported.__meta.IconImage == nil then imported.__meta.IconImage = DEFAULT_IDLE_ICON_ID end
+            if imported.__meta.IconColor == nil then imported.__meta.IconColor = ColorToTable(DEFAULT_IDLE_ICON_COLOR) end
+            State.CustomAnimations.Sets[targetName] = imported
+            table.insert(State.CustomAnimations.Order, targetName)
+            State.currentCustomAnimationName = targetName
+            State.CustomAnimations.Selected = targetName
+            
+            State.SaveCustomAnimations(State.CustomAnimations)
+            if State.CustomAnimDropdown then
+                State.CustomAnimDropdown.Refresh(State.CustomAnimations.Order)
+                State.CustomAnimDropdown.Button.Text = State.currentCustomAnimationName .. "  ▼"
+            end
+            if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+            if State.ApplyCustomAnimIconUI then State.ApplyCustomAnimIconUI() end
+            if refreshCustomAnimationState then refreshCustomAnimationState(false) end
+            popup:Destroy()
+            getgenv().Notify({ Title = "7yd7 | Animation", Content = "✅ Imported custom animations", Duration = 3 })
+        else
+            getgenv().Notify({ Title = "Error", Content = "Invalid JSON", Duration = 3 })
+        end
+    end)
+    
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "x"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+function GetCurrentCustomAnimMeta()
+    local set = State.CustomAnimations.Sets[State.currentCustomAnimationName]
+    if not set then return nil end
+    set.__meta = set.__meta or {}
+    if set.__meta.IconImage == nil then set.__meta.IconImage = DEFAULT_IDLE_ICON_ID end
+    if set.__meta.IconColor == nil then set.__meta.IconColor = ColorToTable(DEFAULT_IDLE_ICON_COLOR) end
+    return set.__meta
 end
 
--- ===============================================================
--- SIDEBAR
--- ===============================================================
-
-local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, sideBarW, 1, 0)
-sidebar.BackgroundColor3 = currentTheme.sidebar
-sidebar.ClipsDescendants = true
-sidebar.ZIndex = 8
-sidebar.Parent = main
-Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 14)
-RegisterTheme(sidebar, "BackgroundColor3", "sidebar")
-
-local sideOverlay = Instance.new("Frame")
-sideOverlay.Size = UDim2.new(0, 10, 1, 0)
-sideOverlay.Position = UDim2.new(1, -10, 0, 0)
-sideOverlay.BackgroundColor3 = currentTheme.sidebar
-sideOverlay.BorderSizePixel = 0
-sideOverlay.ZIndex = 7
-sideOverlay.Parent = sidebar
-RegisterTheme(sideOverlay, "BackgroundColor3", "sidebar")
-
-local tabBtns = {}
-local tabBtnS = math.floor((isMobile and 40 or 48) * BUTTON_SCALE)
-
-local function CreateTabBtn(icon, tabName, yPos, customScale, rawImage)
-	local isUrl = type(icon) == "string" and (string.find(icon, "rbxassetid://") or string.find(icon, "http") or string.find(icon, "rbxthumb://"))
-	
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, tabBtnS, 0, tabBtnS)
-	btn.Position = UDim2.new(0.5, -tabBtnS/2, 0, yPos)
-	btn.BackgroundColor3 = currentTheme.sidebar
-	btn.BackgroundTransparency = 0.8
-	btn.Text = ""
-	btn.TextSize = isMobile and 28 or 34
-	btn.Font = Enum.Font.GothamBold
-	btn.TextColor3 = currentTheme.text
-	btn.ZIndex = 9
-	btn.Parent = sidebar
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
-	
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = currentTheme.sidebar
-	stroke.Thickness = 2
-	stroke.Transparency = 0.7
-	stroke.Parent = btn
-	
-	local imgElement = nil
-	if isUrl then
-		local img = Instance.new("ImageLabel")
-		local s = (tabName == "emotes") and 0.85 or (0.95 * ICON_SCALE)
-		img.Size = UDim2.fromScale(s, s)
-		img.Position = UDim2.fromScale(0.5, 0.5)
-		img.AnchorPoint = Vector2.new(0.5, 0.5)
-		img.BackgroundTransparency = 1
-		img.Image = rawImage or ResolveAssetImage(icon)
-		img.ImageColor3 = currentTheme.text
-		img.ZIndex = 110
-		img.Parent = btn
-		RegisterTheme(img, "ImageColor3", "text")
-		imgElement = img
-	else
-		btn.Text = icon
-		RegisterTheme(btn, "TextColor3", "text")
-	end
-
-	btn.MouseEnter:Connect(function()
-		if currentTab ~= tabName then
-			TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundTransparency = 0.7, BackgroundColor3 = currentTheme.stroke, Size = UDim2.new(0, tabBtnS + 2, 0, tabBtnS + 2)}):Play()
-		end
-	end)
-	btn.MouseLeave:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.15), {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(0, tabBtnS, 0, tabBtnS)
-		}):Play()
-	end)
-	
-	-- Quatrefoil indicator (MaterialYou theme - asset tabanlı)
-	local qSize = tabBtnS + 10
-	local quatrefoil = Instance.new("ImageLabel")
-	quatrefoil.Name = "Quatrefoil"
-	quatrefoil.Size = UDim2.new(0, qSize, 0, qSize)
-	quatrefoil.Position = UDim2.new(0.5, -qSize/2, 0, yPos + tabBtnS/2 - qSize/2)
-	quatrefoil.BackgroundTransparency = 1
-	quatrefoil.Image = ResolveAssetImage(Icons.Quatrefoil)
-	quatrefoil.ImageColor3 = currentTheme.accent
-	quatrefoil.ImageTransparency = 0.3
-	quatrefoil.ScaleType = Enum.ScaleType.Fit
-	quatrefoil.ZIndex = 9
-	quatrefoil.Visible = false
-	quatrefoil.Parent = sidebar
-	
-	tabBtns[tabName] = {btn = btn, stroke = stroke, img = imgElement, quatrefoil = quatrefoil, yPos = yPos}
-	return btn
+State.ApplyCustomAnimIconUI = function()
+    if not State.CustomAnimIconControl or not State.CustomAnimIconControl.SetValue then return end
+    local meta = GetCurrentCustomAnimMeta()
+    if not meta then return end
+    State.CustomAnimIconControl.SetValue(meta.IconImage or DEFAULT_IDLE_ICON_ID, TableToColor(meta.IconColor or ColorToTable(DEFAULT_IDLE_ICON_COLOR)))
 end
 
-CreateTabBtn(Icons.Emote, "emotes", 8)
-CreateTabBtn(Icons.FavoriteFull, "favorites", 8 + tabBtnS + 6)
-CreateTabBtn(Icons.Recent, "recent", 8 + (tabBtnS + 6) * 2)
-CreateTabBtn("rbxassetid://115725480722697", "friends", 8 + (tabBtnS + 6) * 3)
-if not isMobile then
-	CreateTabBtn(Icons.Keybind, "keybinds", 8 + (tabBtnS + 6) * 4)
-end
-CreateTabBtn(Icons.Settings, "settings", isMobile and 8 + (tabBtnS + 6) * 4 or 8 + (tabBtnS + 6) * 5)
-
--- Sliding active-tab indicator (replaces per-btn gradient; hidden for MaterialYou)
-local _indS = tabBtnS + 4
-local _tabIndicator = Instance.new("Frame")
-_tabIndicator.Name = "TabIndicator"
-_tabIndicator.Size = UDim2.new(0, _indS, 0, _indS)
-_tabIndicator.Position = UDim2.new(0.5, -_indS/2, 0, 8 - 2)
-_tabIndicator.BackgroundColor3 = Color3.new(1, 1, 1)
-_tabIndicator.BackgroundTransparency = 0
-_tabIndicator.ZIndex = 8
-_tabIndicator.Parent = sidebar
-Instance.new("UICorner", _tabIndicator).CornerRadius = UDim.new(0, 12)
-
-local _indStroke = Instance.new("UIStroke")
-_indStroke.Color = Color3.new(1, 1, 1)
-_indStroke.Thickness = 1.5
-_indStroke.Transparency = 0.15
-_indStroke.Parent = _tabIndicator
-
-local _indGrad = Instance.new("UIGradient")
-_indGrad.Rotation = 90
-_indGrad.Transparency = NumberSequence.new{
-	NumberSequenceKeypoint.new(0, 0.25),
-	NumberSequenceKeypoint.new(1, 0.72)
-}
-_indGrad.Parent = _tabIndicator
-
-local function _UpdateIndicatorGrad()
-	local acc = currentTheme.accent
-	local topC = Color3.new(math.min(1, acc.R + 0.18), math.min(1, acc.G + 0.18), math.min(1, acc.B + 0.18))
-	local botC = Color3.new(acc.R * 0.25, acc.G * 0.25, acc.B * 0.25)
-	_indGrad.Color = ColorSequence.new{
-		ColorSequenceKeypoint.new(0, topC),
-		ColorSequenceKeypoint.new(1, botC)
-	}
-end
-_UpdateIndicatorGrad()
-
--- ===============================================================
--- CONTENT
--- ===============================================================
-
-local content = Instance.new("Frame")
-content.Size = UDim2.new(1, -sideBarW, 1, 0)
-content.Position = UDim2.new(0, sideBarW, 0, 0)
-content.BackgroundTransparency = 1
-content.Parent = main
-
-local titleH = isMobile and 38 or 46
-local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, titleH)
-titleBar.BackgroundColor3 = currentTheme.secondary
-titleBar.ZIndex = 5
-titleBar.Parent = content
-Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 14)
-RegisterTheme(titleBar, "BackgroundColor3", "secondary")
-
-local titleOverlay = Instance.new("Frame")
-titleOverlay.Size = UDim2.new(0, 14, 1, 0)
-titleOverlay.BackgroundColor3 = currentTheme.secondary
-titleOverlay.BorderSizePixel = 0
-titleOverlay.ZIndex = 4
-titleOverlay.Parent = titleBar
-RegisterTheme(titleOverlay, "BackgroundColor3", "secondary")
-
-local titleIconSz = math.floor((isMobile and 32 or 36) * ICON_SCALE)
-local titleIcon = Instance.new("ImageLabel")
-titleIcon.Size = UDim2.new(0, titleIconSz, 0, titleIconSz)
-titleIcon.Position = UDim2.new(0, 10, 0.5, 0)
-titleIcon.AnchorPoint = Vector2.new(0, 0.5)
-titleIcon.BackgroundTransparency = 1
-titleIcon.Image = ResolveAssetImage(Icons.Emote)
-titleIcon.ImageColor3 = currentTheme.text
-titleIcon.ZIndex = 6
-titleIcon.Parent = titleBar
-RegisterTheme(titleIcon, "ImageColor3", "text")
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -160, 1, 0)
-title.Position = UDim2.new(0, 10 + titleIconSz + 6, 0, 0)
-title.BackgroundTransparency = 1
-title.Text = L.emotes
-title.TextColor3 = currentTheme.text
-title.Font = Enum.Font.GothamBold
-title.TextScaled = true
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.ZIndex = 5
-title.Parent = titleBar
-Instance.new("UITextSizeConstraint", title).MaxTextSize = isMobile and 16 or 20
-RegisterTheme(title, "TextColor3", "text")
-
-local _textGrads = {}
-local function _ApplyTextGrad(grad)
-	local name = Settings.theme
-	local topColor, botColor
-	if name == "Dark" or name == "DarkGlass" then
-		topColor = Color3.fromRGB(20, 20, 28)
-		botColor = Color3.new(1, 1, 1)
-	elseif name == "Light" or name == "FrostedGlass" then
-		topColor = Color3.fromRGB(20, 20, 30)
-		botColor = currentTheme.accent
-	else
-		topColor = currentTheme.accent
-		botColor = Color3.new(1, 1, 1)
-	end
-	grad.Color = ColorSequence.new{
-		ColorSequenceKeypoint.new(0, topColor),
-		ColorSequenceKeypoint.new(1, botColor)
-	}
-	grad.Rotation = 90
-end
-local function _AddTextGrad(textLabel)
-	local g = Instance.new("UIGradient")
-	_ApplyTextGrad(g)
-	g.Parent = textLabel
-	table.insert(_textGrads, g)
-	return g
-end
-_updateTitleGrad = function()
-	for i = #_textGrads, 1, -1 do
-		local g = _textGrads[i]
-		if g and g.Parent then
-			_ApplyTextGrad(g)
-		else
-			table.remove(_textGrads, i)
-		end
-	end
-end
-_AddTextGrad(title)
-
-local btnS = math.floor((isMobile and 28 or 36) * BUTTON_SCALE)
-
-local function MakeBtn(icon, px, colorKey, customSize)
-	local s = customSize or btnS
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(0, s, 0, s)
-	b.Position = UDim2.new(1, px, 0.5, -s/2)
-	b.BackgroundColor3 = currentTheme.tertiary
-	b.Text = ""
-	b.ZIndex = 10
-	b.Parent = titleBar
-	Instance.new("UICorner", b).CornerRadius = UDim.new(0.25, 0)
-	
-	local useWhite = (colorKey == "critical" or colorKey == "accent" or colorKey == "success")
-	
-	local isImg = type(icon) == "string" and (string.find(icon, "rbxassetid://") or string.find(icon, "http") or string.find(icon, "rbxthumb://"))
-	if isImg then
-		local img = Instance.new("ImageLabel")
-		img.Size = UDim2.new(0, math.floor(42 * ICON_SCALE), 0, math.floor(42 * ICON_SCALE))
-		img.Position = UDim2.new(0.5, 0, 0.5, 0)
-		img.AnchorPoint = Vector2.new(0.5, 0.5)
-		img.BackgroundTransparency = 1
-		img.Parent = b
-		img.Image = ResolveAssetImage(icon)
-		img.ImageColor3 = useWhite and Color3.new(1, 1, 1) or currentTheme.text
-		img.ZIndex = 110
-		if not useWhite then
-			RegisterTheme(img, "ImageColor3", "text")
-		end
-	else
-		-- Minus için bold metin kullan (Görünürlük için en iyisi)
-		if icon == "STOP_SHAPE" then
-			b.Text = ""
-			local sq = Instance.new("ImageLabel")
-			sq.Size = UDim2.new(0.75, 0, 0.75, 0)
-			sq.Position = UDim2.new(0.5, 0, 0.5, 0)
-			sq.AnchorPoint = Vector2.new(0.5, 0.5)
-			sq.BackgroundTransparency = 1
-			sq.Image = ResolveAssetImage("rbxassetid://113416463749658")
-			sq.ImageColor3 = Color3.new(1, 1, 1)
-			sq.ScaleType = Enum.ScaleType.Fit
-			sq.ZIndex = 110
-			sq.Parent = b
-		elseif icon == "CLOSE_SHAPE" then
-			b.Text = ""
-			local line1 = Instance.new("Frame")
-			line1.BorderSizePixel = 0
-			line1.Size = UDim2.new(0.40, 0, 0, math.floor(2 * math.max(1, ICON_SCALE))) -- Fixed: Reduced X size
-			line1.Position = UDim2.new(0.5, 0, 0.5, 0)
-			line1.AnchorPoint = Vector2.new(0.5, 0.5)
-			line1.Rotation = 45
-			line1.BackgroundColor3 = useWhite and Color3.new(1, 1, 1) or currentTheme.text
-			line1.ZIndex = 110
-			line1.Parent = b
-			Instance.new("UICorner", line1).CornerRadius = UDim.new(0, 2)
-			
-			local line2 = line1:Clone()
-			line2.Rotation = -45
-			line2.Parent = b
-			
-			if not useWhite then
-				RegisterTheme(line1, "BackgroundColor3", "text")
-				RegisterTheme(line2, "BackgroundColor3", "text")
-			end
-		elseif icon == Icons.Minus or icon == "-" then
-			b.Text = ""
-			local line = Instance.new("Frame")
-			line.BorderSizePixel = 0
-			line.Size = UDim2.new(0.40, 0, 0, math.floor(2 * math.max(1, ICON_SCALE))) -- Fixed: Reduced Minus size
-			line.Position = UDim2.new(0.5, 0, 0.5, 0)
-			line.AnchorPoint = Vector2.new(0.5, 0.5)
-			line.BackgroundColor3 = useWhite and Color3.new(1, 1, 1) or currentTheme.text
-			line.ZIndex = 110
-			line.Parent = b
-			Instance.new("UICorner", line).CornerRadius = UDim.new(0, 2)
-			if not useWhite then
-				RegisterTheme(line, "BackgroundColor3", "text")
-			end
-		elseif icon == Icons.Sort then
-			b.Text = icon
-			b.TextSize = math.floor((isMobile and 32 or 46) * FONT_SCALE)
-		else
-			b.Text = icon
-			b.TextSize = math.floor((isMobile and 12 or 16) * FONT_SCALE)
-		end
-		b.TextColor3 = useWhite and Color3.new(1, 1, 1) or currentTheme.text
-		b.Font = Enum.Font.GothamBlack
-		if not useWhite then
-			RegisterTheme(b, "TextColor3", "text")
-		end
-	end
-
-	b.MouseEnter:Connect(function()
-		local s = customSize or btnS
-		TweenService:Create(b, TweenInfo.new(0.1), {
-			Size = UDim2.new(0, s + 4, 0, s + 4),
-			Position = UDim2.new(1, px - 2, 0.5, -(s + 4)/2)
-		}):Play()
-	end)
-	b.MouseLeave:Connect(function()
-		local s = customSize or btnS
-		TweenService:Create(b, TweenInfo.new(0.1), {
-			Size = UDim2.new(0, s, 0, s),
-			Position = UDim2.new(1, px, 0.5, -s/2)
-		}):Play()
-	end)
-	return b
+do
+    local meta = GetCurrentCustomAnimMeta() or {}
+    local currentImage = meta.IconImage or DEFAULT_IDLE_ICON_ID
+    local currentColor = TableToColor(meta.IconColor or ColorToTable(DEFAULT_IDLE_ICON_COLOR))
+    State.CustomAnimIconControl = SettingsLib.AddAssetColor(State.CustomAnimTab, "Icon", "Asset ID or URL...", currentImage, currentColor, function(text, color)
+        local set = State.CustomAnimations.Sets[State.currentCustomAnimationName]
+        if not set then return end
+        set.__meta = set.__meta or {}
+        set.__meta.IconImage = text
+        set.__meta.IconColor = ColorToTable(color)
+        State.SaveCustomAnimations(State.CustomAnimations)
+        if refreshCustomAnimationState then refreshCustomAnimationState(false) end
+    end)
+    if State.CustomAnimIconControl and State.CustomAnimIconControl.Item then
+        State.CustomAnimIconControl.Item.LayoutOrder = 1.5
+    end
+    
+    local resetBtn = SettingsLib:Create("ImageButton", {
+        Parent = State.CustomAnimIconControl.Item,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -120, 0.5, -10),
+        Size = UDim2.fromOffset(20, 20),
+        Image = "rbxassetid://127493377027615",
+        ScaleType = Enum.ScaleType.Fit,
+        ZIndex = 10
+    })
+    resetBtn.MouseButton1Click:Connect(function()
+        local set = State.CustomAnimations.Sets[State.currentCustomAnimationName]
+        if not set then return end
+        set.__meta = set.__meta or {}
+        set.__meta.IconImage = DEFAULT_IDLE_ICON_ID
+        set.__meta.IconColor = ColorToTable(DEFAULT_IDLE_ICON_COLOR)
+        State.SaveCustomAnimations(State.CustomAnimations)
+        if State.CustomAnimIconControl and State.CustomAnimIconControl.SetValue then
+            State.CustomAnimIconControl.SetValue(DEFAULT_IDLE_ICON_ID, DEFAULT_IDLE_ICON_COLOR)
+        end
+        if refreshCustomAnimationState then refreshCustomAnimationState(false) end
+    end)
 end
 
-local copyEmoteBtn = MakeBtn("rbxassetid://77508802666652", -(btnS*5 + 24), "critical")
-local stopBtn = MakeBtn("STOP_SHAPE", -(btnS*4 + 18), "critical")
-local randBtn = MakeBtn(Icons.Sort, -(btnS*3 + 12), "accent")
-local minBtn = MakeBtn("-", -(btnS*2 + 6), "textDim")
-local closeBtn = MakeBtn("CLOSE_SHAPE", -(btnS + 2), "critical")
+State.CustomAnimUIElems = {}
+function CreateAnimSetUI(folder, cat, name)
+    local item = SettingsLib.AddItem(folder, cat .. " - " .. name, "Current ID: 0")
+    
+    local resetBtn = SettingsLib:Create("ImageButton", {
+        Parent = item,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -70, 0.5, -10),
+        Size = UDim2.fromOffset(20, 20),
+        Image = "rbxassetid://127493377027615",
+        ScaleType = Enum.ScaleType.Fit,
+        ZIndex = 10
+    })
+    
+    local editBtn = SettingsLib:Create("ImageButton", {
+        Parent = item,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -40, 0.5, -10),
+        Size = UDim2.fromOffset(20, 20),
+        Image = "rbxassetid://117761881427472",
+        ScaleType = Enum.ScaleType.Fit,
+        ZIndex = 10
+    })
+    
+    resetBtn.MouseButton1Click:Connect(function()
+        if State.currentCustomAnimationName == "Default" then return end
+        if State.CustomAnimations.Sets[State.currentCustomAnimationName] then
+            if not State.CustomAnimations.Sets[State.currentCustomAnimationName][cat] then
+                State.CustomAnimations.Sets[State.currentCustomAnimationName][cat] = {}
+            end
+            State.CustomAnimations.Sets[State.currentCustomAnimationName][cat][name] = 0
+            State.SaveCustomAnimations(State.CustomAnimations)
+            if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+            if refreshCustomAnimationState then refreshCustomAnimationState(true) end
+        end
+    end)
+    
+    editBtn.MouseButton1Click:Connect(function()
+        State.enterCustomAnimationEditor(cat, name)
+    end)
+    
+    table.insert(State.CustomAnimUIElems, { item = item, cat = cat, name = name })
+end
 
-if Settings.copyEmoteEnabled then
-	RegisterTheme(copyEmoteBtn, "BackgroundColor3", "success")
+State.CustomAnimFolders = {}
+State.CustomAnimFolders.Idle = SettingsLib.AddFolder(State.CustomAnimTab, "Idle Animations")
+State.CustomAnimFolders.Idle.Parent.LayoutOrder = 2
+CreateAnimSetUI(State.CustomAnimFolders.Idle, "idle", "Animation1")
+CreateAnimSetUI(State.CustomAnimFolders.Idle, "idle", "Animation2")
+
+State.CustomAnimFolders.Movement = SettingsLib.AddFolder(State.CustomAnimTab, "Movement Animations")
+State.CustomAnimFolders.Movement.Parent.LayoutOrder = 3
+CreateAnimSetUI(State.CustomAnimFolders.Movement, "walk", "WalkAnim")
+CreateAnimSetUI(State.CustomAnimFolders.Movement, "run", "RunAnim")
+CreateAnimSetUI(State.CustomAnimFolders.Movement, "jump", "JumpAnim")
+CreateAnimSetUI(State.CustomAnimFolders.Movement, "fall", "FallAnim")
+CreateAnimSetUI(State.CustomAnimFolders.Movement, "climb", "ClimbAnim")
+CreateAnimSetUI(State.CustomAnimFolders.Movement, "swimidle", "SwimIdle")
+CreateAnimSetUI(State.CustomAnimFolders.Movement, "swim", "Swim")
+
+State.RefreshCustomAnimUI = function()
+    local set = State.CustomAnimations.Sets[State.currentCustomAnimationName]
+    if not set then return end
+    
+    for _, elem in pairs(State.CustomAnimUIElems) do
+        local desc = elem.item:FindFirstChild("Desc")
+        if desc then
+            local val = set[elem.cat] and set[elem.cat][elem.name] or 0
+            desc.Text = "Current ID: " .. tostring(val)
+        end
+    end
+end
+State.RefreshCustomAnimUI()
+
+State.PageTab = SettingsLib.CreateTab("Page", 5)
+
+function GetEmotePageNames()
+    return State.EmotePages.Order
+end
+
+function GetAnimationPageNames()
+    return State.AnimationPages.Order
+end
+
+SettingsLib.AddItem(State.PageTab, "Page Profiles", "Pages allow you to save different favorite sets. Switch pages to quickly change your favorite wheel loadout.")
+
+SettingsLib.AddItem(State.PageTab, "Emote Profiles", "Manage your favorite emote profiles")
+
+State.PageDropdown = SettingsLib.AddDropdown(State.PageTab, "Select Emote Page", GetEmotePageNames(), State.currentEmotePageName, function(v)
+    SwitchEmotePage(v)
+    State.SaveEmotePages(State.EmotePages)
+end)
+
+local EmotePageMgtItem = SettingsLib.AddItem(State.PageTab, "Emote Page Management", " ")
+EmotePageMgtItem.BackgroundColor3 = Color3.fromRGB(35, 38, 42)
+EmotePageMgtItem.Size = UDim2.new(0.95, 0, 0, 70)
+for _, v in pairs(EmotePageMgtItem:GetChildren()) do if v.Name == "Title" or v.Name == "Desc" then v:Destroy() end end
+
+local EmotePageMgtContainer = Instance.new("Frame")
+EmotePageMgtContainer.Parent = EmotePageMgtItem
+EmotePageMgtContainer.BackgroundTransparency = 1
+EmotePageMgtContainer.Size = UDim2.new(1, 0, 1, 0)
+
+local EmotePageLayout = Instance.new("UIListLayout")
+EmotePageLayout.FillDirection = Enum.FillDirection.Horizontal
+EmotePageLayout.Padding = UDim.new(0, 15)
+EmotePageLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+EmotePageLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+EmotePageLayout.Parent = EmotePageMgtContainer
+
+SettingsLib.AddIconButton(EmotePageMgtContainer, "108445456753346", function()
+    local popup, content = CreatePopup("Create Emote Page")
+    local In = CreateInput(content, "Page Name...")
+    local Save = CreateButton(content, "SAVE", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not State.EmotePages.Sets[In.Text] then
+            State.EmotePages.Sets[In.Text] = {}
+            table.insert(State.EmotePages.Order, In.Text)
+            table.sort(State.EmotePages.Order, function(a, b)
+                if a == "Default" then return true end
+                if b == "Default" then return false end
+                return a:lower() < b:lower()
+            end)
+            State.SaveEmotePages(State.EmotePages)
+            if State.PageDropdown then State.PageDropdown.Refresh(GetEmotePageNames()) end
+            SwitchEmotePage(In.Text)
+            if State.PageDropdown then State.PageDropdown.Button.Text = State.currentEmotePageName .. "  ▼" end
+            popup:Destroy()
+        end
+    end)
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(EmotePageMgtContainer, "71829270056766", function()
+    if State.currentEmotePageName ~= "Default" then
+        local idx = table.find(State.EmotePages.Order, State.currentEmotePageName)
+        if idx then table.remove(State.EmotePages.Order, idx) end
+        State.EmotePages.Sets[State.currentEmotePageName] = nil
+        State.currentEmotePageName = "Default"
+        State.EmotePages.Selected = "Default"
+        State.SaveEmotePages(State.EmotePages)
+        if State.PageDropdown then
+            State.PageDropdown.Refresh(GetEmotePageNames())
+            State.PageDropdown.Button.Text = "Default  ▼"
+        end
+        SwitchEmotePage("Default")
+    end
+end)
+
+SettingsLib.AddIconButton(EmotePageMgtContainer, "117761881427472", function()
+    if State.currentEmotePageName == "Default" then return end
+    local popup, content = CreatePopup("Rename Emote Page")
+    local In = CreateInput(content, "New Name...", State.currentEmotePageName)
+    local Save = CreateButton(content, "RENAME", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not State.EmotePages.Sets[In.Text] then
+            local idx = table.find(State.EmotePages.Order, State.currentEmotePageName)
+            if idx then State.EmotePages.Order[idx] = In.Text end
+            State.EmotePages.Sets[In.Text] = State.EmotePages.Sets[State.currentEmotePageName]
+            State.EmotePages.Sets[State.currentEmotePageName] = nil
+            State.currentEmotePageName = In.Text
+            State.EmotePages.Selected = In.Text
+            State.SaveEmotePages(State.EmotePages)
+            if State.PageDropdown then
+                State.PageDropdown.Refresh(GetEmotePageNames())
+                State.PageDropdown.Button.Text = State.currentEmotePageName .. "  ▼"
+            end
+            popup:Destroy()
+        end
+    end)
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(EmotePageMgtContainer, "107588515524752", function() 
+    local currentSet = State.EmotePages.Sets[State.currentEmotePageName]
+    local data = { Type = "EmotePageSet", Name = State.currentEmotePageName, Data = currentSet }
+    local json = HttpService:JSONEncode(data)
+    local popup, content = CreatePopup("Export Emote Page", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "", json, true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    box.TextEditable = false
+    local copy = CreateButton(content, "COPY TO CLIPBOARD", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+    copy.MouseButton1Click:Connect(function()
+        setclipboard(json)
+        copy.Text = "COPIED!"
+        task.delay(1, function() copy.Text = "COPY TO CLIPBOARD" end)
+    end)
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "×"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(EmotePageMgtContainer, "78317476576895", function() 
+    local popup, content = CreatePopup("Import Emote Page", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "Paste Page JSON here...", "", true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    local imp = CreateButton(content, "IMPORT DATA", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+    imp.MouseButton1Click:Connect(function()
+        local s, d = pcall(function() return HttpService:JSONDecode(box.Text) end)
+        if s and type(d) == "table" and d.Type == "EmotePageSet" and type(d.Data) == "table" then
+            local targetName = MakeUniqueSetName(State.EmotePages.Sets, d.Name or "Imported")
+            State.EmotePages.Sets[targetName] = d.Data
+            table.insert(State.EmotePages.Order, targetName)
+            State.currentEmotePageName = targetName
+            State.EmotePages.Selected = targetName
+            State.SaveEmotePages(State.EmotePages)
+            if State.PageDropdown then
+                State.PageDropdown.Refresh(GetEmotePageNames())
+                State.PageDropdown.Button.Text = State.currentEmotePageName .. "  ▼"
+            end
+            SwitchEmotePage(targetName)
+            popup:Destroy()
+            getgenv().Notify({ Title = "7yd7 | Page", Content = "✅ Imported Emote page", Duration = 3 })
+        else
+            getgenv().Notify({ Title = "Error", Content = "Invalid Emote Page JSON", Duration = 3 })
+        end
+    end)
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "×"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddItem(State.PageTab, "Animation Profiles", "Manage your favorite animation profiles")
+
+State.AnimationPageDropdown = SettingsLib.AddDropdown(State.PageTab, "Select Animation Page", GetAnimationPageNames(), State.currentAnimationPageName, function(v)
+    SwitchAnimationPage(v)
+    State.SaveAnimationPages(State.AnimationPages)
+end)
+
+local AnimPageMgtItem = SettingsLib.AddItem(State.PageTab, "Animation Page Management", " ")
+AnimPageMgtItem.BackgroundColor3 = Color3.fromRGB(35, 38, 42)
+AnimPageMgtItem.Size = UDim2.new(0.95, 0, 0, 70)
+for _, v in pairs(AnimPageMgtItem:GetChildren()) do if v.Name == "Title" or v.Name == "Desc" then v:Destroy() end end
+
+local AnimPageMgtContainer = Instance.new("Frame")
+AnimPageMgtContainer.Parent = AnimPageMgtItem
+AnimPageMgtContainer.BackgroundTransparency = 1
+AnimPageMgtContainer.Size = UDim2.new(1, 0, 1, 0)
+
+local AnimPageLayout = Instance.new("UIListLayout")
+AnimPageLayout.FillDirection = Enum.FillDirection.Horizontal
+AnimPageLayout.Padding = UDim.new(0, 15)
+AnimPageLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+AnimPageLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+AnimPageLayout.Parent = AnimPageMgtContainer
+
+SettingsLib.AddIconButton(AnimPageMgtContainer, "108445456753346", function() 
+    local popup, content = CreatePopup("Create Animation Page")
+    local In = CreateInput(content, "Page Name...")
+    local Save = CreateButton(content, "SAVE", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not State.AnimationPages.Sets[In.Text] then
+            State.AnimationPages.Sets[In.Text] = {}
+            table.insert(State.AnimationPages.Order, In.Text)
+            table.sort(State.AnimationPages.Order, function(a, b)
+                if a == "Default" then return true end
+                if b == "Default" then return false end
+                return a:lower() < b:lower()
+            end)
+            State.SaveAnimationPages(State.AnimationPages)
+            if State.AnimationPageDropdown then State.AnimationPageDropdown.Refresh(GetAnimationPageNames()) end
+            SwitchAnimationPage(In.Text)
+            if State.AnimationPageDropdown then State.AnimationPageDropdown.Button.Text = State.currentAnimationPageName .. "  ▼" end
+            popup:Destroy()
+        end
+    end)
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(AnimPageMgtContainer, "71829270056766", function()
+    if State.currentAnimationPageName ~= "Default" then
+        local idx = table.find(State.AnimationPages.Order, State.currentAnimationPageName)
+        if idx then table.remove(State.AnimationPages.Order, idx) end
+        State.AnimationPages.Sets[State.currentAnimationPageName] = nil
+        State.currentAnimationPageName = "Default"
+        State.AnimationPages.Selected = "Default"
+        State.SaveAnimationPages(State.AnimationPages)
+        if State.AnimationPageDropdown then
+            State.AnimationPageDropdown.Refresh(GetAnimationPageNames())
+            State.AnimationPageDropdown.Button.Text = "Default  ▼"
+        end
+        SwitchAnimationPage("Default")
+    end
+end)
+
+SettingsLib.AddIconButton(AnimPageMgtContainer, "117761881427472", function()
+    if State.currentAnimationPageName == "Default" then return end
+    local popup, content = CreatePopup("Rename Animation Page")
+    local In = CreateInput(content, "New Name...", State.currentAnimationPageName)
+    local Save = CreateButton(content, "RENAME", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.6, 0))
+    local Cancel = CreateButton(content, "CANCEL", Color3.fromRGB(50, 50, 50), UDim2.new(0.55, 0, 0.6, 0))
+    Save.MouseButton1Click:Connect(function()
+        if In.Text ~= "" and not State.AnimationPages.Sets[In.Text] then
+            local idx = table.find(State.AnimationPages.Order, State.currentAnimationPageName)
+            if idx then State.AnimationPages.Order[idx] = In.Text end
+            State.AnimationPages.Sets[In.Text] = State.AnimationPages.Sets[State.currentAnimationPageName]
+            State.AnimationPages.Sets[State.currentAnimationPageName] = nil
+            State.currentAnimationPageName = In.Text
+            State.AnimationPages.Selected = In.Text
+            State.SaveAnimationPages(State.AnimationPages)
+            if State.AnimationPageDropdown then
+                State.AnimationPageDropdown.Refresh(GetAnimationPageNames())
+                State.AnimationPageDropdown.Button.Text = State.currentAnimationPageName .. "  ▼"
+            end
+            popup:Destroy()
+        end
+    end)
+    Cancel.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(AnimPageMgtContainer, "107588515524752", function()
+    local currentSet = State.AnimationPages.Sets[State.currentAnimationPageName]
+    local data = { Type = "AnimationPageSet", Name = State.currentAnimationPageName, Data = currentSet }
+    local json = HttpService:JSONEncode(data)
+    local popup, content = CreatePopup("Export Animation Page", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "", json, true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    box.TextEditable = false
+    local copy = CreateButton(content, "COPY TO CLIPBOARD", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+    copy.MouseButton1Click:Connect(function()
+        setclipboard(json)
+        copy.Text = "COPIED!"
+        task.delay(1, function() copy.Text = "COPY TO CLIPBOARD" end)
+    end)
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "×"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+SettingsLib.AddIconButton(AnimPageMgtContainer, "78317476576895", function()
+    local popup, content = CreatePopup("Import Animation Page", UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "Paste Animation Page JSON here...", "", true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    local imp = CreateButton(content, "IMPORT DATA", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+    imp.MouseButton1Click:Connect(function()
+        local s, d = pcall(function() return HttpService:JSONDecode(box.Text) end)
+        if s and type(d) == "table" and d.Type == "AnimationPageSet" and type(d.Data) == "table" then
+            local targetName = MakeUniqueSetName(State.AnimationPages.Sets, d.Name or "Imported")
+            State.AnimationPages.Sets[targetName] = d.Data
+            table.insert(State.AnimationPages.Order, targetName)
+            State.currentAnimationPageName = targetName
+            State.AnimationPages.Selected = targetName
+            State.SaveAnimationPages(State.AnimationPages)
+            if State.AnimationPageDropdown then
+                State.AnimationPageDropdown.Refresh(GetAnimationPageNames())
+                State.AnimationPageDropdown.Button.Text = State.currentAnimationPageName .. "  ▼"
+            end
+            SwitchAnimationPage(targetName)
+            popup:Destroy()
+            getgenv().Notify({ Title = "7yd7 | Page", Content = "✅ Imported Animation page", Duration = 3 })
+        else
+            getgenv().Notify({ Title = "Error", Content = "Invalid Animation Page JSON", Duration = 3 })
+        end
+    end)
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "×"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
+end)
+
+
+local BackupTab = SettingsLib.CreateTab("Backup", 6)
+
+local BackupDesc = SettingsLib.AddItem(BackupTab, "What's included in a backup?", " ")
+BackupDesc.LayoutOrder = 1
+BackupDesc.Size = UDim2.new(0.95, 0, 0, 110)
+for _, v in pairs(BackupDesc:GetChildren()) do if v.Name == "Title" or v.Name == "Desc" then v:Destroy() end end
+BackupDesc.BackgroundTransparency = 0
+BackupDesc.BackgroundColor3 = Color3.fromRGB(35, 38, 42)
+
+local BackupTitle = Instance.new("TextLabel")
+BackupTitle.Parent = BackupDesc
+BackupTitle.BackgroundTransparency = 1
+BackupTitle.Position = UDim2.new(0, 12, 0, 6)
+BackupTitle.Size = UDim2.new(1, -24, 0, 18)
+BackupTitle.Font = Enum.Font.GothamBold
+BackupTitle.Text = "What's included in a backup?"
+BackupTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+BackupTitle.TextSize = 12
+BackupTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local DescList = Instance.new("Frame")
+DescList.Parent = BackupDesc
+DescList.BackgroundTransparency = 1
+DescList.Position = UDim2.new(0, 12, 0, 28)
+DescList.Size = UDim2.new(1, -24, 1, -28)
+
+local LayoutDesc = Instance.new("UIListLayout")
+LayoutDesc.Parent = DescList
+LayoutDesc.Padding = UDim.new(0, 4)
+
+function MakeDescLine(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = DescList
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(1, 0, 0, 15)
+    lbl.AutomaticSize = Enum.AutomaticSize.Y
+    lbl.TextWrapped = true
+    lbl.Font = Enum.Font.Gotham
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.RichText = true
+end
+
+MakeDescLine("<b>• Theme:</b> Saves custom themes")
+MakeDescLine("<b>• Settings:</b> Saves HUD layout & values")
+MakeDescLine("<b>• Favorite:</b> Saves favorite emotes/anims")
+MakeDescLine("<b>• All:</b> Includes everything above")
+
+local ExportItem = SettingsLib.AddItem(BackupTab, "Export Settings", "Save current settings to a file for sharing or later import.")
+ExportItem.LayoutOrder = 2
+
+local ExportBtnContainer = Instance.new("Frame")
+ExportBtnContainer.Parent = ExportItem
+ExportBtnContainer.BackgroundTransparency = 1
+ExportBtnContainer.Size = UDim2.new(1, -24, 0, 60)
+
+local expDesc = ExportItem:FindFirstChild("Desc")
+if expDesc then
+    expDesc.Size = UDim2.new(1, -24, 0, 0)
+    local function updateExpPos()
+        ExportBtnContainer.Position = UDim2.new(0, 12, 0, expDesc.Position.Y.Offset + expDesc.AbsoluteSize.Y + 12)
+    end
+    expDesc:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateExpPos)
+    updateExpPos()
 else
-	RegisterTheme(copyEmoteBtn, "BackgroundColor3", "tertiary")
-end
-RegisterTheme(stopBtn, "BackgroundColor3", "tertiary")
-RegisterTheme(randBtn, "BackgroundColor3", "accent")
-RegisterTheme(minBtn, "BackgroundColor3", "stroke")
-RegisterTheme(closeBtn, "BackgroundColor3", "critical")
-
-local _isPaused = false
--- stopBtn içindeki stop karesi (duraklat/devam durumuna göre gizlenir)
-local _stopBtnSquare = stopBtn:FindFirstChildWhichIsA("ImageLabel")
-
-local _pauseTextSize = math.floor((isMobile and 14 or 18) * (ICON_SCALE or 1))
-
-local function _SetPauseState(paused)
-	_isPaused = paused
-	-- stopBtn görselini güncelle: duraklat = kare gizli + ">" yaz, devam = kare göster
-	if _stopBtnSquare then
-		_stopBtnSquare.Image = paused and ResolveAssetImage("rbxassetid://129338178452237") or ResolveAssetImage("rbxassetid://113416463749658")
-	end
-	-- HUD duraklat butonunu güncelle (bridge)
-	if _onPauseStateChanged then _onPauseStateChanged(paused) end
+    ExportBtnContainer.Position = UDim2.new(0, 12, 0, 32)
 end
 
-stopBtn.MouseButton1Click:Connect(function()
-	-- Onceligi duraklat halini kontrol etmeye ver (hiz=0 oldugu icin IsPlaying hala true)
-	if currentAnimTrack and _isPaused then
-		-- Duraklatilmissa devam ettir
-		pcall(function() currentAnimTrack:AdjustSpeed(Settings.speed) end)
-		_SetPauseState(false)
-	elseif currentAnimTrack and currentAnimTrack.IsPlaying then
-		-- Calan emoteyi mevcut pozisyonda dondur (hiz=0)
-		pcall(function() currentAnimTrack:AdjustSpeed(0) end)
-		_SetPauseState(true)
-	else
-		StopEmote(true)
-	end
-end)
-randBtn.MouseButton1Click:Connect(function()
-	if #currentData > 0 then
-		local r = currentData[math.random(#currentData)]
-		local speedTxt = Settings.speed ~= 1 and " (" .. Settings.speed .. "x)" or ""
-		Notify("[~] " .. L.playing .. speedTxt, r.name)
-		PlayEmote(r.id, r.name, true) -- Passing true to silence the default notification
-	end
-end)
+local ExportLayout = Instance.new("UIGridLayout")
+ExportLayout.CellSize = UDim2.new(0.48, 0, 0, 26)
+ExportLayout.CellPadding = UDim2.new(0.04, 0, 0, 8)
+ExportLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ExportLayout.Parent = ExportBtnContainer
 
-local searchH = isMobile and 32 or 38
-local search = Instance.new("TextBox")
-search.Size = UDim2.new(1, -16, 0, searchH)
-search.Position = UDim2.new(0, 8, 0, titleH + 6)
-search.BackgroundColor3 = currentTheme.tertiary
-search.PlaceholderText = L.search
-search.PlaceholderColor3 = currentTheme.textDim
-search.Text = ""
-search.TextColor3 = currentTheme.text
-search.TextSize = isMobile and 13 or 15
-search.Font = Enum.Font.Gotham
-search.ZIndex = 5
-search.ClearTextOnFocus = false
-search.Parent = content
-Instance.new("UICorner", search).CornerRadius = UDim.new(0, 10)
-Instance.new("UIPadding", search).PaddingLeft = UDim.new(0, 10)
-RegisterTheme(search, "BackgroundColor3", "tertiary")
-RegisterTheme(search, "TextColor3", "text")
-
-local pageH = isMobile and 30 or 36
-local pageBar = Instance.new("Frame")
-pageBar.Size = UDim2.new(1, -16, 0, pageH)
-pageBar.Position = UDim2.new(0, 8, 1, -(pageH + bottomBarH + 8))
-pageBar.BackgroundColor3 = currentTheme.secondary
-pageBar.ZIndex = 5
-pageBar.Parent = content
-Instance.new("UICorner", pageBar).CornerRadius = UDim.new(0, 10)
-RegisterTheme(pageBar, "BackgroundColor3", "secondary")
-
-local pageBtnW = isMobile and 45 or 60
-
-local prevBtn = Instance.new("TextButton")
-prevBtn.Size = UDim2.new(0, pageBtnW, 1, -4)
-prevBtn.Position = UDim2.new(0, 2, 0, 2)
-prevBtn.BackgroundColor3 = currentTheme.accent
-prevBtn.Text = ""
-prevBtn.ZIndex = 6
-prevBtn.Parent = pageBar
-Instance.new("UICorner", prevBtn).CornerRadius = UDim.new(0, 8)
-RegisterTheme(prevBtn, "BackgroundColor3", "accent")
-
-local function CreateChevron(parent, isNext)
-	local container = Instance.new("Frame")
-	container.Name = "ChevronIcon"
-	container.Size = UDim2.new(1, 0, 1, 0)
-	container.BackgroundTransparency = 1
-	container.ZIndex = 7
-	container.Parent = parent
-	
-	local effScale = math.min(ICON_SCALE, 1.4)
-	local len = math.floor(14 * effScale)
-	local thick = math.floor(1.6 * math.max(1, effScale))
-	local offset = math.floor(len * 0.353)
-	
-	local tipX = isNext and offset or -offset
-	local dx = isNext and -offset or offset
-	
-	local topL = Instance.new("Frame")
-	topL.BorderSizePixel = 0
-	topL.Size = UDim2.new(0, len, 0, thick)
-	topL.AnchorPoint = Vector2.new(0.5, 0.5)
-	topL.Position = UDim2.new(0.5, tipX + dx, 0.5, -offset)
-	topL.Rotation = isNext and 45 or -45
-	topL.BackgroundColor3 = Color3.new(1, 1, 1)
-	topL.ZIndex = 7
-	topL.Parent = container
-	Instance.new("UICorner", topL).CornerRadius = UDim.new(0, 2)
-	
-	local botL = Instance.new("Frame")
-	botL.BorderSizePixel = 0
-	botL.Size = UDim2.new(0, len, 0, thick)
-	botL.AnchorPoint = Vector2.new(0.5, 0.5)
-	botL.Position = UDim2.new(0.5, tipX + dx, 0.5, offset)
-	botL.Rotation = isNext and -45 or 45
-	botL.BackgroundColor3 = Color3.new(1, 1, 1)
-	botL.ZIndex = 7
-	botL.Parent = container
-	Instance.new("UICorner", botL).CornerRadius = UDim.new(0, 2)
+function CreateExportBtn(text, color, order)
+    local btn = Instance.new("TextButton")
+    btn.LayoutOrder = order
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.TextSize = 11
+    btn.Parent = ExportBtnContainer
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+    
+    return btn
 end
 
-local nextBtn = prevBtn:Clone()
-nextBtn.Position = UDim2.new(1, -(pageBtnW + 2), 0, 2)
-nextBtn.Parent = pageBar
-
-CreateChevron(prevBtn, false)
-CreateChevron(nextBtn, true)
-RegisterTheme(nextBtn, "BackgroundColor3", "accent")
-
-local pageNum = Instance.new("TextLabel")
-pageNum.Size = UDim2.new(1, -(pageBtnW*2 + 16), 1, 0)
-pageNum.Position = UDim2.new(0, pageBtnW + 8, 0, 0)
-pageNum.BackgroundTransparency = 1
-pageNum.Text = "1/1"
-pageNum.TextColor3 = currentTheme.textDim
-pageNum.Font = Enum.Font.GothamBold
-pageNum.TextScaled = true
-pageNum.ZIndex = 6
-pageNum.Parent = pageBar
-RegisterTheme(pageNum, "TextColor3", "textDim")
-
-local emptyLbl = Instance.new("TextLabel")
-emptyLbl.Size = UDim2.new(1, -20, 0, 50)
-emptyLbl.Position = UDim2.fromScale(0.5, 0.45)
-emptyLbl.AnchorPoint = Vector2.new(0.5, 0.5)
-emptyLbl.BackgroundTransparency = 1
-emptyLbl.Text = ""
-emptyLbl.TextColor3 = currentTheme.textDim
-emptyLbl.Font = Enum.Font.GothamBold
-emptyLbl.TextScaled = true
-emptyLbl.Visible = false
-emptyLbl.ZIndex = 5
-emptyLbl.Parent = content
-RegisterTheme(emptyLbl, "TextColor3", "textDim")
-
--- ===============================================================
--- SETTINGS PANEL
--- ===============================================================
-
-local settingsPanel = Instance.new("ScrollingFrame")
-settingsPanel.Size = UDim2.new(1, -16, 1, -(titleH + bottomBarH + 20))
-settingsPanel.Position = UDim2.new(0, 8, 0, titleH + 8)
-settingsPanel.BackgroundTransparency = 1
-settingsPanel.ScrollBarThickness = isMobile and 6 or 4
-settingsPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
-settingsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
-settingsPanel.Visible = false
-settingsPanel.ZIndex = 5
-settingsPanel.Parent = content
-
-local settingsLayout = Instance.new("UIListLayout")
-settingsLayout.Padding = UDim.new(0, 6)
-settingsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-settingsLayout.Parent = settingsPanel
-
-local friendsPanel = Instance.new("ScrollingFrame")
-friendsPanel.Size = UDim2.new(1, -16, 1, -(titleH + bottomBarH + 20))
-friendsPanel.Position = UDim2.new(0, 8, 0, titleH + 8)
-friendsPanel.BackgroundTransparency = 1
-friendsPanel.ScrollBarThickness = isMobile and 6 or 4
-friendsPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
-friendsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
-friendsPanel.Visible = false
-friendsPanel.ZIndex = 5
-friendsPanel.Parent = content
-local friendsPanelLayout = Instance.new("UIListLayout")
-friendsPanelLayout.Padding = UDim.new(0, 10)
-friendsPanelLayout.Parent = friendsPanel
-
-local keybindsPanel = Instance.new("ScrollingFrame")
-keybindsPanel.Size = UDim2.new(1, -16, 1, -(titleH + bottomBarH + 20))
-keybindsPanel.Position = UDim2.new(0, 8, 0, titleH + 8)
-keybindsPanel.BackgroundTransparency = 1
-keybindsPanel.ScrollBarThickness = isMobile and 6 or 4
-keybindsPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
-keybindsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
-keybindsPanel.Visible = false
-keybindsPanel.ZIndex = 5
-keybindsPanel.Parent = content
-local keybindsPanelLayout = Instance.new("UIListLayout")
-keybindsPanelLayout.Padding = UDim.new(0, 8)
-keybindsPanelLayout.Parent = keybindsPanel
-
-local RefreshKeybindsPanel  -- forward declaration (defined after ShowKeybindDialog)
-
--- ---------------------------------------------------------------
--- Yardımcı: bölüm başlığı
--- ---------------------------------------------------------------
-MakeSectionHeader = function(text, order)
-	-- Frame kullanmak zorundayız: TextLabel UIListLayout LayoutOrder'ı görmezden gelebiliyor
-	local container = Instance.new("Frame")
-	container.Size = UDim2.new(1, 0, 0, 26)
-	container.BackgroundTransparency = 1
-	container.LayoutOrder = order
-	container.ZIndex = 6
-	container.Parent = settingsPanel
-
-	local hdr = Instance.new("TextLabel")
-	hdr.Size = UDim2.new(1, -4, 1, 0)
-	hdr.BackgroundTransparency = 1
-	hdr.Text = text:upper()
-	hdr.TextColor3 = currentTheme.accent
-	hdr.Font = Enum.Font.GothamBold
-	hdr.TextSize = 11
-	hdr.TextXAlignment = Enum.TextXAlignment.Left
-	hdr.ZIndex = 7
-	hdr.Parent = container
-	RegisterTheme(hdr, "TextColor3", "accent")
-	return container
-end
-
--- ---------------------------------------------------------------
--- Yardımcı: ayar satırı (ikon + başlık + opsiyonel açıklama)
--- ---------------------------------------------------------------
-MakeRow = function(imgId, title, subtitle, order, customH)
-	local iconBoxSz = isMobile and 46 or 54
-	local hasDesc = subtitle and subtitle ~= ""
-	local h = customH or (hasDesc and 72 or 60)
-
-	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, 0, 0, h)
-	row.BackgroundColor3 = currentTheme.secondary
-	row.LayoutOrder = order
-	row.ZIndex = 6
-	row.Parent = settingsPanel
-	Instance.new("UICorner", row).CornerRadius = UDim.new(0, 14)
-	RegisterTheme(row, "BackgroundColor3", "secondary")
-
-	local leftPad = 12
-	if imgId and imgId ~= "" then
-		local iconBox = Instance.new("Frame")
-		iconBox.Size = UDim2.new(0, iconBoxSz, 0, iconBoxSz)
-		iconBox.AnchorPoint = Vector2.new(0, 0.5)
-		iconBox.Position = UDim2.new(0, leftPad, 0.5, 0)
-		iconBox.BackgroundColor3 = currentTheme.tertiary
-		iconBox.ZIndex = 7
-		iconBox.Parent = row
-		Instance.new("UICorner", iconBox).CornerRadius = UDim.new(0, 9)
-		RegisterTheme(iconBox, "BackgroundColor3", "tertiary")
-
-		local icon = Instance.new("ImageLabel")
-		icon.Size = UDim2.new(0.72, 0, 0.72, 0)
-		icon.AnchorPoint = Vector2.new(0.5, 0.5)
-		icon.Position = UDim2.fromScale(0.5, 0.5)
-		icon.BackgroundTransparency = 1
-		icon.Image = ResolveAssetImage("rbxassetid://" .. imgId)
-		icon.ImageColor3 = currentTheme.accent
-		icon.ZIndex = 8
-		icon.Parent = iconBox
-		RegisterTheme(icon, "ImageColor3", "accent")
-	end
-
-	local textLeft = (imgId and imgId ~= "") and (leftPad + iconBoxSz + 10) or leftPad
-	local rightGap = 72
-
-	local titleLbl = Instance.new("TextLabel")
-	titleLbl.BackgroundTransparency = 1
-	titleLbl.Text = title
-	titleLbl.TextColor3 = currentTheme.text
-	titleLbl.Font = Enum.Font.GothamBold
-	titleLbl.TextSize = isMobile and 13 or 14
-	titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-	titleLbl.ZIndex = 7
-	titleLbl.Parent = row
-	RegisterTheme(titleLbl, "TextColor3", "text")
-
-	if hasDesc then
-		titleLbl.Size = UDim2.new(1, -(textLeft + rightGap), 0, 20)
-		titleLbl.Position = UDim2.new(0, textLeft, 0, 12)
-
-		local subLbl = Instance.new("TextLabel")
-		subLbl.Size = UDim2.new(1, -(textLeft + rightGap), 0, 18)
-		subLbl.Position = UDim2.new(0, textLeft, 0, 33)
-		subLbl.BackgroundTransparency = 1
-		subLbl.Text = subtitle
-		subLbl.TextColor3 = currentTheme.textDim
-		subLbl.Font = Enum.Font.Gotham
-		subLbl.TextSize = isMobile and 10 or 11
-		subLbl.TextXAlignment = Enum.TextXAlignment.Left
-		subLbl.TextWrapped = true
-		subLbl.ZIndex = 7
-		subLbl.Parent = row
-		RegisterTheme(subLbl, "TextColor3", "textDim")
-	else
-		titleLbl.Size = UDim2.new(1, -(textLeft + rightGap), 1, 0)
-		titleLbl.Position = UDim2.new(0, textLeft, 0, 0)
-	end
-
-	return row
-end
-
--- ---------------------------------------------------------------
--- Yardımcı: pill toggle anahtarı
--- ---------------------------------------------------------------
-MakePillToggle = function(parent, value, onChange)
-	local pillW, pillH, pad = 50, 28, 3
-	local knobSz = pillH - pad * 2
-
-	local pill = Instance.new("Frame")
-	pill.Size = UDim2.new(0, pillW, 0, pillH)
-	pill.AnchorPoint = Vector2.new(1, 0.5)
-	pill.Position = UDim2.new(1, -12, 0.5, 0)
-	pill.BackgroundColor3 = value and currentTheme.success or currentTheme.stroke
-	pill.ZIndex = 8
-	pill.Parent = parent
-	Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
-
-	local knob = Instance.new("Frame")
-	knob.Size = UDim2.new(0, knobSz, 0, knobSz)
-	knob.AnchorPoint = Vector2.new(0, 0.5)
-	knob.Position = value
-		and UDim2.new(1, -(knobSz + pad), 0.5, 0)
-		or  UDim2.new(0, pad, 0.5, 0)
-	knob.BackgroundColor3 = Color3.new(1, 1, 1)
-	knob.ZIndex = 9
-	knob.Parent = pill
-	Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
-
-	local state = value
-	local pillBtn = Instance.new("TextButton")
-	pillBtn.Size = UDim2.fromScale(1, 1)
-	pillBtn.BackgroundTransparency = 1
-	pillBtn.Text = ""
-	pillBtn.ZIndex = 10
-	pillBtn.Parent = pill
-
-	local function SetState(v)
-		state = v
-		TweenService:Create(pill, TweenInfo.new(0.22), {
-			BackgroundColor3 = v and currentTheme.success or currentTheme.stroke
-		}):Play()
-		TweenService:Create(knob, TweenInfo.new(0.22, Enum.EasingStyle.Back), {
-			Position = v and UDim2.new(1, -(knobSz + pad), 0.5, 0) or UDim2.new(0, pad, 0.5, 0)
-		}):Play()
-	end
-
-	pillBtn.MouseButton1Click:Connect(function()
-		state = not state
-		SetState(state)
-		onChange(state)
-	end)
-
-	return SetState
-end
-
--- ===============================================================
--- GÖRÜNÜM
--- ===============================================================
-MakeSectionHeader(isTR and "Görünüm" or (isES and "Apariencia" or (isAR and "المظهر" or (isFR and "Apparence" or (isHI and "दिखावट" or (isPT and "Aparência" or (isRU and "Внешний вид" or "Appearance")))))), 1)
-
--- Tema
-do
-	local themeRow = MakeRow("110192525313214", L.theme, "", 2)
-	local themeNames = {"Dark", "Purple", "Blue", "Green", "Red", "Light", "MaterialYou", "FrostedGlass", "DarkGlass"}
-
-	local chip = Instance.new("TextButton")
-	chip.Size = UDim2.new(0, 80, 0, 30)
-	chip.AnchorPoint = Vector2.new(1, 0.5)
-	chip.Position = UDim2.new(1, -12, 0.5, 0)
-	chip.BackgroundColor3 = currentTheme.accent
-	chip.Text = Settings.theme
-	chip.TextColor3 = Color3.new(1, 1, 1)
-	chip.Font = Enum.Font.GothamBold
-	chip.TextSize = isMobile and 10 or 11
-	chip.ZIndex = 8
-	chip.Parent = themeRow
-	Instance.new("UICorner", chip).CornerRadius = UDim.new(1, 0)
-	RegisterTheme(chip, "BackgroundColor3", "accent")
-
-	local themeIdx = 1
-	for i, n in ipairs(themeNames) do if n == Settings.theme then themeIdx = i end end
-
-	chip.MouseButton1Click:Connect(function()
-		themeIdx = themeIdx % #themeNames + 1
-		Settings.theme = themeNames[themeIdx]
-		chip.Text = Settings.theme
-		ApplyTheme(Settings.theme)
-		SaveData()
-	end)
-end
-
--- Hız
-do
-	local speedRow = MakeRow("113837085020684", L.speed, "", 3, 78)
-	local speeds = {0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3}
-	local speedIdx = 4
-	for i, s in ipairs(speeds) do if s == Settings.speed then speedIdx = i end end
-
-	local speedLbl = Instance.new("TextLabel")
-	speedLbl.Size = UDim2.new(0, 48, 0, 28)
-	speedLbl.AnchorPoint = Vector2.new(1, 0)
-	speedLbl.Position = UDim2.new(1, -12, 0, 12)
-	speedLbl.BackgroundTransparency = 1
-	speedLbl.Text = Settings.speed .. "x"
-	speedLbl.TextColor3 = currentTheme.accent
-	speedLbl.Font = Enum.Font.GothamBlack
-	speedLbl.TextSize = isMobile and 14 or 15
-	speedLbl.TextXAlignment = Enum.TextXAlignment.Right
-	speedLbl.ZIndex = 8
-	speedLbl.Parent = speedRow
-	RegisterTheme(speedLbl, "TextColor3", "accent")
-
-	local iconBoxSz = isMobile and 46 or 54
-	local sliderLeft = 12 + iconBoxSz + 10
-	local sliderBg = Instance.new("Frame")
-	sliderBg.Size = UDim2.new(1, -(sliderLeft + 12), 0, 6)
-	sliderBg.Position = UDim2.new(0, sliderLeft, 1, -20)
-	sliderBg.BackgroundColor3 = currentTheme.tertiary
-	sliderBg.ZIndex = 8
-	sliderBg.Parent = speedRow
-	Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(1, 0)
-	RegisterTheme(sliderBg, "BackgroundColor3", "tertiary")
-
-	local sliderFill = Instance.new("Frame")
-	sliderFill.Size = UDim2.new(0, 0, 1, 0)
-	sliderFill.BackgroundColor3 = currentTheme.accent
-	sliderFill.ZIndex = 9
-	sliderFill.Parent = sliderBg
-	Instance.new("UICorner", sliderFill).CornerRadius = UDim.new(1, 0)
-	RegisterTheme(sliderFill, "BackgroundColor3", "accent")
-
-	local sliderKnob = Instance.new("TextButton")
-	sliderKnob.Size = UDim2.new(0, 18, 0, 18)
-	sliderKnob.AnchorPoint = Vector2.new(0.5, 0.5)
-	sliderKnob.Position = UDim2.new(0, 0, 0.5, 0)
-	sliderKnob.BackgroundColor3 = Color3.new(1, 1, 1)
-	sliderKnob.Text = ""
-	sliderKnob.ZIndex = 10
-	sliderKnob.Parent = sliderBg
-	Instance.new("UICorner", sliderKnob).CornerRadius = UDim.new(1, 0)
-
-	local function UpdateSpeedUI()
-		Settings.speed = speeds[speedIdx]
-		speedLbl.Text = Settings.speed .. "x"
-		local alpha = (speedIdx - 1) / (#speeds - 1)
-		TweenService:Create(sliderFill, TweenInfo.new(0.2), {Size = UDim2.new(alpha, 0, 1, 0)}):Play()
-		TweenService:Create(sliderKnob, TweenInfo.new(0.2), {Position = UDim2.new(alpha, 0, 0.5, 0)}):Play()
-		SaveData()
-		ApplySpeedToAllTracks()
-		if _onSpeedChanged then _onSpeedChanged() end
-	end
-
-	local sliderDragging = false
-	sliderKnob.InputBegan:Connect(function(inp)
-		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-			sliderDragging = true
-		end
-	end)
-	UserInputService.InputEnded:Connect(function(inp)
-		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-			sliderDragging = false
-		end
-	end)
-	UserInputService.InputChanged:Connect(function(inp)
-		if sliderDragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
-			local ax = math.clamp((inp.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
-			local ni = math.floor(ax * (#speeds - 1) + 1.5)
-			if ni ~= speedIdx then speedIdx = ni; UpdateSpeedUI() end
-		end
-	end)
-
-	UpdateSpeedUI()
-end
-
--- ===============================================================
--- DAVRANIŞ
--- ===============================================================
-MakeSectionHeader(isTR and "Davranış" or (isES and "Comportamiento" or (isAR and "السلوك" or (isFR and "Comportement" or (isHI and "व्यवहार" or (isPT and "Comportamento" or (isRU and "Поведение" or "Behaviour")))))), 9)
-
--- Bildirimler
-do
-	local row = MakeRow("99427666057293", L.notif, "", 10)
-	MakePillToggle(row, Settings.notifications, function(v)
-		Settings.notifications = v
-		SaveData()
-	end)
-end
-
--- Döngü
-do
-	local row = MakeRow("103179694587186", L.loopText or "Loop", "", 11)
-	MakePillToggle(row, Settings.loopEmote, function(v)
-		Settings.loopEmote = v
-		_genv().autoReloadEnabled_Vexro = v
-		SaveData()
-	end)
-end
-
--- Yürüyünce Durdur
-do
-	local row = MakeRow("", L.stopOnWalk, L.stopOnWalkDesc, 12)
-	MakePillToggle(row, Settings.stopOnWalk, function(v)
-		Settings.stopOnWalk = v
-		SaveData()
-	end)
-end
-
--- Oynatma Barı
-do
-	local row = MakeRow("", L.showHUD, L.showHUDDesc, 13)
-	MakePillToggle(row, Settings.showHUD, function(v)
-		Settings.showHUD = v
-		if not v then HideEmoteHUD() end
-		SaveData()
-	end)
-end
-
--- ===============================================================
--- GENEL
--- ===============================================================
-MakeSectionHeader(isTR and "Genel" or (isES and "General" or (isAR and "عام" or (isFR and "Général" or (isHI and "सामान्य" or (isPT and "Geral" or (isRU and "Общее" or "General")))))), 19)
-
--- Dil Sıfırla
-do
-	local row = MakeRow("76975628127992", L.resetLangLbl, L.resetLangDesc, 20)
-
-	local resetBtn = Instance.new("TextButton")
-	resetBtn.Size = UDim2.new(0, 62, 0, 30)
-	resetBtn.AnchorPoint = Vector2.new(1, 0.5)
-	resetBtn.Position = UDim2.new(1, -12, 0.5, 0)
-	resetBtn.BackgroundColor3 = currentTheme.critical
-	resetBtn.Text = "Reset"
-	resetBtn.TextColor3 = Color3.new(1, 1, 1)
-	resetBtn.Font = Enum.Font.GothamBold
-	resetBtn.TextSize = isMobile and 11 or 12
-	resetBtn.ZIndex = 8
-	resetBtn.Parent = row
-	Instance.new("UICorner", resetBtn).CornerRadius = UDim.new(0, 10)
-	RegisterTheme(resetBtn, "BackgroundColor3", "critical")
-
-	resetBtn.MouseButton1Click:Connect(function()
-		Settings.language = nil
-		SaveData()
-		gui:Destroy()
-		pcall(function()
-			if _genv().lastVexroEmote then _genv().lastVexroEmote = nil end
-		end)
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/zyrovell/Vexro/main/vexroemotes.lua"))()
-	end)
-end
-
-
-local PROMPT_TAG = "VexroCopyEmotePrompt"
-
-local function MakeCopyPrompt(targetChar)
-	local root = targetChar:FindFirstChild("HumanoidRootPart")
-	if not root then return end
-	if root:FindFirstChild(PROMPT_TAG) then return end
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name              = PROMPT_TAG
-	prompt.ActionText        = L.copyEmote
-	prompt.ObjectText        = ""
-	prompt.MaxActivationDistance = 10
-	prompt.HoldDuration      = 0
-	prompt.RequiresLineOfSight = false
-	prompt.Enabled           = true
-	prompt.Parent            = root
-	prompt.Triggered:Connect(function()
-		local h = targetChar:FindFirstChildOfClass("Humanoid")
-		if not h then return end
-		local anim = h:FindFirstChildOfClass("Animator")
-		if not anim then return end
-		for _, track in ipairs(anim:GetPlayingAnimationTracks()) do
-			local animId = tonumber(track.Animation.AnimationId:match("%d+"))
-			if animId and EmotesById[animId] then
-				PlayEmote(animId, EmotesById[animId].name)
-				return
-			end
-		end
-	end)
-end
-
-local function RemoveCopyPrompt(targetChar)
-	local root = targetChar:FindFirstChild("HumanoidRootPart")
-	if root then
-		local p = root:FindFirstChild(PROMPT_TAG)
-		if p then p:Destroy() end
-	end
-end
-
-local _copyEmoteConns = {}
-
-local function EnableCopyEmotePrompts()
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= player and p.Character then
-			MakeCopyPrompt(p.Character)
-		end
-	end
-	_copyEmoteConns[#_copyEmoteConns + 1] = Players.PlayerAdded:Connect(function(p)
-		_copyEmoteConns[#_copyEmoteConns + 1] = p.CharacterAdded:Connect(function(char)
-			if Settings.copyEmoteEnabled then MakeCopyPrompt(char) end
-		end)
-	end)
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= player then
-			_copyEmoteConns[#_copyEmoteConns + 1] = p.CharacterAdded:Connect(function(char)
-				if Settings.copyEmoteEnabled then MakeCopyPrompt(char) end
-			end)
-		end
-	end
-end
-
-local function DisableCopyEmotePrompts()
-	for _, conn in ipairs(_copyEmoteConns) do conn:Disconnect() end
-	_copyEmoteConns = {}
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= player and p.Character then
-			RemoveCopyPrompt(p.Character)
-		end
-	end
-end
-
-if Settings.copyEmoteEnabled then
-	EnableCopyEmotePrompts()
-end
-
-copyEmoteBtn.MouseButton1Click:Connect(function()
-	Settings.copyEmoteEnabled = not Settings.copyEmoteEnabled
-	TweenService:Create(copyEmoteBtn, TweenInfo.new(0.2), {
-		BackgroundColor3 = Settings.copyEmoteEnabled and currentTheme.success or currentTheme.critical
-	}):Play()
-	if Settings.copyEmoteEnabled then
-		EnableCopyEmotePrompts()
-	else
-		DisableCopyEmotePrompts()
-	end
-	SaveData()
-end)
-
--- ===============================================================
--- ===============================================================
--- ARKADAŞ & BERABER EMOTE SİSTEMİ
--- ===============================================================
-local friendAddModeBtn
-local _syncLock = false
-do
-local ATTR_REQ  = "VFR_Req"   -- "<targetUserId>"
-local ATTR_RESP = "VFR_Resp"  -- "<senderId>:1|0"
-local ATTR_SYNC = "VFR_Sync"  -- "<emoteId>|<emoteName>"
-local ATTR_STOP = "VFR_Stop"  -- tick() as string
-
--- Spam koruması
-local REQ_COOLDOWN        = 5   -- aynı kişiye tekrar istek için bekleme (sn)
-local REQ_SPAM_WINDOW     = 5   -- spam penceresi (sn)
-local REQ_SPAM_LIMIT      = 3   -- bu kadar hızlı istek → timeout
-local REQ_TIMEOUT_DUR     = 30  -- timeout süresi (sn)
-local INCOMING_COOLDOWN   = 5   -- aynı kişiden gelen isteği tekrar gösterme eşiği (sn)
-
-local _reqCooldowns      = {}   -- [targetUserId] = lastSendTime
-local _reqSpamStart      = 0
-local _reqSpamCount      = 0
-local _reqTimeoutUntil   = 0   -- timeout bitiş zamanı
-local _incomingCooldowns = {}  -- [senderUserId] = lastReceivedTime
-
--- Kaydet / Yükle
-local function _SaveFriend()
-	pcall(function()
-		local enc = HttpService:JSONEncode({
-			friends        = FriendData.friends,
-			autoReject     = FriendData.autoReject,
-			acceptRequests = FriendData.acceptRequests,
-			playFriendEmote = FriendData.playFriendEmote,
-			syncEmote      = FriendData.syncEmote,
-		})
-		_genv().VexroFriendSave = enc
-	end)
-end
-
-local function _LoadFriend()
-	pcall(function()
-		local raw = _genv().VexroFriendSave
-		if not raw then return end
-		local ok, d = pcall(HttpService.JSONDecode, HttpService, raw)
-		if not ok then return end
-		FriendData.friends        = d.friends or {}
-		FriendData.autoReject     = d.autoReject or false
-		FriendData.acceptRequests = d.acceptRequests ~= false
-		FriendData.playFriendEmote = d.playFriendEmote ~= false
-		FriendData.syncEmote      = d.syncEmote ~= false
-	end)
-end
-_LoadFriend()
-
--- Kendi karakterine attr yaz
-local function _MyAttr(attr, val)
-	pcall(function()
-		local c = player.Character
-		if c then c:SetAttribute(attr, val) end
-	end)
-end
-
--- Gelen istek paneli
-ShowFriendRequestPanel = function(senderUserId, senderName)
-	-- Arka plan karartıcı
-	local dimmer = Instance.new("Frame")
-	dimmer.Size = UDim2.new(1,0,1,0)
-	dimmer.BackgroundColor3 = Color3.new(0,0,0)
-	dimmer.BackgroundTransparency = 0.45
-	dimmer.ZIndex = 98000
-	dimmer.Parent = gui
-
-	local panel = Instance.new("Frame")
-	panel.Size = UDim2.new(0, 340, 0, 215)
-	panel.AnchorPoint = Vector2.new(0.5, 0.5)
-	panel.Position = UDim2.new(0.5, 0, 0.5, 0)
-	panel.BackgroundColor3 = currentTheme.secondary
-	panel.ZIndex = 98001
-	panel.Parent = gui
-	Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 16)
-	local ps = Instance.new("UIStroke", panel); ps.Color = currentTheme.stroke; ps.Thickness = 1.5
-
-	-- Brand
-	local brand = Instance.new("TextLabel")
-	brand.Size = UDim2.new(1, 0, 0, 20); brand.Position = UDim2.new(0,0,0,8)
-	brand.BackgroundTransparency = 1; brand.Text = "Vexro Emote Player"
-	brand.TextColor3 = currentTheme.accent; brand.Font = Enum.Font.GothamBold
-	brand.TextSize = 11; brand.ZIndex = 98002; brand.Parent = panel
-
-	-- Avatar
-	local av = Instance.new("ImageLabel")
-	av.Size = UDim2.new(0,48,0,48); av.Position = UDim2.new(0,14,0,34)
-	av.BackgroundTransparency = 1
-	av.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(senderUserId) .. "&w=150&h=150"
-	av.ZIndex = 98002; av.Parent = panel
-	Instance.new("UICorner", av).CornerRadius = UDim.new(1,0)
-
-	-- İstek metni
-	local reqTxt = Instance.new("TextLabel")
-	reqTxt.Size = UDim2.new(1,-80,0,48); reqTxt.Position = UDim2.new(0,70,0,34)
-	reqTxt.BackgroundTransparency = 1
-	reqTxt.Text = tostring(senderName) .. " sizi arkadaş eklemek istiyor."
-	reqTxt.TextColor3 = currentTheme.text; reqTxt.Font = Enum.Font.Gotham
-	reqTxt.TextSize = 12; reqTxt.TextWrapped = true
-	reqTxt.TextXAlignment = Enum.TextXAlignment.Left
-	reqTxt.TextYAlignment = Enum.TextYAlignment.Center
-	reqTxt.ZIndex = 98002; reqTxt.Parent = panel
-
-	-- Otomatik reddet barı
-	local bar = Instance.new("Frame")
-	bar.Size = UDim2.new(1,-28,0,34); bar.Position = UDim2.new(0,14,0,90)
-	bar.BackgroundColor3 = currentTheme.tertiary; bar.ZIndex = 98002; bar.Parent = panel
-	Instance.new("UICorner", bar).CornerRadius = UDim.new(0,10)
-
-	local cbBtn = Instance.new("TextButton")
-	cbBtn.Size = UDim2.new(0,20,0,20); cbBtn.Position = UDim2.new(0,7,0.5,-10)
-	cbBtn.BackgroundColor3 = currentTheme.secondary; cbBtn.Text = ""; cbBtn.ZIndex = 98003; cbBtn.Parent = bar
-	Instance.new("UICorner", cbBtn).CornerRadius = UDim.new(1,0)
-	local cbStroke = Instance.new("UIStroke", cbBtn); cbStroke.Color = currentTheme.stroke; cbStroke.Thickness = 1.5
-
-	local cbDot = Instance.new("Frame")
-	cbDot.Size = UDim2.new(0,10,0,10); cbDot.AnchorPoint = Vector2.new(0.5,0.5)
-	cbDot.Position = UDim2.new(0.5,0,0.5,0); cbDot.BackgroundColor3 = currentTheme.accent
-	cbDot.Visible = FriendData.autoReject; cbDot.ZIndex = 98004; cbDot.Parent = cbBtn
-	Instance.new("UICorner", cbDot).CornerRadius = UDim.new(1,0)
-
-	local autoLbl = Instance.new("TextLabel")
-	autoLbl.Size = UDim2.new(1,-34,1,0); autoLbl.Position = UDim2.new(0,32,0,0)
-	autoLbl.BackgroundTransparency = 1; autoLbl.Text = L.autoRejectLbl
-	autoLbl.TextColor3 = currentTheme.textDim; autoLbl.Font = Enum.Font.Gotham
-	autoLbl.TextSize = 11; autoLbl.TextXAlignment = Enum.TextXAlignment.Left
-	autoLbl.ZIndex = 98003; autoLbl.Parent = bar
-
-	cbBtn.MouseButton1Click:Connect(function()
-		FriendData.autoReject = not FriendData.autoReject
-		cbDot.Visible = FriendData.autoReject
-		_SaveFriend()
-	end)
-
-	local function _close()
-		pcall(function() dimmer:Destroy() end)
-		pcall(function() panel:Destroy() end)
-	end
-
-	-- Reddet butonu
-	local rejBtn = Instance.new("TextButton")
-	rejBtn.Size = UDim2.new(0.46,0,0,40); rejBtn.Position = UDim2.new(0,14,0,138)
-	rejBtn.BackgroundColor3 = currentTheme.critical; rejBtn.Text = L.reject or "Reddet"
-	rejBtn.TextColor3 = Color3.new(1,1,1); rejBtn.Font = Enum.Font.GothamBold
-	rejBtn.TextSize = 13; rejBtn.ZIndex = 98002; rejBtn.Parent = panel
-	Instance.new("UICorner", rejBtn).CornerRadius = UDim.new(0,12)
-
-	-- Kabul Et butonu
-	local accBtn = Instance.new("TextButton")
-	accBtn.Size = UDim2.new(0.46,0,0,40); accBtn.Position = UDim2.new(0.54,-14,0,138)
-	accBtn.BackgroundColor3 = currentTheme.success; accBtn.Text = L.accept or "Kabul Et"
-	accBtn.TextColor3 = Color3.new(1,1,1); accBtn.Font = Enum.Font.GothamBold
-	accBtn.TextSize = 13; accBtn.ZIndex = 98002; accBtn.Parent = panel
-	Instance.new("UICorner", accBtn).CornerRadius = UDim.new(0,12)
-
-	rejBtn.MouseButton1Click:Connect(function()
-		_MyAttr(ATTR_RESP, tostring(senderUserId) .. ":0")
-		task.delay(1, function() _MyAttr(ATTR_RESP, "") end)
-		_close()
-	end)
-
-	accBtn.MouseButton1Click:Connect(function()
-		FriendData.friends[tostring(senderUserId)] = {name = senderName, syncEnabled = true}
-		_SaveFriend()
-		_MyAttr(ATTR_RESP, tostring(senderUserId) .. ":1")
-		task.delay(1, function() _MyAttr(ATTR_RESP, "") end)
-		RefreshFriendList()
-		Notify(L.friendReqAcceptedYou:format(tostring(senderName)), "", nil)
-		_close()
-	end)
-
-	-- Otomatik reddet aktifse hemen kapat
-	if FriendData.autoReject then
-		_MyAttr(ATTR_RESP, tostring(senderUserId) .. ":0")
-		task.delay(0.5, function() _MyAttr(ATTR_RESP, "") end)
-		_close()
-	end
-end
-
--- Bir karakteri izle (attr değişikliklerini dinle)
-local function _WatchChar(char, uid, uname)
-	local function _conn(attr, fn)
-		local ok, sig = pcall(function() return char:GetAttributeChangedSignal(attr) end)
-		if ok and sig then
-			local c = sig:Connect(fn)
-			_friendConns[#_friendConns+1] = c
-		end
-	end
-
-	-- Arkadaş isteği bana mı geliyor?
-	_conn(ATTR_REQ, function()
-		local v = char:GetAttribute(ATTR_REQ)
-		if tostring(v) ~= tostring(player.UserId) then return end
-		if not FriendData.acceptRequests then return end
-		-- Aynı kişiden spam isteği yoksay
-		local now = tick()
-		local uid_s = tostring(uid)
-		local lastIn = _incomingCooldowns[uid_s] or 0
-		if now - lastIn < INCOMING_COOLDOWN then return end
-		_incomingCooldowns[uid_s] = now
-		ShowFriendRequestPanel(uid, uname)
-	end)
-
-	-- İstek cevabı (benim isteğime cevap)
-	_conn(ATTR_RESP, function()
-		local v = char:GetAttribute(ATTR_RESP)
-		if not v then return end
-		local parts = v:split(":")
-		if #parts ~= 2 then return end
-		if tostring(parts[1]) ~= tostring(player.UserId) then return end
-		if parts[2] == "1" then
-			FriendData.friends[tostring(uid)] = {name = uname, syncEnabled = true}
-			_SaveFriend()
-			RefreshFriendList()
-			Notify(L.friendReqAcceptedThem:format(uname), "", nil)
-		end
-	end)
-
-	-- Emote senkron
-	_conn(ATTR_SYNC, function()
-		if not FriendData.playFriendEmote then return end
-		if _syncLock then return end
-		local fdata = FriendData.friends[tostring(uid)]
-		if not fdata or not fdata.syncEnabled then return end
-		local v = char:GetAttribute(ATTR_SYNC)
-		if not v or v == "" then return end
-		-- Çakışma kontrolü: başka biriyle zaten senkronda mı
-		if FriendData.currentSyncPartner and FriendData.currentSyncPartner ~= tostring(uid) then
-			Notify(L.friendAlreadySyncing or "Hata! Zaten başka birisiyle senkrondayız.", "", nil)
-			return
-		end
-		local sep = v:find("|")
-		if not sep then return end
-		local eid = tonumber(v:sub(1, sep-1))
-		local ename = v:sub(sep+1)
-		if eid and FriendData.syncEmote then
-			_syncLock = true
-			FriendData.currentSyncPartner = tostring(uid)
-			PlayEmote(eid, ename, true)
-			task.defer(function() _syncLock = false end)
-		end
-	end)
-
-	-- Emote durdurma
-	_conn(ATTR_STOP, function()
-		if FriendData.currentSyncPartner == tostring(uid) then
-			FriendData.currentSyncPartner = nil
-			StopEmote(false)
-		end
-	end)
-end
-
--- Tüm oyuncuları izle
-local function _WatchAll()
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= player then
-			if p.Character then _WatchChar(p.Character, p.UserId, p.Name) end
-			local cc = p.CharacterAdded:Connect(function(c)
-				c:WaitForChild("HumanoidRootPart", 8)
-				_WatchChar(c, p.UserId, p.Name)
-				if FriendData.addModeActive then
-					task.wait(0.3)
-					pcall(function()
-						if not FriendData.addModeActive then return end
-						local head = c:FindFirstChild("Head")
-						if head and not head:FindFirstChild("VexroFriendBB") then
-							_MakeBillboard(p)
-						end
-					end)
-				end
-			end)
-			_friendConns[#_friendConns+1] = cc
-		end
-	end
-	local pa = Players.PlayerAdded:Connect(function(p)
-		if p == player then return end
-		local cc = p.CharacterAdded:Connect(function(c)
-			c:WaitForChild("HumanoidRootPart", 8)
-			_WatchChar(c, p.UserId, p.Name)
-		end)
-		_friendConns[#_friendConns+1] = cc
-	end)
-	_friendConns[#_friendConns+1] = pa
-end
-_WatchAll()
-
--- BillboardGui yönetimi
-local _billConns = {}
-local _MakeBillboard
-local function _RemoveBillboard(p)
-	pcall(function()
-		local head = p.Character and p.Character:FindFirstChild("Head")
-		if head then
-			local bb = head:FindFirstChild("VexroFriendBB")
-			if bb then bb:Destroy() end
-		end
-	end)
-end
-
-_MakeBillboard = function(p)
-	if not p.Character then return end
-	if FriendData.friends[tostring(p.UserId)] then return end
-	local head = p.Character:FindFirstChild("Head")
-	if not head or head:FindFirstChild("VexroFriendBB") then return end
-
-	local bb = Instance.new("BillboardGui")
-	bb.Name = "VexroFriendBB"
-	bb.Size = UDim2.new(0, 140, 0, 34)
-	bb.StudsOffset = Vector3.new(0, 2.8, 0)
-	bb.AlwaysOnTop = false
-	bb.ResetOnSpawn = false
-	bb.Parent = head
-
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(1,0,1,0)
-	btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	btn.BackgroundTransparency = 0.08
-	btn.TextColor3 = Color3.fromRGB(30, 30, 30)
-	btn.Text = L.addFriendBtn
-	btn.Font = Enum.Font.GothamBold
-	btn.TextSize = 11
-	btn.Parent = bb
-	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
-	local btnStroke = Instance.new("UIStroke")
-	btnStroke.Color = Color3.fromRGB(180, 180, 180)
-	btnStroke.Thickness = 1
-	btnStroke.Parent = btn
-
-	local _btnBusy = false
-	btn.MouseButton1Click:Connect(function()
-		if _btnBusy then return end
-		_btnBusy = true
-		local function _done() _btnBusy = false end
-
-		if FriendData.friends[tostring(p.UserId)] then
-			Notify(L.alreadyFriends, "", nil); _done(); return
-		end
-
-		local now = tick()
-		local uid_s = tostring(p.UserId)
-
-		-- Global timeout kontrolü
-		if now < _reqTimeoutUntil then
-			local rem = math.ceil(_reqTimeoutUntil - now)
-			Notify(L.spamProtect:format(rem), "", nil)
-			_done(); return
-		end
-
-		-- Aynı kişiye tekrar istek cooldown
-		local lastSent = _reqCooldowns[uid_s] or 0
-		if now - lastSent < REQ_COOLDOWN then
-			local rem = math.ceil(REQ_COOLDOWN - (now - lastSent))
-			Notify(L.waitRequest:format(rem), "", nil)
-			_done(); return
-		end
-
-		-- Spam sayacı güncelle
-		if now - _reqSpamStart > REQ_SPAM_WINDOW then
-			_reqSpamStart = now
-			_reqSpamCount = 0
-		end
-		_reqSpamCount = _reqSpamCount + 1
-
-		if _reqSpamCount >= REQ_SPAM_LIMIT then
-			_reqTimeoutUntil = now + REQ_TIMEOUT_DUR
-			_reqSpamCount = 0
-			Notify(L.tooFastRequest:format(REQ_TIMEOUT_DUR), "", nil)
-			btn.Text = L.blocked
-			btn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-			_done(); return
-		end
-
-		-- İstek gönder
-		_reqCooldowns[uid_s] = now
-		_MyAttr(ATTR_REQ, uid_s)
-		btn.Text = L.requestSent
-		btn.BackgroundColor3 = Color3.fromRGB(60, 160, 90)
-		btn.TextColor3 = Color3.new(1, 1, 1)
-		Notify(L.friendReqSent:format(p.Name), "", nil)
-		task.delay(3, function() _MyAttr(ATTR_REQ, "") end)
-		_done()
-	end)
-end
-
-local function _SetAddMode(on)
-	FriendData.addModeActive = on
-	-- Mevcut billboard bağlantılarını temizle
-	for _, c in ipairs(_billConns) do pcall(function() c:Disconnect() end) end
-	_billConns = {}
-	if on then
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= player then _MakeBillboard(p) end
-		end
-	else
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= player then _RemoveBillboard(p) end
-		end
-	end
-	-- Renk güncelle
-	TweenService:Create(friendAddModeBtn, TweenInfo.new(0.2), {
-		BackgroundColor3 = on and currentTheme.success or currentTheme.critical
-	}):Play()
-end
-
-
--- Emote sync broadcast (PlayEmote sonrası çağrılır)
-_genv().VexroBroadcastSync = function(emoteId, emoteName)
-	if not FriendData.syncEmote then return end
-	local hasSyncFriend = false
-	for _, fd in pairs(FriendData.friends) do
-		if fd.syncEnabled then hasSyncFriend = true; break end
-	end
-	if not hasSyncFriend then return end
-	_MyAttr(ATTR_SYNC, tostring(emoteId) .. "|" .. tostring(emoteName))
-end
-
-_genv().VexroBroadcastStop = function()
-	_MyAttr(ATTR_STOP, tostring(tick()))
-	FriendData.currentSyncPartner = nil
-end
-
--- Arkadaş sekmesi içeriği
-local function _MakeFriendToggle(txt, desc, order, getVal, setVal)
-	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1,0,0,60)
-	row.BackgroundColor3 = currentTheme.tertiary
-	row.LayoutOrder = order; row.ZIndex = 6; row.Parent = friendsPanel
-	Instance.new("UICorner", row).CornerRadius = UDim.new(0,12)
-	RegisterTheme(row, "BackgroundColor3", "tertiary")
-
-	local tl = Instance.new("TextLabel")
-	tl.Size = UDim2.new(0.55,0,0,22); tl.Position = UDim2.new(0,12,0,8)
-	tl.BackgroundTransparency = 1; tl.Text = txt; tl.TextColor3 = currentTheme.text
-	tl.Font = Enum.Font.GothamBold; tl.TextSize = isMobile and 11 or 12
-	tl.TextXAlignment = Enum.TextXAlignment.Left; tl.ZIndex = 7; tl.Parent = row
-	RegisterTheme(tl, "TextColor3", "text")
-
-	local dl = Instance.new("TextLabel")
-	dl.Size = UDim2.new(0.55,0,0,26); dl.Position = UDim2.new(0,12,0,30)
-	dl.BackgroundTransparency = 1; dl.Text = desc; dl.TextColor3 = currentTheme.textDim
-	dl.Font = Enum.Font.Gotham; dl.TextSize = isMobile and 9 or 10
-	dl.TextXAlignment = Enum.TextXAlignment.Left; dl.TextWrapped = true; dl.ZIndex = 7; dl.Parent = row
-	RegisterTheme(dl, "TextColor3", "textDim")
-
-	local tb = Instance.new("TextButton")
-	tb.Size = UDim2.new(0.38,0,0,30); tb.Position = UDim2.new(0.58,0,0.5,-15)
-	tb.BackgroundColor3 = getVal() and currentTheme.success or currentTheme.critical
-	tb.Text = getVal() and (L.on or "Açık") or (L.off or "Kapalı")
-	tb.TextColor3 = Color3.new(1,1,1); tb.Font = Enum.Font.GothamBold
-	tb.TextSize = isMobile and 11 or 12; tb.ZIndex = 8; tb.Parent = row
-	Instance.new("UICorner", tb).CornerRadius = UDim.new(0,10)
-
-	tb.MouseButton1Click:Connect(function()
-		local v = not getVal(); setVal(v)
-		tb.Text = v and (L.on or "Açık") or (L.off or "Kapalı")
-		TweenService:Create(tb, TweenInfo.new(0.2), {
-			BackgroundColor3 = v and currentTheme.success or currentTheme.critical
-		}):Play()
-		_SaveFriend()
-	end)
-end
-
-_MakeFriendToggle(
-	"Arkadaşımın emote'unu oynat",
-	"Arkadaşın emote başlattığında sende de otomatik oynar",
-	1,
-	function() return FriendData.playFriendEmote end,
-	function(v) FriendData.playFriendEmote = v end
-)
-_MakeFriendToggle(
-	"Emote'u arkadaşınla beraber oynat",
-	"Emote oynatınca arkadaşlarına da senkron gönderir",
-	2,
-	function() return FriendData.syncEmote end,
-	function(v) FriendData.syncEmote = v end
-)
-
--- Arkadaş Ekle Modu butonu
-local friendAddBtn = Instance.new("TextButton")
-friendAddBtn.Size = UDim2.new(1, 0, 0, 38)
-friendAddBtn.BackgroundColor3 = currentTheme.accent
-friendAddBtn.Text = L.addFriendMode
-friendAddBtn.TextColor3 = Color3.new(1, 1, 1)
-friendAddBtn.Font = Enum.Font.GothamBold
-friendAddBtn.TextSize = isMobile and 12 or 13
-friendAddBtn.LayoutOrder = 3
-friendAddBtn.ZIndex = 6
-friendAddBtn.Parent = friendsPanel
-Instance.new("UICorner", friendAddBtn).CornerRadius = UDim.new(0, 10)
-RegisterTheme(friendAddBtn, "BackgroundColor3", "accent")
-
-friendAddModeBtn = friendAddBtn
-
-friendAddBtn.MouseButton1Click:Connect(function()
-	_SetAddMode(not FriendData.addModeActive)
-	TweenService:Create(friendAddBtn, TweenInfo.new(0.2), {
-		BackgroundColor3 = FriendData.addModeActive and currentTheme.success or currentTheme.accent
-	}):Play()
-end)
-
--- Bilgi kutusu
-local infoBox = Instance.new("Frame")
-infoBox.Size = UDim2.new(1, 0, 0, 52)
-infoBox.BackgroundColor3 = Color3.fromRGB(40, 60, 100)
-infoBox.BackgroundTransparency = 0.4
-infoBox.LayoutOrder = 0
-infoBox.ZIndex = 5
-infoBox.Parent = friendsPanel
-Instance.new("UICorner", infoBox).CornerRadius = UDim.new(0, 10)
-local infoBoxLbl = Instance.new("TextLabel")
-infoBoxLbl.Size = UDim2.new(1, -32, 1, 0)
-infoBoxLbl.Position = UDim2.new(0, 32, 0, 0)
-infoBoxLbl.BackgroundTransparency = 1
-infoBoxLbl.Text = L.friendInfoTxt
-infoBoxLbl.TextColor3 = Color3.fromRGB(200, 220, 255)
-infoBoxLbl.Font = Enum.Font.Gotham
-infoBoxLbl.TextSize = 10
-infoBoxLbl.TextWrapped = true
-infoBoxLbl.TextXAlignment = Enum.TextXAlignment.Left
-infoBoxLbl.TextYAlignment = Enum.TextYAlignment.Center
-infoBoxLbl.ZIndex = 6
-infoBoxLbl.Parent = infoBox
-local infoIcon = Instance.new("TextLabel")
-infoIcon.Size = UDim2.new(0, 24, 0, 24)
-infoIcon.Position = UDim2.new(0, 6, 0.5, -12)
-infoIcon.BackgroundTransparency = 1
-infoIcon.Text = "ℹ"
-infoIcon.TextColor3 = Color3.fromRGB(150, 190, 255)
-infoIcon.Font = Enum.Font.GothamBold
-infoIcon.TextSize = 14
-infoIcon.ZIndex = 6
-infoIcon.Parent = infoBox
-
--- Arkadaş listesi başlığı
-local flHeader = Instance.new("TextLabel")
-flHeader.Size = UDim2.new(1,0,0,22); flHeader.BackgroundTransparency = 1
-flHeader.Text = L.friendListHeader; flHeader.TextColor3 = currentTheme.textDim
-flHeader.Font = Enum.Font.GothamBold; flHeader.TextSize = 11
-flHeader.LayoutOrder = 4; flHeader.ZIndex = 5; flHeader.Parent = friendsPanel
-RegisterTheme(flHeader, "TextColor3", "textDim")
-
-local friendListContainer = Instance.new("Frame")
-friendListContainer.Size = UDim2.new(1,0,0,0)
-friendListContainer.AutomaticSize = Enum.AutomaticSize.Y
-friendListContainer.BackgroundTransparency = 1
-friendListContainer.LayoutOrder = 5; friendListContainer.ZIndex = 5; friendListContainer.Parent = friendsPanel
-local flListLayout = Instance.new("UIListLayout")
-flListLayout.Padding = UDim.new(0,6); flListLayout.Parent = friendListContainer
-
-local emptyFriendLbl = Instance.new("TextLabel")
-emptyFriendLbl.Size = UDim2.new(1,0,0,36); emptyFriendLbl.BackgroundTransparency = 1
-emptyFriendLbl.Text = L.noFriends
-emptyFriendLbl.TextColor3 = currentTheme.textDim; emptyFriendLbl.Font = Enum.Font.Gotham
-emptyFriendLbl.TextSize = 11; emptyFriendLbl.TextWrapped = true
-emptyFriendLbl.ZIndex = 6; emptyFriendLbl.Parent = friendListContainer
-RegisterTheme(emptyFriendLbl, "TextColor3", "textDim")
-
-RefreshFriendList = function()
-	for _, ch in ipairs(friendListContainer:GetChildren()) do
-		if ch:IsA("Frame") then ch:Destroy() end
-	end
-	local hasAny = false
-	for userId, fdata in pairs(FriendData.friends) do
-		hasAny = true
-		local uid = tonumber(userId)
-		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1,0,0,50); row.BackgroundColor3 = currentTheme.tertiary
-		row.ZIndex = 6; row.Parent = friendListContainer
-		Instance.new("UICorner", row).CornerRadius = UDim.new(0,10)
-		RegisterTheme(row, "BackgroundColor3", "tertiary")
-
-		local av = Instance.new("ImageLabel")
-		av.Size = UDim2.new(0,36,0,36); av.Position = UDim2.new(0,8,0.5,-18)
-		av.BackgroundTransparency = 1
-		av.Image = uid and ("rbxthumb://type=AvatarHeadShot&id=" .. uid .. "&w=150&h=150") or ""
-		av.ZIndex = 7; av.Parent = row
-		Instance.new("UICorner", av).CornerRadius = UDim.new(1,0)
-
-		local nl = Instance.new("TextLabel")
-		nl.Size = UDim2.new(1,-130,1,0); nl.Position = UDim2.new(0,52,0,0)
-		nl.BackgroundTransparency = 1; nl.Text = fdata.name or userId
-		nl.TextColor3 = currentTheme.text; nl.Font = Enum.Font.GothamBold
-		nl.TextSize = isMobile and 11 or 12; nl.TextXAlignment = Enum.TextXAlignment.Left
-		nl.ZIndex = 7; nl.Parent = row
-		RegisterTheme(nl, "TextColor3", "text")
-
-		local syncBtn = Instance.new("TextButton")
-		syncBtn.Size = UDim2.new(0,46,0,24); syncBtn.Position = UDim2.new(1,-84,0.5,-12)
-		syncBtn.BackgroundColor3 = fdata.syncEnabled and currentTheme.success or currentTheme.critical
-		syncBtn.Text = fdata.syncEnabled and "Sync" or "Off"
-		syncBtn.TextColor3 = Color3.new(1,1,1); syncBtn.Font = Enum.Font.GothamBold
-		syncBtn.TextSize = 10; syncBtn.ZIndex = 7; syncBtn.Parent = row
-		Instance.new("UICorner", syncBtn).CornerRadius = UDim.new(0,8)
-
-		syncBtn.MouseButton1Click:Connect(function()
-			fdata.syncEnabled = not fdata.syncEnabled
-			syncBtn.Text = fdata.syncEnabled and "Sync" or "Off"
-			TweenService:Create(syncBtn, TweenInfo.new(0.2), {
-				BackgroundColor3 = fdata.syncEnabled and currentTheme.success or currentTheme.critical
-			}):Play()
-			_SaveFriend()
-		end)
-
-		local rmBtn = Instance.new("TextButton")
-		rmBtn.Size = UDim2.new(0,28,0,24); rmBtn.Position = UDim2.new(1,-30,0.5,-12)
-		rmBtn.BackgroundColor3 = currentTheme.critical; rmBtn.Text = "-"
-		rmBtn.TextColor3 = Color3.new(1,1,1); rmBtn.Font = Enum.Font.GothamBold
-		rmBtn.TextSize = 16; rmBtn.ZIndex = 7; rmBtn.Parent = row
-		Instance.new("UICorner", rmBtn).CornerRadius = UDim.new(0,8)
-
-		rmBtn.MouseButton1Click:Connect(function()
-			FriendData.friends[userId] = nil
-			if FriendData.currentSyncPartner == userId then FriendData.currentSyncPartner = nil end
-			_SaveFriend(); RefreshFriendList()
-		end)
-	end
-	emptyFriendLbl.Visible = not hasAny
-	flHeader.Visible = hasAny
-end
-RefreshFriendList()
-
--- Ayarlar paneline "Arkadaş istekleri al" satırı (Davranış bölümünün altı: order 15)
-do
-	local arRow = MakeRow("", L.acceptRequestsLbl, "", 15)
-	MakePillToggle(arRow, FriendData.acceptRequests, function(v)
-		FriendData.acceptRequests = v
-		_SaveFriend()
-	end)
-end
-
--- Cleanup kaydı güncelle
-local _prevClean = _genv().VexroEmotesCleanup
-_genv().VexroEmotesCleanup = function()
-	if _prevClean then pcall(_prevClean) end
-	for _, c in ipairs(_friendConns) do pcall(function() c:Disconnect() end) end
-	_friendConns = {}
-	_SetAddMode(false)
-	pcall(function() _genv().VexroBroadcastSync = nil end)
-	pcall(function() _genv().VexroBroadcastStop = nil end)
-end
-
-end -- arkadaş sistemi do...end sonu
-
--- BOTTOM BAR
--- ===============================================================
-
-local bottomBar = Instance.new("Frame")
-bottomBar.Size = UDim2.new(1, 0, 0, bottomBarH)
-bottomBar.Position = UDim2.new(0, 0, 1, -bottomBarH)
-bottomBar.BackgroundColor3 = currentTheme.tertiary
-bottomBar.ZIndex = 15
-bottomBar.Parent = content
-Instance.new("UICorner", bottomBar).CornerRadius = UDim.new(0, 14)
-RegisterTheme(bottomBar, "BackgroundColor3", "tertiary")
-
-local bottomOverlay = Instance.new("Frame")
-bottomOverlay.Size = UDim2.new(1, 0, 0, 8)
-bottomOverlay.BackgroundColor3 = currentTheme.tertiary
-bottomOverlay.BorderSizePixel = 0
-bottomOverlay.ZIndex = 14
-bottomOverlay.Parent = bottomBar
-RegisterTheme(bottomOverlay, "BackgroundColor3", "tertiary")
-
-local grip = Instance.new("Frame")
-grip.Size = UDim2.new(0, 40, 0, 4)
-grip.Position = UDim2.new(0.5, -20, 0.5, -2)
-grip.BackgroundColor3 = currentTheme.textDim
-grip.ZIndex = 16
-grip.Parent = bottomBar
-Instance.new("UICorner", grip).CornerRadius = UDim.new(1, 0)
-RegisterTheme(grip, "BackgroundColor3", "textDim")
-
-local scrollY = titleH + searchH + 14
-local scroll = Instance.new("ScrollingFrame")
-scroll.Size = UDim2.new(1, -16, 1, -(scrollY + pageH + bottomBarH + 18))
-scroll.Position = UDim2.new(0, 8, 0, scrollY)
-scroll.BackgroundTransparency = 1
-scroll.ScrollBarThickness = isMobile and 3 or 5
-scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-scroll.ScrollBarImageColor3 = currentTheme.stroke
-scroll.ZIndex = 1
-scroll.Parent = content
-RegisterTheme(scroll, "ScrollBarImageColor3", "stroke")
-
--- ===============================================================
--- CARD SYSTEM (RESPONSIVE GRID)
--- ===============================================================
-
-local function CalcLayout()
-	local PAD = isMobile and 4 or 6
-	local w = scroll.AbsoluteSize.X
-	
-	-- Determine minimal viable card size to allow more columns
-	local minCardSize = isMobile and TARGET_MOBILE_CARD or TARGET_PC_CARD
-	
-	-- Calculate how many columns fit
-	cols = math.floor(w / (minCardSize + PAD))
-	if cols < 1 then cols = 1 end
-	
-	-- Expand card size slightly to fill gaps
-	currentCardSize = (w - (PAD * (cols - 1))) / cols
-	
-	-- Calculate rows based on available height to fill page mostly
-	local NAME_H = math.clamp(currentCardSize * 0.35, 18, 28)
-	local FAV_H = math.clamp(currentCardSize * 0.3, 18, 24)
-	local CARD_TOTAL_H = currentCardSize + NAME_H + FAV_H
-	
-	local rowsVisible = math.floor(scroll.AbsoluteSize.Y / (CARD_TOTAL_H + PAD))
-	if rowsVisible < 2 then rowsVisible = 2 end
-	
-	-- Determine items per page dynamically
-	perPage = cols * rowsVisible
-	
-	pages = math.max(1, math.ceil(#filtered / perPage))
-	page = math.clamp(page, 1, pages)
-end
-
-local function UpdatePageUI()
-	pageNum.Text = page .. "/" .. pages
-	local show = pages > 1
-	prevBtn.Visible = show
-	nextBtn.Visible = show
-	
-	if prevBtn:FindFirstChild("ChevronIcon") then 
-		for _, c in ipairs(prevBtn.ChevronIcon:GetChildren()) do c.BackgroundColor3 = Color3.new(0, 0, 0) end
-	end
-	if nextBtn:FindFirstChild("ChevronIcon") then 
-		for _, c in ipairs(nextBtn.ChevronIcon:GetChildren()) do c.BackgroundColor3 = Color3.new(0, 0, 0) end
-	end
-	
-	pageBar.Visible = currentTab ~= "settings" and currentTab ~= "friends" and currentTab ~= "keybinds" and pages > 1
-	
-	local empty = #filtered == 0 and currentTab ~= "settings"
-	emptyLbl.Visible = empty
-	if empty then
-		local q = search and search.Text ~= "" or false
-		if q then
-			emptyLbl.Text = L.noSearch or "No results found"
-		elseif currentTab == "favorites" then
-			emptyLbl.Text = L.noFav
-		elseif currentTab == "recent" then
-			emptyLbl.Text = L.noRecent
-		else
-			emptyLbl.Text = L.noSearch or "No results found"
-		end
-	end
-end
-
-local function _MarkBadEmote(emoteId)
-	local key = tostring(emoteId)
-	if _badEmotes[key] then return end
-	_badEmotes[key] = true
-	-- Remove from master Emotes list
-	for i = #Emotes, 1, -1 do
-		if tostring(Emotes[i].id) == key then table.remove(Emotes, i); break end
-	end
-	EmotesById[tonumber(key)] = nil
-	-- Remove from current filtered list so page counts update
-	for i = #filtered, 1, -1 do
-		if tostring(filtered[i].id) == key then table.remove(filtered, i); break end
-	end
-	-- Debounced grid refresh so rapid failures coalesce into one redraw
-	if not _refreshPending then
-		_refreshPending = true
-		task.delay(0.8, function()
-			_refreshPending = false
-			if currentTab ~= "settings" and currentTab ~= "friends" and currentTab ~= "keybinds" then
-				page = math.clamp(page, 1, math.max(1, math.ceil(#filtered / perPage)))
-				Refresh(false)
-			end
-		end)
-	end
-end
-
-local function ClearCards()
-	for _, c in pairs(cards) do
-		if c and c.Parent then
-			-- Cancel any running tweens to avoid they reference destroyed instances
-			for _, desc in ipairs(c:GetDescendants()) do
-				if desc:IsA("TweenBase") then pcall(function() desc:Cancel() end) end
-			end
-			c:Destroy()
-		end
-	end
-	cards = {}
-	-- Prune _textGrads of entries whose parent was just destroyed
-	for i = #_textGrads, 1, -1 do
-		local g = _textGrads[i]
-		if not (g and g.Parent) then
-			table.remove(_textGrads, i)
-		end
-	end
-end
-
--- ===============================================================
--- KEYBIND DIALOG
--- ===============================================================
-
-local function ShowKeybindDialog(emoteId, emote, isEdit)
-	-- Remove existing overlay
-	local existing = main:FindFirstChild("VexroKeybindOverlay")
-	if existing then existing:Destroy() end
-
-	local overlay = Instance.new("TextButton")
-	overlay.Name = "VexroKeybindOverlay"
-	overlay.Size = UDim2.new(1, 0, 1, 0)
-	overlay.BackgroundColor3 = Color3.new(0, 0, 0)
-	overlay.BackgroundTransparency = 0.5
-	overlay.Text = ""
-	overlay.AutoButtonColor = false
-	overlay.ZIndex = 200
-	overlay.Parent = main
-	overlay.MouseButton1Click:Connect(function() end) -- tüm tıklamaları yut
-
-	local dialog = Instance.new("Frame")
-	dialog.Size = UDim2.new(0.85, 0, 0, 260)
-	dialog.Position = UDim2.fromScale(0.5, 0.5)
-	dialog.AnchorPoint = Vector2.new(0.5, 0.5)
-	dialog.BackgroundColor3 = currentTheme.secondary
-	dialog.ZIndex = 201
-	dialog.Parent = overlay
-	Instance.new("UICorner", dialog).CornerRadius = UDim.new(0, 16)
-	local dStroke = Instance.new("UIStroke")
-	dStroke.Color = currentTheme.accent
-	dStroke.Thickness = 2
-	dStroke.Transparency = 0.4
-	dStroke.Parent = dialog
-
-	-- Title
-	local titleLbl = Instance.new("TextLabel")
-	titleLbl.Size = UDim2.new(1, -16, 0, 36)
-	titleLbl.Position = UDim2.new(0, 8, 0, 8)
-	titleLbl.BackgroundTransparency = 1
-	titleLbl.Text = isEdit and L.editKeybind or L.newKeybind
-	titleLbl.TextColor3 = currentTheme.text
-	titleLbl.Font = Enum.Font.GothamBold
-	titleLbl.TextSize = 16
-	titleLbl.ZIndex = 202
-	titleLbl.Parent = dialog
-
-	-- Name label
-	local nameLblTitle = Instance.new("TextLabel")
-	nameLblTitle.Size = UDim2.new(0, 60, 0, 24)
-	nameLblTitle.Position = UDim2.new(0, 12, 0, 52)
-	nameLblTitle.BackgroundTransparency = 1
-	nameLblTitle.Text = L.kbName
-	nameLblTitle.TextColor3 = currentTheme.textDim
-	nameLblTitle.Font = Enum.Font.GothamBold
-	nameLblTitle.TextSize = 13
-	nameLblTitle.TextXAlignment = Enum.TextXAlignment.Left
-	nameLblTitle.ZIndex = 202
-	nameLblTitle.Parent = dialog
-
-	local nameBox = Instance.new("TextBox")
-	nameBox.Size = UDim2.new(1, -24, 0, 32)
-	nameBox.Position = UDim2.new(0, 12, 0, 78)
-	nameBox.BackgroundColor3 = currentTheme.tertiary
-	nameBox.PlaceholderText = emote.name
-	nameBox.Text = isEdit and (GetKeybind(emoteId) and GetKeybind(emoteId).name or "") or ""
-	nameBox.TextColor3 = currentTheme.text
-	nameBox.PlaceholderColor3 = currentTheme.textDim
-	nameBox.Font = Enum.Font.Gotham
-	nameBox.TextSize = 13
-	nameBox.ClearTextOnFocus = false
-	nameBox.ZIndex = 202
-	nameBox.Parent = dialog
-	Instance.new("UICorner", nameBox).CornerRadius = UDim.new(0, 8)
-	local nbStroke = Instance.new("UIStroke")
-	nbStroke.Color = currentTheme.stroke
-	nbStroke.Thickness = 1.5
-	nbStroke.Parent = nameBox
-
-	-- Atama label
-	local atamaLbl = Instance.new("TextLabel")
-	atamaLbl.Size = UDim2.new(0, 80, 0, 24)
-	atamaLbl.Position = UDim2.new(0, 12, 0, 122)
-	atamaLbl.BackgroundTransparency = 1
-	atamaLbl.Text = L.kbAssign
-	atamaLbl.TextColor3 = currentTheme.textDim
-	atamaLbl.Font = Enum.Font.GothamBold
-	atamaLbl.TextSize = 13
-	atamaLbl.TextXAlignment = Enum.TextXAlignment.Left
-	atamaLbl.ZIndex = 202
-	atamaLbl.Parent = dialog
-
-	-- Key recording button
-	local recordedKey = isEdit and (GetKeybind(emoteId) and GetKeybind(emoteId).key or nil) or nil
-	local isRecording = false
-	local recordConn
-
-	local keyBtn = Instance.new("TextButton")
-	keyBtn.Size = UDim2.new(1, -24, 0, 36)
-	keyBtn.Position = UDim2.new(0, 12, 0, 148)
-	keyBtn.BackgroundColor3 = currentTheme.tertiary
-	keyBtn.Text = recordedKey and ("[" .. recordedKey .. "]") or L.kbRecording
-	keyBtn.TextColor3 = recordedKey and currentTheme.accent or currentTheme.textDim
-	keyBtn.Font = Enum.Font.GothamBold
-	keyBtn.TextSize = 13
-	keyBtn.ZIndex = 202
-	keyBtn.Parent = dialog
-	Instance.new("UICorner", keyBtn).CornerRadius = UDim.new(0, 8)
-	local kbStroke = Instance.new("UIStroke")
-	kbStroke.Color = currentTheme.stroke
-	kbStroke.Thickness = 1.5
-	kbStroke.Parent = keyBtn
-
-	keyBtn.MouseButton1Click:Connect(function()
-		if isRecording then return end
-		isRecording = true
-		keyBtn.Text = "..."
-		kbStroke.Color = currentTheme.accent
-		TweenService:Create(kbStroke, TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Transparency = 0.7}):Play()
-		local UIS2 = game:GetService("UserInputService")
-		recordConn = UIS2.InputBegan:Connect(function(inp, gp)
-			if gp then return end
-			if inp.UserInputType == Enum.UserInputType.Keyboard then
-				recordedKey = inp.KeyCode.Name
-				isRecording = false
-				recordConn:Disconnect()
-				keyBtn.Text = "[" .. recordedKey .. "]"
-				keyBtn.TextColor3 = currentTheme.accent
-				kbStroke.Color = currentTheme.stroke
-				TweenService:Create(kbStroke, TweenInfo.new(0.1), {Transparency = 0}):Play()
-			end
-		end)
-	end)
-
-	-- Cancel button
-	local cancelBtn = Instance.new("TextButton")
-	cancelBtn.Size = UDim2.new(0.45, -6, 0, 38)
-	cancelBtn.Position = UDim2.new(0, 12, 0, 208)
-	cancelBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
-	cancelBtn.Text = L.kbCancel
-	cancelBtn.TextColor3 = Color3.new(1, 1, 1)
-	cancelBtn.Font = Enum.Font.GothamBold
-	cancelBtn.TextSize = 14
-	cancelBtn.ZIndex = 202
-	cancelBtn.Parent = dialog
-	Instance.new("UICorner", cancelBtn).CornerRadius = UDim.new(0, 10)
-
-	-- Save button
-	local saveBtn = Instance.new("TextButton")
-	saveBtn.Size = UDim2.new(0.55, -18, 0, 38)
-	saveBtn.Position = UDim2.new(0.45, 6, 0, 208)
-	saveBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
-	saveBtn.Text = L.kbSave
-	saveBtn.TextColor3 = Color3.new(1, 1, 1)
-	saveBtn.Font = Enum.Font.GothamBold
-	saveBtn.TextSize = 14
-	saveBtn.ZIndex = 202
-	saveBtn.Parent = dialog
-	Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 10)
-
-	cancelBtn.MouseButton1Click:Connect(function()
-		if recordConn then pcall(function() recordConn:Disconnect() end) end
-		overlay:Destroy()
-	end)
-
-	local _KB_BLACKLIST = {Unknown=true, Backspace=true, Delete=true, Escape=true,
-		Return=true, Tab=true, CapsLock=true, LeftShift=true, RightShift=true,
-		LeftControl=true, RightControl=true, LeftAlt=true, RightAlt=true,
-		LeftMeta=true, RightMeta=true, Insert=true, Home=true, End=true,
-		PageUp=true, PageDown=true, NumLock=true, ScrollLock=true, Pause=true, Print=true}
-
-	saveBtn.MouseButton1Click:Connect(function()
-		if not recordedKey then return end
-		if _KB_BLACKLIST[recordedKey] then
-			keyBtn.Text = L.kbInvalidKey or "Invalid key!"
-			keyBtn.TextColor3 = Color3.fromRGB(220, 50, 50)
-			task.delay(1.5, function()
-				if recordedKey then
-					keyBtn.Text = "[" .. recordedKey .. "]"
-					keyBtn.TextColor3 = currentTheme.accent
-				end
-			end)
-			return
-		end
-		if recordConn then pcall(function() recordConn:Disconnect() end) end
-		local kbName = nameBox.Text ~= "" and nameBox.Text or emote.name
-		SetKeybind(emoteId, kbName, recordedKey)
-		overlay:Destroy()
-		Refresh(false)
-		if currentTab == "keybinds" and RefreshKeybindsPanel then RefreshKeybindsPanel() end
-	end)
-
-	-- Entry animation
-	dialog.Size = UDim2.new(0, 0, 0, 0)
-	TweenService:Create(dialog, TweenInfo.new(0.35, Enum.EasingStyle.Back), {Size = UDim2.new(0.85, 0, 0, 260)}):Play()
-end
-
--- Assign RefreshKeybindsPanel (forward-declared above keybindsPanel)
-RefreshKeybindsPanel = function()
-	for _, c in ipairs(keybindsPanel:GetChildren()) do
-		if not c:IsA("UIListLayout") then c:Destroy() end
-	end
-	local hasAny = false
-	for emoteId, kb in pairs(KeybindsSet) do
-		hasAny = true
-		local emote = EmotesById[emoteId]
-		local emoteName = emote and emote.name or ("Emote #"..emoteId)
-		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1, 0, 0, 56)
-		row.BackgroundColor3 = currentTheme.secondary
-		row.BorderSizePixel = 0
-		row.ZIndex = 6
-		row.Parent = keybindsPanel
-		Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
-		-- Emote thumbnail
-		local thumb = Instance.new("ImageLabel")
-		thumb.Size = UDim2.new(0, 44, 0, 44)
-		thumb.Position = UDim2.new(0, 6, 0.5, -22)
-		thumb.BackgroundTransparency = 1
-		thumb.Image = "rbxthumb://type=Asset&id="..emoteId.."&w=420&h=420"
-		thumb.ZIndex = 7
-		thumb.Parent = row
-		Instance.new("UICorner", thumb).CornerRadius = UDim.new(0, 6)
-		-- Name
-		local nameLbl = Instance.new("TextLabel")
-		nameLbl.Size = UDim2.new(1, -130, 0, 20)
-		nameLbl.Position = UDim2.new(0, 56, 0, 8)
-		nameLbl.BackgroundTransparency = 1
-		nameLbl.Text = emoteName
-		nameLbl.TextColor3 = currentTheme.text
-		nameLbl.Font = Enum.Font.GothamBold
-		nameLbl.TextSize = 13
-		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-		nameLbl.ZIndex = 7
-		nameLbl.Parent = row
-		-- Key badge
-		local keyLbl = Instance.new("TextLabel")
-		keyLbl.Size = UDim2.new(0, 38, 0, 24)
-		keyLbl.Position = UDim2.new(0, 56, 0, 28)
-		keyLbl.BackgroundColor3 = currentTheme.accent
-		keyLbl.Text = kb.key
-		keyLbl.TextColor3 = currentTheme.primary
-		keyLbl.Font = Enum.Font.GothamBold
-		keyLbl.TextSize = 12
-		keyLbl.ZIndex = 7
-		keyLbl.Parent = row
-		Instance.new("UICorner", keyLbl).CornerRadius = UDim.new(0, 6)
-		-- Custom name label
-		local customName = Instance.new("TextLabel")
-		customName.Size = UDim2.new(1, -110, 0, 14)
-		customName.Position = UDim2.new(0, 100, 0, 30)
-		customName.BackgroundTransparency = 1
-		customName.Text = kb.name ~= "" and kb.name or ""
-		customName.TextColor3 = currentTheme.textDim
-		customName.Font = Enum.Font.Gotham
-		customName.TextSize = 11
-		customName.TextXAlignment = Enum.TextXAlignment.Left
-		customName.ZIndex = 7
-		customName.Parent = row
-		-- Delete button
-		local delBtn = Instance.new("ImageButton")
-		delBtn.Size = UDim2.new(0, 42, 0, 42)
-		delBtn.Position = UDim2.new(1, -40, 0.5, -16)
-		delBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-		delBtn.Image = ResolveAssetImage(Icons.KeybindRemove)
-		delBtn.ImageColor3 = Color3.new(1,1,1)
-		delBtn.ZIndex = 7
-		delBtn.Parent = row
-		Instance.new("UICorner", delBtn).CornerRadius = UDim.new(1, 0)
-		delBtn.MouseButton1Click:Connect(function()
-			RemoveKeybind(emoteId)
-			RefreshKeybindsPanel()
-		end)
-	end
-	if not hasAny then
-		local emptyLbl2 = Instance.new("TextLabel")
-		emptyLbl2.Size = UDim2.new(1, 0, 0, 60)
-		emptyLbl2.BackgroundTransparency = 1
-		emptyLbl2.Text = L.kbEmpty
-		emptyLbl2.TextColor3 = currentTheme.textDim
-		emptyLbl2.Font = Enum.Font.Gotham
-		emptyLbl2.TextSize = 14
-		emptyLbl2.ZIndex = 6
-		emptyLbl2.Parent = keybindsPanel
-	end
-end
-
--- ===============================================================
--- CARD SYSTEM
--- ===============================================================
-
-local function MakeCard(emote, ci, animate)
-	local CARD = currentCardSize
-	local PAD = isMobile and 4 or 6
-
-	-- Dynamic text height based on card size, but capped
-	local NAME_H = math.clamp(CARD * 0.35, 18, 28)
-	local FAV_H = math.clamp(CARD * 0.3, 18, 24)
-	local KB_H = (not isMobile) and math.clamp(CARD * 0.45, 30, 40) or 0  -- keybind row height (PC only)
-	local CARD_TOTAL_H = KB_H + CARD + NAME_H + FAV_H
-
-	-- Ana kart container
-	local cardContainer = Instance.new("Frame")
-	cardContainer.Size = UDim2.new(0, CARD, 0, CARD_TOTAL_H)
-	cardContainer.BackgroundTransparency = 1
-	cardContainer.ZIndex = 2
-	cardContainer.Parent = scroll
-	
-	local col = ci % cols
-	local row = math.floor(ci / cols)
-	
-	-- Position logic for grid
-	local targetX = col * (CARD + PAD)
-	local targetY = PAD + row * (CARD_TOTAL_H + PAD)
-	
-	if animate then
-		cardContainer.Position = UDim2.new(0, targetX, 0, targetY + 30)
-		cardContainer.BackgroundTransparency = 1
-		
-		task.delay(ci * 0.02, function()
-			if cardContainer.Parent then
-				TweenService:Create(cardContainer, TweenInfo.new(0.25, Enum.EasingStyle.Back), {
-					Position = UDim2.new(0, targetX, 0, targetY)
-				}):Play()
-			end
-		end)
-	else
-		cardContainer.Position = UDim2.new(0, targetX, 0, targetY)
-	end
-	
-	local card = Instance.new("ImageButton")
-	card.Size = UDim2.new(1, 0, 0, CARD)
-	card.Position = UDim2.new(0, 0, 0, KB_H)
-	card.BackgroundColor3 = currentTheme.tertiary
-	card.ScaleType = Enum.ScaleType.Fit
-	card.ZIndex = 3
-	card.Parent = cardContainer
-	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
-	
-	card.Image = "rbxthumb://type=Asset&id=" .. emote.id .. "&w=420&h=420"
-	-- Cards are dynamic, register/unregister is complex. We set color directly on refresh.
-	card.BackgroundColor3 = currentTheme.tertiary
-
-	-- Async asset validation with 15-second timeout
-	task.spawn(function()
-		local _done = false
-		local function _onResult(_, status)
-			if _done then return end
-			_done = true
-			if status == Enum.AssetFetchStatus.Failure then
-				task.defer(function()
-					if cardContainer and cardContainer.Parent then cardContainer:Destroy() end
-					_MarkBadEmote(emote.id)
-				end)
-			end
-		end
-		task.delay(15, function() _onResult(nil, Enum.AssetFetchStatus.Failure) end)
-		pcall(function()
-			game:GetService("ContentProvider"):PreloadAsync({card}, _onResult)
-		end)
-	end)
-	
-	if animate then
-		card.ImageTransparency = 1
-		task.delay(ci * 0.02, function()
-			if card.Parent then
-				TweenService:Create(card, TweenInfo.new(0.25), {ImageTransparency = 0}):Play()
-			end
-		end)
-	end
-	
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = currentTheme.accent
-	stroke.Thickness = 2
-	stroke.Transparency = 0.6
-	stroke.Parent = card
-	
-	-- İsim Label (resmin altında)
-	local nameLbl = Instance.new("TextLabel")
-	nameLbl.Size = UDim2.new(1, -4, 0, NAME_H - 2) 
-	nameLbl.Position = UDim2.new(0, 2, 0, KB_H + CARD)
-	nameLbl.BackgroundColor3 = currentTheme.secondary
-	nameLbl.Text = #emote.name > 20 and emote.name:sub(1, 19) .. "…" or emote.name
-	nameLbl.TextColor3 = currentTheme.text
-	nameLbl.Font = Enum.Font.GothamBold
-	nameLbl.TextScaled = true
-	nameLbl.TextWrapped = true 
-	nameLbl.Active = true 
-	nameLbl.ZIndex = 3
-	nameLbl.Parent = cardContainer
-	Instance.new("UICorner", nameLbl).CornerRadius = UDim.new(0, 4)
-	_AddTextGrad(nameLbl)
-
-	nameLbl.MouseEnter:Connect(function()
-		TweenService:Create(nameLbl, TweenInfo.new(0.2, Enum.EasingStyle.Back), {
-			Size = UDim2.new(1, 4, 0, NAME_H + 4),
-			Rotation = math.random(-2, 2)
-		}):Play()
-	end)
-	
-	nameLbl.MouseLeave:Connect(function()
-		TweenService:Create(nameLbl, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-			Size = UDim2.new(1, -4, 0, NAME_H - 2),
-			Rotation = 0
-		}):Play()
-	end)
-	
-	
-	local isFav = IsFavorite(emote.id)
-	local favBtn = Instance.new("TextButton")
-	favBtn.Size = UDim2.new(1, 0, 0, FAV_H)
-	favBtn.Position = UDim2.new(0, 0, 0, KB_H + CARD + NAME_H)
-	favBtn.BackgroundColor3 = currentTheme.accent
-	favBtn.BackgroundTransparency = 1 -- Kareyi kaldır
-	favBtn.Text = ""
-	favBtn.ZIndex = 4
-	favBtn.Parent = cardContainer
-	Instance.new("UICorner", favBtn).CornerRadius = UDim.new(0, 4)
-
-	local favIcon = Instance.new("TextLabel")
-	local iconSize = isMobile and 28 or 34
-	favIcon.Size = UDim2.new(0, iconSize, 0, iconSize)
-	favIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-	favIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-	favIcon.BackgroundTransparency = 1
-	favIcon.Text = isFav and utf8.char(0x2605) or utf8.char(0x2606)
-	favIcon.TextColor3 = isFav and Color3.fromRGB(255, 215, 0) or currentTheme.accent
-	favIcon.Font = Enum.Font.SourceSansLight
-	favIcon.TextSize = isMobile and 26 or 32
-	favIcon.TextScaled = false
-	favIcon.ZIndex = 50
-	favIcon.Parent = favBtn
-	
-	favBtn.MouseEnter:Connect(function()
-		TweenService:Create(favBtn, TweenInfo.new(0.15, Enum.EasingStyle.Back), {
-			BackgroundColor3 = isFav and currentTheme.tertiary or currentTheme.accent,
-			Size = UDim2.new(1, 6, 0, FAV_H + 6),
-			Rotation = math.random(-2, 2)
-		}):Play()
-	end)
-	favBtn.MouseLeave:Connect(function()
-		TweenService:Create(favBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
-			BackgroundColor3 = isFav and currentTheme.tertiary or currentTheme.stroke,
-			Size = UDim2.new(1, 0, 0, FAV_H),
-			Rotation = 0
-		}):Play()
-	end)
-	
-	favBtn.MouseButton1Click:Connect(function()
-		isFav = ToggleFavorite(emote.id)
-		
-		if isFav then
-			favIcon.Text = utf8.char(0x2605)
-			favIcon.TextColor3 = Color3.fromRGB(255, 215, 0)
-		else
-			favIcon.Text = utf8.char(0x2606)
-			favIcon.TextColor3 = currentTheme.accent
-		end
-		
-		TweenService:Create(favBtn, TweenInfo.new(0.2), {
-			BackgroundColor3 = isFav and currentTheme.tertiary or currentTheme.stroke
-		}):Play()
-		
-		-- YILDIZ PATLAMA ANİMASYONU
-		if isFav then
-			favIcon.Size = UDim2.new(0, 0, 0, 0)
-			TweenService:Create(favIcon, TweenInfo.new(0.5, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {
-				Size = UDim2.new(0, iconSize + 6, 0, iconSize + 6)
-			}):Play()
-			task.delay(0.2, function()
-				TweenService:Create(favIcon, TweenInfo.new(0.3, Enum.EasingStyle.Sine), {
-					Size = UDim2.new(0, iconSize, 0, iconSize)
-				}):Play()
-			end)
-			
-			local ripple = Instance.new("Frame")
-			ripple.Size = UDim2.new(0, 0, 0, 0)
-			ripple.Position = UDim2.fromScale(0.5, 0.5)
-			ripple.AnchorPoint = Vector2.new(0.5, 0.5)
-			ripple.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
-			ripple.BackgroundTransparency = 0.3
-			ripple.ZIndex = 4
-			ripple.Parent = favBtn
-			Instance.new("UICorner", ripple).CornerRadius = UDim.new(1, 0)
-			
-			TweenService:Create(ripple, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-				Size = UDim2.new(2, 0, 2, 0),
-				BackgroundTransparency = 1
-			}):Play()
-			task.delay(0.4, function() if ripple then ripple:Destroy() end end)
-		else
-			-- Geri alırken küçük bir küçülme efekti
-			TweenService:Create(favIcon, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-				Size = UDim2.new(0, iconSize - 4, 0, iconSize - 4)
-			}):Play()
-			task.delay(0.2, function()
-				TweenService:Create(favIcon, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-					Size = UDim2.new(0, iconSize, 0, iconSize)
-				}):Play()
-			end)
-		end
-		
-		if currentTab == "favorites" then
-			task.delay(0.4, function()
-				if currentTab == "favorites" then UpdateTabData() end
-			end)
-		end
-	end)
-
-	-- Keybind button row at TOP of card (PC only, same style as favBtn at bottom)
-	local kbHasBinding = GetKeybind(emote.id) ~= nil
-	if not isMobile then
-		local kbBtn = Instance.new("TextButton")
-		kbBtn.Size = UDim2.new(1, 0, 0, KB_H)
-		kbBtn.Position = UDim2.new(0, 0, 0, 0)
-		kbBtn.BackgroundColor3 = currentTheme.accent
-		kbBtn.BackgroundTransparency = 1
-		kbBtn.Text = ""
-		kbBtn.ZIndex = 4
-		kbBtn.ClipsDescendants = true
-		kbBtn.Parent = cardContainer
-		Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0, 4)
-
-		local kbIcon = Instance.new("ImageLabel")
-		kbIcon.Size = UDim2.new(0.95, 0, 0.95, 0)
-		kbIcon.Position = UDim2.fromScale(0.5, 0.5)
-		kbIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-		kbIcon.BackgroundTransparency = 1
-		kbIcon.ScaleType = Enum.ScaleType.Fit
-		kbIcon.Image = ResolveAssetImage(kbHasBinding and Icons.KeybindActive or Icons.Keybind)
-		kbIcon.ImageColor3 = kbHasBinding and currentTheme.accent or currentTheme.textDim
-		kbIcon.ZIndex = 5
-		kbIcon.Parent = kbBtn
-
-		kbBtn.MouseEnter:Connect(function()
-			TweenService:Create(kbBtn, TweenInfo.new(0.15, Enum.EasingStyle.Back), {
-				BackgroundColor3 = kbHasBinding and currentTheme.tertiary or currentTheme.accent,
-				Size = UDim2.new(1, 6, 0, KB_H + 6),
-				Rotation = math.random(-2, 2)
-			}):Play()
-		end)
-		kbBtn.MouseLeave:Connect(function()
-			TweenService:Create(kbBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
-				BackgroundColor3 = currentTheme.stroke,
-				Size = UDim2.new(1, 0, 0, KB_H),
-				Rotation = 0
-			}):Play()
-		end)
-
-		kbBtn.MouseButton1Click:Connect(function()
-			ShowKeybindDialog(emote.id, emote, kbHasBinding)
-			-- Update icon after dialog closes via Refresh
-		end)
-
-		-- Long press: show red remove overlay on card
-		local longPressTimer = nil
-		local longPressOverlay = nil
-
-		local function ShowRemoveOverlay()
-			if not GetKeybind(emote.id) then return end
-			if longPressOverlay then return end
-			longPressOverlay = Instance.new("Frame")
-			longPressOverlay.Size = UDim2.new(1, 0, 0, 0)
-			longPressOverlay.Position = UDim2.new(0, 0, 1, 0)
-			longPressOverlay.AnchorPoint = Vector2.new(0, 1)
-			longPressOverlay.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
-			longPressOverlay.BackgroundTransparency = 0.2
-			longPressOverlay.ZIndex = 15
-			longPressOverlay.ClipsDescendants = true
-			longPressOverlay.Parent = card
-			Instance.new("UICorner", longPressOverlay).CornerRadius = UDim.new(0, 8)
-			TweenService:Create(longPressOverlay, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-				Size = UDim2.new(1, 0, 1, 0),
-				Position = UDim2.new(0, 0, 0, 0)
-			}):Play()
-			local removeIcon = Instance.new("ImageButton")
-			removeIcon.Size = UDim2.new(0, 42, 0, 42)
-			removeIcon.Position = UDim2.fromScale(0.5, 0.5)
-			removeIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-			removeIcon.BackgroundTransparency = 1
-			removeIcon.Image = ResolveAssetImage(Icons.KeybindRemove)
-			removeIcon.ImageColor3 = Color3.new(1, 1, 1)
-			removeIcon.ZIndex = 16
-			removeIcon.Parent = longPressOverlay
-			removeIcon.MouseButton1Click:Connect(function()
-				RemoveKeybind(emote.id)
-				kbHasBinding = false
-				kbIcon.Image = ResolveAssetImage(Icons.Keybind)
-				kbIcon.ImageColor3 = currentTheme.textDim
-				if longPressOverlay then longPressOverlay:Destroy(); longPressOverlay = nil end
-			end)
-			task.delay(2.5, function()
-				if longPressOverlay then
-					TweenService:Create(longPressOverlay, TweenInfo.new(0.2), {BackgroundTransparency = 1}):Play()
-					task.delay(0.2, function()
-						if longPressOverlay then longPressOverlay:Destroy(); longPressOverlay = nil end
-					end)
-				end
-			end)
-		end
-
-		local pressStart = 0
-		card.InputBegan:Connect(function(inp)
-			if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-				pressStart = tick()
-				longPressTimer = task.delay(0.6, ShowRemoveOverlay)
-			end
-		end)
-		card.InputEnded:Connect(function(inp)
-			if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-				if longPressTimer then task.cancel(longPressTimer); longPressTimer = nil end
-				if tick() - pressStart < 0.4 and longPressOverlay then
-					longPressOverlay:Destroy(); longPressOverlay = nil
-				end
-			end
-		end)
-	end -- isMobile check for keybind block
-
-	card.MouseEnter:Connect(function()
-		-- Hafif büyütme ve tilt efekti
-		TweenService:Create(card, TweenInfo.new(0.2, Enum.EasingStyle.Back), {
-			Size = UDim2.new(1, 6, 0, CARD + 6),
-			Rotation = math.random(-2, 2)
-		}):Play()
-		-- Stroke parlaması
-		local hoverColor = currentTheme.strokeHover or currentTheme.accent
-		TweenService:Create(stroke, TweenInfo.new(0.2), {Transparency = 0, Thickness = 2.5, Color = hoverColor}):Play()
-	end)
-
-	card.MouseLeave:Connect(function()
-		-- Normale dönüş
-		TweenService:Create(card, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-			Size = UDim2.new(1, 0, 0, CARD),
-			Rotation = 0
-		}):Play()
-		TweenService:Create(stroke, TweenInfo.new(0.2), {Transparency = 0.6, Thickness = 2, Color = currentTheme.stroke}):Play()
-	end)
-	
-	
-	card.MouseButton1Click:Connect(function()
-		-- İçeri göçme (Jelly)
-		TweenService:Create(card, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {Size = UDim2.new(0.9, 0, 0, CARD * 0.9)}):Play()
-		
-		task.delay(0.1, function()
-			-- Geri fırlama
-			TweenService:Create(card, TweenInfo.new(0.3, Enum.EasingStyle.Elastic), {Size = UDim2.new(1, 0, 0, CARD)}):Play()
-		end)
-		
-		TweenService:Create(stroke, TweenInfo.new(0.1), {Color = Color3.fromRGB(80, 220, 120)}):Play()
-		task.delay(0.3, function()
-			if card.Parent then
-				TweenService:Create(stroke, TweenInfo.new(0.2), {Color = currentTheme.accent}):Play()
-			end
-		end)
-		
-		-- Break any active friend sync when user manually picks a new emote
-		if FriendData and FriendData.currentSyncPartner then
-			FriendData.currentSyncPartner = nil
-		end
-		PlayEmote(emote.id, emote.name)
-	end)
-
-	return cardContainer
-end
-
-local function UpdateCards(animate)
-	ClearCards()
-	
-	local startIdx = (page - 1) * perPage + 1
-	local endIdx = math.min(page * perPage, #filtered)
-	
-	local ci = 0
-	for i = startIdx, endIdx do
-		if filtered[i] then
-			cards[i] = MakeCard(filtered[i], ci, animate)
-			ci = ci + 1
-		end
-	end
-	
-	local CARD = currentCardSize
-	local PAD = isMobile and 4 or 6
-	local NAME_H = math.clamp(CARD * 0.35, 18, 28)
-	local FAV_H = math.clamp(CARD * 0.3, 18, 24)
-	local CARD_TOTAL_H = CARD + NAME_H + FAV_H
-	
-	local rows = math.ceil(ci / math.max(cols, 1))
-	scroll.CanvasSize = UDim2.new(0, 0, 0, rows * (CARD_TOTAL_H + PAD) + PAD)
-	scroll.CanvasPosition = Vector2.zero
-
-	-- Background preload next page thumbnails so page changes feel instant
-	local _npStart = page * perPage + 1
-	local _npEnd   = math.min((page + 1) * perPage, #filtered)
-	if _npStart <= _npEnd then
-		task.spawn(function()
-			local _imgs = {}
-			for _i = _npStart, _npEnd do
-				local _fe = filtered[_i]
-				if _fe and not _badEmotes[tostring(_fe.id)] then
-					local _img = Instance.new("ImageLabel")
-					_img.Image = "rbxthumb://type=Asset&id=" .. _fe.id .. "&w=420&h=420"
-					_imgs[#_imgs + 1] = _img
-				end
-			end
-			if #_imgs > 0 then
-				pcall(function() game:GetService("ContentProvider"):PreloadAsync(_imgs) end)
-				for _, _img in ipairs(_imgs) do _img:Destroy() end
-			end
-		end)
-	end
-end
-
-local function Refresh(animate)
-	CalcLayout()
-	UpdatePageUI()
-	UpdateCards(animate ~= false)
-end
-
-prevBtn.MouseButton1Click:Connect(function()
-	if pages <= 1 then return end
-	if page > 1 then 
-		page = page - 1
-	else 
-		page = pages -- Loop to end
-	end
-	Refresh(true)
-end)
-nextBtn.MouseButton1Click:Connect(function()
-	if pages <= 1 then return end
-	if page < pages then 
-		page = page + 1
-	else 
-		page = 1 -- Loop to start
-	end
-	Refresh(true)
-end)
-
--- ===============================================================
--- TAB SYSTEM
--- ===============================================================
-
-UpdateTabStyles = function()
-	local isM3 = Settings.theme == "MaterialYou"
-	for name, data in pairs(tabBtns) do
-		local active = currentTab == name
-		local targetColor = active and currentTheme.accent or currentTheme.sidebar
-		local targetIconColor = active and Color3.new(1, 1, 1) or currentTheme.text
-		
-		-- Quatrefoil göstergesi (sadece MaterialYou)
-		if data.quatrefoil then
-			if isM3 and active then
-				data.quatrefoil.Visible = true
-				data.quatrefoil.ImageColor3 = currentTheme.accent
-				local qSize = tabBtnS + 10
-				data.quatrefoil.Size = UDim2.new(0, 0, 0, 0)
-				TweenService:Create(data.quatrefoil, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-					Size = UDim2.new(0, qSize, 0, qSize),
-					ImageTransparency = 0.3
-				}):Play()
-			else
-				if data.quatrefoil.Visible then
-					local qRef = data.quatrefoil
-					TweenService:Create(qRef, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-						Size = UDim2.new(0, 0, 0, 0),
-						ImageTransparency = 1
-					}):Play()
-					task.delay(0.2, function()
-						if qRef and qRef.Parent then qRef.Visible = false end
-					end)
-				end
-			end
-		end
-		
-		-- Tüm temalarda butonlar şeffaf; aktif gösterge ayrı frame'de
-		TweenService:Create(data.btn, TweenInfo.new(0.2), {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(0, tabBtnS, 0, tabBtnS)
-		}):Play()
-		data.stroke.Transparency = 1
-
-		if isM3 then
-			-- MaterialYou: quatrefoil göstergesi, sliding indicator gizli
-			if _tabIndicator then _tabIndicator.Visible = false end
-		else
-			-- Diğer temalar: sliding indicator göster, aktif tab'a kaydır
-			if _tabIndicator then
-				_tabIndicator.Visible = true
-				if active then
-					_UpdateIndicatorGrad()
-					local targetY = data.yPos - 2
-					TweenService:Create(_tabIndicator, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-						Position = UDim2.new(0.5, -_indS/2, 0, targetY)
-					}):Play()
-				end
-			end
-		end
-		
-		if data.img then
-			TweenService:Create(data.img, TweenInfo.new(0.2), {
-				ImageColor3 = targetIconColor
-			}):Play()
-		else
-			TweenService:Create(data.btn, TweenInfo.new(0.2), {
-				TextColor3 = targetIconColor
-			}):Play()
-		end
-	end
-end
-
-UpdateTabData = function()
-	search.Text = ""
-	page = 1
-	
-	local isSettings  = currentTab == "settings"
-	local isFriends   = currentTab == "friends"
-	local isKeybinds  = currentTab == "keybinds"
-	settingsPanel.Visible  = isSettings
-	friendsPanel.Visible   = isFriends
-	keybindsPanel.Visible  = isKeybinds
-	local hideNormal = isSettings or isFriends or isKeybinds
-	scroll.Visible  = not hideNormal
-	search.Visible  = not hideNormal
-	pageBar.Visible = not hideNormal
-	if hideNormal then
-		emptyLbl.Visible = false
-	end
-	if isKeybinds then
-		if RefreshKeybindsPanel then RefreshKeybindsPanel() end
-	end
-	
-	if currentTab == "emotes" then
-		currentData = Emotes
-		-- If bad emotes exist, build a clean filtered copy; otherwise share the table
-		if next(_badEmotes) then
-			filtered = {}
-			for _, e in ipairs(Emotes) do
-				if not _badEmotes[tostring(e.id)] then filtered[#filtered + 1] = e end
-			end
-		else
-			filtered = Emotes
-		end
-		title.Text = L.emotes
-		titleIcon.Image = ResolveAssetImage(Icons.Emote)
-		titleIcon.ImageColor3 = currentTheme.text
-		titleIcon.Visible = true
-	elseif currentTab == "favorites" then
-		currentData = {}
-		for i = 1, #Favorites do
-			local emote = EmotesById[Favorites[i]]
-			if emote then
-				currentData[#currentData + 1] = emote
-			end
-		end
-		filtered = currentData
-		title.Text = L.favorites
-		titleIcon.Image = ResolveAssetImage(Icons.FavoriteFull)
-		titleIcon.ImageColor3 = (Settings.theme == "FrostedGlass" or Settings.theme == "DarkGlass") and currentTheme.accent or currentTheme.text
-		titleIcon.Visible = true
-
-	elseif currentTab == "recent" then
-		currentData = {}
-		for i = 1, #RecentEmotes do
-			local emote = EmotesById[RecentEmotes[i]]
-			if emote then
-				currentData[#currentData + 1] = emote
-			end
-		end
-		filtered = currentData
-		title.Text = L.recent
-		titleIcon.Image = ResolveAssetImage(Icons.Recent)
-		titleIcon.ImageColor3 = (Settings.theme == "FrostedGlass" or Settings.theme == "DarkGlass") and currentTheme.accent or currentTheme.text
-		titleIcon.Visible = true
-	elseif currentTab == "settings" then
-		title.Text = L.settings
-		titleIcon.Image = ResolveAssetImage(Icons.Settings)
-		titleIcon.ImageColor3 = (Settings.theme == "FrostedGlass" or Settings.theme == "DarkGlass") and currentTheme.accent or currentTheme.text
-		titleIcon.Visible = true
-	elseif currentTab == "friends" then
-		title.Text = L.friendTab or "Arkadaşlar"
-		titleIcon.Image = ResolveAssetImage("rbxassetid://115725480722697")
-		titleIcon.ImageColor3 = (Settings.theme == "FrostedGlass" or Settings.theme == "DarkGlass") and currentTheme.accent or currentTheme.text
-		titleIcon.Visible = true
-	elseif currentTab == "keybinds" then
-		title.Text = L.keybinds
-		titleIcon.Image = ResolveAssetImage("rbxassetid://122679509852670")
-		titleIcon.ImageColor3 = (Settings.theme == "FrostedGlass" or Settings.theme == "DarkGlass") and currentTheme.accent or currentTheme.text
-		titleIcon.Visible = true
-	end
-	
-	local tabIconSz = titleIconSz
-	if currentTab ~= "emotes" then
-		tabIconSz = math.floor(titleIconSz * 1.3)
-	end
-	titleIcon.Size = UDim2.new(0, tabIconSz, 0, tabIconSz)
-	title.Position = UDim2.new(0, titleIcon.Visible and (10 + tabIconSz + 6) or 10, 0, 0)
-	
-	UpdateTabStyles()
-	if not isSettings and not isKeybinds and not isFriends then Refresh(true) end
-end
-
-tabBtns["emotes"].btn.MouseButton1Click:Connect(function() currentTab = "emotes"; UpdateTabData() end)
-tabBtns["favorites"].btn.MouseButton1Click:Connect(function() currentTab = "favorites"; UpdateTabData() end)
-
-tabBtns["recent"].btn.MouseButton1Click:Connect(function() currentTab = "recent"; UpdateTabData() end)
-tabBtns["settings"].btn.MouseButton1Click:Connect(function() currentTab = "settings"; UpdateTabData() end)
-tabBtns["friends"].btn.MouseButton1Click:Connect(function() currentTab = "friends"; UpdateTabData() end)
-if not isMobile then tabBtns["keybinds"].btn.MouseButton1Click:Connect(function() currentTab = "keybinds"; UpdateTabData() end) end
-
-local searchToken = 0
-search:GetPropertyChangedSignal("Text"):Connect(function()
-	if currentTab == "settings" then return end
-	searchToken = searchToken + 1
-	local myToken = searchToken
-	task.wait(0.08)
-	if myToken ~= searchToken then return end -- Newer input supersedes
-	local q = search.Text:lower()
-	filtered = {}
-	for i = 1, #currentData do
-		local e = currentData[i]
-		if not _badEmotes[tostring(e.id)] and (q == "" or (#q <= #(e._lname or e.name) and (e._lname or e.name:lower()):find(q, 1, true))) then
-			filtered[#filtered + 1] = e
-		end
-	end
-	page = 1
-	Refresh(true)
-end)
-
--- ===============================================================
--- MINI ICON
--- ===============================================================
-
-do
-local iconS = isMobile and 50 or 60
-local miniIcon = Instance.new("ImageButton")
-miniIcon.Size = UDim2.new(0, iconS, 0, iconS)
-miniIcon.Position = UDim2.new(0, 20, 0.5, -iconS/2)
-miniIcon.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
-miniIcon.Image = "rbxassetid://88874992610290"
-miniIcon.Visible = false
-miniIcon.ZIndex = 1000
-miniIcon.Parent = gui
-Instance.new("UICorner", miniIcon).CornerRadius = UDim.new(1, 0)
-
-local miniIconStroke = Instance.new("UIStroke")
-miniIconStroke.Color = Color3.new(1, 1, 1) -- Gradient için beyaz taban
-miniIconStroke.Thickness = 3
-miniIconStroke.Parent = miniIcon
-
-miniIconGrad = Instance.new("UIGradient")
-miniIconGrad.Color = ColorSequence.new{
-	ColorSequenceKeypoint.new(0, currentTheme.stroke),
-	ColorSequenceKeypoint.new(0.33, currentTheme.accent),
-	ColorSequenceKeypoint.new(0.66, currentTheme.stroke),
-	ColorSequenceKeypoint.new(1, currentTheme.accent)
+local btnColors = {
+    dark = Color3.fromRGB(45, 48, 52),
+    blue = Color3.fromRGB(88, 101, 242)
 }
-miniIconGrad.Parent = miniIconStroke
+
+local BtnExportAll = CreateExportBtn("Export All Settings", btnColors.dark, 1)
+local BtnExportThemes = CreateExportBtn("Export Themes", btnColors.blue, 2)
+local BtnExportSettings = CreateExportBtn("Export Settings", btnColors.blue, 3)
+local BtnExportFavorites = CreateExportBtn("Export Favorites", btnColors.blue, 4)
+
+function GetFavoritesData()
+    local favAnimsStr = "{}"
+    if isfile and isfile(State.favoriteAnimationsFileName) then
+        favAnimsStr = readfile(State.favoriteAnimationsFileName)
+    end
+    return {
+        EmotePages = State.EmotePages,
+        Animations = HttpService:JSONDecode(favAnimsStr) or {}
+    }
+end
+
+BtnExportAll.MouseButton1Click:Connect(function()
+    local data = {
+        Type = "All",
+        Themes = LoadThemes(),
+        Settings = Config,
+        Favorites = GetFavoritesData()
+    }
+    setclipboard(HttpService:JSONEncode(data))
+    BtnExportAll.Text = "Copied!"
+    task.delay(1, function() BtnExportAll.Text = "Export All Settings" end)
+end)
+
+BtnExportThemes.MouseButton1Click:Connect(function()
+    local data = {
+        Type = "Themes",
+        Themes = LoadThemes()
+    }
+    setclipboard(HttpService:JSONEncode(data))
+    BtnExportThemes.Text = "Copied!"
+    task.delay(1, function() BtnExportThemes.Text = "Export Themes" end)
+end)
+
+BtnExportSettings.MouseButton1Click:Connect(function()
+    local data = {
+        Type = "Settings",
+        Settings = Config
+    }
+    setclipboard(HttpService:JSONEncode(data))
+    BtnExportSettings.Text = "Copied!"
+    task.delay(1, function() BtnExportSettings.Text = "Export Settings" end)
+end)
+
+BtnExportFavorites.MouseButton1Click:Connect(function()
+    local data = {
+        Type = "Favorites",
+        Favorites = GetFavoritesData()
+    }
+    setclipboard(HttpService:JSONEncode(data))
+    BtnExportFavorites.Text = "Copied!"
+    task.delay(1, function() BtnExportFavorites.Text = "Export Favorites" end)
+end)
+
+
+local ImportItem = SettingsLib.AddItem(BackupTab, "Import Settings", "Select a backup file to restore your configuration and overwrite current settings.")
+ImportItem.LayoutOrder = 3
+
+local ImportBtnContainer = Instance.new("Frame")
+ImportBtnContainer.Parent = ImportItem
+ImportBtnContainer.BackgroundTransparency = 1
+ImportBtnContainer.Size = UDim2.new(1, -24, 0, 60)
+
+local impDesc = ImportItem:FindFirstChild("Desc")
+if impDesc then
+    impDesc.Size = UDim2.new(1, -24, 0, 0)
+    local function updateImpPos()
+        ImportBtnContainer.Position = UDim2.new(0, 12, 0, impDesc.Position.Y.Offset + impDesc.AbsoluteSize.Y + 12)
+    end
+    impDesc:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateImpPos)
+    updateImpPos()
+else
+    ImportBtnContainer.Position = UDim2.new(0, 12, 0, 32)
+end
+
+local ImportLayout = Instance.new("UIGridLayout")
+ImportLayout.CellSize = UDim2.new(0.48, 0, 0, 26)
+ImportLayout.CellPadding = UDim2.new(0.04, 0, 0, 8)
+ImportLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ImportLayout.Parent = ImportBtnContainer
+
+function CreateImportBtn(text, color, order)
+    local btn = Instance.new("TextButton")
+    btn.LayoutOrder = order
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.TextSize = 11
+    btn.Parent = ImportBtnContainer
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+    
+    return btn
+end
+
+local BtnImportAll = CreateImportBtn("Import All Settings", btnColors.dark, 1)
+local BtnImportThemes = CreateImportBtn("Import Themes", btnColors.blue, 2)
+local BtnImportSettings = CreateImportBtn("Import Settings", btnColors.blue, 3)
+local BtnImportFavorites = CreateImportBtn("Import Favorites", btnColors.blue, 4)
+
+function HandleImportPrompt(typeStr)
+    local popup, content = CreatePopup("Import " .. typeStr, UDim2.fromOffset(320, 240))
+    local box = CreateInput(content, "Paste Backup JSON here...", "", true)
+    box.Size = UDim2.new(0.9, 0, 0, 130)
+    
+    local imp = CreateButton(content, "IMPORT DATA", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+
+    imp.MouseButton1Click:Connect(function()
+        local s, d = pcall(function() return HttpService:JSONDecode(box.Text) end)
+        if s and type(d) == "table" and d.Type then
+            if typeStr ~= "All" and d.Type ~= "All" and typeStr ~= d.Type then
+                 getgenv().Notify({Title = "Error", Content = "Backup type mismatch!", Duration = 3})
+                 return
+            end
+            
+            if d.Themes and (typeStr == "All" or typeStr == "Themes") then
+                themes = d.Themes
+                currentThemeName = themes.Selected or Config.SelectedTheme or "Default"
+                SaveThemesImplementation(themes)
+                themeDropdown.Refresh(GetNames())
+                if themeDropdown and themeDropdown.Button then
+                    themeDropdown.Button.Text = currentThemeName .. "  ▼"
+                end
+                local themeToApply = themes[currentThemeName] or themes["Default"]
+                if themeToApply then
+                    State.isApplyingTheme = false
+                    ApplyTheme(themeToApply)
+                else
+                    warn("7yd7 | Missing Default theme during import fallback")
+                end
+            end
+            if d.Settings and (typeStr == "All" or typeStr == "Settings") then
+                for k, v in pairs(d.Settings) do Config[k] = v end
+                SaveConfig()
+                ApplyUIVisibility()
+                if applySavedPositions then applySavedPositions() end
+                if State.RefreshSettingsUI then State.RefreshSettingsUI() end
+            end
+            if (d.Favorites or d.EmotePages) and (typeStr == "All" or typeStr == "Favorites") then
+                local emotesData = d.EmotePages or d.Favorites.Emotes
+                if emotesData then
+                    if emotesData.Sets then
+                        State.EmotePages = emotesData
+                    else
+                        State.EmotePages.Sets.Default = emotesData
+                    end
+                    State.SaveEmotePages(State.EmotePages)
+                    SwitchEmotePage(State.currentEmotePageName)
+                end
+                
+                if d.Favorites and d.Favorites.Animations then
+                     State.favoriteAnimations = d.Favorites.Animations
+                     writefile(State.favoriteAnimationsFileName, HttpService:JSONEncode(d.Favorites.Animations))
+                     State.favoriteSetVersion = State.favoriteSetVersion + 1
+                end
+                if State.RefreshUI then State.RefreshUI() end
+            end
+            
+            getgenv().Notify({Title = "Success", Content = "Data imported successfully!", Duration = 3})
+            popup:Destroy()
+        else
+            getgenv().Notify({Title = "Error", Content = "Invalid Backup JSON Format!", Duration = 3})
+        end
+    end)
+    
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(24, 24)
+    close.Position = UDim2.new(1, -30, 0, 5)
+    close.Text = "×"
+    close.Font = Enum.Font.GothamBold
+    close.TextSize = 20
+    close.BackgroundTransparency = 1
+    close.TextColor3 = Color3.new(1,1,1)
+    close.Parent = popup
+    close.MouseButton1Click:Connect(function() popup:Destroy() end)
+end
+
+BtnImportAll.MouseButton1Click:Connect(function() HandleImportPrompt("All") end)
+BtnImportThemes.MouseButton1Click:Connect(function() HandleImportPrompt("Themes") end)
+BtnImportSettings.MouseButton1Click:Connect(function() HandleImportPrompt("Settings") end)
+BtnImportFavorites.MouseButton1Click:Connect(function() HandleImportPrompt("Favorites") end)
+
+pcall(function()
+    SafeLoad("https://raw.githubusercontent.com/7yd7/Hub/Branch/GUIS/count-emote", "Count Emote")
+end)
+
+getgenv().Notify({
+    Title = '7yd7 | Emote',
+    Content = '⚠️ Script loading...',
+    Duration = 5
+})
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+if not player then
+    player = Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+end
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+getgenv().OwnedAuthenticEmotes = getgenv().OwnedAuthenticEmotes or {}
+function gatherAuthenticEmotes(char)
+    if not char then return end
+    local hum = char:WaitForChild("Humanoid", 5)
+    if not hum then return end
+    local desc = hum:WaitForChild("HumanoidDescription", 5)
+    if not desc then return end
+    local allEmotes = desc:GetEmotes()
+    local owned = {}
+    
+    for _, e in ipairs(desc:GetEquippedEmotes()) do
+        local id = allEmotes[e.Name] and allEmotes[e.Name][1]
+        if id then
+            local idNum = tonumber((tostring(id):gsub("rbxassetid://", "")))
+            if idNum then
+                table.insert(owned, {
+                    name = e.Name,
+                    id = idNum
+                })
+            end
+        end
+    end
+    if #owned > 0 then
+        getgenv().OwnedAuthenticEmotes = owned
+    end
+end
+
+task.spawn(function() gatherAuthenticEmotes(character) end)
+player.CharacterAdded:Connect(gatherAuthenticEmotes)
+
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+RunService.Heartbeat:Connect(function()
+    local success, menu = pcall(function() return CoreGui.RobloxGui.EmotesMenu.Children end)
+    if not (success and menu) then return end
+    
+    pcall(function()
+        local wheelVisible = menu.Main.EmotesWheel.Visible
+        if wheelVisible then
+            State.lastWheelVisibleTime = tick()
+        end
+        ToggleContainer.Visible = wheelVisible
+    end)
+
+    local errorMsg = menu:FindFirstChild("ErrorMessage")
+
+    if errorMsg and errorMsg.Visible then
+        if player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.RigType == Enum.HumanoidRigType.R6 then
+            errorMsg.ErrorText.Text = "Only r15 does not work r6"
+        elseif tick() - State.lastRadialActionTime < 2 then
+            errorMsg.Visible = false
+        end
+    end
+end)
+
+
+function ErrorMessage(text, duration)
+
+    if State.currentTimer then
+        task.cancel(State.currentTimer)
+        State.currentTimer = nil
+    end
+    
+    local errorMessage = CoreGui.RobloxGui.EmotesMenu.Children.ErrorMessage
+    local errorText = errorMessage.ErrorText
+    
+    errorText.Text = text
+    
+    errorMessage.Visible = true
+    
+    State.currentTimer = task.delay(duration, function()
+        errorMessage.Visible = false
+        State.currentTimer = nil
+    end)
+end
+
+function stopEmotes()
+    for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+        track:Stop()
+    end
+end
+
+function getCharacterAndHumanoid()
+    local character = player.Character
+    if not character then
+        return nil, nil
+    end
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not humanoid then
+        return nil, nil
+    end
+    return character, humanoid
+end
+
+function urlToId(animationId)
+    animationId = string.gsub(animationId, "http://www%.roblox%.com/asset/%?id=", "")
+    animationId = string.gsub(animationId, "rbxassetid://", "")
+    return animationId
+end
+
+function resolveEmoteToAnimationId(emoteId)
+    local fallbackId = tonumber(emoteId)
+    if not emoteId or emoteId == "" then return fallbackId end
+
+    local objects
+    local ok = false
+    local idStr = tostring(emoteId)
+    for _, url in ipairs({
+        "rbxassetid://" .. idStr,
+        "http://www.roblox.com/asset/?id=" .. idStr
+    }) do
+        ok, objects = pcall(function()
+            return game:GetObjects(url)
+        end)
+        if ok and type(objects) == "table" and #objects > 0 then
+            break
+        end
+    end
+    if ok and type(objects) == "table" then
+        local function findAnimId(obj)
+            if obj:IsA("Animation") then
+                local animId = tonumber(urlToId(obj.AnimationId))
+                if animId and animId > 0 then
+                    return animId
+                end
+            end
+            for _, child in ipairs(obj:GetChildren()) do
+                local found = findAnimId(child)
+                if found then return found end
+            end
+            return nil
+        end
+
+        local rootObj = objects[1]
+        if rootObj and rootObj.Parent == nil then
+            pcall(function() rootObj.Parent = workspace end)
+        end
+        if rootObj then
+            local foundRoot = findAnimId(rootObj)
+            if foundRoot then
+                pcall(function() rootObj:Destroy() end)
+                return foundRoot
+            end
+        end
+        for _, obj in ipairs(objects) do
+            local found = findAnimId(obj)
+            pcall(function() obj:Destroy() end)
+            if found then
+                return found
+            end
+        end
+    end
+    return fallbackId
+end
+
+function saveFavoritesAnimations()
+    if writefile then
+        local jsonData = HttpService:JSONEncode(State.favoriteAnimations)
+        writefile(State.favoriteAnimationsFileName, jsonData)
+    end
+end
+
+function loadFavoritesAnimations()
+    if readfile and isfile and isfile(State.favoriteAnimationsFileName) then
+        local success, result = pcall(function()
+            local fileContent = readfile(State.favoriteAnimationsFileName)
+            return HttpService:JSONDecode(fileContent)
+        end)
+        if success and type(result) == "table" then
+            local filtered = {}
+            for _, fav in pairs(result) do
+                local idNum = fav and tonumber(fav.id)
+                if fav and idNum and (idNum > 0 or idNum < -1000) then
+                    if fav.isCustomSet == nil and idNum < 0 then
+                        fav.isCustomSet = true
+                    end
+                    if IsCustomSetData(fav) and not fav.customSetName and type(fav.name) == "string" then
+                        local baseName = fav.name:gsub("%s*%-.*$", "")
+                        fav.customSetName = baseName
+                    end
+                    table.insert(filtered, fav)
+                end
+            end
+            State.favoriteAnimations = filtered
+            State.favoriteSetVersion = State.favoriteSetVersion + 1
+        end
+    end
+end
+
+function disconnectAllConnections()
+    for _, connection in pairs(State.guiConnections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    State.guiConnections = {}
+    if ContextActionService then
+        ContextActionService:UnbindAction("7yd7_EmoteWheelHotkeys")
+    end
+end
+
+function loadSpeedEmoteConfig()
+    State.speedEmoteEnabled = Config.EmoteSpeedEnabled
+    if UI.SpeedBox then
+        UI.SpeedBox.Text = tostring(Config.EmoteSpeed)
+        updateSpeedBoxVisibility()
+    end
+end
+
+function extractAssetId(imageUrl)
+    local assetId = string.match(imageUrl, "Asset&id=(%d+)")
+    return assetId
+end
+
+local isRandomSlotEnabled
+local isRandomSlotActive
+
+function isEmoteSearchActive()
+    return State.currentMode == "emote" and State.emoteSearchTerm and State.emoteSearchTerm ~= ""
+end
+
+function isAnimationSearchActive()
+    return State.currentMode == "animation" and State.animationSearchTerm and State.animationSearchTerm ~= ""
+end
+
+function isSearchActive()
+    return isEmoteSearchActive() or isAnimationSearchActive()
+end
+
+function shouldRandomSlotBeShown()
+    if Config.RandomEnabled ~= true then return false end
+    if State.currentMode == "emote" then
+        return not isEmoteSearchActive()
+    elseif State.currentMode == "animation" then
+        return not isAnimationSearchActive()
+    end
+    return false
+end
+
+function getFirstPageSize()
+    if shouldRandomSlotBeShown() then
+        return math.max(State.itemsPerPage - 1, 1)
+    end
+    return State.itemsPerPage
+end
+
+isRandomSlotEnabled = function()
+    return Config.RandomEnabled == true
+end
+
+function calcPagesForList(count, isFirstList)
+    if count <= 0 then return 0 end
+    if isFirstList then
+        local first = getFirstPageSize()
+        if count <= first then return 1 end
+        return 1 + math.ceil((count - first) / State.itemsPerPage)
+    end
+    return math.ceil(count / State.itemsPerPage)
+end
+
+function getCategoryStats()
+    local stats = {}
+    local randomCaptured = false
+    local shouldShowRandom = shouldRandomSlotBeShown()
+
+    local authenticEmotes = (Config.AuthenticFirstPage and State.currentMode == "emote") and (getgenv().OwnedAuthenticEmotes or {}) or {}
+    if #authenticEmotes > 0 then
+        local pages = calcPagesForList(#authenticEmotes, false)
+        table.insert(stats, { name = "Authentic", list = authenticEmotes, pages = pages, hasRandom = false })
+    end
+
+    local favoritesToUse = (State.currentMode == "animation") and (_G.filteredFavoritesAnimationsForDisplay or State.favoriteAnimations) or (_G.filteredFavoritesForDisplay or State.favoriteEmotes)
+    if #favoritesToUse > 0 then
+        local hasRandom = not randomCaptured and shouldShowRandom
+        if hasRandom then randomCaptured = true end
+        local pages = calcPagesForList(#favoritesToUse, hasRandom)
+        table.insert(stats, { name = "Favorites", list = favoritesToUse, pages = pages, hasRandom = hasRandom })
+    end
+
+    local normalList = {}
+    if State.currentMode == "animation" then
+        normalList = State.animationPageCache.normal or {}
+    else
+        normalList = State.emotePageCache.normal or {}
+    end
+
+    if #normalList > 0 then
+        local hasRandom = not randomCaptured and shouldShowRandom
+        if hasRandom then randomCaptured = true end
+        local pages = calcPagesForList(#normalList, hasRandom)
+        table.insert(stats, { name = "Normal", list = normalList, pages = pages, hasRandom = hasRandom })
+    end
+
+    return stats
+end
+
+isRandomSlotActive = function()
+    if not shouldRandomSlotBeShown() then return false end
+    local categories = getCategoryStats()
+    local totalPages = 0
+    for _, cat in ipairs(categories) do
+        if cat.hasRandom then
+            return State.currentPage == totalPages + 1
+        end
+        totalPages = totalPages + cat.pages
+    end
+    return false
+end
+
+function getPageSize(pageNumber, isFirstList)
+    if isFirstList and pageNumber == 1 then
+        return getFirstPageSize()
+    end
+    return State.itemsPerPage
+end
+
+function getListSlice(list, pageNumber, isFirstList)
+    local pageSize = getPageSize(pageNumber, isFirstList)
+    local startIndex
+    if isFirstList and pageNumber == 1 then
+        startIndex = 1
+    elseif isFirstList then
+        startIndex = getFirstPageSize() + (pageNumber - 2) * State.itemsPerPage + 1
+    else
+        startIndex = (pageNumber - 1) * State.itemsPerPage + 1
+    end
+    local endIndex = math.min(startIndex + pageSize - 1, #list)
+    local items = {}
+    for i = startIndex, endIndex do
+        if list[i] then table.insert(items, list[i]) end
+    end
+    return items
+end
+
+function getRandomSourceList()
+    if Config.RandomEnabled == false then
+        return {}
+    end
+    if State.favoriteEnabled then
+        if State.currentMode == "animation" then
+            return State.filteredAnimations
+        end
+        return State.filteredEmotes
+    end
+    if Config.RandomMode == "Favorites" then
+        if State.currentMode == "animation" then
+            return _G.filteredFavoritesAnimationsForDisplay or State.favoriteAnimations
+        end
+        return _G.filteredFavoritesForDisplay or State.favoriteEmotes
+    end
+    if State.currentMode == "animation" then
+        return State.filteredAnimations
+    end
+    return State.filteredEmotes
+end
+
+function pickRandomItem()
+    local list = getRandomSourceList() or {}
+    if #list == 0 then return nil end
+    return list[math.random(1, #list)]
+end
+
+function pickRandomItemForMode()
+    local list = getRandomSourceList() or {}
+    if #list == 0 then return nil end
+    if State.currentMode == "animation" then
+        local filtered = {}
+        for _, item in ipairs(list) do
+            if item.bundledItems then
+                table.insert(filtered, item)
+            end
+        end
+        if #filtered == 0 then return nil end
+        return filtered[math.random(1, #filtered)]
+    end
+    return list[math.random(1, #list)]
+end
+function updateRandomSlotBlocker(frontFrame, enable)
+    if not frontFrame then return end
+    local slot = frontFrame:FindFirstChild("1")
+    if not slot or not slot:IsA("ImageLabel") then return end
+
+    local blocker = slot:FindFirstChild("RandomBlocker")
+    if enable then
+        if not blocker then
+            blocker = Instance.new("ImageButton")
+            blocker.Name = "RandomBlocker"
+            blocker.BackgroundTransparency = 1
+            blocker.Size = UDim2.new(1, 0, 1, 0)
+            blocker.Position = UDim2.new(0, 0, 0, 0)
+            blocker.AutoButtonColor = false
+            blocker.ZIndex = slot.ZIndex + 10
+            blocker.Parent = slot
+        else
+            blocker.ZIndex = slot.ZIndex + 10
+        end
+        blocker.Active = true
+    else
+        if blocker then blocker:Destroy() end
+        if State.randomSlotBlockerConn then
+            State.randomSlotBlockerConn:Disconnect()
+            State.randomSlotBlockerConn = nil
+        end
+    end
+end
+
+function clearCustomHitboxes()
+    if State.randomSlotBlockerConn then
+        State.randomSlotBlockerConn:Disconnect()
+        State.randomSlotBlockerConn = nil
+    end
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    if not success or not frontFrame then return end
+    local slot1 = frontFrame:FindFirstChild("1")
+    if slot1 then
+        local blocker = slot1:FindFirstChild("RandomBlocker")
+        if blocker then blocker:Destroy() end
+    end
+    for _, child in pairs(frontFrame:GetChildren()) do
+        if child:IsA("ImageLabel") then
+            child.Active = false
+        end
+    end
+    frontFrame.Active = true   
+end
+
+function applyEmotesButtonsActiveState()
+end
+
+function setEmotesButtonsActiveForFavorites()
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    if not success or not frontFrame then return end
+    for _, child in pairs(frontFrame:GetChildren()) do
+        if child:IsA("ImageLabel") then
+            child.Active = true
+        end
+    end
+    frontFrame.Active = true
+end
+
+function updateScriptPriorityOverlay()
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    if not success or not frontFrame then return end
+
+    local enable = (State.favoriteEnabled or State.currentMode == "animation" or State.customAnimationEditorActive)
+    local blocker = frontFrame:FindFirstChild("ScriptPriorityBlocker")
+    if enable then
+        if not blocker then
+            blocker = Instance.new("ImageButton")
+            blocker.Name = "ScriptPriorityBlocker"
+            blocker.BackgroundTransparency = 1
+            blocker.Size = UDim2.new(1, 0, 1, 0)
+            blocker.Position = UDim2.new(0, 0, 0, 0)
+            blocker.AutoButtonColor = false
+            blocker.ZIndex = 9999
+            blocker.Parent = frontFrame
+            
+            blocker.InputBegan:Connect(function(input)
+                if State.hudEditorActive then return end
+                if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+                
+                local okWheel, emotesWheel = pcall(function()
+                    return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel
+                end)
+                if not (okWheel and emotesWheel) then return end
+                if not emotesWheel.Visible then return end
+
+                local actualPos = Vector2.new(input.Position.X, input.Position.Y)
+                local absPos = emotesWheel.AbsolutePosition
+                local absSize = emotesWheel.AbsoluteSize
+
+                local inXBounds = (actualPos.X >= absPos.X) and (actualPos.X <= absPos.X + absSize.X)
+                local inYBounds = (actualPos.Y >= absPos.Y) and (actualPos.Y <= absPos.Y + absSize.Y)
+                if not (inXBounds and inYBounds) then return end
+
+                local center = absPos + (absSize / 2)
+                local dx = actualPos.X - center.X
+                local dy = actualPos.Y - center.Y
+
+                local distance = math.sqrt(dx*dx + dy*dy)
+                local radius = math.min(absSize.X, absSize.Y) * 0.5
+                if distance > radius then return end
+                local dynamicDeadzone = radius * 0.2
+                if distance < dynamicDeadzone then return end
+
+                local sectorAngle = 360 / 8
+                local angle = math.deg(math.atan2(dy, dx))
+                local correctedAngle = (angle + 90 + (sectorAngle / 2)) % 360
+                local index = math.floor(correctedAngle / sectorAngle) + 1
+                if not (State.customAnimationEditorActive or State.favoriteEnabled or State.currentMode == "animation" or (index == 1 and isRandomSlotActive())) then return end
+
+                handleSectorAction(index)
+            end)
+        end
+        blocker.Active = true
+    else
+        if blocker then blocker:Destroy() end
+    end
+end
+
+function applyRandomSlotVisual(frontFrame)
+    if not frontFrame then return end
+    local slot = frontFrame:FindFirstChild("1")
+    if slot and slot:IsA("ImageLabel") then
+        if not isRandomSlotEnabled() then
+            AnimationSystem.ResetRandomSlot(frontFrame)
+            return
+        end
+        if slot.Image ~= RANDOM_SLOT_ICON then
+            slot.Image = RANDOM_SLOT_ICON
+        end
+        if slot.ImageColor3 ~= RANDOM_SLOT_COLOR then
+            slot.ImageColor3 = RANDOM_SLOT_COLOR
+        end
+        if State.currentMode == "emote" then
+            updateRandomSlotBlocker(frontFrame, true)
+        else
+            updateRandomSlotBlocker(frontFrame, false)
+        end
+        local idValue = slot:FindFirstChild("AnimationID")
+        if idValue then idValue:Destroy() end
+        local favoriteIcon = slot:FindFirstChild("FavoriteIcon")
+        if favoriteIcon then favoriteIcon:Destroy() end
+    end
+end
+
+function resetRandomSlotColor(frontFrame)
+    if not frontFrame then return end
+    local slot = frontFrame:FindFirstChild("1")
+    if slot and slot:IsA("ImageLabel") then
+        if slot.ImageColor3 == RANDOM_SLOT_COLOR then
+            slot.ImageColor3 = Color3.new(1, 1, 1)
+        end
+        if slot.Image == RANDOM_SLOT_ICON then
+            slot.Image = ""
+        end
+    end
+    updateRandomSlotBlocker(frontFrame, false)
+    if State.randomSpamConn then
+        State.randomSpamConn:Disconnect()
+        State.randomSpamConn = nil
+    end
+end
+
+function applySearchSlot1Image()
+    pcall(function()
+        local frontFrame = game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+        local slot1 = frontFrame and frontFrame:FindFirstChild("1")
+        local slot2 = frontFrame and frontFrame:FindFirstChild("2")
+        if slot1 and slot1:IsA("ImageLabel") and slot2 and slot2:IsA("ImageLabel") then
+            local img2 = slot2.Image
+            if img2 and img2 ~= "" then
+                slot1.Image = img2
+            end
+        end
+    end)
+end
+
+function bumpImageUpdateToken()
+    State.imageUpdateToken = State.imageUpdateToken + 1
+end
+
+local ContentProvider = game:GetService("ContentProvider")
+function preloadThumbnail(url)
+    if not url or url == "" then return end
+    task.spawn(function()
+        pcall(function()
+            ContentProvider:PreloadAsync({Instance.new("ImageLabel", {Image = url})})
+        end)
+    end)
+end
+
+function enforceImages()
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    if not success or not frontFrame then return end
+    
+    local token = State.imageUpdateToken
+    for slotName, targetImg in pairs(State.targetImages) do
+        local slot = frontFrame:FindFirstChild(slotName)
+        if slot and slot:IsA("ImageLabel") then
+            if slot.Image ~= targetImg then
+                slot.Image = targetImg
+            end
+            if slotName == "1" and isRandomSlotActive() then
+                if slot.ImageColor3 ~= RANDOM_SLOT_COLOR then
+                    slot.ImageColor3 = RANDOM_SLOT_COLOR
+                end
+            end
+        end
+    end
+end
+
+function spamRandomSlotVisual(frontFrame, token)
+    if not frontFrame then return end
+    State.targetImages["1"] = RANDOM_SLOT_ICON
+    enforceImages()
+end
+
+function spamAnimationImages(frontFrame, imageMap, token)
+    if not frontFrame then return end
+    for k, v in pairs(imageMap or {}) do
+        State.targetImages[k] = v
+    end
+    enforceImages()
+end
+
+
+function getEmoteName(assetId)
+    local success, productInfo = pcall(function()
+        return game:GetService("MarketplaceService"):GetProductInfo(tonumber(assetId))
+    end)
+    
+    if success and productInfo then
+        return productInfo.Name
+    else
+        return "Emote_" .. tostring(assetId)
+    end
+end
+
+isInFavorites = function(assetId)
+    if not assetId then return false end
+    if State.favoriteSetBuiltVersion ~= State.favoriteSetVersion then
+        State.favoriteEmoteSet = {}
+        for _, favorite in pairs(State.favoriteEmotes) do
+            if favorite.id then
+                State.favoriteEmoteSet[tostring(favorite.id)] = true
+            end
+        end
+        State.favoriteAnimationSet = {}
+        for _, favorite in pairs(State.favoriteAnimations) do
+            if favorite.id then
+                State.favoriteAnimationSet[tostring(favorite.id)] = true
+            end
+        end
+        State.favoriteSetBuiltVersion = State.favoriteSetVersion
+    end
+    if State.currentMode == "animation" then
+        return State.favoriteAnimationSet[tostring(assetId)] == true
+    end
+    return State.favoriteEmoteSet[tostring(assetId)] == true
+end
+
+function rebuildEmoteNormalCache()
+    if State.emotePageCache.version == State.emoteCacheVersion and State.emotePageCache.favVersion == State.favoriteSetVersion then
+        return
+    end
+    if State.favoriteSetBuiltVersion ~= State.favoriteSetVersion then
+        State.favoriteEmoteSet = {}
+        for _, favorite in pairs(State.favoriteEmotes) do
+            State.favoriteEmoteSet[tostring(favorite.id)] = true
+        end
+        State.favoriteAnimationSet = {}
+        for _, favorite in pairs(State.favoriteAnimations) do
+            State.favoriteAnimationSet[tostring(favorite.id)] = true
+        end
+        State.favoriteSetBuiltVersion = State.favoriteSetVersion
+    end
+    local normal = {}
+    for _, emote in ipairs(State.filteredEmotes) do
+        if not State.favoriteEmoteSet[tostring(emote.id)] then
+            table.insert(normal, emote)
+        end
+    end
+    State.emotePageCache.normal = normal
+    State.emotePageCache.version = State.emoteCacheVersion
+    State.emotePageCache.favVersion = State.favoriteSetVersion
+end
+
+function rebuildAnimationNormalCache()
+    if State.animationPageCache.version == State.animationCacheVersion and State.animationPageCache.favVersion == State.favoriteSetVersion then
+        return
+    end
+    if State.favoriteSetBuiltVersion ~= State.favoriteSetVersion then
+        State.favoriteEmoteSet = {}
+        for _, favorite in pairs(State.favoriteEmotes) do
+            State.favoriteEmoteSet[tostring(favorite.id)] = true
+        end
+        State.favoriteAnimationSet = {}
+        for _, favorite in pairs(State.favoriteAnimations) do
+            State.favoriteAnimationSet[tostring(favorite.id)] = true
+        end
+        State.favoriteSetBuiltVersion = State.favoriteSetVersion
+    end
+    local normal = {}
+    for _, animation in ipairs(State.filteredAnimations) do
+        if not State.favoriteAnimationSet[tostring(animation.id)] then
+            table.insert(normal, animation)
+        end
+    end
+    State.animationPageCache.normal = normal
+    State.animationPageCache.version = State.animationCacheVersion
+    State.animationPageCache.favVersion = State.favoriteSetVersion
+end
+
+function getCustomSetIcon(setName)
+    local set = State.CustomAnimations and State.CustomAnimations.Sets and State.CustomAnimations.Sets[setName]
+    local meta = set and set.__meta or {}
+    local iconImage = meta.IconImage or DEFAULT_IDLE_ICON_ID
+    local iconColor = TableToColor(meta.IconColor or ColorToTable(DEFAULT_IDLE_ICON_COLOR))
+    return iconImage, iconColor
+end
+
+function IsCustomSetData(data)
+    if not data then return false end
+    if data.isCustomSet then return true end
+    local idNum = tonumber(data.id)
+    return idNum and idNum < 0 or false
+end
+
+function GetCustomSetName(data)
+    if not data then return nil end
+    local name = data.customSetName or data.name
+    if type(name) == "string" then
+        name = name:gsub("%s*%-.*$", "")
+    end
+    return name
+end
+
+function updateAnimationImages(currentPageAnimations, randomActive)
+    local token = State.imageUpdateToken
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    
+    if not success or not frontFrame then
+        return
+    end
+
+    if randomActive then
+        applyRandomSlotVisual(frontFrame)
+        State.targetImages = {["1"] = RANDOM_SLOT_ICON}
+        spamRandomSlotVisual(frontFrame, token)
+    else
+        State.targetImages = {}
+        resetRandomSlotColor(frontFrame)
+    end
+
+    local startSlot = randomActive and 2 or 1
+    local imageMap = {}
+    local newTargetImages = {}
+    if randomActive then
+        newTargetImages["1"] = RANDOM_SLOT_ICON
+    end
+
+    for i = 1, 12 do
+        if i >= startSlot then
+            local listIndex = randomActive and (i - 1) or i
+            local animationData = currentPageAnimations[listIndex]
+            if animationData and animationData.id then
+                local image = "rbxthumb://type=BundleThumbnail&id=" .. tostring(animationData.id) .. "&w=420&h=420"
+                if IsCustomSetData(animationData) then
+                    local customImage = getCustomSetIcon(GetCustomSetName(animationData) or animationData.name)
+                    image = GetAsset(customImage)
+                end
+                newTargetImages[tostring(i)] = image
+                imageMap[tostring(i)] = image
+            else
+                newTargetImages[tostring(i)] = ""
+                imageMap[tostring(i)] = ""
+            end
+        end
+    end
+    
+    State.targetImages = newTargetImages
+
+    for slotName, image in pairs(imageMap) do
+        local child = frontFrame:FindFirstChild(slotName)
+        if child and child:IsA("ImageLabel") then
+            preloadThumbnail(image)
+            child.Image = image
+            
+            local listIndex = randomActive and (tonumber(slotName) - 1) or tonumber(slotName)
+            local animationData = currentPageAnimations[listIndex]
+            if animationData and animationData.id then
+                local idValue = child:FindFirstChild("AnimationID") or Instance.new("IntValue")
+                idValue.Name = "AnimationID"
+                idValue.Value = tonumber(animationData.id) or 0
+                idValue.Parent = child
+                
+                if IsCustomSetData(animationData) then
+                    local _, customColor = getCustomSetIcon(GetCustomSetName(animationData) or animationData.name)
+                    child.ImageColor3 = customColor
+                else
+                    child.ImageColor3 = Color3.new(1, 1, 1)
+                end
+            elseif not randomActive and child.ImageColor3 == RANDOM_SLOT_COLOR then
+                child.ImageColor3 = Color3.new(1, 1, 1)
+            end
+        end
+    end
+    
+    applyEmotesButtonsActiveState()
+end
+
+
+function updateFavoriteIcon(imageLabel, assetId, isFavorite)
+    local favoriteIcon = imageLabel:FindFirstChild("FavoriteIcon")
+    
+    if not favoriteIcon then
+        favoriteIcon = Instance.new("ImageLabel")
+        favoriteIcon.Name = "FavoriteIcon"
+        favoriteIcon.Size = UDim2.new(0.3, 0, 0.3, 0) 
+        favoriteIcon.Position = UDim2.new(0.7, 0, 0, 0)
+        favoriteIcon.AnchorPoint = Vector2.new(0, 0)
+        favoriteIcon.BackgroundTransparency = 1
+        favoriteIcon.ZIndex = imageLabel.ZIndex + 5
+        favoriteIcon.ScaleType = Enum.ScaleType.Fit
+        favoriteIcon.Parent = imageLabel
+    end
+    
+    if isFavorite then
+        favoriteIcon.Image = State.favoriteIconId
+    else
+        favoriteIcon.Image = State.notFavoriteIconId 
+    end
+end
+
+function updateAllFavoriteIcons()
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    
+    if success and frontFrame then
+        if not State.favoriteEnabled then
+            for _, child in pairs(frontFrame:GetChildren()) do
+                if child:IsA("ImageLabel") then
+                    local favoriteIcon = child:FindFirstChild("FavoriteIcon")
+                    if favoriteIcon then favoriteIcon:Destroy() end
+                end
+            end
+            return
+        end
+        local randomActive = isRandomSlotActive()
+        for _, child in pairs(frontFrame:GetChildren()) do
+            if child:IsA("ImageLabel") and child.Image ~= "" and (not randomActive or child.Name ~= "1") then
+                local assetId
+                if State.currentMode == "animation" then
+                    local idValue = child:FindFirstChild("AnimationID")
+                    if idValue then
+                        assetId = idValue.Value
+                    end
+                else
+                    assetId = extractAssetId(child.Image)
+                end
+                
+                if assetId then
+                    local isFavorite = isInFavorites(assetId)
+                    updateFavoriteIcon(child, assetId, isFavorite)
+                end
+            end
+        end
+        applyEmotesButtonsActiveState()
+    end
+end
+
+function updateAnimations()
+    local character, humanoid = getCharacterAndHumanoid()
+    if not character or not humanoid then
+        return
+    end
+
+    local humanoidDescription = humanoid.HumanoidDescription
+    if not humanoidDescription then
+        if not State.pendingAnimRetry then
+            State.pendingAnimRetry = true
+            task.delay(0.2, function()
+                State.pendingAnimRetry = false
+                if State.currentMode == "animation" then
+                    updateAnimations()
+                end
+            end)
+        end
+        return
+    end
+
+    bumpImageUpdateToken()
+    rebuildAnimationNormalCache()
+
+    local currentPageAnimations = {}
+    local animationTable = {}
+    local equippedAnimations = {}
+
+    local categories = getCategoryStats()
+    local accumulatedPages = 0
+    local currentCat = nil
+    
+    for _, cat in ipairs(categories) do
+        if State.currentPage <= accumulatedPages + cat.pages then
+            local adjustedPage = State.currentPage - accumulatedPages
+            currentPageAnimations = getListSlice(cat.list, adjustedPage, cat.hasRandom)
+            currentCat = cat
+            break
+        end
+        accumulatedPages = accumulatedPages + cat.pages
+    end
+
+    local randomActive = isRandomSlotActive()
+    if randomActive then
+        local randomFallback = currentPageAnimations[1] or (State.filteredAnimations and State.filteredAnimations[1])
+        if randomFallback then
+            animationTable["Random Animation"] = {randomFallback.id}
+            table.insert(equippedAnimations, "Random Animation")
+        end
+    end
+
+    State.animImageRetry = 0
+    for _, animation in pairs(currentPageAnimations) do
+        local animationName = animation.name
+        local animationId = animation.id
+        animationTable[animationName] = {animationId}
+        table.insert(equippedAnimations, animationName)
+    end
+
+    humanoidDescription:SetEmotes(animationTable)
+    humanoidDescription:SetEquippedEmotes(equippedAnimations)
+    
+    updateAnimationImages(currentPageAnimations, randomActive)
+    if State.favoriteEnabled then
+        setEmotesButtonsActiveForFavorites()
+    end
+
+    task.delay(0.2, function()
+        if State.favoriteEnabled then
+            setEmotesButtonsActiveForFavorites()
+        end
+        if State.favoriteEnabled then
+            updateAllFavoriteIcons()
+        end
+    end)
+end
+
+updateEmotes = function()
+    local character, humanoid = getCharacterAndHumanoid()
+    if not character or not humanoid then
+        return
+    end
+
+    if State.currentMode == "animation" then
+        updateAnimations()
+        return
+    end
+    
+    bumpImageUpdateToken()
+    local token = State.imageUpdateToken
+    
+    if State.animImageSpamConn then
+        State.animImageSpamConn:Disconnect()
+        State.animImageSpamConn = nil
+        State.animImageSpamMap = nil
+        State.animImageSpamTicks = nil
+        State.animImageSpamToken = State.animImageSpamToken + 1
+    end
+
+    local humanoidDescription = humanoid.HumanoidDescription
+    if not humanoidDescription then
+        return
+    end
+
+    local currentPageEmotes = {}
+    local emoteTable = {}
+    local equippedEmotes = {}
+
+    rebuildEmoteNormalCache()
+    local categories = getCategoryStats()
+    local accumulatedPages = 0
+    local currentCat = nil
+    
+    for _, cat in ipairs(categories) do
+        if State.currentPage <= accumulatedPages + cat.pages then
+            local adjustedPage = State.currentPage - accumulatedPages
+            currentPageEmotes = getListSlice(cat.list, adjustedPage, cat.hasRandom)
+            currentCat = cat
+            break
+        end
+        accumulatedPages = accumulatedPages + cat.pages
+    end
+
+    local randomActive = isRandomSlotActive()
+    if randomActive then
+        local randomFallback = currentPageEmotes[1] or (State.filteredEmotes and State.filteredEmotes[1])
+        if randomFallback then
+            emoteTable["Random Emote"] = {randomFallback.id}
+            table.insert(equippedEmotes, "Random Emote")
+        end
+    end
+
+    for _, emote in pairs(currentPageEmotes) do
+        local emoteName = emote.name
+        local emoteId = emote.id
+        emoteTable[emoteName] = {emoteId}
+        table.insert(equippedEmotes, emoteName)
+    end
+
+    humanoidDescription:SetEmotes(emoteTable)
+    humanoidDescription:SetEquippedEmotes(equippedEmotes)
+    
+    local newTargetImages = {}
+    if randomActive then
+        newTargetImages["1"] = RANDOM_SLOT_ICON
+    end
+
+    local startSlot = randomActive and 2 or 1
+    for i = 1, 12 do
+        if i >= startSlot then
+            local listIndex = randomActive and (i - 1) or i
+            local emoteData = currentPageEmotes[listIndex]
+            if emoteData and emoteData.id then
+                newTargetImages[tostring(i)] = "rbxthumb://type=Asset&id=" .. tostring(emoteData.id) .. "&w=420&h=420"
+            else
+                newTargetImages[tostring(i)] = ""
+            end
+        end
+    end
+    
+    State.targetImages = newTargetImages
+
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    
+    if success and frontFrame then
+        for slotName, image in pairs(newTargetImages) do
+            local child = frontFrame:FindFirstChild(slotName)
+            if child and child:IsA("ImageLabel") then
+                child.Image = image
+                if slotName == "1" and randomActive then
+                    child.ImageColor3 = RANDOM_SLOT_COLOR
+                else
+                    child.ImageColor3 = Color3.new(1, 1, 1)
+                end
+            end
+        end
+        
+        if State.favoriteEnabled then
+            setEmotesButtonsActiveForFavorites()
+        end
+        if randomActive then
+            applyRandomSlotVisual(frontFrame)
+            spamRandomSlotVisual(frontFrame, token)
+        else
+            resetRandomSlotColor(frontFrame)
+        end
+    end
+
+    task.delay(0.2, function()
+        if State.favoriteEnabled then
+            setEmotesButtonsActiveForFavorites()
+        end
+        if State.favoriteEnabled then
+            updateAllFavoriteIcons()
+        end
+    end)
+end
+
+calculateTotalPages = function()
+    rebuildEmoteNormalCache()
+    rebuildAnimationNormalCache()
+
+    local categories = getCategoryStats()
+    local total = 0
+    for _, cat in ipairs(categories) do
+        total = total + cat.pages
+    end
+    return math.max(total, 1)
+end
+
+function isGivenAnimation(animationHolder, animationId)
+    for _, animation in animationHolder:GetChildren() do
+        if animation:IsA("Animation") and urlToId(animation.AnimationId) == animationId then
+            return true
+        end
+    end
+    return false
+end
+
+function isDancing(character, animationTrack)
+    local animationId = urlToId(animationTrack.Animation.AnimationId)
+    for _, animationHolder in character.Animate:GetChildren() do
+        if animationHolder:IsA("StringValue") then
+            local sharesAnimationId = isGivenAnimation(animationHolder, animationId)
+            if sharesAnimationId then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+function createGUIElements()
+    local exists, emotesWheel = checkEmotesMenuExists()
+    if not exists then
+        return false
+    end
+
+    if UI.CustomFrames then
+        for _, frame in pairs(UI.CustomFrames) do
+            if frame and frame.Parent then frame:Destroy() end
+        end
+    end
+    UI.CustomFrames = {}
+
+    if emotesWheel:FindFirstChild("Under") then
+        emotesWheel.Under:Destroy()
+    end
+    if emotesWheel:FindFirstChild("Top") then
+        emotesWheel.Top:Destroy()
+    end
+    if emotesWheel:FindFirstChild("EmoteWalkButton") then
+        emotesWheel.EmoteWalkButton:Destroy()
+    end
+    if emotesWheel:FindFirstChild("Favorite") then
+        emotesWheel.Favorite:Destroy()
+    end
+    if emotesWheel:FindFirstChild("SpeedEmote") then
+        emotesWheel.SpeedEmote:Destroy()
+    end
+    if emotesWheel:FindFirstChild("Changepage") then
+        emotesWheel.Changepage:Destroy()
+    end
+    if emotesWheel:FindFirstChild("SpeedBox") then
+        emotesWheel.SpeedBox:Destroy()
+    end
+    if emotesWheel:FindFirstChild("Reload") then
+        emotesWheel.Reload:Destroy()
+    end
+
+    UI.Under = Instance.new("Frame")
+    local UIListLayout = Instance.new("UIListLayout")
+    UI._1left = Instance.new("ImageButton")
+    UI._9right = Instance.new("ImageButton")
+    UI._4pages = Instance.new("TextLabel")
+    UI._3TextLabel = Instance.new("TextLabel")
+    UI._2Routenumber = Instance.new("TextBox")
+    UI.EmoteWalkButton = Instance.new("ImageButton")
+    local UICorner_Left = Instance.new("UICorner")
+    UICorner_Left.CornerRadius = UDim.new(0, 10)
+    UICorner_Left.Parent = UI._1left
+    
+    local UICorner_Right = Instance.new("UICorner")
+    UICorner_Right.CornerRadius = UDim.new(0, 10)
+    UICorner_Right.Parent = UI._9right
+
+    local UICorner1 = Instance.new("UICorner")
+    UI.Top = Instance.new("Frame")
+    local UIListLayout_2 = Instance.new("UIListLayout")
+    local UICorner = Instance.new("UICorner")
+    UI.Search = Instance.new("TextBox")
+    UI.Favorite = Instance.new("ImageButton")
+    local UICorner2 = Instance.new("UICorner")
+    UI.SpeedBox = Instance.new("TextBox")
+    local UICorner_4 = Instance.new("UICorner")
+    UI.SpeedEmote = Instance.new("ImageButton")
+    local UICorner_2 = Instance.new("UICorner")
+    UI.Changepage = Instance.new("ImageButton")
+    local UICorner_5 = Instance.new("UICorner")
+    UI.Reload = Instance.new("ImageButton")
+    local UICorner_6 = Instance.new("UICorner")
+
+    UI.Under.Name = "Under"
+    UI.Under.Parent = emotesWheel
+    UI.Under.BackgroundTransparency = 1.000
+    UI.Under.BorderSizePixel = 0
+    UI.Under.Position = UDim2.new(0.129999995, 0, 1, 0)
+    UI.Under.Size = UDim2.new(0.737500012, 0, 0.132499993, 0)
+
+    UIListLayout.Parent = UI.Under
+    UIListLayout.FillDirection = Enum.FillDirection.Horizontal
+    UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+
+    UI._1left.Name = "1left"
+    UI._1left.Parent = UI.Under
+    UI._1left.BackgroundTransparency = 1.000
+    UI._1left.BorderSizePixel = 0
+    UI._1left.Size = UDim2.new(0.169491529, 0, 0.94339627, 0)
+    UI._1left.Image = "rbxassetid://93111945058621"
+    UI._1left.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    UI._1left.ImageTransparency = 0.400
+
+    UI._9right.Name = "9right"
+    UI._9right.Parent = UI.Under
+    UI._9right.BackgroundTransparency = 1.000
+    UI._9right.BorderSizePixel = 0
+    UI._9right.Size = UDim2.new(0.169491529, 0, 0.94339627, 0)
+    UI._9right.Image = "rbxassetid://107938916240738"
+    UI._9right.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    UI._9right.ImageTransparency = 0.400
+
+    UI._4pages.Name = "4pages"
+    UI._4pages.Parent = UI.Under
+    UI._4pages.BackgroundTransparency = 1.000
+    UI._4pages.BorderSizePixel = 0
+    UI._4pages.Size = UDim2.new(0.159322038, 0, 0.811320841, 0)
+    UI._4pages.Font = Enum.Font.SourceSansBold
+    UI._4pages.Text = "1"
+    UI._4pages.TextColor3 = Color3.fromRGB(0, 0, 0)
+    UI._4pages.TextScaled = true
+    UI._4pages.TextSize = 14.000
+    UI._4pages.TextTransparency = 0.400
+    UI._4pages.TextWrapped = true
+
+    UI._3TextLabel.Name = "3TextLabel"
+    UI._3TextLabel.Parent = UI.Under
+    UI._3TextLabel.BackgroundTransparency = 1.000
+    UI._3TextLabel.BorderSizePixel = 0
+    UI._3TextLabel.Size = UDim2.new(0.338983059, 0, 0.94339627, 0)
+    UI._3TextLabel.Font = Enum.Font.SourceSansBold
+    UI._3TextLabel.Text = " ------ "
+    UI._3TextLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+    UI._3TextLabel.TextScaled = true
+    UI._3TextLabel.TextSize = 14.000
+    UI._3TextLabel.TextTransparency = 0.400
+    UI._3TextLabel.TextWrapped = true
+
+    UI._2Routenumber.Name = "2Route-number"
+    UI._2Routenumber.Parent = UI.Under
+    UI._2Routenumber.Active = true
+    UI._2Routenumber.BackgroundTransparency = 1.000
+    UI._2Routenumber.BorderSizePixel = 0
+    UI._2Routenumber.Size = UDim2.new(0.159322038, 0, 0.811320841, 0)
+    UI._2Routenumber.Font = Enum.Font.SourceSansBold
+    UI._2Routenumber.PlaceholderColor3 = Color3.fromRGB(0, 0, 0)
+    UI._2Routenumber.Text = "1"
+    UI._2Routenumber.TextColor3 = Color3.fromRGB(0, 0, 0)
+    UI._2Routenumber.TextScaled = true
+    UI._2Routenumber.TextSize = 14.000
+    UI._2Routenumber.TextTransparency = 0.400
+    UI._2Routenumber.TextWrapped = true
+
+    UI.Top.Name = "Top"
+    UI.Top.Parent = emotesWheel
+    UI.Top.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    UI.Top.BackgroundTransparency = 0.400
+    UI.Top.BorderSizePixel = 0
+    UI.Top.Position = UDim2.new(0.127499998, 0, -0.109999999, 0)
+    UI.Top.Size = UDim2.new(0.737500012, 0, 0.0949999914, 0)
+
+    UIListLayout_2.Parent = UI.Top
+    UIListLayout_2.FillDirection = Enum.FillDirection.Horizontal
+    UIListLayout_2.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    UIListLayout_2.SortOrder = Enum.SortOrder.LayoutOrder
+    UIListLayout_2.VerticalAlignment = Enum.VerticalAlignment.Center
+
+    UICorner.CornerRadius = UDim.new(0, 20)
+    UICorner.Parent = UI.Top
+
+    UI.Search.Name = "Search"
+    UI.Search.Parent = UI.Top
+    UI.Search.BackgroundTransparency = 1.000
+    UI.Search.Size = UDim2.new(0.864406765, 0, 0.81578958, 0)
+    UI.Search.Font = Enum.Font.SourceSansBold
+    UI.Search.PlaceholderText = "Search/ID"
+    UI.Search.Text = ""
+    UI.Search.TextColor3 = Color3.fromRGB(255, 255, 255)
+    UI.Search.TextScaled = true
+    UI.Search.TextSize = 14.000
+    UI.Search.TextWrapped = true
+
+    UI.EmoteWalkButton.Name = "EmoteWalkButton"
+    UI.EmoteWalkButton.Parent = emotesWheel
+    UI.EmoteWalkButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    UI.EmoteWalkButton.BackgroundTransparency = 0.400
+    UI.EmoteWalkButton.BorderSizePixel = 0
+    UI.EmoteWalkButton.Position = UDim2.new(0.889999986, 0, -0.107500002, 0)
+    UI.EmoteWalkButton.Size = UDim2.new(0.0874999985, 0, 0.0874999985, 0)
+    UI.EmoteWalkButton.Image = State.defaultButtonImage
+
+    UICorner1.CornerRadius = UDim.new(0, 10)
+    UICorner1.Parent = UI.EmoteWalkButton
+
+    UI.Favorite.Name = "Favorite"
+    UI.Favorite.Parent = emotesWheel
+    UI.Favorite.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    UI.Favorite.BackgroundTransparency = 0.400
+    UI.Favorite.BorderSizePixel = 0
+    UI.Favorite.Position = UDim2.new(0.0189999994, 0, -0.108000003, 0)
+    UI.Favorite.Size = UDim2.new(0.0874999985, 0, 0.0874999985, 0)
+    UI.Favorite.Image = "rbxassetid://124025954365505"
+
+    UICorner2.CornerRadius = UDim.new(0, 10)
+    UICorner2.Parent = UI.Favorite
+
+    UI.SpeedBox.Name = "SpeedBox"
+    UI.SpeedBox.Parent = emotesWheel
+    UI.SpeedBox.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    UI.SpeedBox.BackgroundTransparency = 0.400
+    UI.SpeedBox.BorderSizePixel = 0
+    UI.SpeedBox.Position = UDim2.new(0.0189999398, 0, -0.000499992399, 0)
+    UI.SpeedBox.Size = UDim2.new(0.0874999985, 0, 0.0874999985, 0)
+    UI.SpeedBox.Visible = false
+    UI.SpeedBox.Font = Enum.Font.SourceSansBold
+    UI.SpeedBox.PlaceholderColor3 = Color3.fromRGB(178, 178, 178)
+    UI.SpeedBox.Text = "1"
+    UI.SpeedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    UI.SpeedBox.TextScaled = true
+    UI.SpeedBox.TextWrapped = true
+    UI.SpeedBox:GetPropertyChangedSignal("Text"):Connect(function()
+       UI.SpeedBox.Text = UI.SpeedBox.Text:gsub("[^%d.]", "")
+    end)
+    UI.SpeedBox.ZIndex = 2
+
+    UICorner_4.CornerRadius = UDim.new(0, 10)
+    UICorner_4.Parent = UI.SpeedBox
+
+    UI.SpeedEmote.Name = "SpeedEmote"
+    UI.SpeedEmote.Parent = emotesWheel
+    UI.SpeedEmote.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    UI.SpeedEmote.BackgroundTransparency = 0.400
+    UI.SpeedEmote.BorderSizePixel = 0
+    UI.SpeedEmote.Position = UDim2.new(0.888999999, 0, -0, 0)
+    UI.SpeedEmote.Size = UDim2.new(0.0874999985, 0, 0.0874999985, 0)
+    UI.SpeedEmote.Image = "rbxassetid://116056570415896"
+    UI.SpeedEmote.ZIndex = 2
+
+    UICorner_2.CornerRadius = UDim.new(0, 10)
+    UICorner_2.Parent = UI.SpeedEmote
+
+UI.Changepage.Name = "Changepage"
+UI.Changepage.Parent = emotesWheel
+UI.Changepage.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+UI.Changepage.BackgroundTransparency = 0.400
+UI.Changepage.BorderColor3 = Color3.fromRGB(0, 0, 0)
+UI.Changepage.BorderSizePixel = 0
+UI.Changepage.Position = UDim2.new(0.019, 0,1.021, 0)
+UI.Changepage.Size = UDim2.new(0.087, 0,0.087, 0)
+UI.Changepage.ZIndex = 3
+UI.Changepage.Image = "rbxassetid://13285615740"
+
+UICorner_5.CornerRadius = UDim.new(0, 10)
+UICorner_5.Parent = UI.Changepage
+
+    UI.Reload.Name = "Reload"
+    UI.Reload.Parent = emotesWheel
+    UI.Reload.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    UI.Reload.BackgroundTransparency = 0.400
+    UI.Reload.BorderSizePixel = 0
+    UI.Reload.Position = UDim2.new(0.888999999, 0, 1.02100003, 0)
+    UI.Reload.Size = UDim2.new(0.0869999975, 0, 0.0869999975, 0)
+    UI.Reload.ZIndex = 3
+    UI.Reload.Image = "rbxassetid://127493377027615"
+
+    UICorner_6.CornerRadius = UDim.new(0, 10)
+    UICorner_6.Parent = UI.Reload
+
+    local function spawnCustomFrame(name, zIndex)
+        local cf = Instance.new("Frame")
+        cf.Name = name
+        cf.Parent = emotesWheel
+        cf.BackgroundColor3 = Color3.fromRGB(0,0,0)
+        cf.BackgroundTransparency = 0.4
+        cf.ZIndex = zIndex or 3
+        cf.BorderSizePixel = 0
+        cf.Active = true
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 10)
+        corner.Parent = cf
+
+        if not UI.CustomFrames then UI.CustomFrames = {} end
+        UI.CustomFrames[name] = cf
+
+        return cf
+    end
+
+    local function recordDefaults()
+        local allMovable = getMovableElements()
+        for name, el in pairs(allMovable) do
+             HUD.DefaultPositions[name] = el.Position
+             HUD.DefaultSizes[name] = el.Size
+             if el:IsA("TextLabel") or el:IsA("TextBox") then
+                 HUD.DefaultTexts[name] = el.Text
+                 if el:IsA("TextBox") then
+                     HUD.DefaultPlaceholders[name] = el.PlaceholderText
+                 end
+             end
+        end
+    end
+    
+    if Config.CustomFrames then
+        for name, data in pairs(Config.CustomFrames) do
+            spawnCustomFrame(name, data.ZIndex or 3)
+        end
+    end
+    
+    recordDefaults()
+    loadSpeedEmoteConfig()
+
+    connectEvents()
+    State.isGUICreated = true
+    
+    ApplyTheme(themes[currentThemeName] or themes.Default)
+    
+    updateGUIColors()
+    
+    ApplyUIVisibility()
+    
+    if ApplyFreezeButtonVisual then ApplyFreezeButtonVisual() end
+    if applySavedPositions then applySavedPositions() end
+    if updateHUDLayouts then updateHUDLayouts() end
+    
+    return true
+end
+
+updatePageDisplay = function()
+    if UI._4pages and UI._2Routenumber then
+        UI._4pages.Text = tostring(State.totalPages)
+        UI._2Routenumber.Text = tostring(State.currentPage)
+    end
+    if State.currentMode == "animation" then
+        Config.AnimationPage = State.currentPage
+    else
+        Config.EmotePage = State.currentPage
+    end
+    SaveConfig()
+end
+
+
+toggleFavorite = function(emoteId, emoteName)
+    local found = false
+    local index = 0
+
+    for i, fav in pairs(State.favoriteEmotes) do
+        if tostring(fav.id) == tostring(emoteId) then
+            found = true
+            index = i
+            break
+        end
+    end
+
+    if found then
+        table.remove(State.favoriteEmotes, index)
+        getgenv().Notify({
+            Title = '7yd7 | Favorite System',
+            Content = '🗑️ Removed "' .. emoteName .. '" from favorites',
+            Duration = 3
+        })
+    else
+        table.insert(State.favoriteEmotes, {
+            id = emoteId,
+            name = emoteName .. " - ⭐"
+        })
+        getgenv().Notify({
+            Title = '7yd7 | Favorite System',
+            Content = '✅ Added "' .. emoteName .. '" to favorites',
+            Duration = 3
+        })
+    end
+
+    State.EmotePages.Sets[State.currentEmotePageName] = DeepCopy(State.favoriteEmotes)
+    State.SaveEmotePages(State.EmotePages)
+
+    State.favoriteSetVersion = State.favoriteSetVersion + 1
+    State.totalPages = calculateTotalPages()
+    updatePageDisplay()
+    updateEmotes()
+    updateAllFavoriteIcons()
+end
+
+
+toggleFavoriteAnimation = function(animationData)
+    local found = false
+    local index = 0
+
+    for i, fav in pairs(State.favoriteAnimations) do
+        if fav.id == animationData.id then
+            found = true
+            index = i
+            break
+        end
+    end
+
+    if found then
+        table.remove(State.favoriteAnimations, index)
+        getgenv().Notify({
+            Title = '7yd7 | Favorite System',
+            Content = '🗑️ Removed "' .. animationData.name .. '" from favorites',
+            Duration = 3
+        })
+    else
+        table.insert(State.favoriteAnimations, {
+            id = animationData.id,
+            name = animationData.name .. " - ⭐",
+            bundledItems = animationData.bundledItems,
+            isCustomSet = IsCustomSetData(animationData),
+            customSetName = IsCustomSetData(animationData) and (type(animationData.name) == "string" and animationData.name:gsub("%s*%-.*$", "") or animationData.name) or nil
+        })
+        getgenv().Notify({
+            Title = '7yd7 | Favorite System',
+            Content = '✅ Added "' .. animationData.name .. '" to favorites',
+            Duration = 3
+        })
+    end
+
+    State.favoriteSetVersion = State.favoriteSetVersion + 1
+    
+    State.AnimationPages.Sets[State.currentAnimationPageName] = DeepCopy(State.favoriteAnimations)
+    State.SaveAnimationPages(State.AnimationPages)
+
+    State.totalPages = calculateTotalPages()
+    updatePageDisplay()
+    updateAnimations()
+    updateAllFavoriteIcons()
+end
+
+
+
+function setupEmoteClickDetection()
+    if State.isMonitoringClicks then
+        return
+    end
+    
+    State.emoteMonitorToken = State.emoteMonitorToken + 1
+    local token = State.emoteMonitorToken
+
+    local function monitorEmotes()
+        while State.favoriteEnabled and State.currentMode == "emote" and State.emoteMonitorToken == token do
+            local success, frontFrame = pcall(function()
+                return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+            end)
+
+            if success and frontFrame then
+                for _, connection in pairs(State.emoteClickConnections) do
+                    if connection then
+                        connection:Disconnect()
+                    end
+                end
+                State.emoteClickConnections = {}
+
+                local randomActive = isRandomSlotActive()
+                for _, child in pairs(frontFrame:GetChildren()) do
+                    if child:IsA("ImageLabel") and child.Image ~= "" and (not randomActive or child.Name ~= "1") then
+                        local imageUrl = child.Image
+                        local assetId = extractAssetId(imageUrl)
+                        if assetId then
+                            local isFavorite = isInFavorites(assetId)
+                            updateFavoriteIcon(child, assetId, isFavorite)
+                        end
+                    end
+                end
+
+                applyEmotesButtonsActiveState()
+            end
+
+            task.wait(0.1)
+        end
+    end
+
+    if State.favoriteEnabled then
+        State.isMonitoringClicks = true
+        task.spawn(monitorEmotes)
+    end
+end
+
+applyAnimation = function(animationData)
+    local player = game.Players.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:FindFirstChild("Humanoid")
+    local animate = character:FindFirstChild("Animate")
+    
+    if not animate or not humanoid then
+        getgenv().Notify({
+            Title = '7yd7 | Animation Error',
+            Content = '❌ Animate or Humanoid not found',
+            Duration = 3
+        })
+        return
+    end
+    
+    local bundleId = animationData.id
+    local bundledItems = animationData.bundledItems
+
+    getgenv().lastPlayedAnimation = animationData
+    Config.LastPlayedAnimationData = animationData
+    task.spawn(SaveConfig)
+    
+        if not bundledItems and not animationData.isCustomSet then
+        getgenv().Notify({
+            Title = '7yd7 | Animation Error', 
+            Content = '??? No bundled items found',
+            Duration = 3
+        })
+        return
+    end
+    
+    if animationData.isCustomSet and not bundledItems then
+        bundledItems = {"Custom-Animation"}
+    end
+    
+    for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+        track:Stop()
+    end
+    
+    local cacheKey = tostring(bundleId)
+    local mappings = State.AnimationCache[cacheKey]
+    
+    if mappings and #mappings > 0 and mappings._version ~= 2 then
+        mappings = nil
+    end
+    
+        if animationData.isCustomSet then
+            mappings = buildCustomSetMappings(GetCustomSetName(animationData) or animationData.name)
+            if #mappings > 0 then
+                mappings._version = 2
+                State.AnimationCache[cacheKey] = mappings
+                task.spawn(saveAnimationCache)
+            end
+    elseif not mappings then
+        mappings = resolveAnimationMappings(bundledItems)
+        if #mappings > 0 then
+            mappings._version = 2
+            State.AnimationCache[cacheKey] = mappings
+            task.spawn(saveAnimationCache)
+        end
+    end
+    
+    if #mappings == 0 then return end
+    
+    local sorted = {}
+    for _, m in ipairs(mappings) do
+        if m.category:lower() == "idle" then
+            table.insert(sorted, 1, m)
+        else
+            table.insert(sorted, m)
+        end
+    end
+    
+    local function applyAnimationToObject(animObj, animId, weights)
+        if not animObj or not animObj:IsA("Animation") then return end
+
+        animObj.AnimationId = animId
+
+        if weights ~= nil then
+            for _, child in ipairs(animObj:GetChildren()) do
+                if child:IsA("NumberValue") and child.Name == "Weight" then
+                    child:Destroy()
+                end
+            end
+            for _, wVal in ipairs(weights) do
+                local w = Instance.new("NumberValue")
+                w.Name = "Weight"
+                w.Value = wVal
+                w.Parent = animObj
+            end
+        end
+    end
+
+    local mappingMap = {}
+    for _, m in ipairs(sorted) do
+        local cat = m.category:lower()
+        if not mappingMap[cat] then
+            mappingMap[cat] = { folderName = m.category, items = {} }
+        end
+        mappingMap[cat].items[m.name:lower()] = m
+    end
+
+    for cat, data in pairs(mappingMap) do
+        local categoryFolder = animate:FindFirstChild(data.folderName)
+        if not categoryFolder then
+            continue
+        end
+
+        local items = data.items
+
+        local sourceByName = {}
+        for name, m in pairs(items) do
+            sourceByName[name] = m
+        end
+
+        for _, animObj in ipairs(categoryFolder:GetChildren()) do
+            if animObj:IsA("Animation") then
+                local lowerName = animObj.Name:lower()
+                local m = sourceByName[lowerName]
+                if m then
+                    sourceByName[lowerName] = nil
+                    applyAnimationToObject(animObj, m.animationId, m.weights)
+                    if animObj.Name ~= m.name then
+                        animObj.Name = m.name
+                    end
+                else
+                    animObj:Destroy()
+                end
+            end
+        end
+
+        for name, m in pairs(sourceByName) do
+            local animObj = Instance.new("Animation")
+            animObj.Name = m.name
+            applyAnimationToObject(animObj, m.animationId, m.weights)
+            animObj.Parent = categoryFolder
+        end
+    end
+    
+    if humanoid.MoveDirection.Magnitude == 0 then
+        animate.Disabled = true
+        animate.Disabled = false
+    end
+end
+
+function playAnimationPreview(animationData)
+    local _, humanoid = getCharacterAndHumanoid()
+    if not humanoid then return false end
+    local animator = humanoid:FindFirstChild("Animator")
+    if not animator then return false end
+
+    local bundledItems = animationData and animationData.bundledItems
+    if not bundledItems then return false end
+    
+    local bundleId = animationData.id
+    local cacheKey = tostring(bundleId)
+    local mappings = State.AnimationCache[cacheKey]
+    
+    if not mappings then
+        mappings = resolveAnimationMappings(bundledItems)
+        if #mappings > 0 then
+            State.AnimationCache[cacheKey] = mappings
+            task.spawn(saveAnimationCache)
+        end
+    end
+    
+    if #mappings == 0 then return false end
+    
+    local m = mappings[1]
+    local animation = Instance.new("Animation")
+    animation.AnimationId = m.animationId
+    local ok, track = pcall(function()
+        return animator:LoadAnimation(animation)
+    end)
+    if ok and track then
+        track.Priority = Enum.AnimationPriority.Action
+        track.Looped = true
+        if State.speedEmoteEnabled or State.emotesWalkEnabled then
+            track:Play()
+        end
+        State.currentEmoteTrack = track
+        if State.speedEmoteEnabled then
+            local speedVal = tonumber(UI.SpeedBox.Text) or Config.EmoteSpeed or 1
+            track:AdjustSpeed(speedVal)
+        end
+        return true
+    end
+
+    return false
+end
+
+handleSectorAction = function(index)
+    if tick() - State.lastActionTick < 0.25 then return end
+    State.lastActionTick = tick()
+
+    if State.customAnimationEditorActive and (not State.customAnimationEditingKey or not State.customAnimationEditingName or not (State.CustomAnimOverlay and State.CustomAnimOverlay.Parent)) then
+        if State.exitCustomAnimationEditor then
+            State.exitCustomAnimationEditor()
+        else
+            State.customAnimationEditorActive = false
+        end
+    end
+
+    local randomActive = isRandomSlotActive()
+    if index == 1 and randomActive then
+        local itemData = pickRandomItemForMode()
+        if not itemData then
+            getgenv().Notify({
+                Title = '7yd7 | Random',
+                Content = '? No valid random item found',
+                Duration = 3
+            })
+            return
+        end
+        State.lastRadialActionTime = tick()
+
+        if State.customAnimationEditorActive then
+            local animIdToSave = itemData.id
+            local cat = State.customAnimationEditingKey
+            local name = State.customAnimationEditingName
+            if State.CustomAnimations.Sets[State.currentCustomAnimationName] and cat and name then
+                if State.currentMode == "emote" or (State.currentMode == "animation" and not itemData.bundledItems) then
+                    local resolved = resolveEmoteToAnimationId(itemData.id)
+                    if resolved then animIdToSave = resolved end
+                end
+                if not State.CustomAnimations.Sets[State.currentCustomAnimationName][cat] then
+                    State.CustomAnimations.Sets[State.currentCustomAnimationName][cat] = {}
+                end
+                State.CustomAnimations.Sets[State.currentCustomAnimationName][cat][name] = animIdToSave
+                State.SaveCustomAnimations(State.CustomAnimations)
+                getgenv().Notify({ Title = "7yd7 | Saved", Content = "✅ Saved " .. name, Duration = 3 })
+                if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+                if refreshCustomAnimationState then refreshCustomAnimationState(true) end
+                State.exitCustomAnimationEditor()
+            end
+            return
+        end
+
+        if State.favoriteEnabled then
+            if State.currentMode == "animation" then
+                if not isInFavorites(itemData.id) then
+                    toggleFavoriteAnimation(itemData)
+                end
+            else
+                if not isInFavorites(itemData.id) then
+                    toggleFavorite(itemData.id, itemData.name)
+                end
+            end
+            return
+        end
+
+        if State.currentMode == "animation" then
+            if stopCurrentEmote then stopCurrentEmote() end
+            applyAnimation(itemData)
+            State.lastRandomAnimationId = itemData.id
+            if not State.favoriteEnabled then
+                pcall(function()
+                    game:GetService("GuiService"):SetEmotesMenuOpen(false)
+                end)
+                pcall(function()
+                    game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Visible = false
+                end)
+            end
+        else
+            local _, hum = getCharacterAndHumanoid()
+            if hum then
+                pcall(function()
+                    game:GetService("GuiService"):SetEmotesMenuOpen(false)
+                end)
+                pcall(function()
+                    game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Visible = false
+                end)
+                playRandomEmote(hum, itemData.id)
+                State.lastRandomEmoteId = itemData.id
+            end
+        end
+        return
+    end
+
+    if State.currentMode == "animation" then
+        rebuildAnimationNormalCache()
+    else
+        rebuildEmoteNormalCache()
+    end
+
+    local function getEmoteAtIndex(idx)
+        local categories = getCategoryStats()
+        local accumulatedPages = 0
+        
+        for _, cat in ipairs(categories) do
+            if State.currentPage <= accumulatedPages + cat.pages then
+                local adjustedPage = State.currentPage - accumulatedPages
+                local pageItems = getListSlice(cat.list, adjustedPage, cat.hasRandom)
+                return pageItems[idx]
+            end
+            accumulatedPages = accumulatedPages + cat.pages
+        end
+        return nil
+    end
+
+    local slotOffset = randomActive and 1 or 0
+    local itemData = getEmoteAtIndex(index - slotOffset)
+    if not itemData then return end
+
+    State.lastRadialActionTime = tick()
+
+    if State.customAnimationEditorActive then
+        local animIdToSave = itemData.id
+        local cat = State.customAnimationEditingKey
+        local name = State.customAnimationEditingName
+
+        if State.currentMode == "emote" or (State.currentMode == "animation" and not itemData.bundledItems) then
+            local resolved = resolveEmoteToAnimationId(itemData.id)
+            if resolved then animIdToSave = resolved end
+        end
+
+        if State.currentMode == "animation" and itemData.bundledItems then
+            local resolved = resolveAnimationMappings(itemData.bundledItems)
+            if resolved and #resolved > 0 then
+                local match
+                for _, m in ipairs(resolved) do
+                    if m.category:lower() == cat:lower() and m.name:lower() == name:lower() then
+                        match = m
+                        break
+                    end
+                end
+                if not match then
+                    for _, m in ipairs(resolved) do
+                        if m.category:lower() == cat:lower() then
+                            match = m
+                            break
+                        end
+                    end
+                end
+                if match then
+                    local extractedId = tonumber(urlToId(match.animationId))
+                    if extractedId then
+                        animIdToSave = extractedId
+                    end
+                end
+                
+                if animIdToSave == itemData.id and resolved[1] then
+                    animIdToSave = tonumber(urlToId(resolved[1].animationId)) or itemData.id
+                end
+            end
+        end
+
+        if State.CustomAnimations.Sets[State.currentCustomAnimationName] and cat and name then
+            if not State.CustomAnimations.Sets[State.currentCustomAnimationName][cat] then
+                State.CustomAnimations.Sets[State.currentCustomAnimationName][cat] = {}
+            end
+            State.CustomAnimations.Sets[State.currentCustomAnimationName][cat][name] = animIdToSave
+            State.SaveCustomAnimations(State.CustomAnimations)
+            getgenv().Notify({ Title = "7yd7 | Saved", Content = "✅ Saved " .. name, Duration = 3 })
+            
+            if State.RefreshCustomAnimUI then State.RefreshCustomAnimUI() end
+            if refreshCustomAnimationState then refreshCustomAnimationState(true) end
+            State.exitCustomAnimationEditor()
+        end
+        return
+    end
+
+    if State.favoriteEnabled then
+        if State.currentMode == "animation" then
+            toggleFavoriteAnimation(itemData)
+        else
+            toggleFavorite(itemData.id, itemData.name)
+        end
+    else
+        if State.currentMode == "animation" then
+            applyAnimation(itemData)
+            pcall(function()
+                game:GetService("GuiService"):SetEmotesMenuOpen(false)
+            end)
+            pcall(function()
+                game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Visible = false
+            end)
+        else
+            local _, hum = getCharacterAndHumanoid()
+            if hum then
+                if playRandomEmote then
+                    playRandomEmote(hum, itemData.id)
+                elseif playEmote then
+                    playEmote(hum, itemData.id)
+                end
+            end
+        end
+    end
+
+end
+
+function clearAnimationSlotImages()
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    if not success or not frontFrame then
+        return
+    end
+
+    for i = 1, State.itemsPerPage do
+        local child = frontFrame:FindFirstChild(tostring(i))
+        if child and child:IsA("ImageLabel") then
+            local idValue = child:FindFirstChild("AnimationID")
+            if idValue then
+                idValue:Destroy()
+            end
+            if child.Image and child.Image:find("rbxthumb://type=BundleThumbnail") then
+                child.Image = ""
+            end
+        end
+    end
+end
+
+
+function monitorAnimations(token)
+    while State.currentMode == "animation" and State.animationMonitorToken == token do
+        local success, frontFrame = pcall(function()
+            return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+        end)
+        
+        if success and frontFrame then
+            for _, connection in pairs(State.emoteClickConnections) do
+                if connection then
+                    connection:Disconnect()
+                end
+            end
+            State.emoteClickConnections = {}
+            
+            local favoritesToUse = _G.filteredFavoritesAnimationsForDisplay or State.favoriteAnimations
+            local hasFavorites = #favoritesToUse > 0
+            local favoritePagesCount = hasFavorites and calcPagesForList(#favoritesToUse, true) or 0
+            local isInFavoritesPages = State.currentPage <= favoritePagesCount
+            
+            local currentPageAnimations = {}
+            
+            if isInFavoritesPages and hasFavorites then
+                currentPageAnimations = getListSlice(favoritesToUse, State.currentPage, true)
+            else
+                local normalAnimations = {}
+                for _, animation in pairs(State.filteredAnimations) do
+                    if not isInFavorites(animation.id) then
+                        table.insert(normalAnimations, animation)
+                    end
+                end
+                
+                local adjustedPage = State.currentPage - favoritePagesCount
+                local isFirstNormalList = (favoritePagesCount == 0)
+                currentPageAnimations = getListSlice(normalAnimations, adjustedPage, isFirstNormalList)
+            end
+            
+            local randomActive = isRandomSlotActive()
+            local buttonIndex = 1
+            for _, child in pairs(frontFrame:GetChildren()) do
+                if child:IsA("ImageLabel") and (not randomActive or child.Name ~= "1") then
+                    if buttonIndex <= #currentPageAnimations then
+                        local animationData = currentPageAnimations[buttonIndex]
+                        
+                        if State.favoriteEnabled then
+                            local isFavorite = isInFavorites(animationData.id)
+                            updateFavoriteIcon(child, animationData.id, isFavorite)
+                        else
+                            local favoriteIcon = child:FindFirstChild("FavoriteIcon")
+                            if favoriteIcon then
+                                favoriteIcon:Destroy()
+                            end
+                        end
+                        buttonIndex = buttonIndex + 1
+                    else
+                        local favoriteIcon = child:FindFirstChild("FavoriteIcon")
+                        if favoriteIcon then
+                            favoriteIcon:Destroy()
+                        end
+                    end
+                end
+            end
+
+        end
+        
+        task.wait(0.1)
+    end
+end
+
+function stopEmoteClickDetection()
+    State.isMonitoringClicks = false
+    State.emoteMonitorToken = State.emoteMonitorToken + 1
+    State.animationMonitorToken = State.animationMonitorToken + 1
+    
+    for _, connection in pairs(State.emoteClickConnections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    State.emoteClickConnections = {}
+    
+    local success, frontFrame = pcall(function()
+        return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+    end)
+    
+    if success and frontFrame then
+        for _, child in pairs(frontFrame:GetChildren()) do
+            if child:IsA("ImageLabel") then
+                local clickDetector = child:FindFirstChild("ClickDetector")
+                if clickDetector then
+                    clickDetector:Destroy()
+                end
+                
+                local favoriteIcon = child:FindFirstChild("FavoriteIcon")
+                if favoriteIcon then
+                    favoriteIcon:Destroy()
+                end
+            end
+        end
+        applyEmotesButtonsActiveState()
+    end
+end
+
+
+function fetchAllEmotes()
+    if State.isLoading then
+        return
+    end
+    State.isLoading = true
+
+    local function applyData(data, total)
+        State.emotesData = data
+        State.totalEmotesLoaded = total
+        State.originalEmotesData = State.emotesData
+        State.filteredEmotes = State.emotesData
+        State.emoteCacheVersion = State.emoteCacheVersion + 1
+        State.totalPages = calculateTotalPages()
+        State.currentPage = 1
+        updatePageDisplay()
+        updateEmotes()
+        State.isLoading = false
+    end
+
+    local function fetchFromUrl()
+        local success, result = pcall(function()
+            local jsonContent = game:HttpGet("https://raw.githubusercontent.com/7yd7/sniper-Emote/refs/heads/test/EmoteSniper.json")
+            if jsonContent and jsonContent ~= "" then
+                local data = HttpService:JSONDecode(jsonContent)
+                return data.data or {}
+            else
+                return nil
+            end
+        end)
+
+        if success and result then
+            local emoteData = {}
+            local total = 0
+            for _, item in pairs(result) do
+                local id = tonumber(item.id)
+                if id and id > 0 then
+                    table.insert(emoteData, {id = id, name = item.name or ("Emote_" .. id)})
+                    total = total + 1
+                end
+            end
+            if #emoteData > 0 then
+                pcall(function()
+                    if not isfolder("7yd7") then makefolder("7yd7") end
+                    writefile(State.EmoteDataCachePath, HttpService:JSONEncode(emoteData))
+                end)
+                return emoteData, total
+            end
+        end
+        return nil, nil
+    end
+
+    local cacheData = nil
+    pcall(function()
+        if isfile and isfile(State.EmoteDataCachePath) then
+            local json = readfile(State.EmoteDataCachePath)
+            local decoded = HttpService:JSONDecode(json)
+            if type(decoded) == "table" and #decoded > 0 then
+                cacheData = decoded
+            end
+        end
+    end)
+
+    if cacheData then
+        applyData(cacheData, #cacheData)
+    else
+        State.emotesData = {{id = 3360686498, name = "Stadium"},{id = 3360692915, name = "Tilt"},{id = 3576968026, name = "Shrug"},{id = 3360689775, name = "Salute"}}
+        State.totalEmotesLoaded = #State.emotesData
+        State.originalEmotesData = State.emotesData
+        State.filteredEmotes = State.emotesData
+        State.emoteCacheVersion = State.emoteCacheVersion + 1
+        State.totalPages = calculateTotalPages()
+        State.currentPage = 1
+        updatePageDisplay()
+        updateEmotes()
+        State.isLoading = false
+    end
+
+    task.spawn(function()
+        while true do
+            local emoteData, total = fetchFromUrl()
+            if emoteData then
+                applyData(emoteData, total)
+                getgenv().Notify({Title = '7yd7 | Emote', Content = "📦 Emotes loaded", Duration = 3})
+                return
+            end
+            task.wait(3)
+        end
+    end)
+end
+
+function fetchAllAnimations()
+    if State.isLoading then
+        return
+    end
+    State.isLoading = true
+    State.animationsData = {}
+
+    local function processCustomSets()
+        if State.CustomAnimations and State.CustomAnimations.Order then
+            for idx, customSetName in ipairs(State.CustomAnimations.Order) do
+                if customSetName ~= "Default" and State.CustomAnimations.Sets[customSetName] then
+                    local fakeId = -1000 - idx
+                    local customSetData = State.CustomAnimations.Sets[customSetName]
+                    local mappings = {}
+                    for cat, anims in pairs(customSetData) do
+                        if cat ~= "__meta" then
+                            for name, id in pairs(anims) do
+                                if tostring(id) ~= "0" then
+                                    table.insert(mappings, {category = cat, name = name, animationId = "rbxassetid://" .. id})
+                                end
+                            end
+                        end
+                    end
+                    mappings._version = 2
+                    State.AnimationCache[tostring(fakeId)] = mappings
+
+                    local customAnimationData = {
+                        id = fakeId,
+                        name = customSetName,
+                        bundledItems = {"Custom-Animation"},
+                        isCustomSet = true
+                    }
+                    table.insert(State.animationsData, 1, customAnimationData)
+                end
+            end
+        end
+    end
+
+    local function finalize()
+        State.originalAnimationsData = State.animationsData
+        State.filteredAnimations = State.animationsData
+        State.animationCacheVersion = State.animationCacheVersion + 1
+        State.isLoading = false
+    end
+
+    processCustomSets()
+    finalize()
+
+    task.spawn(function()
+        while true do
+            local success, result = pcall(function()
+                local jsonContent = game:HttpGet("https://raw.githubusercontent.com/7yd7/sniper-Emote/refs/heads/test/AnimationSniper.json")
+                if jsonContent and jsonContent ~= "" then
+                    local data = HttpService:JSONDecode(jsonContent)
+                    return data.data or {}
+                end
+                return nil
+            end)
+
+            local offsaleSuccess, offsaleResult
+            if offsaleAnimationJson then
+                offsaleSuccess, offsaleResult = pcall(function()
+                    local jsonContent = game:HttpGet("https://raw.githubusercontent.com/7yd7/sniper-Emote/refs/heads/test/AnimationSniperoffsale.json")
+                    if jsonContent and jsonContent ~= "" then
+                        local data = HttpService:JSONDecode(jsonContent)
+                        return data.data or {}
+                    end
+                    return nil
+                end)
+            end
+
+            if success or offsaleSuccess then
+                local animationsData = {}
+                local seenIds = {}
+
+                if success and result then
+                    for _, item in pairs(result) do
+                        local id = tonumber(item.id)
+                        if id and id > 0 then
+                            seenIds[id] = true
+                            table.insert(animationsData, {
+                                id = id,
+                                name = item.name or ("Animation_" .. id),
+                                bundledItems = item.bundledItems
+                            })
+                        end
+                    end
+                end
+
+                if offsaleSuccess and offsaleResult then
+                    for _, item in pairs(offsaleResult) do
+                        local id = tonumber(item.id)
+                        if id and id > 0 and not seenIds[id] then
+                            seenIds[id] = true
+                            table.insert(animationsData, {
+                                id = id,
+                                name = item.name or ("Animation_Offsale_" .. id),
+                                bundledItems = item.bundledItems
+                            })
+                        end
+                    end
+                end
+
+                State.animationsData = animationsData
+                processCustomSets()
+                finalize()
+                return
+            end
+
+            task.wait(3)
+        end
+    end)
+end
+
+local function smartSearchMatch(name, searchTerm)
+    if not searchTerm or searchTerm == "" then return true end
+    name = name:lower()
+    searchTerm = searchTerm:lower()
+    
+    for word in searchTerm:gmatch("%S+") do
+        if not name:find(word, 1, true) then
+            return false
+        end
+    end
+    return true
+end
+
+function searchEmotes(searchTerm)
+    if State.isLoading then
+        getgenv().Notify({
+            Title = '7yd7 | Emote',
+            Content = '⚠️ Loading please wait...',
+            Duration = 5
+        })
+        return
+    end
+
+    searchTerm = searchTerm:lower()
+
+    if searchTerm == "" then
+        State.filteredEmotes = State.originalEmotesData
+        State.emoteCacheVersion = State.emoteCacheVersion + 1
+        if _G.originalFavoritesBackup then
+            _G.originalFavoritesBackup = nil
+        end
+        _G.filteredFavoritesForDisplay = nil
+    else
+        local isIdSearch = searchTerm:match("^%d+$")
+        
+        local newFilteredList = {}
+        
+        if isIdSearch then
+            for _, emote in pairs(State.originalEmotesData) do
+                if tostring(emote.id) == searchTerm then
+                    table.insert(newFilteredList, emote)
+                end
+            end
+        else
+            for _, emote in pairs(State.originalEmotesData) do
+                if smartSearchMatch(emote.name, searchTerm) then
+                    table.insert(newFilteredList, emote)
+                end
+            end
+        end
+        
+        State.filteredEmotes = newFilteredList
+        State.emoteCacheVersion = State.emoteCacheVersion + 1
+
+        if not isIdSearch then
+            if not _G.originalFavoritesBackup then
+                _G.originalFavoritesBackup = {}
+                for i, favorite in pairs(State.favoriteEmotes) do
+                    _G.originalFavoritesBackup[i] = {
+                        id = favorite.id,
+                        name = favorite.name
+                    }
+                end
+            end
+
+            _G.filteredFavoritesForDisplay = {}
+            for _, favorite in pairs(State.favoriteEmotes) do
+                if smartSearchMatch(favorite.name, searchTerm) then
+                    table.insert(_G.filteredFavoritesForDisplay, favorite)
+                end
+            end
+        end
+        applySearchSlot1Image()
+    end
+
+    State.totalPages = calculateTotalPages()
+    State.currentPage = 1
+    updatePageDisplay()
+    updateEmotes()
+end
+
+function searchAnimations(searchTerm)
+    if State.isLoading then
+        getgenv().Notify({
+            Title = '7yd7 | Animation',
+            Content = '⚠️ Loading please wait...',
+            Duration = 5
+        })
+        return
+    end
+
+    searchTerm = searchTerm:lower()
+
+    if searchTerm == "" then
+        State.filteredAnimations = State.originalAnimationsData
+        State.animationCacheVersion = State.animationCacheVersion + 1
+        if _G.originalAnimationFavoritesBackup then
+            _G.originalAnimationFavoritesBackup = nil
+        end
+        _G.filteredFavoritesAnimationsForDisplay = nil
+    else
+        local isIdSearch = searchTerm:match("^%d+$")
+        
+        local newFilteredList = {}
+        
+        if isIdSearch then
+            for _, animation in pairs(State.originalAnimationsData) do
+                if tostring(animation.id) == searchTerm then
+                    table.insert(newFilteredList, animation)
+                end
+            end
+        else
+            for _, animation in pairs(State.originalAnimationsData) do
+                if smartSearchMatch(animation.name, searchTerm) then
+                    table.insert(newFilteredList, animation)
+                end
+            end
+        end
+        
+        State.filteredAnimations = newFilteredList
+        State.animationCacheVersion = State.animationCacheVersion + 1
+
+        if not isIdSearch then
+            if not _G.originalAnimationFavoritesBackup then
+                _G.originalAnimationFavoritesBackup = {}
+                for i, favorite in pairs(State.favoriteAnimations) do
+                    _G.originalAnimationFavoritesBackup[i] = {
+                        id = favorite.id,
+                        name = favorite.name,
+                        bundledItems = favorite.bundledItems
+                    }
+                end
+            end
+
+            _G.filteredFavoritesAnimationsForDisplay = {}
+            for _, favorite in pairs(State.favoriteAnimations) do
+                if smartSearchMatch(favorite.name, searchTerm) then
+                    table.insert(_G.filteredFavoritesAnimationsForDisplay, favorite)
+                end
+            end
+        end
+        applySearchSlot1Image()
+    end
+
+    State.totalPages = calculateTotalPages()
+    State.currentPage = 1
+    updatePageDisplay()
+    updateAnimations()
+end
+
+findCustomAnimationDataByName = function(setName)
+    if not setName or setName == "Default" then
+        return nil
+    end
+
+    for _, animationData in ipairs(State.originalAnimationsData or {}) do
+        if animationData.isCustomSet and animationData.name == setName then
+            return animationData
+        end
+    end
+
+    for _, animationData in ipairs(State.animationsData or {}) do
+        if animationData.isCustomSet and animationData.name == setName then
+            return animationData
+        end
+    end
+
+    return nil
+end
+
+refreshCustomAnimationState = function(applySelectedSet)
+    local activeSearch = State.animationSearchTerm or ""
+    local previousPage = State.currentPage
+
+    fetchAllAnimations()
+
+    if activeSearch ~= "" then
+        searchAnimations(activeSearch)
+    else
+        State.filteredAnimations = State.originalAnimationsData
+        State.animationCacheVersion = State.animationCacheVersion + 1
+        State.totalPages = calculateTotalPages()
+        local maxPage = math.max(State.totalPages, 1)
+        if previousPage < 1 then
+            State.currentPage = 1
+        elseif previousPage > maxPage then
+            State.currentPage = maxPage
+        else
+            State.currentPage = previousPage
+        end
+        updatePageDisplay()
+        if State.currentMode == "animation" then
+            updateAnimations()
+        end
+    end
+
+    if applySelectedSet and State.currentCustomAnimationName ~= "Default" then
+        local selectedAnimationData = findCustomAnimationDataByName(State.currentCustomAnimationName)
+        if selectedAnimationData then
+            pcall(function()
+                applyAnimation(selectedAnimationData)
+            end)
+        end
+    end
+end
+
+function goToPage(pageNumber)
+    bumpImageUpdateToken()
+    if pageNumber < 1 then
+        State.currentPage = 1
+    elseif pageNumber > State.totalPages then
+        State.currentPage = State.totalPages
+    else
+        State.currentPage = pageNumber
+    end
+    updatePageDisplay()
+    updateEmotes()
+end
+
+function previousPage()
+    bumpImageUpdateToken()
+    if State.currentPage <= 1 then
+        State.currentPage = State.totalPages
+    else
+        State.currentPage = State.currentPage - 1
+    end
+    updatePageDisplay()
+    updateEmotes()
+end
+
+function nextPage()
+    bumpImageUpdateToken()
+    if State.currentPage >= State.totalPages then
+        State.currentPage = 1
+    else
+        State.currentPage = State.currentPage + 1
+    end
+    updatePageDisplay()
+    updateEmotes()
+end
+
+function stopCurrentEmote()
+    if State.currentEmoteTrack then
+        State.currentEmoteTrack:Stop()
+        State.currentEmoteTrack = nil
+    end
+end
+
+playEmote = function(humanoid, emoteId)
+    stopCurrentEmote()
+    stopEmotes()
+
+    local animation = Instance.new("Animation")
+    animation.AnimationId = "rbxassetid://" .. emoteId
+
+    local success, animTrack = pcall(function()
+        return humanoid.Animator:LoadAnimation(animation)
+    end)
+
+    if success and animTrack then
+        State.currentEmoteTrack = animTrack
+        State.currentEmoteTrack.Priority = Enum.AnimationPriority.Action
+        State.currentEmoteTrack.Looped = true
+        task.wait(0.1)
+        if State.speedEmoteEnabled or State.emotesWalkEnabled then
+            State.currentEmoteTrack:Play()
+
+            if State.speedEmoteEnabled then
+                local speedValue = tonumber(UI.SpeedBox.Text) or 1
+                State.currentEmoteTrack:AdjustSpeed(speedValue)
+            end
+        end
+    end
+end
+
+playRandomEmote = function(humanoid, emoteId)
+    stopCurrentEmote()
+    stopEmotes()
+
+    local ok, track = pcall(function()
+        return humanoid:PlayEmoteAndGetAnimTrackById(emoteId)
+    end)
+    if ok and track and typeof(track) == "Instance" and track:IsA("AnimationTrack") then
+        State.currentEmoteTrack = track
+        if State.speedEmoteEnabled then
+            local speedVal = tonumber(UI.SpeedBox.Text) or Config.EmoteSpeed or 1
+            track:AdjustSpeed(speedVal)
+        end
+    end
+end
+
+function onCharacterAdded(character)
+    State.currentCharacter = character
+    stopCurrentEmote()
+
+    local humanoid = character:WaitForChild("Humanoid")
+    local animator = humanoid:WaitForChild("Animator")
+
+    if getgenv().autoReloadEnabled and getgenv().lastPlayedAnimation then
+        task.spawn(function()
+            local player = game.Players.LocalPlayer
+            if not player:HasAppearanceLoaded() then
+                player.CharacterAppearanceLoaded:Wait()
+            end
+            local animate = character:WaitForChild("Animate")
+            character:WaitForChild("HumanoidRootPart")
+            applyAnimation(getgenv().lastPlayedAnimation)
+            getgenv().Notify({
+                Title = '7yd7 | Auto Reload Animation',
+                Content = '🔄 The last animation was automatically \n reapplied',
+                Duration = 3
+            })
+            
+            local lastAnim = getgenv().lastPlayedAnimation
+            local cacheKey = tostring(lastAnim.id)
+            local changed = false
+            for i = 1, 7 do
+                task.wait(0.01)
+                if not character or not character.Parent or not humanoid then break end
+                local mappings = State.AnimationCache[cacheKey]
+                if mappings and animate and animate.Parent then
+                    for _, m in ipairs(mappings) do
+                        local categoryFolder = animate:FindFirstChild(m.category)
+                        if categoryFolder then
+                            for _, animObj in ipairs(categoryFolder:GetChildren()) do
+                                if animObj:IsA("Animation") then
+                                    if animObj.AnimationId ~= m.animationId then
+                                        animObj.AnimationId = m.animationId
+                                        changed = true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            --[[
+            if changed and humanoid.MoveDirection.Magnitude == 0 then
+                animate.Disabled = true
+                animate.Disabled = false
+            end
+            --]]
+        end)
+    end
+
+    animator.AnimationPlayed:Connect(function(animationTrack)
+        if isDancing(character, animationTrack) then
+            local playedEmoteId = urlToId(animationTrack.Animation.AnimationId)
+            if playedEmoteId == "" or playedEmoteId == "0" then return end
+
+            if State.emotesWalkEnabled then
+                if State.currentEmoteTrack then
+                    local currentEmoteId = urlToId(State.currentEmoteTrack.Animation.AnimationId)
+                    if currentEmoteId == playedEmoteId then
+                        return
+                    else
+                        stopCurrentEmote()
+                    end
+                end
+
+                playEmote(humanoid, playedEmoteId)
+
+                if currentEmoteTrack then
+                    currentEmoteTrack.Ended:Connect(function()
+                        if currentEmoteTrack == animationTrack then
+                            currentEmoteTrack = nil
+                        end
+                    end)
+                end
+            end
+
+            if State.speedEmoteEnabled and not State.emotesWalkEnabled then
+                if State.currentEmoteTrack then
+                    local currentEmoteId = urlToId(State.currentEmoteTrack.Animation.AnimationId)
+                    if currentEmoteId == playedEmoteId then
+                        return
+                    else
+                        stopCurrentEmote()
+                    end
+                end
+
+                playEmote(humanoid, playedEmoteId)
+
+                if currentEmoteTrack then
+                    currentEmoteTrack.Ended:Connect(function()
+                        if currentEmoteTrack == animationTrack then
+                            currentEmoteTrack = nil
+                        end
+                    end)
+                end
+            end
+        end
+    end)
+
+    humanoid.Died:Connect(function()
+    if State.hudEditorActive and exitHUDEditor then exitHUDEditor() end
+    State.emotesWalkEnabled = false
+    State.speedEmoteEnabled = false
+    State.favoriteEnabled = false
+    State.currentEmoteTrack = nil
+
+    stopEmotes()
+        stopCurrentEmote()
+    end)
+end
+
+function toggleEmoteWalk()
+    State.emotesWalkEnabled = not State.emotesWalkEnabled
+    ApplyFreezeButtonVisual()
+
+    if State.emotesWalkEnabled then
+        getgenv().Notify({
+            Title = '7yd7 | Emote Freeze',
+            Content = "🔒 Emote freeze ON",
+            Duration = 5
+        })
+
+        task.wait(0.1)
+        stopCurrentEmote()
+        if State.currentEmoteTrack and State.currentEmoteTrack.IsPlaying then
+            State.currentEmoteTrack:AdjustSpeed(1)
+        end
+    else
+        getgenv().Notify({
+            Title = '7yd7 | Emote Freeze',
+            Content = '🔓 Emote freeze OFF',
+            Duration = 5
+        })
+        task.wait(0.1)
+        stopCurrentEmote()
+
+        if State.currentEmoteTrack and State.currentEmoteTrack.IsPlaying and State.speedEmoteEnabled then
+            local speedValue = tonumber(UI.SpeedBox.Text) or 1
+            State.currentEmoteTrack:AdjustSpeed(speedValue)
+        elseif State.currentEmoteTrack and State.currentEmoteTrack.IsPlaying then
+            State.currentEmoteTrack:AdjustSpeed(1)
+        end
+    end
+end
+
+function toggleSpeedEmote()
+    State.speedEmoteEnabled = not State.speedEmoteEnabled
+    updateSpeedBoxVisibility()
+
+    if State.speedEmoteEnabled then
+        getgenv().Notify({
+            Title = '7yd7 | Speed Emote',
+            Content = "⚡ Speed Emote ON",
+            Duration = 5
+        })
+        task.wait(0.1)
+        stopCurrentEmote()
+    else
+        getgenv().Notify({
+            Title = '7yd7 | Speed Emote',
+            Content = '⚡ Speed Emote OFF',
+            Duration = 5
+        })
+        task.wait(0.1)
+        stopCurrentEmote()
+    end
+
+    Config.EmoteSpeedEnabled = State.speedEmoteEnabled
+    Config.EmoteSpeed = tonumber(UI.SpeedBox.Text) or 1
+    SaveConfig()
+end
+
+function toggleFavoriteMode()
+    State.favoriteEnabled = not State.favoriteEnabled
+
+    if State.favoriteEnabled then
+        ApplyFavoriteButtonVisual()
+        getgenv().Notify({
+            Title = '7yd7 | Favorite System',
+            Content = "🔒 Favorite ON",
+            Duration = 5
+        })
+
+        updateScriptPriorityOverlay()
+        setEmotesButtonsActiveForFavorites()
+
+        if State.currentMode == "emote" then
+            setupEmoteClickDetection()
+        else 
+            updateAllFavoriteIcons()
+        end
+    else
+        ApplyFavoriteButtonVisual()
+        getgenv().Notify({
+            Title = '7yd7 | Favorite System',
+            Content = '🔓 Favorite OFF',
+            Duration = 3
+        })
+        
+        if State.currentMode == "emote" then
+            stopEmoteClickDetection()
+        else
+            updateAllFavoriteIcons()
+        end
+        clearCustomHitboxes()
+        updateScriptPriorityOverlay()
+    end
+
+    pcall(function()
+        local frontFrame = CoreGui.RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+        applyEmotesButtonsActiveState()
+    end)
+end
+
+local clickCooldown = {}
+local CLICK_COOLDOWN_TIME = 0.1
+
+function safeButtonClick(buttonName, callback)
+    if State.hudEditorActive then return end
+    local currentTime = tick()
+    if not clickCooldown[buttonName] or (currentTime - clickCooldown[buttonName]) > CLICK_COOLDOWN_TIME then
+        clickCooldown[buttonName] = currentTime
+        callback()
+    end
+end
+
+function setupAnimationClickDetection()
+    if State.isMonitoringClicks then
+        return
+    end
+    
+    if State.currentMode == "animation" then
+        State.animationMonitorToken = State.animationMonitorToken + 1
+        local token = State.animationMonitorToken
+        State.isMonitoringClicks = true
+        task.spawn(function()
+            monitorAnimations(token)
+        end)
+    end
+end
+
+function toggleAutoReload()
+    getgenv().autoReloadEnabled = not getgenv().autoReloadEnabled
+    Config.AutoReloadEnabled = getgenv().autoReloadEnabled
+    task.spawn(SaveConfig)
+    
+    if getgenv().autoReloadEnabled then
+        getgenv().Notify({
+            Title = '7yd7 | Auto Reload Animation',
+            Content = "🔄 Auto Reload ON",
+            Duration = 5
+        })
+    else
+        getgenv().Notify({
+            Title = '7yd7 | Auto Reload Animation',
+            Content = '🔄 Auto Reload OFF',
+            Duration = 3
+        })
+    end
+end
+
+function connectEvents()
+    disconnectAllConnections()
+
+    if UI._1left then
+        table.insert(State.guiConnections, UI._1left.MouseButton1Click:Connect(function()
+            safeButtonClick("PrevPage", previousPage)
+        end))
+    end
+
+    if UI._9right then
+        table.insert(State.guiConnections, UI._9right.MouseButton1Click:Connect(function()
+            safeButtonClick("NextPage", nextPage)
+        end))
+    end
+
+    if UI._2Routenumber then
+        table.insert(State.guiConnections, UI._2Routenumber.FocusLost:Connect(function(enterPressed)
+            if State.hudEditorActive then return end
+            local pageNum = tonumber(UI._2Routenumber.Text)
+            if pageNum then
+                goToPage(pageNum)
+            else
+                UI._2Routenumber.Text = tostring(State.currentPage)
+            end
+        end))
+    end
+
+    if UI.Search then
+        table.insert(State.guiConnections, UI.Search.Changed:Connect(function(property)
+            if State.hudEditorActive then return end
+            if property == "Text" then
+                if State.suppressSearch then
+                    return
+                end
+                if State.currentMode == "emote" then
+                    State.emoteSearchTerm = UI.Search.Text
+                    searchEmotes(State.emoteSearchTerm)
+                else
+                    State.animationSearchTerm = UI.Search.Text
+                    searchAnimations(State.animationSearchTerm)
+                end
+            end
+        end))
+    end
+
+    local SECTOR_COUNT = 8
+    local SECTOR_ANGLE = 360 / SECTOR_COUNT
+    
+    local function isAuthenticPageActive()
+        if not (Config.AuthenticFirstPage and State.currentMode == "emote") then
+            return false
+        end
+        local authenticEmotes = getgenv().OwnedAuthenticEmotes or {}
+        local authenticPagesCount = calcPagesForList(#authenticEmotes, false)
+        return #authenticEmotes > 0 and State.currentPage <= authenticPagesCount
+    end
+
+    table.insert(State.guiConnections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if State.hudEditorActive then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        
+        local exists, emotesWheel = checkEmotesMenuExists()
+        local isRecentlyVisible = (tick() - State.lastWheelVisibleTime < 0.15)
+        if not (exists and (emotesWheel.Visible or isRecentlyVisible)) then return end
+
+        
+        local actualPos = Vector2.new(input.Position.X, input.Position.Y)
+
+        local absPos = emotesWheel.AbsolutePosition
+        local absSize = emotesWheel.AbsoluteSize
+
+        local inXBounds = (actualPos.X >= absPos.X) and (actualPos.X <= absPos.X + absSize.X)
+        local inYBounds = (actualPos.Y >= absPos.Y) and (actualPos.Y <= absPos.Y + absSize.Y)
+        if not (inXBounds and inYBounds) then return end
+
+        local center = absPos + (absSize / 2)
+        local dx = actualPos.X - center.X
+        local dy = actualPos.Y - center.Y
+
+        local distance = math.sqrt(dx*dx + dy*dy)
+        local radius = math.min(absSize.X, absSize.Y) * 0.5
+        if distance > radius then return end
+        local dynamicDeadzone = radius * 0.2
+        if distance < dynamicDeadzone then return end
+
+        local angle = math.deg(math.atan2(dy, dx))
+        local correctedAngle = (angle + 90 + (SECTOR_ANGLE / 2)) % 360
+        local index = math.floor(correctedAngle / SECTOR_ANGLE) + 1
+        if not (State.favoriteEnabled or State.currentMode == "animation" or isAuthenticPageActive() or (index == 1 and isRandomSlotActive())) then return end
+
+        handleSectorAction(index)
+    end))
+
+    local function bindWheelHotkeys()
+        if not ContextActionService then return end
+
+        local keyToIndex = {
+            [Enum.KeyCode.One] = 1, [Enum.KeyCode.Two] = 2, [Enum.KeyCode.Three] = 3, [Enum.KeyCode.Four] = 4,
+            [Enum.KeyCode.Five] = 5, [Enum.KeyCode.Six] = 6, [Enum.KeyCode.Seven] = 7, [Enum.KeyCode.Eight] = 8,
+            [Enum.KeyCode.KeypadOne] = 1, [Enum.KeyCode.KeypadTwo] = 2, [Enum.KeyCode.KeypadThree] = 3, [Enum.KeyCode.KeypadFour] = 4,
+            [Enum.KeyCode.KeypadFive] = 5, [Enum.KeyCode.KeypadSix] = 6, [Enum.KeyCode.KeypadSeven] = 7, [Enum.KeyCode.KeypadEight] = 8
+        }
+
+        local function onHotkey(actionName, inputState, inputObject)
+            if inputState ~= Enum.UserInputState.Begin then return Enum.ContextActionResult.Pass end
+            if State.hudEditorActive then return Enum.ContextActionResult.Pass end
+            if UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
+            if State.customAnimationEditorActive and (not State.customAnimationEditingKey or not State.customAnimationEditingName or not (State.CustomAnimOverlay and State.CustomAnimOverlay.Parent)) then
+                if State.exitCustomAnimationEditor then
+                    State.exitCustomAnimationEditor()
+                else
+                    State.customAnimationEditorActive = false
+                end
+            end
+
+            local index = keyToIndex[inputObject.KeyCode]
+            if not index then return Enum.ContextActionResult.Pass end
+            
+            if isAuthenticPageActive() then
+                return Enum.ContextActionResult.Pass
+            end
+
+            if not (State.favoriteEnabled or State.currentMode == "animation" or (index == 1 and isRandomSlotActive())) then
+                return Enum.ContextActionResult.Pass
+            end
+
+            local exists, emotesWheel = checkEmotesMenuExists()
+            local isRecentlyVisible = (tick() - State.lastWheelVisibleTime < 0.15)
+            if not (exists and (emotesWheel.Visible or isRecentlyVisible)) then return Enum.ContextActionResult.Pass end
+
+            local success, frontFrame = pcall(function()
+                return game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Front.EmotesButtons
+            end)
+            if success and frontFrame then
+                local target = frontFrame:FindFirstChild(tostring(index))
+                if target and target:IsA("ImageLabel") and target.Image ~= "" then
+                    handleSectorAction(index)
+                    if State.currentMode == "animation" and not State.favoriteEnabled then
+                        pcall(function()
+                            game:GetService("GuiService"):SetEmotesMenuOpen(false)
+                        end)
+                        pcall(function()
+                            game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Visible = false
+                        end)
+                    end
+                    return Enum.ContextActionResult.Sink
+                end
+            end
+
+            return Enum.ContextActionResult.Pass
+        end
+
+        ContextActionService:UnbindAction("7yd7_EmoteWheelHotkeys")
+        ContextActionService:BindActionAtPriority(
+            "7yd7_EmoteWheelHotkeys",
+            onHotkey,
+            false,
+            (Enum.ContextActionPriority.High.Value + 50),
+            Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four,
+            Enum.KeyCode.Five, Enum.KeyCode.Six, Enum.KeyCode.Seven, Enum.KeyCode.Eight,
+            Enum.KeyCode.KeypadOne, Enum.KeyCode.KeypadTwo, Enum.KeyCode.KeypadThree, Enum.KeyCode.KeypadFour,
+            Enum.KeyCode.KeypadFive, Enum.KeyCode.KeypadSix, Enum.KeyCode.KeypadSeven, Enum.KeyCode.KeypadEight
+        )
+    end
+
+    bindWheelHotkeys()
+
+    if UI.EmoteWalkButton then
+        table.insert(State.guiConnections, UI.EmoteWalkButton.MouseButton1Click:Connect(function()
+            safeButtonClick("EmoteWalk", toggleEmoteWalk)
+        end))
+    end
+
+    if UI.Favorite then
+        table.insert(State.guiConnections, UI.Favorite.MouseButton1Click:Connect(function()
+            safeButtonClick("Favorite", toggleFavoriteMode)
+        end))
+    end
+
+    if UI.SpeedEmote then
+        table.insert(State.guiConnections, UI.SpeedEmote.MouseButton1Click:Connect(function()
+            safeButtonClick("SpeedEmote", toggleSpeedEmote)
+        end))
+    end
+
+    if UI.Reload then
+        table.insert(State.guiConnections, UI.Reload.MouseButton1Click:Connect(function()
+            safeButtonClick("AutoReload", toggleAutoReload)
+        end))
+    end
+
+    if UI.Changepage then
+        table.insert(State.guiConnections, UI.Changepage.MouseButton1Click:Connect(function()
+            safeButtonClick("ChangePage", function()
+                stopEmoteClickDetection()
+                if State.animImageSpamConn then
+                    State.animImageSpamConn:Disconnect()
+                    State.animImageSpamConn = nil
+                    State.animImageSpamMap = nil
+                    State.animImageSpamTicks = nil
+                    State.animImageSpamToken = State.animImageSpamToken + 1
+                end
+                
+                if State.currentMode == "emote" then
+                    State.currentMode = "animation"
+                    
+                    local function applyAnimationModeUI()
+                        State.suppressSearch = true
+                        UI.Search.Text = State.animationSearchTerm
+                        State.suppressSearch = false
+                        State.currentPage = Config.AnimationPage or 1
+                        State.totalPages = calculateTotalPages()
+                        updatePageDisplay()
+                        updateEmotes() 
+                        updateScriptPriorityOverlay()
+                        State.animationMonitorToken = State.animationMonitorToken + 1
+                        local token = State.animationMonitorToken
+                        State.isMonitoringClicks = true
+                        task.spawn(function()
+                            monitorAnimations(token)
+                        end)
+                    end
+
+                    applyAnimationModeUI()
+                    
+                    local beforeVersion = State.animationCacheVersion
+                    task.spawn(function()
+                        fetchAllAnimations()
+                        if State.currentMode ~= "animation" then return end
+                        if State.animationCacheVersion ~= beforeVersion then
+                            applyAnimationModeUI()
+                        end
+                    end)
+                    
+                    getgenv().Notify({
+                        Title = '7yd7 | Animation',
+                        Content = '📄 Changed to Emote > Animation Mode',
+                        Duration = 3
+                    })
+
+                else
+                    State.currentMode = "emote"
+                    clearCustomHitboxes()
+                    State.suppressSearch = true
+                    UI.Search.Text = State.emoteSearchTerm
+                    State.suppressSearch = false
+                    State.currentPage = Config.EmotePage or 1
+                    State.totalPages = calculateTotalPages()
+                    updatePageDisplay() 
+                    updateEmotes()
+                    updateScriptPriorityOverlay()
+                    
+                    if State.favoriteEnabled then
+                        setupEmoteClickDetection()
+                    end
+                    
+                    getgenv().Notify({
+                        Title = '7yd7 | Emote', 
+                        Content = '📄 Changed to Animation > Emote Mode',
+                        Duration = 3
+                    })
+                end
+            end)
+        end))
+    end
+
+
+
+    if UI.SpeedBox then
+        table.insert(State.guiConnections, UI.SpeedBox.FocusLost:Connect(function()
+            if State.hudEditorActive then return end
+            local speedValue = tonumber(UI.SpeedBox.Text) or 1
+            Config.EmoteSpeed = speedValue
+            SaveConfig()
+        end))
+    end
+
+    table.insert(State.guiConnections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if State.hudEditorActive then return end
+        local exists, emotesWheel = checkEmotesMenuExists()
+        if not (exists and emotesWheel.Visible) then return end
+
+        if input.KeyCode == Enum.KeyCode.Q then
+            if UserInputService:GetFocusedTextBox() then return end
+            previousPage()
+        elseif input.KeyCode == Enum.KeyCode.E then
+            if UserInputService:GetFocusedTextBox() then return end
+            nextPage()
+        elseif (input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl) then
+            if not UserInputService:GetFocusedTextBox() and UI.Search then
+                UI.Search:CaptureFocus()
+            end
+        end
+    end))
+end
+
+
+
+
+
+
+function calculateSnap(element, newPos, currentName, allMovable)
+    local SNAP_THRESHOLD = 8
+    local parent = element.Parent
+    if not parent then return newPos, nil, nil end
+    local ps = parent.AbsoluteSize
+    local pp = parent.AbsolutePosition
+    local absX = pp.X + newPos.X.Scale * ps.X + newPos.X.Offset
+    local absY = pp.Y + newPos.Y.Scale * ps.Y + newPos.Y.Offset
+    local absW = element.AbsoluteSize.X
+    local absH = element.AbsoluteSize.Y
+    local sX, sY = absX, absY
+    local didX, didY = false, false
+    local guideX, guideY
+    for oName, oEl in pairs(allMovable) do
+        if oName ~= currentName then
+            local oX = oEl.AbsolutePosition.X
+            local oY = oEl.AbsolutePosition.Y
+            local oW = oEl.AbsoluteSize.X
+            local oH = oEl.AbsoluteSize.Y
+            if not didX then
+                if math.abs(absX - oX) < SNAP_THRESHOLD then sX = oX; didX = true; guideX = oX end
+                if math.abs(absX - (oX + oW)) < SNAP_THRESHOLD then sX = oX + oW; didX = true; guideX = oX + oW end
+                if math.abs((absX + absW) - oX) < SNAP_THRESHOLD then sX = oX - absW; didX = true; guideX = oX end
+                if math.abs((absX + absW) - (oX + oW)) < SNAP_THRESHOLD then sX = oX + oW - absW; didX = true; guideX = oX + oW end
+                if math.abs((absX + absW/2) - (oX + oW/2)) < SNAP_THRESHOLD then sX = oX + oW/2 - absW/2; didX = true; guideX = oX + oW/2 end
+            end
+            if not didY then
+                if math.abs(absY - oY) < SNAP_THRESHOLD then sY = oY; didY = true; guideY = oY end
+                if math.abs(absY - (oY + oH)) < SNAP_THRESHOLD then sY = oY + oH; didY = true; guideY = oY + oH end
+                if math.abs((absY + absH) - oY) < SNAP_THRESHOLD then sY = oY - absH; didY = true; guideY = oY end
+                if math.abs((absY + absH) - (oY + oH)) < SNAP_THRESHOLD then sY = oY + oH - absH; didY = true; guideY = oY + oH end
+                if math.abs((absY + absH/2) - (oY + oH/2)) < SNAP_THRESHOLD then sY = oY + oH/2 - absH/2; didY = true; guideY = oY + oH/2 end
+            end
+        end
+    end
+    local fsx = (sX - pp.X) / ps.X
+    local fsy = (sY - pp.Y) / ps.Y
+    return UDim2.new(fsx, newPos.X.Offset, fsy, newPos.Y.Offset), guideX, guideY
+end
+
+local function hudColorToRGB(c)
+    return {math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)}
+end
+
+local function copyProps(name)
+    local src = Config.HUDProperties and Config.HUDProperties[name]
+    if not src then return {} end
+    local out = {}
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            local t = {}
+            for i, sv in pairs(v) do
+                t[i] = sv
+            end
+            out[k] = t
+        else
+            out[k] = v
+        end
+    end
+    return out
+end
+
+local function captureHUDState(n, el)
+    if not n or not el then return nil end
+    local cR = el:FindFirstChildWhichIsA("UICorner")
+    local s = {
+        name = n,
+        pos = el.Position,
+        size = el.Size,
+        z = el.ZIndex,
+        bgTrans = el.BackgroundTransparency,
+        bgColor = el.BackgroundColor3,
+        radius = cR and cR.CornerRadius or nil
+    }
+    if el:IsA("ImageLabel") or el:IsA("ImageButton") then
+        s.imgTrans = el.ImageTransparency
+        s.imgColor = el.ImageColor3
+    end
+    if el:IsA("TextLabel") or el:IsA("TextBox") then
+        s.text = el.Text
+        s.textTrans = el.TextTransparency
+        s.textColor = el.TextColor3
+        if el:IsA("TextBox") then
+            s.placeholder = el.PlaceholderText
+        end
+    end
+    s.props = copyProps(n)
+    return s
+end
+
+local function pushUndo(state)
+    if not state then return end
+    if not HUD.UndoStack then HUD.UndoStack = {} end
+    table.insert(HUD.UndoStack, state)
+    if #HUD.UndoStack > 50 then
+        table.remove(HUD.UndoStack, 1)
+    end
+end
+
+local function sameUDim2(a, b)
+    return a.X.Scale == b.X.Scale and a.X.Offset == b.X.Offset and a.Y.Scale == b.Y.Scale and a.Y.Offset == b.Y.Offset
+end
+
+local function sameUDim(a, b)
+    return a.Scale == b.Scale and a.Offset == b.Offset
+end
+
+local function sameColor(a, b)
+    return math.abs(a.R - b.R) < 0.001 and math.abs(a.G - b.G) < 0.001 and math.abs(a.B - b.B) < 0.001
+end
+
+local function applyHUDState(state)
+    if not state or not state.name then return end
+    local all = getAllHUDObjects()
+    local el = all[state.name]
+    if not el then return end
+
+    if state.pos then
+        el.Position = state.pos
+        if not Config.HUDPositions then Config.HUDPositions = {} end
+        Config.HUDPositions[state.name] = {state.pos.X.Scale, state.pos.X.Offset, state.pos.Y.Scale, state.pos.Y.Offset}
+    end
+    if state.size then
+        el.Size = state.size
+        if not Config.HUDSizes then Config.HUDSizes = {} end
+        Config.HUDSizes[state.name] = {state.size.X.Scale, state.size.X.Offset, state.size.Y.Scale, state.size.Y.Offset}
+    end
+    if state.z ~= nil then el.ZIndex = state.z end
+    if state.props and state.props.BgTrans ~= nil then el.BackgroundTransparency = state.bgTrans end
+    if state.props and state.props.BgColor then el.BackgroundColor3 = state.bgColor end
+    if el:IsA("ImageLabel") or el:IsA("ImageButton") then
+        if state.props and state.props.ImgTrans ~= nil then el.ImageTransparency = state.imgTrans end
+        if state.props and state.props.ImgColor then el.ImageColor3 = state.imgColor end
+    end
+    if el:IsA("TextLabel") or el:IsA("TextBox") then
+        if state.props and state.props.Text ~= nil then el.Text = state.text end
+        if state.props and state.props.TextTransparency ~= nil then el.TextTransparency = state.textTrans end
+        if state.props and state.props.TxtColor then el.TextColor3 = state.textColor end
+        if el:IsA("TextBox") and state.placeholder ~= nil then
+            el.PlaceholderText = state.placeholder
+        end
+    end
+    if state.radius then
+        local cR = el:FindFirstChildWhichIsA("UICorner")
+        if cR then cR.CornerRadius = state.radius end
+    end
+
+    if not Config.HUDProperties then Config.HUDProperties = {} end
+    Config.HUDProperties[state.name] = state.props or {}
+    SaveConfig()
+    pcall(function() updateGUIColors() end)
+end
+
+local function undoLastHUD()
+    if not State.hudEditorActive then return end
+    if not HUD.UndoStack or #HUD.UndoStack == 0 then return end
+    local state = table.remove(HUD.UndoStack)
+    applyHUDState(state)
+end
+
+local function normalizeUDim2(u, ps)
+    if not u or not ps or ps.X <= 0 or ps.Y <= 0 then
+        return nil
+    end
+    local sx = u.X.Scale + (u.X.Offset / ps.X)
+    local sy = u.Y.Scale + (u.Y.Offset / ps.Y)
+    return sx, 0, sy, 0
+end
+
+local function tableToUDim2(v)
+    if type(v) ~= "table" or #v ~= 4 then return nil end
+    return UDim2.new(v[1], v[2], v[3], v[4])
+end
+
+local function normalizeHUDScale()
+    local elems = getAllHUDObjects()
+    for name, el in pairs(elems) do
+        local parent = el and el.Parent
+        if parent then
+            local hasLayout = parent:FindFirstChildOfClass("UIListLayout")
+            if hasLayout and not HUD.IsUnlocked then
+                return
+            end
+            local ps = parent.AbsoluteSize
+            if Config.HUDPositions and Config.HUDPositions[name] then
+                local v = Config.HUDPositions[name]
+                if type(v) == "table" and #v == 4 then
+                    local sx, ox, sy, oy = v[1], v[2], v[3], v[4]
+                    if ox ~= 0 or oy ~= 0 then
+                        local nsx, nox, nsy, noy = normalizeUDim2(UDim2.new(sx, ox, sy, oy), ps)
+                        if nsx then
+                            Config.HUDPositions[name] = {nsx, nox, nsy, noy}
+                            el.Position = UDim2.new(nsx, nox, nsy, noy)
+                        end
+                    end
+                end
+            end
+            if Config.HUDSizes and Config.HUDSizes[name] then
+                local v = Config.HUDSizes[name]
+                if type(v) == "table" and #v == 4 then
+                    local def = HUD.DefaultSizes and HUD.DefaultSizes[name]
+                    local isDefault = def and sameUDim2(def, tableToUDim2(v) or UDim2.new(0,0,0,0))
+                    if isDefault then
+                        return
+                    end
+                    local sx, ox, sy, oy = v[1], v[2], v[3], v[4]
+                    if ox ~= 0 or oy ~= 0 then
+                        local nsx, nox, nsy, noy = normalizeUDim2(UDim2.new(sx, ox, sy, oy), ps)
+                        if nsx then
+                            Config.HUDSizes[name] = {nsx, nox, nsy, noy}
+                            el.Size = UDim2.new(nsx, nox, nsy, noy)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    SaveConfig()
+end
+
+local function normalizeHUDScaleForElement(name, el, normalizePos, normalizeSize)
+    if not name or not el or not el.Parent then return end
+    if normalizePos == nil then normalizePos = true end
+    if normalizeSize == nil then normalizeSize = true end
+    local parent = el.Parent
+    local hasLayout = parent:FindFirstChildOfClass("UIListLayout")
+    if hasLayout and not HUD.IsUnlocked then return end
+    local ps = parent.AbsoluteSize
+    if ps.X <= 0 or ps.Y <= 0 then return end
+
+    if normalizePos then
+        local nsx, nox, nsy, noy = normalizeUDim2(el.Position, ps)
+        if nsx then
+            el.Position = UDim2.new(nsx, nox, nsy, noy)
+            if not Config.HUDPositions then Config.HUDPositions = {} end
+            Config.HUDPositions[name] = {nsx, nox, nsy, noy}
+        end
+    end
+
+    if normalizeSize then
+        local nsx, nox, nsy, noy = normalizeUDim2(el.Size, ps)
+        if nsx then
+            el.Size = UDim2.new(nsx, nox, nsy, noy)
+            if not Config.HUDSizes then Config.HUDSizes = {} end
+            Config.HUDSizes[name] = {nsx, nox, nsy, noy}
+        end
+    end
+
+    SaveConfig()
+end
+
+function selectHUDElement(name, element)
+    if HUD.SelectedElement == element then return end
+    HUD.SelectedElement = element
+    HUD.LastTouchedElement = element
+    HUD.LastTouchedName = name
+
+    local parent = element.Parent
+    if UI and parent and (parent == UI.Top or parent == UI.Under) then
+        local key = parent.Name
+        local l = parent:FindFirstChildOfClass("UIListLayout") or (HUD.Layouts and HUD.Layouts[key])
+        if l then
+            HUD.Layouts[key] = l
+            HUD.LayoutsRemoved[key] = true
+            l.Parent = nil
+        end
+    end
+
+    for _, h in pairs(HUD.ResizeHandles) do pcall(function() h:Destroy() end) end
+    HUD.ResizeHandles = {}
+    for _, c in pairs(HUD.ResizeConnections) do pcall(function() c:Disconnect() end) end
+    HUD.ResizeConnections = {}
+
+    local selectionGui = HUD.SelectionGui
+    local wrapper = Instance.new("Frame")
+    wrapper.Name = "SelectionWrapper"
+    wrapper.BackgroundTransparency = 1
+    wrapper.ZIndex = 1
+    wrapper.Parent = selectionGui
+
+    table.insert(HUD.ResizeHandles, wrapper)
+    table.insert(HUD.ResizeConnections, RunService.RenderStepped:Connect(function()
+        if HUD.SelectedElement == element and element.Parent then
+            wrapper.Size = UDim2.fromOffset(element.AbsoluteSize.X, element.AbsoluteSize.Y)
+            wrapper.Position = UDim2.fromOffset(element.AbsolutePosition.X, element.AbsolutePosition.Y)
+        end
+    end))
+
+    local handlePositions = {
+        TopLeft = {UDim2.new(0,0,0,0), Vector2.new(-1, -1)},
+        Top = {UDim2.new(0.5,0,0,0), Vector2.new(0, -1)},
+        TopRight = {UDim2.new(1,0,0,0), Vector2.new(1, -1)},
+        Left = {UDim2.new(0,0,0.5,0), Vector2.new(-1, 0)},
+        Right = {UDim2.new(1,0,0.5,0), Vector2.new(1, 0)},
+        BottomLeft = {UDim2.new(0,0,1,0), Vector2.new(-1, 1)},
+        Bottom = {UDim2.new(0.5,0,1,0), Vector2.new(0, 1)},
+        BottomRight = {UDim2.new(1,0,1,0), Vector2.new(1, 1)}
+    }
+
+    for dir, data in pairs(handlePositions) do
+        local h = Instance.new("Frame")
+        h.Name = "Resize_"..dir
+        h.Size = UDim2.new(0, 8, 0, 8)
+        h.AnchorPoint = Vector2.new(0.5, 0.5)
+        h.Position = data[1]
+        h.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+        h.BorderColor3 = Color3.fromRGB(0, 0, 0)
+        h.ZIndex = 11000
+        h.Parent = wrapper
+
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, 4, 1, 4)
+        btn.Position = UDim2.new(0.5, 0, 0.5, 0)
+        btn.AnchorPoint = Vector2.new(0.5, 0.5)
+        btn.BackgroundTransparency = 1
+        btn.Text = ""
+        btn.ZIndex = 11001
+        btn.Parent = h
+
+        local resizing = false
+        local dragStart
+        local startAbsSize
+        local startAbsPos
+        local resizeUndo
+
+        table.insert(HUD.ResizeConnections, btn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                resizing = true
+                resizeUndo = captureHUDState(name, element)
+                dragStart = input.Position
+                startAbsSize = element.AbsoluteSize
+                startAbsPos = element.AbsolutePosition
+            end
+        end))
+
+        table.insert(HUD.ResizeConnections, UserInputService.InputChanged:Connect(function(input)
+            if not resizing then return end
+            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                local delta = input.Position - dragStart
+                local pSize = element.Parent and element.Parent.AbsoluteSize or Vector2.new(1, 1)
+                
+                local dirVec = data[2]
+                local newW = startAbsSize.X + (dirVec.X == 1 and delta.X or (dirVec.X == -1 and -delta.X or 0))
+                local newH = startAbsSize.Y + (dirVec.Y == 1 and delta.Y or (dirVec.Y == -1 and -delta.Y or 0))
+                local newX = startAbsPos.X + (dirVec.X == -1 and delta.X or 0)
+                local newY = startAbsPos.Y + (dirVec.Y == -1 and delta.Y or 0)
+
+                if newW < 20 then
+                    if dirVec.X == -1 then newX = newX - (20 - newW) end
+                    newW = 20
+                end
+                if newH < 20 then
+                    if dirVec.Y == -1 then newY = newY - (20 - newH) end
+                    newH = 20
+                end
+
+                local parentPos = element.Parent and element.Parent.AbsolutePosition or Vector2.new(0,0)
+                local relX = (newX - parentPos.X) / pSize.X
+                local relY = (newY - parentPos.Y) / pSize.Y
+
+                element.Size = UDim2.new(newW / pSize.X, 0, newH / pSize.Y, 0)
+                element.Position = UDim2.new(relX, 0, relY, 0)
+            end
+        end))
+
+        table.insert(HUD.ResizeConnections, UserInputService.InputEnded:Connect(function(input)
+             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                 if resizing then
+                     resizing = false
+                     if resizeUndo and (not sameUDim2(resizeUndo.pos, element.Position) or not sameUDim2(resizeUndo.size, element.Size)) then
+                         pushUndo(resizeUndo)
+                     end
+                     local rPs = element.Parent and element.Parent.AbsoluteSize or Vector2.new(1, 1)
+                     local pXs = element.Position.X.Scale + (element.Position.X.Offset / rPs.X)
+                     local pYs = element.Position.Y.Scale + (element.Position.Y.Offset / rPs.Y)
+                     Config.HUDPositions[name] = {pXs, 0, pYs, 0}
+                     if not Config.HUDSizes then Config.HUDSizes = {} end
+                     local sXs = element.Size.X.Scale + (element.Size.X.Offset / rPs.X)
+                     local sYs = element.Size.Y.Scale + (element.Size.Y.Offset / rPs.Y)
+                     Config.HUDSizes[name] = {sXs, 0, sYs, 0}
+                 end
+             end
+        end))
+    end
+end
+
+function setupElementDragging(name, element, allMovable, snapGuideV, snapGuideH)
+    element.Visible = true
+    local stroke = Instance.new("UIStroke")
+    stroke.Name = "HUDEditorStroke"
+    stroke.Color = Color3.fromRGB(0, 255, 100)
+    stroke.Thickness = 2
+    stroke.Parent = element
+    table.insert(HUD.Strokes, stroke)
+
+    local isChild = false
+    for _, friendly in pairs(HUD.FriendlyNames) do
+        if name == friendly then
+            isChild = true
+            break
+        end
+    end
+
+    local inputTarget = Instance.new("TextButton")
+    inputTarget.Name = "HUDDragHandle_" .. name
+    inputTarget.BackgroundTransparency = 1
+    inputTarget.Text = ""
+    inputTarget.ZIndex = isChild and 10 or 5
+    inputTarget.Active = true
+    inputTarget.Parent = HUD.SelectionGui
+
+    table.insert(HUD.Connections, RunService.RenderStepped:Connect(function()
+        if element and element.Parent then
+            inputTarget.Size = UDim2.fromOffset(element.AbsoluteSize.X, element.AbsoluteSize.Y)
+            inputTarget.Position = UDim2.fromOffset(element.AbsolutePosition.X, element.AbsolutePosition.Y)
+        end
+    end))
+
+    local dragging = false
+    local dragStart, startPos
+    local dragUndo
+    table.insert(HUD.Connections, inputTarget.InputBegan:Connect(function(input)
+        if not State.hudEditorActive then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragUndo = captureHUDState(name, element)
+            dragStart = input.Position
+            startPos = element.Position
+            stroke.Color = Color3.fromRGB(255, 255, 255)
+            selectHUDElement(name, element)
+        end
+    end))
+
+    table.insert(HUD.Connections, UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            if not dragStart then return end
+            local delta = input.Position - dragStart
+            local ps = element.Parent and element.Parent.AbsoluteSize or Vector2.new(1, 1)
+            local rawPos = UDim2.new(
+                startPos.X.Scale + delta.X / ps.X, startPos.X.Offset,
+                startPos.Y.Scale + delta.Y / ps.Y, startPos.Y.Offset
+            )
+            local snapped, gx, gy = calculateSnap(element, rawPos, name, allMovable)
+            element.Position = snapped
+            local ovP = HUD.Overlay and HUD.Overlay.AbsolutePosition or Vector2.new(0, 0)
+            if snapGuideV then snapGuideV.Visible = (gx ~= nil); if gx then snapGuideV.Position = UDim2.fromOffset(gx - ovP.X, 0) end end
+            if snapGuideH then snapGuideH.Visible = (gy ~= nil); if gy then snapGuideH.Position = UDim2.fromOffset(0, gy - ovP.Y) end end
+        end
+    end))
+
+    table.insert(HUD.Connections, UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging then
+                dragging = false
+                stroke.Color = Color3.fromRGB(0, 255, 100)
+                if snapGuideV then snapGuideV.Visible = false end
+                if snapGuideH then snapGuideH.Visible = false end
+                if dragUndo and not sameUDim2(dragUndo.pos, element.Position) then
+                    pushUndo(dragUndo)
+                end
+                    local dPs = element.Parent and element.Parent.AbsoluteSize or Vector2.new(1, 1)
+                    local dpXs = element.Position.X.Scale + (element.Position.X.Offset / dPs.X)
+                    local dpYs = element.Position.Y.Scale + (element.Position.Y.Offset / dPs.Y)
+                    element.Position = UDim2.new(dpXs, 0, dpYs, 0)
+                    Config.HUDPositions[name] = {dpXs, 0, dpYs, 0}
+                end
+        end
+    end))
+end
+
+applySavedPositions = function()
+    local elems = getAllHUDObjects()
+    for name, el in pairs(elems) do
+        local customPos = Config.HUDPositions and Config.HUDPositions[name]
+        if customPos and type(customPos) == "table" and #customPos == 4 then
+            el.Position = UDim2.new(customPos[1], customPos[2], customPos[3], customPos[4])
+        elseif HUD.DefaultPositions and HUD.DefaultPositions[name] then
+             el.Position = HUD.DefaultPositions[name]
+        end
+
+        local customSz = Config.HUDSizes and Config.HUDSizes[name]
+        if customSz and type(customSz) == "table" and #customSz == 4 then
+            el.Size = UDim2.new(customSz[1], customSz[2], customSz[3], customSz[4])
+        elseif HUD.DefaultSizes and HUD.DefaultSizes[name] then
+             el.Size = HUD.DefaultSizes[name]
+        end
+
+        local props = Config.HUDProperties and Config.HUDProperties[name]
+        if props then
+            for k, v in pairs(props) do
+                pcall(function()
+                    if k == "Radius" or k == "CornerRadius" then
+                        local cR = el:FindFirstChildWhichIsA("UICorner")
+                        if cR and type(v) == "table" then
+                             cR.CornerRadius = UDim.new(tonumber(v[1]) or 0, tonumber(v[2]) or 0)
+                        end
+                    elseif k == "RadiusString" or k == "PlaceholderTransparency" then
+                    else
+                        el[k] = v
+                    end
+                end)
+            end
+        end
+    end
+end
+
+exitHUDEditor = function()
+    if not State.hudEditorActive then return end
+    State.hudEditorActive = false
+    if SettingsLib and SettingsLib.UI and SettingsLib.UI:IsA("ScreenGui") and HUD.SettingsDisplayOrderPrev ~= nil then
+        pcall(function()
+            SettingsLib.UI.DisplayOrder = HUD.SettingsDisplayOrderPrev
+        end)
+        HUD.SettingsDisplayOrderPrev = nil
+    end
+    for _, conn in pairs(HUD.Connections) do pcall(function() conn:Disconnect() end) end
+    HUD.Connections = {}
+    for _, conn in pairs(HUD.ResizeConnections) do pcall(function() conn:Disconnect() end) end
+    HUD.ResizeConnections = {}
+    for _, h in pairs(HUD.ResizeHandles) do pcall(function() h:Destroy() end) end
+    HUD.ResizeHandles = {}
+    HUD.SelectedElement = nil
+    for _, stroke in pairs(HUD.Strokes) do
+        pcall(function() if stroke and stroke.Parent then stroke:Destroy() end end)
+    end
+    HUD.Strokes = {}
+
+    if HUD.SelectionGui then
+        pcall(function() HUD.SelectionGui:Destroy() end)
+        HUD.SelectionGui = nil
+    end
+    for _, el in pairs(getMovableElements()) do
+        local h = el:FindFirstChild("HUDDragHandle")
+        if h then h:Destroy() end
+        if el:FindFirstChildOfClass("UIListLayout") then
+            for _, child in pairs(el:GetChildren()) do
+                if child:IsA("GuiButton") or child:IsA("TextBox") then
+                    child.Active = true
+                end
+            end
+        end
+    end
+    if HUD.Overlay then
+        for _, g in pairs(HUD.Overlay:GetChildren()) do
+            if g.Name == "SnapGuide" then g:Destroy() end
+        end
+    end
+    if HUD.Overlay and HUD.Overlay.Parent then HUD.Overlay:Destroy() end
+    HUD.Overlay = nil
+    if HUD.ForceVisibleConn then HUD.ForceVisibleConn:Disconnect(); HUD.ForceVisibleConn = nil end
+    if UI.Search then UI.Search.TextEditable = true; UI.Search.Active = true end
+    if UI.SpeedBox then UI.SpeedBox.TextEditable = true; UI.SpeedBox.Active = true end
+    if UI._2Routenumber then UI._2Routenumber.TextEditable = true; UI._2Routenumber.Active = true end
+    pcall(function() game:GetService("GuiService"):SetEmotesMenuOpen(false) end)
+    pcall(function() game:GetService("CoreGui").RobloxGui.EmotesMenu.Children.Main.EmotesWheel.Visible = false end)
+end
+
+enterHUDEditor = function()
+    if State.hudEditorActive then return end
+    State.hudEditorActive = true
+    HUD.UndoStack = {}
+
+    GuiService:SetEmotesMenuOpen(false)
+    task.wait(0.15)
+
+    local exists, emotesWheel = checkEmotesMenuExists()
+    if not exists then State.hudEditorActive = false; return end
+    emotesWheel.Visible = true
+
+    HUD.ForceVisibleConn = RunService.Heartbeat:Connect(function()
+        if not State.hudEditorActive then return end
+        pcall(function()
+            local _, ew = checkEmotesMenuExists()
+            if ew then ew.Visible = true end
+        end)
+    end)
+
+    local main = getSettingsMainFrame()
+    if main then main.Visible = false end
+    syncToggleVisibility()
+    if SettingsLib and SettingsLib.UI and SettingsLib.UI:IsA("ScreenGui") then
+        if HUD.SettingsDisplayOrderPrev == nil then
+            HUD.SettingsDisplayOrderPrev = SettingsLib.UI.DisplayOrder
+        end
+        pcall(function() SettingsLib.UI.DisplayOrder = 99998 end)
+    end
+    ApplyUIVisibility()
+
+    local selectionGui = game:GetService("CoreGui"):FindFirstChild("7yd7_HUDSelection")
+    if not selectionGui then
+        selectionGui = Instance.new("ScreenGui")
+        selectionGui.Name = "7yd7_HUDSelection"
+        selectionGui.IgnoreGuiInset = false
+        selectionGui.DisplayOrder = 99999
+        selectionGui.Parent = game:GetService("CoreGui")
+    else
+        selectionGui.IgnoreGuiInset = false
+        selectionGui.DisplayOrder = 99999
+    end
+    HUD.SelectionGui = selectionGui
+
+    local overlay = Instance.new("Frame")
+    overlay.Name = "HUDEditorOverlay"
+    overlay.Parent = SettingsLib.UI
+    overlay.BackgroundTransparency = 1
+    overlay.Size = UDim2.fromScale(1, 1)
+    overlay.ZIndex = 6000
+    overlay.Active = false
+    HUD.Overlay = overlay
+    table.insert(HUD.Connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if not State.hudEditorActive then return end
+        if input.KeyCode == Enum.KeyCode.Z then
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl) then
+                undoLastHUD()
+            end
+        end
+    end))
+    table.insert(HUD.Connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            local p = input.Position
+            if HUD.SelectedElement then
+                local e = HUD.SelectedElement
+                local pos = e.AbsolutePosition
+                local sz = e.AbsoluteSize
+                if p.X < pos.X - 25 or p.X > pos.X + sz.X + 25 or p.Y < pos.Y - 25 or p.Y > pos.Y + sz.Y + 25 then
+                    task.delay(0.1, function()
+                        if HUD.SelectedElement == e then
+                            HUD.SelectedElement = nil
+                            for _, h in pairs(HUD.ResizeHandles) do pcall(function() h:Destroy() end) end
+                            HUD.ResizeHandles = {}
+                            for _, c in pairs(HUD.ResizeConnections) do pcall(function() c:Disconnect() end) end
+                            HUD.ResizeConnections = {}
+                        end
+                    end)
+                end
+            end
+        end
+    end))
+
+    local bc = Instance.new("Frame")
+    bc.Parent = overlay
+    bc.BackgroundTransparency = 1
+    bc.AnchorPoint = Vector2.new(1, 0)
+    bc.Position = UDim2.new(1, -10, 0, 10)
+    bc.Size = UDim2.fromOffset(360, 42)
+    bc.ZIndex = 6000
+
+    local bl = Instance.new("UIListLayout")
+    bl.FillDirection = Enum.FillDirection.Horizontal
+    bl.Padding = UDim.new(0, 8)
+    bl.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    bl.VerticalAlignment = Enum.VerticalAlignment.Center
+    bl.Parent = bc
+
+    local propertiesBtn = Instance.new("ImageButton")
+    propertiesBtn.Parent = bc
+    propertiesBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    propertiesBtn.BackgroundTransparency = 0.4
+    propertiesBtn.Size = UDim2.fromOffset(42, 42)
+    propertiesBtn.Image = "rbxassetid://111026029750357"
+    propertiesBtn.ZIndex = 6001
+    local propCorner = Instance.new("UICorner")
+    propCorner.CornerRadius = UDim.new(0, 10)
+    propCorner.Parent = propertiesBtn
+
+    local exportBtn = Instance.new("ImageButton")
+    exportBtn.Parent = bc
+    exportBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    exportBtn.BackgroundTransparency = 0.4
+    exportBtn.Size = UDim2.fromOffset(42, 42)
+    exportBtn.Image = "rbxassetid://107588515524752"
+    exportBtn.ZIndex = 6001
+    local exportCorner = Instance.new("UICorner")
+    exportCorner.CornerRadius = UDim.new(0, 10)
+    exportCorner.Parent = exportBtn
+
+    local importBtn = Instance.new("ImageButton")
+    importBtn.Parent = bc
+    importBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    importBtn.BackgroundTransparency = 0.4
+    importBtn.Size = UDim2.fromOffset(42, 42)
+    importBtn.Image = "rbxassetid://78317476576895"
+    importBtn.ZIndex = 6001
+    local importCorner = Instance.new("UICorner")
+    importCorner.CornerRadius = UDim.new(0, 10)
+    importCorner.Parent = importBtn
+
+    local resetBtn = Instance.new("ImageButton")
+    resetBtn.Parent = bc
+    resetBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    resetBtn.BackgroundTransparency = 0.4
+    resetBtn.Size = UDim2.fromOffset(42, 42)
+    resetBtn.Image = "rbxassetid://123088523596870"
+    resetBtn.ZIndex = 6001
+    local resetCorner = Instance.new("UICorner")
+    resetCorner.CornerRadius = UDim.new(0, 10)
+    resetCorner.Parent = resetBtn
+
+    local lockBtn = Instance.new("ImageButton")
+    lockBtn.Parent = bc
+    lockBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    lockBtn.BackgroundTransparency = 0.4
+    lockBtn.Size = UDim2.fromOffset(42, 42)
+    lockBtn.Image = HUD.IsUnlocked and "rbxassetid://137042445663198" or "rbxassetid://137985778533954"
+    lockBtn.ZIndex = 6001
+    local lockCorner = Instance.new("UICorner")
+    lockCorner.CornerRadius = UDim.new(0, 10)
+    lockCorner.Parent = lockBtn
+
+    local addBtn = Instance.new("ImageButton")
+    addBtn.Parent = bc
+    addBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    addBtn.BackgroundTransparency = 0.4
+    addBtn.Size = UDim2.fromOffset(42, 42)
+    addBtn.Image = "rbxassetid://108445456753346"
+    addBtn.ZIndex = 6001
+    local addCorner = Instance.new("UICorner")
+    addCorner.CornerRadius = UDim.new(0, 10)
+    addCorner.Parent = addBtn
+
+    local backBtn = Instance.new("ImageButton")
+    backBtn.Parent = bc
+    backBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    backBtn.BackgroundTransparency = 0.4
+    backBtn.Size = UDim2.fromOffset(42, 42)
+    backBtn.Image = "rbxassetid://79024388644722"
+    backBtn.ZIndex = 6001
+    local backCorner = Instance.new("UICorner")
+    backCorner.CornerRadius = UDim.new(0, 10)
+    backCorner.Parent = backBtn
+
+
+
+    local function rebuildHUDOverlays()
+        for _, conn in pairs(HUD.ResizeConnections) do pcall(function() conn:Disconnect() end) end
+        HUD.ResizeConnections = {}
+        for _, h in pairs(HUD.ResizeHandles) do pcall(function() h:Destroy() end) end
+        HUD.ResizeHandles = {}
+        for _, stroke in pairs(HUD.Strokes) do pcall(function() stroke:Destroy() end) end
+        HUD.Strokes = {}
+        if selectionGui then selectionGui:ClearAllChildren() end
+        HUD.SelectedElement = nil
+        
+        local allMovable = getMovableElements()
+        
+        local snapGuideH = Instance.new("Frame")
+        snapGuideH.Name = "SnapGuide"
+        snapGuideH.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+        snapGuideH.BorderSizePixel = 0
+        snapGuideH.Size = UDim2.new(1, 0, 0, 1)
+        snapGuideH.ZIndex = 6002
+        snapGuideH.Visible = false
+        snapGuideH.Parent = selectionGui
+
+        local snapGuideV = Instance.new("Frame")
+        snapGuideV.Name = "SnapGuide"
+        snapGuideV.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+        snapGuideV.BorderSizePixel = 0
+        snapGuideV.Size = UDim2.new(0, 1, 1, 0)
+        snapGuideV.ZIndex = 6002
+        snapGuideV.Visible = false
+        snapGuideV.Parent = selectionGui
+
+        for name, element in pairs(allMovable) do
+            setupElementDragging(name, element, allMovable, snapGuideV, snapGuideH)
+        end
+        
+        updateHUDLayouts()
+        
+        applySavedPositions()
+    end
+
+    local function rebuildCustomFramesFromConfig()
+        if UI.CustomFrames then
+            for _, frame in pairs(UI.CustomFrames) do
+                if frame and frame.Parent then frame:Destroy() end
+            end
+        end
+        UI.CustomFrames = {}
+
+        if not Config.CustomFrames then return end
+        local _, emotesWheel = checkEmotesMenuExists()
+        if not emotesWheel then return end
+
+        for name, data in pairs(Config.CustomFrames) do
+            local cf = Instance.new("Frame")
+            cf.Name = name
+            cf.Parent = emotesWheel
+            cf.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            cf.BackgroundTransparency = 0.4
+            cf.ZIndex = data and data.ZIndex or 3
+            cf.BorderSizePixel = 0
+            cf.Active = true
+
+            local pos = Config.HUDPositions and Config.HUDPositions[name]
+            local size = Config.HUDSizes and Config.HUDSizes[name]
+            if pos and type(pos) == "table" and #pos == 4 then
+                cf.Position = UDim2.new(pos[1], pos[2], pos[3], pos[4])
+            else
+                cf.Position = UDim2.new(0.5, 0, 0.5, 0)
+            end
+            if size and type(size) == "table" and #size == 4 then
+                cf.Size = UDim2.new(size[1], size[2], size[3], size[4])
+            else
+                cf.Size = UDim2.new(0.3, 0, 0.3, 0)
+            end
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 10)
+            corner.Parent = cf
+
+            UI.CustomFrames[name] = cf
+            HUD.DefaultPositions[name] = cf.Position
+            HUD.DefaultSizes[name] = cf.Size
+        end
+    end
+
+    local function applyHUDSettingsReplace(settings)
+        local function normalizeImportTable(tbl)
+            if type(tbl) ~= "table" then return {} end
+            local allElems = getAllHUDObjects()
+            for eName, v in pairs(tbl) do
+                if type(v) == "table" and #v == 4 then
+                    local sx, ox, sy, oy = v[1], v[2], v[3], v[4]
+                    if ox ~= 0 or oy ~= 0 then
+                        local el = allElems[eName]
+                        local ps = el and el.Parent and el.Parent.AbsoluteSize
+                        if ps and ps.X > 0 and ps.Y > 0 then
+                            tbl[eName] = {sx + (ox / ps.X), 0, sy + (oy / ps.Y), 0}
+                        end
+                    end
+                end
+            end
+            return tbl
+        end
+        Config.HUDPositions = normalizeImportTable(settings.HUDPositions or {})
+        Config.HUDSizes = normalizeImportTable(settings.HUDSizes or {})
+        Config.HUDProperties = settings.HUDProperties or {}
+        Config.CustomFrames = settings.CustomFrames or {}
+        HUD.LayoutsRemoved = {}
+        SaveConfig()
+        rebuildCustomFramesFromConfig()
+        applySavedPositions()
+
+        rebuildHUDOverlays()
+        updateHUDLayouts()
+        ApplyUIVisibility()
+        pcall(function() updateGUIColors() end)
+    end
+
+    table.insert(HUD.Connections, lockBtn.MouseButton1Click:Connect(function()
+        HUD.IsUnlocked = not HUD.IsUnlocked
+        lockBtn.Image = HUD.IsUnlocked and "rbxassetid://137042445663198" or "rbxassetid://137985778533954"
+        rebuildHUDOverlays()
+        pcall(function() updateGUIColors() end)
+        getgenv().Notify({ 
+            Title = "7yd7 | HUD Editor", 
+            Content = HUD.IsUnlocked and "🔓 Interior Unlocked! Children are now editable." or "🔒 Interior Locked! Top-level only.", 
+            Duration = 2 
+        })
+    end))
+
+    rebuildHUDOverlays()
+
+    table.insert(HUD.Connections, exportBtn.MouseButton1Click:Connect(function()
+        local function normalizeExportTable(tbl)
+            if type(tbl) ~= "table" then return {} end
+            local out = {}
+            local allElems = getAllHUDObjects()
+            for eName, v in pairs(tbl) do
+                if type(v) == "table" and #v == 4 then
+                    local sx, ox, sy, oy = v[1], v[2], v[3], v[4]
+                    if ox ~= 0 or oy ~= 0 then
+                        local el = allElems[eName]
+                        local ps = el and el.Parent and el.Parent.AbsoluteSize
+                        if ps and ps.X > 0 and ps.Y > 0 then
+                            sx = sx + (ox / ps.X)
+                            sy = sy + (oy / ps.Y)
+                        end
+                    end
+                    out[eName] = {sx, 0, sy, 0}
+                else
+                    out[eName] = v
+                end
+            end
+            return out
+        end
+        local function normalizeExportProps(props)
+            if type(props) ~= "table" then return {} end
+            local out = {}
+            local allElems = getAllHUDObjects()
+            for eName, p in pairs(props) do
+                local ep = {}
+                for k, v in pairs(p) do
+                    if (k == "CornerRadius" or k == "Radius") and type(v) == "table" and #v == 2 then
+                        local rs, ro = v[1], v[2]
+                        if ro ~= 0 and rs == 0 then
+                            local el = allElems[eName]
+                            if el then
+                                local minDim = math.min(el.AbsoluteSize.X, el.AbsoluteSize.Y)
+                                if minDim > 0 then
+                                    rs = ro / minDim
+                                    ro = 0
+                                end
+                            end
+                        end
+                        ep[k] = {rs, ro}
+                    else
+                        ep[k] = v
+                    end
+                end
+                out[eName] = ep
+            end
+            return out
+        end
+        local data = {
+            Type = "HUD",
+            Settings = {
+                HUDPositions = normalizeExportTable(Config.HUDPositions or {}),
+                HUDSizes = normalizeExportTable(Config.HUDSizes or {}),
+                HUDProperties = normalizeExportProps(Config.HUDProperties or {}),
+                CustomFrames = Config.CustomFrames or {}
+            }
+        }
+        setclipboard(HttpService:JSONEncode(data))
+        getgenv().Notify({ Title = "7yd7 | HUD Editor", Content = "✅ HUD settings copied", Duration = 2 })
+    end))
+
+    table.insert(HUD.Connections, importBtn.MouseButton1Click:Connect(function()
+        local popup, content = CreatePopup("Import HUD", UDim2.fromOffset(320, 240))
+        local popupRoot = HUD.SelectionGui or SettingsLib.UI
+        if popupRoot and popup.Parent ~= popupRoot then
+            popup.Parent = popupRoot
+        end
+
+        local baseZ = 7000
+        popup.ZIndex = baseZ
+
+        local backdrop = Instance.new("TextButton")
+        backdrop.Name = "HUDImportBackdrop"
+        backdrop.Parent = popup.Parent
+        backdrop.Size = UDim2.fromScale(1, 1)
+        backdrop.BackgroundTransparency = 1
+        backdrop.Text = ""
+        backdrop.AutoButtonColor = false
+        backdrop.ZIndex = baseZ - 1
+        backdrop.Active = true
+
+        local scroll = Instance.new("ScrollingFrame")
+        scroll.Parent = content
+        scroll.BackgroundTransparency = 1
+        scroll.BorderSizePixel = 0
+        scroll.Position = UDim2.new(0.05, 0, 0, 5)
+        scroll.Size = UDim2.new(0.9, 0, 0, 130)
+        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        scroll.ScrollBarThickness = 4
+        scroll.Active = true
+        scroll.ScrollingEnabled = true
+        scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+        scroll.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+
+        local box = CreateInput(scroll, "Paste HUD JSON here...", "", true)
+        box.Size = UDim2.new(1, -8, 0, 130)
+        box.Position = UDim2.new(0, 0, 0, 0)
+        box.TextYAlignment = Enum.TextYAlignment.Top
+        box.ClearTextOnFocus = false
+
+        local function updateCanvas()
+            local padding = 8
+            local h = math.max(130, (box.TextBounds.Y or 0) + padding)
+            scroll.CanvasSize = UDim2.new(0, 0, 0, h)
+        end
+        box:GetPropertyChangedSignal("Text"):Connect(updateCanvas)
+        box:GetPropertyChangedSignal("TextBounds"):Connect(updateCanvas)
+        updateCanvas()
+
+        local imp = CreateButton(content, "IMPORT HUD", (State.EmoteTheme and State.EmoteTheme.Accent) or Color3.fromRGB(0, 255, 150), UDim2.new(0.05, 0, 0.8, 0), UDim2.new(0.9, 0, 0, 35))
+
+        imp.MouseButton1Click:Connect(function()
+            local s, d = pcall(function() return HttpService:JSONDecode(box.Text) end)
+            if s and type(d) == "table" then
+                local settings = d.Settings or d
+                if d.Type and d.Type ~= "HUD" then
+                    getgenv().Notify({ Title = "Error", Content = "HUD import type mismatch!", Duration = 3 })
+                    return
+                end
+                if type(settings) ~= "table" then
+                    getgenv().Notify({ Title = "Error", Content = "Invalid HUD JSON", Duration = 3 })
+                    return
+                end
+                applyHUDSettingsReplace(settings)
+                HUD.UndoStack = {}
+                if backdrop then backdrop:Destroy() end
+                popup:Destroy()
+                getgenv().Notify({ Title = "7yd7 | HUD Editor", Content = "✅ HUD settings imported", Duration = 2 })
+            else
+                getgenv().Notify({ Title = "Error", Content = "Invalid HUD JSON", Duration = 3 })
+            end
+        end)
+
+        local close = Instance.new("TextButton")
+        close.Size = UDim2.fromOffset(24, 24)
+        close.Position = UDim2.new(1, -30, 0, 5)
+        close.Text = "×"
+        close.Font = Enum.Font.GothamBold
+        close.TextSize = 20
+        close.BackgroundTransparency = 1
+        close.TextColor3 = Color3.new(1,1,1)
+        close.ZIndex = baseZ + 2
+        close.Active = true
+        close.AutoButtonColor = false
+        close.Parent = popup
+        close.MouseButton1Click:Connect(function()
+            if backdrop then backdrop:Destroy() end
+            popup:Destroy()
+        end)
+        backdrop.MouseButton1Click:Connect(function()
+            if backdrop then backdrop:Destroy() end
+            popup:Destroy()
+        end)
+
+        local function bumpPopupZIndex(panel, z)
+            if not panel then return end
+            panel.ZIndex = z
+            for _, d in ipairs(panel:GetDescendants()) do
+                if d:IsA("GuiObject") then
+                    d.ZIndex = z + 1
+                end
+            end
+        end
+        bumpPopupZIndex(popup, baseZ)
+        close.ZIndex = baseZ + 2
+    end))
+
+    table.insert(HUD.Connections, backBtn.MouseButton1Click:Connect(function()
+        exitHUDEditor()
+    end))
+
+    table.insert(HUD.Connections, resetBtn.MouseButton1Click:Connect(function()
+        Config.HUDPositions = {}
+        Config.HUDSizes = {}
+        Config.CustomFrames = {}
+        Config.HUDProperties = {}
+        HUD.LayoutsRemoved = {}
+        SaveConfig()
+        
+        local allElements = getAllHUDObjects()
+        for name, el in pairs(allElements) do
+            if name:match("^CustomFrame_") then
+                el:Destroy()
+                if UI.CustomFrames then UI.CustomFrames[name] = nil end
+            else
+                if HUD.DefaultPositions[name] then el.Position = HUD.DefaultPositions[name] end
+                if HUD.DefaultSizes[name] then el.Size = HUD.DefaultSizes[name] end
+                
+                for internal, friendly in pairs(HUD.FriendlyNames) do
+                    if name == friendly then
+                        if internal:match("^Under%.") then
+                            el.Parent = UI.Under
+                        elseif internal:match("^Top%.") then
+                            el.Parent = UI.Top
+                        end
+                        break
+                    end
+                end
+
+                el.ZIndex = (name == "Top" or name == "Under") and 3 or (el:IsA("ImageButton") and 4 or 3)
+                if name == "Under" then
+                    el.BackgroundTransparency = 1
+                else
+                    el.BackgroundTransparency = (name == "Top" or name == "Reload" or name == "Changepage" or name == "EmoteWalkButton" or name == "SpeedBox" or name == "SpeedEmote" or name == "Favorite") and 0.4 or 1
+                end
+                
+                if el:IsA("ImageButton") or el:IsA("ImageLabel") then
+                    el.ImageTransparency = 0
+                end
+                
+                if el:IsA("TextLabel") or el:IsA("TextBox") then
+                    el.TextTransparency = 0.4
+                    if HUD.DefaultTexts and HUD.DefaultTexts[name] then
+                        el.Text = HUD.DefaultTexts[name]
+                    end
+                    if el:IsA("TextBox") and HUD.DefaultPlaceholders and HUD.DefaultPlaceholders[name] then
+                        el.PlaceholderText = HUD.DefaultPlaceholders[name]
+                    end
+                end
+
+                local cR = el:FindFirstChildWhichIsA("UICorner")
+                if cR then
+                    cR.CornerRadius = UDim.new(0, 10)
+                end
+            end
+        end
+
+        pcall(function() updateGUIColors() end)
+        
+        HUD.SelectedElement = nil
+        for _, h in pairs(HUD.ResizeHandles) do pcall(function() h:Destroy() end) end
+        HUD.ResizeHandles = {}
+        for _, c in pairs(HUD.ResizeConnections) do pcall(function() c:Disconnect() end) end
+        HUD.ResizeConnections = {}
+        
+        rebuildHUDOverlays()
+        updateHUDLayouts()
+        ApplyUIVisibility()
+        State.totalPages = calculateTotalPages()
+        if State.currentPage > State.totalPages then
+            State.currentPage = State.totalPages
+        end
+        updatePageDisplay()
+        
+        getgenv().Notify({ Title = "7yd7 | HUD Editor", Content = "🔄 All designs and frames have been fully reset", Duration = 3 })
+    end))
+
+    local propertiesPanel = Instance.new("Frame")
+    propertiesPanel.Name = "HUDPropertiesPanel"
+    propertiesPanel.Parent = overlay
+    propertiesPanel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    propertiesPanel.BackgroundTransparency = 0.4
+    propertiesPanel.Size = UDim2.fromOffset(260, 150)
+    propertiesPanel.AnchorPoint = Vector2.new(1, 0)
+    propertiesPanel.Position = UDim2.new(1, -10, 0, 60)
+    propertiesPanel.Visible = false
+    propertiesPanel.ZIndex = 6005
+    propertiesPanel.ClipsDescendants = true
+    local panelCorner = Instance.new("UICorner")
+    panelCorner.CornerRadius = UDim.new(0, 10)
+    panelCorner.Parent = propertiesPanel
+    
+    local title = Instance.new("TextLabel")
+    title.Parent = propertiesPanel
+    title.BackgroundTransparency = 1
+    title.Size = UDim2.new(1, 0, 0, 26)
+    title.Position = UDim2.new(0, 0, 0, 2)
+    title.Font = Enum.Font.SourceSansBold
+    title.Text = "No Element"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 14
+    title.TextScaled = true
+    title.ZIndex = 6006
+
+    local propContent = Instance.new("ScrollingFrame")
+    propContent.Parent = propertiesPanel
+    propContent.BackgroundTransparency = 1
+    propContent.Position = UDim2.new(0, 0, 0, 28)
+    propContent.Size = UDim2.new(1, 0, 1, -32)
+    propContent.CanvasSize = UDim2.new(0, 0, 0, 0)
+    propContent.ScrollBarThickness = 2
+    propContent.Active = true
+    propContent.ScrollingEnabled = true
+    propContent.ZIndex = 6006
+
+    local propLayout = Instance.new("UIListLayout")
+    propLayout.Parent = propContent
+    propLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    propLayout.Padding = UDim.new(0, 6)
+    propLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    HUD.LastTouchedElement = nil
+    HUD.LastTouchedName = nil
+
+    local function createPropRow(label, lOrder, isLarge)
+        local row = Instance.new("Frame")
+        row.BackgroundTransparency = 1
+        row.Size = UDim2.new(0.92, 0, 0, isLarge and 50 or 26)
+        row.LayoutOrder = lOrder
+        row.ZIndex = 6006
+        row.Parent = propContent
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Parent = row
+        lbl.Size = UDim2.new(0, 70, 0, 26)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = label
+        lbl.TextColor3 = Color3.fromRGB(180, 180, 180)
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Font = Enum.Font.SourceSansBold
+        lbl.TextSize = 12
+        lbl.ZIndex = 6007
+
+        local tbox = Instance.new("TextBox")
+        tbox.Parent = row
+        tbox.Size = UDim2.new(1, -75, 1, -4)
+        tbox.Position = UDim2.new(0, 75, 0, 2)
+        tbox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        tbox.BackgroundTransparency = 0.3
+        tbox.TextColor3 = Color3.fromRGB(255, 255, 255)
+        tbox.Font = Enum.Font.Code
+        tbox.TextSize = 12
+        tbox.TextXAlignment = isLarge and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
+        tbox.TextYAlignment = isLarge and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center
+        tbox.ClearTextOnFocus = false
+        tbox.TextWrapped = isLarge
+        tbox.PlaceholderText = ""
+        tbox.PlaceholderColor3 = Color3.fromRGB(80, 80, 80)
+        tbox.ZIndex = 6007
+        local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0, 6); tc.Parent = tbox
+
+        return row, tbox
+    end
+
+    local _, posBox = createPropRow("Position", 1)
+    local _, sizeBox = createPropRow("Size", 2)
+    local zRow, zBox = createPropRow("ZIndex", 3)
+    local bgRow, bgBox = createPropRow("BgTrans", 4)
+    local bgcRow, bgcBox = createPropRow("BgColor", 5)
+    local imgRow, imgBox = createPropRow("ImgTrans", 6)
+    local imgcRow, imgcBox = createPropRow("ImgColor", 7)
+    local radRow, radBox = createPropRow("Radius", 8)
+    local txtRow, txtBox = createPropRow("Text", 9, true)
+    local phRow, phBox = createPropRow("Placeholder", 10, true)
+    local ttrRow, ttrBox = createPropRow("TxtTrans", 11)
+    local txtcRow, txtcBox = createPropRow("TxtColor", 12)
+
+    local deleteRow = Instance.new("Frame")
+    deleteRow.BackgroundTransparency = 1
+    deleteRow.Size = UDim2.new(0.92, 0, 0, 28)
+    deleteRow.LayoutOrder = 13
+    deleteRow.ZIndex = 6006
+    deleteRow.Parent = propContent
+
+    local deleteBtn = Instance.new("TextButton")
+    deleteBtn.Parent = deleteRow
+    deleteBtn.Size = UDim2.new(1, 0, 1, 0)
+    deleteBtn.BackgroundColor3 = Color3.fromRGB(170, 60, 60)
+    deleteBtn.BackgroundTransparency = 0.1
+    deleteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    deleteBtn.Font = Enum.Font.GothamBold
+    deleteBtn.TextSize = 12
+    deleteBtn.Text = "Delete Custom Frame"
+    deleteBtn.ZIndex = 6007
+    local delCorner = Instance.new("UICorner"); delCorner.CornerRadius = UDim.new(0, 6); delCorner.Parent = deleteBtn
+
+
+
+    local function parseUDim2(text)
+        local s1, o1, s2, o2 = text:match("{%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*}%s*,%s*{%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*}")
+        if s1 and o1 and s2 and o2 then
+            return tonumber(s1), tonumber(o1), tonumber(s2), tonumber(o2)
+        end
+        local a, b = text:match("([%d%.%-]+)%s*,%s*([%d%.%-]+)")
+        if a and b then
+            local va, vb = tonumber(a), tonumber(b)
+            if va and vb then
+                return 0, va, 0, vb
+            end
+        end
+        return nil
+    end
+
+    local function formatUDim2(udim)
+        return string.format("{%g, %g},{%g, %g}", udim.X.Scale, udim.X.Offset, udim.Y.Scale, udim.Y.Offset)
+    end
+
+    table.insert(HUD.Connections, propertiesBtn.MouseButton1Click:Connect(function()
+        propertiesPanel.Visible = not propertiesPanel.Visible
+    end))
+
+    local function formatUDim(udim)
+        return string.format("{%g, %g}", udim.Scale, udim.Offset)
+    end
+
+    local function formatRGB(c)
+        return string.format("%d, %d, %d", math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+    end
+
+    local function parseRGB(text)
+        local a, b, c = text:match("([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)")
+        if not a then return nil end
+        local r, g, b2 = tonumber(a), tonumber(b), tonumber(c)
+        if not r or not g or not b2 then return nil end
+        local maxv = math.max(r, g, b2)
+        if maxv <= 1 then
+            r, g, b2 = r * 255, g * 255, b2 * 255
+        end
+        r = math.clamp(r, 0, 255)
+        g = math.clamp(g, 0, 255)
+        b2 = math.clamp(b2, 0, 255)
+        return r, g, b2
+    end
+
+    table.insert(HUD.Connections, RunService.RenderStepped:Connect(function()
+        if not propertiesPanel.Visible then return end
+        local e = HUD.LastTouchedElement
+        local eName = HUD.LastTouchedName
+        if e and e.Parent then
+            title.Text = string.format("[%s] %s", e.ClassName, eName or "Unknown")
+            if not posBox:IsFocused() then posBox.Text = formatUDim2(e.Position) end
+            if not sizeBox:IsFocused() then sizeBox.Text = formatUDim2(e.Size) end
+            
+            zRow.Visible = true
+            if not zBox:IsFocused() then zBox.Text = tostring(e.ZIndex) end
+
+            bgRow.Visible = true
+            if not bgBox:IsFocused() then bgBox.Text = tostring(math.floor(e.BackgroundTransparency * 100) / 100) end
+
+            if e:IsA("ImageLabel") or e:IsA("ImageButton") then
+                imgRow.Visible = true
+                if not imgBox:IsFocused() then imgBox.Text = tostring(math.floor(e.ImageTransparency * 100) / 100) end
+            else
+                imgRow.Visible = false
+            end
+            
+            bgcRow.Visible = true
+            if not bgcBox:IsFocused() then bgcBox.Text = formatRGB(e.BackgroundColor3) end
+            
+            if e:IsA("ImageLabel") or e:IsA("ImageButton") then
+                imgcRow.Visible = true
+                if not imgcBox:IsFocused() then imgcBox.Text = formatRGB(e.ImageColor3) end
+            else
+                imgcRow.Visible = false
+            end
+            
+            if e:IsA("TextLabel") or e:IsA("TextBox") then
+                ttrRow.Visible = true
+                if not ttrBox:IsFocused() then ttrBox.Text = tostring(math.floor(e.TextTransparency * 100) / 100) end
+                
+                txtRow.Visible = true
+                if not txtBox:IsFocused() then txtBox.Text = e.Text end
+
+                txtcRow.Visible = true
+                if not txtcBox:IsFocused() then txtcBox.Text = formatRGB(e.TextColor3) end
+                
+                if e:IsA("TextBox") then
+                    phRow.Visible = true
+                    if not phBox:IsFocused() then phBox.Text = e.PlaceholderText end
+                else
+                    phRow.Visible = false
+                end
+            else
+                ttrRow.Visible = false
+                txtRow.Visible = false
+                phRow.Visible = false
+                txtcRow.Visible = false
+            end
+
+            deleteRow.Visible = (eName and eName:match("^CustomFrame_")) and true or false
+
+
+            local cR = e:FindFirstChildWhichIsA("UICorner")
+            if cR then
+                radRow.Visible = true
+                if not radBox:IsFocused() then radBox.Text = formatUDim(cR.CornerRadius) end
+            else
+                radRow.Visible = false
+            end
+        else
+            title.Text = "No Element Selected"
+            zRow.Visible = false
+            bgRow.Visible = false
+            imgRow.Visible = false
+            bgcRow.Visible = false
+            imgcRow.Visible = false
+            radRow.Visible = false
+            ttrRow.Visible = false
+            txtRow.Visible = false
+            phRow.Visible = false
+            txtcRow.Visible = false
+            deleteRow.Visible = false
+            if not posBox:IsFocused() then posBox.Text = "" end
+            if not sizeBox:IsFocused() then sizeBox.Text = "" end
+        end
+        
+        local totalH = propLayout.AbsoluteContentSize.Y + 10
+        propContent.CanvasSize = UDim2.new(0, 0, 0, totalH)
+        local vpY = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.Y or 800
+        local maxH = math.floor(vpY * 0.55)
+        propertiesPanel.Size = UDim2.fromOffset(260, math.min(maxH, totalH + 40))
+    end))
+
+    local function saveHUDProp(eName, propKey, val)
+        if not Config.HUDProperties then Config.HUDProperties = {} end
+        if not Config.HUDProperties[eName] then Config.HUDProperties[eName] = {} end
+        Config.HUDProperties[eName][propKey] = val
+        SaveConfig()
+    end
+
+    table.insert(HUD.Connections, deleteBtn.MouseButton1Click:Connect(function()
+        local eName = HUD.LastTouchedName
+        if not eName or not eName:match("^CustomFrame_") then return end
+        local frame = UI.CustomFrames and UI.CustomFrames[eName]
+        if frame and frame.Parent then frame:Destroy() end
+        if UI.CustomFrames then UI.CustomFrames[eName] = nil end
+        if Config.CustomFrames then Config.CustomFrames[eName] = nil end
+        if Config.HUDPositions then Config.HUDPositions[eName] = nil end
+        if Config.HUDSizes then Config.HUDSizes[eName] = nil end
+        if Config.HUDProperties then Config.HUDProperties[eName] = nil end
+        if HUD.DefaultPositions then HUD.DefaultPositions[eName] = nil end
+        if HUD.DefaultSizes then HUD.DefaultSizes[eName] = nil end
+        if HUD.DefaultTexts then HUD.DefaultTexts[eName] = nil end
+        if HUD.DefaultPlaceholders then HUD.DefaultPlaceholders[eName] = nil end
+        SaveConfig()
+
+        HUD.SelectedElement = nil
+        HUD.LastTouchedElement = nil
+        HUD.LastTouchedName = nil
+        for _, h in pairs(HUD.ResizeHandles) do pcall(function() h:Destroy() end) end
+        HUD.ResizeHandles = {}
+        for _, c in pairs(HUD.ResizeConnections) do pcall(function() c:Disconnect() end) end
+        HUD.ResizeConnections = {}
+
+        rebuildHUDOverlays()
+        updateHUDLayouts()
+        ApplyUIVisibility()
+        pcall(function() updateGUIColors() end)
+        getgenv().Notify({ Title = "7yd7 | HUD Editor", Content = "🗑️ Custom Frame deleted", Duration = 2 })
+    end))
+
+
+
+    table.insert(HUD.Connections, posBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local s1, o1, s2, o2 = parseUDim2(posBox.Text)
+        if s1 then
+            local prev = captureHUDState(eName, e)
+            e.Position = UDim2.new(s1, o1, s2, o2)
+            if prev and not sameUDim2(prev.pos, e.Position) then
+                pushUndo(prev)
+            end
+            Config.HUDPositions[eName] = {s1, o1, s2, o2}
+        end
+    end))
+
+    table.insert(HUD.Connections, sizeBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local s1, o1, s2, o2 = parseUDim2(sizeBox.Text)
+        if s1 then
+            local prev = captureHUDState(eName, e)
+            e.Size = UDim2.new(s1, o1, s2, o2)
+            if prev and not sameUDim2(prev.size, e.Size) then
+                pushUndo(prev)
+            end
+            if not Config.HUDSizes then Config.HUDSizes = {} end
+            Config.HUDSizes[eName] = {s1, o1, s2, o2}
+        end
+    end))
+
+    table.insert(HUD.Connections, zBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local v = tonumber(zBox.Text)
+        if v then
+            local prev = captureHUDState(eName, e)
+            e.ZIndex = v
+            if prev and prev.z ~= e.ZIndex then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "ZIndex", v)
+        end
+    end))
+
+    table.insert(HUD.Connections, bgBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local v = tonumber(bgBox.Text)
+        if v then
+            local prev = captureHUDState(eName, e)
+            e.BackgroundTransparency = math.clamp(v, 0, 1)
+            if prev and prev.bgTrans ~= e.BackgroundTransparency then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "BgTrans", e.BackgroundTransparency)
+        end
+    end))
+
+    table.insert(HUD.Connections, imgBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local v = tonumber(imgBox.Text)
+        if v and (e:IsA("ImageLabel") or e:IsA("ImageButton")) then
+            local prev = captureHUDState(eName, e)
+            e.ImageTransparency = math.clamp(v, 0, 1)
+            if prev and prev.imgTrans ~= e.ImageTransparency then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "ImgTrans", e.ImageTransparency)
+        end
+    end))
+    
+    table.insert(HUD.Connections, bgcBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local r, g, b = parseRGB(bgcBox.Text)
+        if r then
+            if isThemeDefaultRGB(r, g, b) then
+                if Config.HUDProperties and Config.HUDProperties[eName] then
+                    Config.HUDProperties[eName].BgColor = nil
+                    if next(Config.HUDProperties[eName]) == nil then
+                        Config.HUDProperties[eName] = nil
+                    end
+                    SaveConfig()
+                end
+                pcall(function() updateGUIColors() end)
+                return
+            end
+            local prev = captureHUDState(eName, e)
+            local c = Color3.fromRGB(r, g, b)
+            pcall(function() e.BackgroundColor3 = c end)
+            if prev and not sameColor(prev.bgColor, e.BackgroundColor3) then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "BgColor", {r, g, b})
+        end
+    end))
+    
+    table.insert(HUD.Connections, imgcBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        if not (e:IsA("ImageLabel") or e:IsA("ImageButton")) then return end
+        local r, g, b = parseRGB(imgcBox.Text)
+        if r then
+            if isThemeDefaultRGB(r, g, b) then
+                if Config.HUDProperties and Config.HUDProperties[eName] then
+                    Config.HUDProperties[eName].ImgColor = nil
+                    if next(Config.HUDProperties[eName]) == nil then
+                        Config.HUDProperties[eName] = nil
+                    end
+                    SaveConfig()
+                end
+                pcall(function() updateGUIColors() end)
+                return
+            end
+            local prev = captureHUDState(eName, e)
+            local c = Color3.fromRGB(r, g, b)
+            pcall(function() e.ImageColor3 = c end)
+            if prev and prev.imgColor and not sameColor(prev.imgColor, e.ImageColor3) then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "ImgColor", {r, g, b})
+        end
+    end))
+
+    table.insert(HUD.Connections, radBox.FocusLost:Connect(function(enter)
+        if not enter then return end
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local a, b = radBox.Text:match("{%s*([%d%.%-]+)%s*,%s*([%d%.%-]+)%s*}")
+        if not a and not b then a, b = radBox.Text:match("([%d%.%-]+)%s*,%s*([%d%.%-]+)") end
+        if a and b then
+            local va, vb = tonumber(a), tonumber(b)
+            if va and vb then
+                local cR = e:FindFirstChildWhichIsA("UICorner")
+                if cR then
+                    local prev = captureHUDState(eName, e)
+                    if vb ~= 0 and va == 0 then
+                        local minDim = math.min(e.AbsoluteSize.X, e.AbsoluteSize.Y)
+                        if minDim > 0 then
+                            va = vb / minDim
+                            vb = 0
+                        end
+                    end
+                    cR.CornerRadius = UDim.new(va, vb)
+                    if prev and prev.radius and not sameUDim(prev.radius, cR.CornerRadius) then
+                        pushUndo(prev)
+                    end
+                    saveHUDProp(eName, "CornerRadius", {va, vb})
+                end
+            end
+        end
+    end))
+
+    table.insert(HUD.Connections, txtBox.FocusLost:Connect(function(enter)
+        if not enter then return end
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        if e:IsA("TextLabel") or e:IsA("TextBox") then
+            local prev = captureHUDState(eName, e)
+            e.Text = txtBox.Text
+            if prev and prev.text ~= e.Text then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "Text", txtBox.Text)
+        end
+    end))
+
+    table.insert(HUD.Connections, phBox.FocusLost:Connect(function(enter)
+        if not enter then return end
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        if e:IsA("TextBox") then
+            local prev = captureHUDState(eName, e)
+            e.PlaceholderText = phBox.Text
+            if prev and prev.placeholder ~= e.PlaceholderText then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "PlaceholderText", phBox.Text)
+        end
+    end))
+
+    table.insert(HUD.Connections, ttrBox.FocusLost:Connect(function(enter)
+        if not enter then return end
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        local v = tonumber(ttrBox.Text)
+        if v and (e:IsA("TextLabel") or e:IsA("TextBox")) then
+            local prev = captureHUDState(eName, e)
+            e.TextTransparency = math.clamp(v, 0, 1)
+            if prev and prev.textTrans ~= e.TextTransparency then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "TextTransparency", e.TextTransparency)
+        end
+    end))
+
+    table.insert(HUD.Connections, txtcBox.FocusLost:Connect(function()
+        local e, eName = HUD.LastTouchedElement, HUD.LastTouchedName
+        if not e or not e.Parent or not eName then return end
+        if not (e:IsA("TextLabel") or e:IsA("TextBox")) then return end
+        local r, g, b = parseRGB(txtcBox.Text)
+        if r then
+            if isThemeDefaultRGB(r, g, b) then
+                if Config.HUDProperties and Config.HUDProperties[eName] then
+                    Config.HUDProperties[eName].TxtColor = nil
+                    if next(Config.HUDProperties[eName]) == nil then
+                        Config.HUDProperties[eName] = nil
+                    end
+                    SaveConfig()
+                end
+                pcall(function() updateGUIColors() end)
+                return
+            end
+            local prev = captureHUDState(eName, e)
+            local c = Color3.fromRGB(r, g, b)
+            pcall(function() e.TextColor3 = c end)
+            if prev and prev.textColor and not sameColor(prev.textColor, e.TextColor3) then
+                pushUndo(prev)
+            end
+            saveHUDProp(eName, "TxtColor", {r, g, b})
+        end
+    end))
+
+
+
+
+    if UI.Search then UI.Search.TextEditable = false; UI.Search.Active = false; pcall(function() UI.Search:ReleaseFocus() end) end
+    if UI.SpeedBox then UI.SpeedBox.TextEditable = false; UI.SpeedBox.Active = false; pcall(function() UI.SpeedBox:ReleaseFocus() end) end
+    if UI._2Routenumber then UI._2Routenumber.TextEditable = false; UI._2Routenumber.Active = false; pcall(function() UI._2Routenumber:ReleaseFocus() end) end
+
+    local allMovable = getMovableElements()
+    local snapGuideH = Instance.new("Frame")
+    snapGuideH.Name = "SnapGuide"
+    snapGuideH.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    snapGuideH.BorderSizePixel = 0
+    snapGuideH.Size = UDim2.new(1, 0, 0, 1)
+    snapGuideH.ZIndex = 6002
+    snapGuideH.Visible = false
+    snapGuideH.Parent = overlay
+
+    local snapGuideV = Instance.new("Frame")
+    snapGuideV.Name = "SnapGuide"
+    snapGuideV.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    snapGuideV.BorderSizePixel = 0
+    snapGuideV.Size = UDim2.new(0, 1, 1, 0)
+    snapGuideV.ZIndex = 6002
+    snapGuideV.Visible = false
+    snapGuideV.Parent = overlay
+
+    for name, element in pairs(allMovable) do
+        setupElementDragging(name, element, getMovableElements(), snapGuideV, snapGuideH)
+    end
+
+    table.insert(HUD.Connections, addBtn.MouseButton1Click:Connect(function()
+        local nameIndex = 1
+        while UI.CustomFrames and UI.CustomFrames["CustomFrame_"..nameIndex] do
+            nameIndex = nameIndex + 1
+        end
+        local newName = "CustomFrame_"..nameIndex
+        
+        local _, emotesWheel = checkEmotesMenuExists()
+        local cf = Instance.new("Frame")
+        cf.Name = newName
+        cf.Parent = emotesWheel
+        cf.BackgroundTransparency = 0.4
+        cf.ZIndex = 3
+        cf.BorderSizePixel = 0
+        cf.Active = true
+        cf.Size = UDim2.new(0.3, 0, 0.3, 0)
+        cf.Position = UDim2.new(0.5, 0, 0.5, 0)
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 10)
+        corner.Parent = cf
+
+        if not UI.CustomFrames then UI.CustomFrames = {} end
+        UI.CustomFrames[newName] = cf
+
+        HUD.DefaultSizes[newName] = UDim2.new(0.3, 0, 0.3, 0)
+        HUD.DefaultPositions[newName] = UDim2.new(0.5, 0, 0.5, 0)
+
+        Config.HUDPositions[newName] = {0.5, 0, 0.5, 0}
+        if not Config.HUDSizes then Config.HUDSizes = {} end
+        Config.HUDSizes[newName] = {0.3, 0, 0.3, 0}
+        if not Config.CustomFrames then Config.CustomFrames = {} end
+        Config.CustomFrames[newName] = {ZIndex = 3}
+
+        pcall(function() updateGUIColors() end)
+
+        setupElementDragging(newName, cf, getMovableElements(), snapGuideV, snapGuideH)
+        selectHUDElement(newName, cf)
+        
+        getgenv().Notify({ Title = "7yd7 | HUD Editor", Content = "➕ Custom Frame added!", Duration = 2 })
+    end))
+
+    getgenv().Notify({ Title = "7yd7 | HUD Editor", Content = "✏️ Drag elements to reposition", Duration = 5 })
+end
+
+State.RefreshUI = function()
+    State.totalPages = calculateTotalPages()
+    updatePageDisplay()
+    if State.currentMode == "animation" then
+        updateAnimations()
+    else
+        updateEmotes()
+    end
+end
+
+State.RefreshSettingsUI = function()
+    if TogglesUI then
+        for key, toggle in pairs(TogglesUI) do
+            if Config[key] ~= nil and toggle.SetState then
+                toggle.SetState(Config[key])
+            end
+        end
+    end
+end
+
+function checkAndRecreateGUI()
+    local exists, emotesWheel = checkEmotesMenuExists()
+    if not exists then
+        State.isGUICreated = false
+        return
+    end
+
+    if not emotesWheel:FindFirstChild("Under") or not emotesWheel:FindFirstChild("Top") or
+        not emotesWheel:FindFirstChild("EmoteWalkButton") or not emotesWheel:FindFirstChild("Favorite") or
+        not emotesWheel:FindFirstChild("SpeedEmote") or not emotesWheel:FindFirstChild("SpeedBox") or
+        not emotesWheel:FindFirstChild("Changepage") or not emotesWheel:FindFirstChild("Reload") then
+        State.isGUICreated = false
+        if createGUIElements() then
+            updatePageDisplay()
+            updateEmotes()
+            loadSpeedEmoteConfig()
+        end
+    end
+end
+
+if player.Character then
+    onCharacterAdded(player.Character)
+end
+
+player.CharacterAdded:Connect(function(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid")
+    onCharacterAdded(char)
+    
+    task.spawn(function()
+        local attempts = 0
+        while attempts < 20 do
+            if checkEmotesMenuExists() then
+                task.wait(0.2)
+                if createGUIElements() then
+                    updatePageDisplay()
+                    updateEmotes()
+                    updateGUIColors()
+                    loadSpeedEmoteConfig()
+                end
+                break
+            end
+            attempts = attempts + 1
+            task.wait(0.1)
+        end
+    end)
+end)
+
+
+RunService.Heartbeat:Connect(function()
+    if not State.isGUICreated then
+        checkAndRecreateGUI()
+    else
+        updateGUIColors()
+        enforceImages()
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    if humanoid and State.currentEmoteTrack and typeof(State.currentEmoteTrack) == "Instance" and State.currentEmoteTrack:IsA("AnimationTrack") and State.currentEmoteTrack.IsPlaying then
+        if humanoid.MoveDirection.Magnitude > 0 then
+            if State.speedEmoteEnabled and not State.emotesWalkEnabled then
+                State.currentEmoteTrack:Stop()
+                State.currentEmoteTrack = nil
+            end
+        end
+    end
+end)
 
 task.spawn(function()
-	local rot = 0
-	while miniIcon.Parent do
-		rot = rot + 360
-		TweenService:Create(miniIconGrad, TweenInfo.new(2, Enum.EasingStyle.Linear), {Rotation = rot}):Play()
-		task.wait(2)
-	end
+    loadFavoritesAnimations()
+    fetchAllEmotes()
+    loadSpeedEmoteConfig()
 end)
 
+StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
 task.spawn(function()
-	while miniIcon.Parent do
-		if miniIcon.Visible then
-			TweenService:Create(miniIcon, TweenInfo.new(1, Enum.EasingStyle.Sine), {Size = UDim2.new(0, iconS + 4, 0, iconS + 4)}):Play()
-			task.wait(1)
-			TweenService:Create(miniIcon, TweenInfo.new(1, Enum.EasingStyle.Sine), {Size = UDim2.new(0, iconS, 0, iconS)}):Play()
-			task.wait(1)
-		else
-			task.wait(0.5)
-		end
-	end
+    while true do
+        local robloxGui = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+        local emotesMenu = robloxGui and robloxGui:FindFirstChild("EmotesMenu")
+
+        if not emotesMenu then
+            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
+
+        else
+            local exists = emotesMenu:FindFirstChild("Children") and emotesMenu.Children:FindFirstChild("Main") and
+                               emotesMenu.Children.Main:FindFirstChild("EmotesWheel")
+
+            if exists then
+                local emotesWheel = emotesMenu.Children.Main.EmotesWheel
+                if not emotesWheel:FindFirstChild("Under") or not emotesWheel:FindFirstChild("Top") then
+                    if createGUIElements then
+                        createGUIElements()
+                        loadSpeedEmoteConfig()
+                    end
+                    updateGUIColors()
+                    updatePageDisplay()
+                end
+            end
+        end
+
+        task.wait(0.3)
+    end
 end)
 
-do
-local savedPos, savedSize = nil, nil
-local iconDragging, iconDragStart, iconStartPos = false, nil, nil
-
-miniIcon.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		iconDragging = true
-		iconDragStart = input.Position
-		iconStartPos = miniIcon.Position
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if iconDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - iconDragStart
-		miniIcon.Position = UDim2.new(iconStartPos.X.Scale, iconStartPos.X.Offset + delta.X, iconStartPos.Y.Scale, iconStartPos.Y.Offset + delta.Y)
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		if iconDragging then
-			local delta = input.Position - iconDragStart
-			if math.abs(delta.X) < 5 and math.abs(delta.Y) < 5 then
-				miniIcon.Visible = false
-				main.Visible = true
-				main.ClipsDescendants = true
-				main.Size = UDim2.new(0, 0, 0, 0)
-				main.BackgroundTransparency = 1
-				main.Rotation = -15
-				
-				local targetSize = savedSize or GetDefaultSize()
-				local targetPos = savedPos or UDim2.fromScale(0.5, 0.5)
-				main.Position = targetPos
-				
-				TweenService:Create(main, TweenInfo.new(0.35, Enum.EasingStyle.Back), {Size = targetSize, BackgroundTransparency = 0, Rotation = 0}):Play()
-				TweenService:Create(mainStroke, TweenInfo.new(0.35), {Transparency = 0}):Play()
-				
-				task.delay(0.4, function()
-					main.ClipsDescendants = false
-					if currentTab ~= "settings" then Refresh(true) end
-				end)
-			end
-		end
-		iconDragging = false
-	end
-end)
-
-minBtn.MouseButton1Click:Connect(function()
-	savedPos = main.Position
-	savedSize = main.Size
-	
-	TweenService:Create(main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Size = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 1, Rotation = 15}):Play()
-	TweenService:Create(mainStroke, TweenInfo.new(0.3), {Transparency = 1}):Play()
-	
-	task.delay(0.3, function()
-		main.Visible = false
-		miniIcon.Visible = true
-	end)
-end)
-
--- Tüm bağlantıları kesip scripti temizle
-local function _CleanupScript()
-	pcall(function() _heartbeatConn:Disconnect() end)
-	pcall(function() _charAddedConn:Disconnect() end)
-	pcall(function() if _keybindInputConn then _keybindInputConn:Disconnect() end end)
-	pcall(function() DisableCopyEmotePrompts() end)
-	pcall(function() StopHUDTracking() end)
-	_genv().VexroEmotesCleanup = nil
-	_genv().lastVexroEmote = nil
-	_genv().autoReloadEnabled_Vexro = nil
-	pcall(function() gui:Destroy() end)
+if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+    SafeLoad("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/OpenEmote.lua", "Open Emote")
+    getgenv().Notify({
+        Title = '7yd7 | Emote Mobile',
+        Content = '📱 Added emote open button for ease of use',
+        Duration = 10
+    })
 end
 
-_genv().VexroEmotesCleanup = _CleanupScript
-
-closeBtn.MouseButton1Click:Connect(function()
-	gui.Enabled = false  -- tüm input'u hemen kes
-	main.ClipsDescendants = true
-	TweenService:Create(main, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
-		Size = UDim2.new(0, 0, 0, 0),
-		BackgroundTransparency = 1
-	}):Play()
-	task.delay(0.22, _CleanupScript)
-end)
-end -- iconDrag scope
-end -- miniIcon/iconS scope
-
--- ===============================================================
--- DRAG & RESIZE
--- ===============================================================
-
-do
-local dragging, dragStart, startPos = false, nil, nil
-
-local function StartDrag(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = main.Position
-	end
+if UserInputService.KeyboardEnabled then
+    getgenv().Notify({
+        Title = '7yd7 | Emote PC',
+        Content = '💻 Open menu press button "."',
+        Duration = 10
+    })
 end
-
-titleBar.InputBegan:Connect(StartDrag)
-bottomBar.InputBegan:Connect(StartDrag)
-sidebar.InputBegan:Connect(StartDrag)
-
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = false
-	end
-end)
-
-local resizeS = isMobile and 28 or 22
-local resizeBtn = Instance.new("TextButton")
-resizeBtn.Size = UDim2.new(0, resizeS, 0, resizeS)
-resizeBtn.Position = UDim2.new(1, -resizeS - 3, 1, -resizeS - 3)
-resizeBtn.BackgroundColor3 = currentTheme.stroke
-resizeBtn.BackgroundTransparency = 0.4
-resizeBtn.Text = "/"
-resizeBtn.TextColor3 = currentTheme.textDim
-resizeBtn.TextSize = isMobile and 12 or 14
-resizeBtn.ZIndex = 100
-resizeBtn.Parent = main
-Instance.new("UICorner", resizeBtn).CornerRadius = UDim.new(0, 8)
-
-do
-local resizing, resizeStart, sizeStart = false, nil, nil
-local lastRefreshTime = 0
-
-resizeBtn.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		resizing = true
-		resizeStart = input.Position
-		sizeStart = main.AbsoluteSize
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - resizeStart
-		-- Min height: enough for all tabs + padding (6 tabs on PC, 5 on mobile)
-		local tabCount = isMobile and 5 or 6
-		local minH = 8 + (tabBtnS + 6) * tabCount + tabBtnS + 16
-		local newW = math.clamp(sizeStart.X + delta.X, 400, 1200)
-		local newH = math.clamp(sizeStart.Y + delta.Y, minH, 800)
-		main.Size = UDim2.new(0, newW, 0, newH)
-		
-		local now = tick()
-		if now - lastRefreshTime > 0.1 then
-			lastRefreshTime = now
-			if currentTab ~= "settings" then Refresh(false) end
-		end
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-	if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and resizing then
-		resizing = false
-		if currentTab ~= "settings" then Refresh(false) end
-	end
-end)
-end -- resize scope
-end -- drag scope
-
--- ===============================================================
--- CHARACTER RESPAWN & AUTO-RELOAD
--- ===============================================================
-
--- Enable auto reload before listener registration
-_genv().autoReloadEnabled_Vexro = Settings.loopEmote
-
-local _charAddedConn = player.CharacterAdded:Connect(function(newChar)
-	local newHum = newChar:WaitForChild("Humanoid", 5)
-	if not newHum then return end
-	
-	-- R6 check
-	if newHum.RigType == Enum.HumanoidRigType.R6 then
-		Notify(utf8.char(0x274C), L.r6Msg)
-		task.wait(2)
-		gui:Destroy()
-		return
-	end
-	
-	-- Auto-reload last emote after respawn
-	if _genv().lastVexroEmote and _genv().autoReloadEnabled_Vexro then
-		task.wait(1)
-		PlayEmote(_genv().lastVexroEmote.id, _genv().lastVexroEmote.name, true)
-		Notify("[R]", L.ready or "Emote reapplied")
-	end
-end)
-
--- ===============================================================
--- INITIALIZE
--- ===============================================================
-
-main.Rotation = -10
-local openSize = GetDefaultSize()
-TweenService:Create(main, TweenInfo.new(0.45, Enum.EasingStyle.Back), {Size = openSize, BackgroundTransparency = 0, Rotation = 0}):Play()
-TweenService:Create(mainStroke, TweenInfo.new(0.45), {Transparency = 0}):Play()
-
-task.wait(0.5)
-
-main.ClipsDescendants = false
-ApplyTheme(Settings.theme)
-UpdateTabStyles()
-UpdateTabData()
-
--- Keybind playback listener (PC only)
-local _keybindInputConn = nil
-if not isMobile then
-	_keybindInputConn = UserInputService.InputBegan:Connect(function(inp, gp)
-		if gp then return end
-		if inp.UserInputType ~= Enum.UserInputType.Keyboard then return end
-		local keyName = inp.KeyCode.Name
-		for emoteId, kb in pairs(KeybindsSet) do
-			if kb.key == keyName then
-				local emote = EmotesById[emoteId]
-				if emote then
-					PlayEmote(emote.id, emote.name)
-				end
-				break
-			end
-		end
-	end)
-end
-
-task.wait(0.25)
-Notify(utf8.char(0x2705) .. " " .. L.ready, #Emotes .. " emotes")
-
--- ================================================================
--- VEXRO EXTENDED MODULES v1.0
--- Bölüm 1: Dinamik Tema  |  Bölüm 2: Animation Blending & Combo
--- Bölüm 3: Canlı Emote HUD  |  Bölüm 4: Entegrasyon
--- NOT: do...end bloğu Lua'nın 200 local sınırını aşmamak için
--- ================================================================
-local function _VexroExtend() -- Ayrı fonksiyon: kendi 200 register tablosu
-
--- ----------------------------------------------------------------
--- ----------------------------------------------------------------
-
-
-
--- Lighting.OutdoorAmbient → vurgu rengi
--- Max 0.72 ile sınırlıyoruz: buton arka planı asla beyaza dönmesin
--- Forward declarations
-local HUD, infoPanel, infoSpeedLbl, comboSlots, comboQueue_UI
-local _currentInfoId, _currentInfoName
-local _comboLoopEnabled = false
-local _comboLoopList    = {}
-
-
--- ----------------------------------------------------------------
--- BÖLÜM 2 — ANİMASYON BLENDING & SEQUENCING (Combo Sistemi)
--- AnimationTrack:Play(0.3) ile 0.3s fade-in/out harmanlama,
--- Stopped sinyali ile otomatik sıralama, max 3 emote combo.
--- ----------------------------------------------------------------
-
--- Forward declaration: HUD fonksiyonları aşağıda tanımlanır
-local ShowEmoteHUD, HideEmoteHUD
-
-local ComboQueue    = {} -- {id, name} tablosu
-local isComboActive = false
-
--- 0.3 saniyelik smooth fade ile tek bir combo adımını oynat
-local function PlayComboStep(emoteId, emoteName)
-	local animator = GetAnimator()
-	if not animator then return end
-
-	-- Mevcut animasyonu 0.3s fade-out ile durdur
-	if currentAnimTrack and currentAnimTrack.IsPlaying then
-		currentAnimTrack:Stop(0.3)
-		task.wait(0.08)
-	end
-
-	-- Animasyonu cache'den al veya yükle
-	local anim = _animCache[emoteId]
-	if not anim then
-		pcall(function()
-			local ok, objects = pcall(function()
-				return game:GetObjects("rbxassetid://" .. emoteId)
-			end)
-			if ok and objects and #objects > 0 then
-				local item = objects[1]
-				anim = item:IsA("Animation") and item
-					or item:FindFirstChildWhichIsA("Animation", true)
-			end
-			if not anim then
-				anim = Instance.new("Animation")
-				anim.AnimationId = "rbxassetid://" .. emoteId
-			end
-			_animCache[emoteId] = anim
-		end)
-	end
-	if not anim then return end
-
-	pcall(function()
-		local track = animator:LoadAnimation(anim)
-		track.Priority = Enum.AnimationPriority.Action4
-		track.Looped   = false             -- Combo modunda döngü kapalı
-
-		track:Play(0.3)                    -- 0.3s FADE-IN (harmanlama)
-		task.delay(0.05, function()
-			if track.IsPlaying then
-				track:AdjustSpeed(Settings.speed)
-			end
-		end)
-
-		currentAnimTrack = track
-		_genv().lastVexroEmote = {id = emoteId, name = emoteName}
-		AddToRecent(emoteId)
-
-		-- HUD'u göster (defer: ShowEmoteHUD aşağıda tanımlanır)
-		task.defer(function()
-			if ShowEmoteHUD then ShowEmoteHUD(emoteId, emoteName) end
-		end)
-
-		-- Track durduğunda → kuyrukta sonraki varsa çal, yoksa bitir
-		track.Stopped:Connect(function()
-			if not isComboActive then return end
-			if #ComboQueue > 0 then
-				local nxt = table.remove(ComboQueue, 1)
-				PlayComboStep(nxt.id, nxt.name)
-			else
-				-- Döngü açıksa listeyi yeniden başlat, kuyruğu sıfırlama
-				if _comboLoopEnabled and #_comboLoopList > 0 then
-					ComboQueue = {}
-					for i = 2, #_comboLoopList do
-						ComboQueue[#ComboQueue + 1] = _comboLoopList[i]
-					end
-					PlayComboStep(_comboLoopList[1].id, _comboLoopList[1].name)
-				else
-					isComboActive = false
-					task.defer(function()
-						if HideEmoteHUD then HideEmoteHUD() end
-					end)
-					-- Combo bitince slot UI'ını sıfırla
-					task.defer(function()
-						if comboQueue_UI then comboQueue_UI = {} end
-						if comboSlots then
-							for j = 1, 3 do
-								if comboSlots[j] then
-									comboSlots[j].Text = L.slotLabel .. " " .. j
-									TweenService:Create(comboSlots[j], TweenInfo.new(0.15), {
-										BackgroundColor3 = Color3.fromRGB(30, 30, 46)
-									}):Play()
-								end
-							end
-						end
-					end)
-				end
-			end
-		end)
-	end)
-end
-
--- Combo sıralamasını başlat
-local function StartCombo(emoteList)
-	if #emoteList == 0 then return end
-	isComboActive = true
-	-- Döngü için orijinal listeyi sakla
-	_comboLoopList = {}
-	for _, e in ipairs(emoteList) do
-		_comboLoopList[#_comboLoopList + 1] = {id = e.id, name = e.name}
-	end
-	ComboQueue = {}
-	for i = 2, #emoteList do
-		ComboQueue[#ComboQueue + 1] = emoteList[i]
-	end
-	PlayComboStep(emoteList[1].id, emoteList[1].name)
-end
-
--- ----------------------------------------------------------------
--- BÖLÜM 3 — CANLI EMOTE HUD (Alt-Orta Şeffaf Panel)
--- RenderStepped canlı slider, hız butonları (0.1x–2x),
--- bilgi popup, sürüklenebilir knob, Disconnect ile FPS koruması.
--- ----------------------------------------------------------------
-
-local hudTrackerConn = nil  -- RenderStepped bağlantısı (yönetilir)
-local _hudHideToken  = 0   -- Hızlı emote geçişlerinde eski hide task'ını iptal eder
-
--- ▸ Ana HUD çerçevesi (forward declared above — do NOT add local here)
-HUD = Instance.new("Frame")
-HUD.Name                   = "VexroHUD"
-HUD.Size                   = isMobile and UDim2.new(0, 320, 0, 100) or UDim2.new(0, 500, 0, 104)
-HUD.Position               = UDim2.new(0.5, 0, 1, -120)
-HUD.AnchorPoint            = Vector2.new(0.5, 1)
-HUD.BackgroundColor3       = Color3.fromRGB(8, 8, 12)
-HUD.BackgroundTransparency = 0.30
-HUD.BorderSizePixel        = 0
-HUD.Visible                = false
-HUD.ZIndex                 = 500
-HUD.ClipsDescendants       = false
-HUD.Parent                 = gui
-Instance.new("UICorner", HUD).CornerRadius = UDim.new(0, 14)
-
-local hudStroke = Instance.new("UIStroke")
-hudStroke.Color        = currentTheme.stroke
-hudStroke.Thickness    = 1.5
-hudStroke.Transparency = 0.25
-hudStroke.Parent       = HUD
-
--- ▸ Sol üst: Favori yıldızı
-local hudFavBtn = Instance.new("ImageButton")
-hudFavBtn.Size                   = UDim2.new(0, 22, 0, 22)
-hudFavBtn.Position               = UDim2.new(0, 9, 0, 6)
-hudFavBtn.BackgroundColor3       = Color3.fromRGB(30, 30, 46)
-hudFavBtn.BackgroundTransparency = 0.20
-hudFavBtn.Image                  = ResolveAssetImage(Icons.FavoriteEmpty)
-hudFavBtn.ImageColor3            = currentTheme.accent
-hudFavBtn.ZIndex                 = 502
-hudFavBtn.Parent                 = HUD
-Instance.new("UICorner", hudFavBtn).CornerRadius = UDim.new(1, 0)
-
-local function RefreshHUDFavBtn()
-	if not _currentInfoId then return end
-	local isFav = IsFavorite(_currentInfoId)
-	hudFavBtn.Image      = ResolveAssetImage(isFav and Icons.FavoriteFull or Icons.FavoriteEmpty)
-	TweenService:Create(hudFavBtn, TweenInfo.new(0.15), {
-		ImageColor3      = isFav and Color3.fromRGB(255, 215, 0) or currentTheme.accent,
-		BackgroundColor3 = isFav and Color3.fromRGB(55, 45, 10) or Color3.fromRGB(30, 30, 46)
-	}):Play()
-end
-
-hudFavBtn.MouseButton1Click:Connect(function()
-	if not _currentInfoId then return end
-	ToggleFavorite(_currentInfoId)
-	RefreshHUDFavBtn()
-end)
-
--- ▸ Sol alt: "i" bilgi ikonu
-local hudInfoBtn = Instance.new("TextButton")
-hudInfoBtn.Size                   = UDim2.new(0, 22, 0, 22)
-hudInfoBtn.Position               = UDim2.new(0, 9, 0, 32)
-hudInfoBtn.BackgroundColor3       = currentTheme.accent
-hudInfoBtn.BackgroundTransparency = 0.40
-hudInfoBtn.Text                   = "i"
-hudInfoBtn.TextColor3             = Color3.new(1, 1, 1)
-hudInfoBtn.Font                   = Enum.Font.GothamBold
-hudInfoBtn.TextSize               = 12
-hudInfoBtn.ZIndex                 = 502
-hudInfoBtn.Parent                 = HUD
-Instance.new("UICorner", hudInfoBtn).CornerRadius = UDim.new(1, 0)
-
--- ▸ Orta üst: Emote adı
-local hudName = Instance.new("TextLabel")
-hudName.Size                   = UDim2.new(1, -130, 0, 22)
-hudName.Position               = UDim2.new(0, 44, 0, 7)
-hudName.BackgroundTransparency = 1
-hudName.Text                   = ""
-hudName.TextColor3             = Color3.new(1, 1, 1)
-hudName.Font                   = Enum.Font.GothamBold
-hudName.TextSize               = isMobile and 13 or 15
-hudName.TextXAlignment         = Enum.TextXAlignment.Left
-hudName.TextTruncate           = Enum.TextTruncate.AtEnd
-hudName.ZIndex                 = 501
-hudName.Parent                 = HUD
-
--- ▸ Orta alt: Creator (daha küçük, sönük)
-local hudCreator = Instance.new("TextLabel")
-hudCreator.Size                   = UDim2.new(1, -130, 0, 15)
-hudCreator.Position               = UDim2.new(0, 44, 0, 30)
-hudCreator.BackgroundTransparency = 1
-hudCreator.Text                   = "Vexro Emotes"
-hudCreator.TextColor3             = Color3.fromRGB(120, 120, 145)
-hudCreator.Font                   = Enum.Font.Gotham
-hudCreator.TextSize               = isMobile and 10 or 11
-hudCreator.TextXAlignment         = Enum.TextXAlignment.Left
-hudCreator.ZIndex                 = 501
-hudCreator.Parent                 = HUD
-
--- ▸ Progress slider arka planı
-local hudSliderBg = Instance.new("Frame")
-hudSliderBg.Size             = UDim2.new(1, -148, 0, 4)
-hudSliderBg.Position         = UDim2.new(0, 44, 0, 54)
-hudSliderBg.BackgroundColor3 = Color3.fromRGB(42, 42, 58)
-hudSliderBg.ZIndex           = 501
-hudSliderBg.Parent           = HUD
-Instance.new("UICorner", hudSliderBg).CornerRadius = UDim.new(1, 0)
-
--- İlerleme (fill) kısmı
-local hudFill = Instance.new("Frame")
-hudFill.Size             = UDim2.new(0, 0, 1, 0)
-hudFill.BackgroundColor3 = currentTheme.accent
-hudFill.ZIndex           = 502
-hudFill.Parent           = hudSliderBg
-Instance.new("UICorner", hudFill).CornerRadius = UDim.new(1, 0)
-
--- Sürüklenebilir tutaç (knob)
-local hudKnob = Instance.new("TextButton")
-hudKnob.Size             = UDim2.new(0, 12, 0, 12)
-hudKnob.AnchorPoint      = Vector2.new(0.5, 0.5)
-hudKnob.Position         = UDim2.new(0, 0, 0.5, 0)
-hudKnob.BackgroundColor3 = Color3.new(1, 1, 1)
-hudKnob.Text             = ""
-hudKnob.ZIndex           = 503
-hudKnob.Parent           = hudSliderBg
-Instance.new("UICorner", hudKnob).CornerRadius = UDim.new(1, 0)
-
--- ▸ Orta-alt: Duraklat / Devam Et butonu
-local hudPauseBtn = Instance.new("ImageButton")
-hudPauseBtn.Size                   = UDim2.new(0, 60, 0, 22)
-hudPauseBtn.AnchorPoint            = Vector2.new(0.5, 0)
-hudPauseBtn.Position               = UDim2.new(0.5, 0, 0, 66)
-hudPauseBtn.BackgroundColor3       = Color3.fromRGB(30, 30, 46)
-hudPauseBtn.BackgroundTransparency = 0.10
-hudPauseBtn.Image                  = ResolveAssetImage("rbxassetid://113416463749658")
-hudPauseBtn.ImageColor3            = Color3.new(1, 1, 1)
-hudPauseBtn.ScaleType              = Enum.ScaleType.Fit
-hudPauseBtn.ZIndex                 = 503
-hudPauseBtn.Parent                 = HUD
-Instance.new("UICorner", hudPauseBtn).CornerRadius = UDim.new(0, 7)
-
-local hudPauseBtnStroke = Instance.new("UIStroke")
-hudPauseBtnStroke.Color       = currentTheme.stroke
-hudPauseBtnStroke.Thickness   = 1
-hudPauseBtnStroke.Transparency = 0.40
-hudPauseBtnStroke.Parent      = hudPauseBtn
-
-local function RefreshHudPauseBtn()
-	if _isPaused then
-		hudPauseBtn.Image = ResolveAssetImage("rbxassetid://129338178452237")
-		hudPauseBtn.BackgroundColor3 = currentTheme.accent
-	else
-		hudPauseBtn.Image = ResolveAssetImage("rbxassetid://113416463749658")
-		hudPauseBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 46)
-	end
-end
-
-hudPauseBtn.MouseButton1Click:Connect(function()
-	-- Onceligi duraklat halini kontrol etmeye ver (hiz=0 iken IsPlaying hala true)
-	if currentAnimTrack and _isPaused then
-		pcall(function() currentAnimTrack:AdjustSpeed(Settings.speed) end)
-		_SetPauseState(false)
-	elseif currentAnimTrack and currentAnimTrack.IsPlaying then
-		pcall(function() currentAnimTrack:AdjustSpeed(0) end)
-		_SetPauseState(true)
-	end
-end)
-
--- Bridge'i buraya bağla: stopBtn _onPauseStateChanged'i çağırınca hudPauseBtn güncellenir
-_onPauseStateChanged = function(paused)
-	RefreshHudPauseBtn()
-end
-
--- ▸ Sağ: Hız kontrol butonları (0.1x  0.5x  1x  1.5x  2x)
-local HUD_SPEEDS = {0.1, 0.5, 1, 1.5, 2}
-local HUD_LABELS = {"0.1", "0.5", "1x", "1.5", "2x"}
-local hudSpeedBtns = {}
-local spBtnW   = isMobile and 26 or 30
-local spBtnGap = 3
-local spTotalW = #HUD_SPEEDS * spBtnW + (#HUD_SPEEDS - 1) * spBtnGap
-
--- Aktif hız butonunu vurgula
-local function RefreshHUDSpeedBtns()
-	for i, btn in ipairs(hudSpeedBtns) do
-		local active = math.abs(HUD_SPEEDS[i] - Settings.speed) < 0.01
-		TweenService:Create(btn, TweenInfo.new(0.15), {
-			BackgroundColor3 = active and currentTheme.accent or Color3.fromRGB(30, 30, 46)
-		}):Play()
-	end
-end
-
-for si, spd in ipairs(HUD_SPEEDS) do
-	local xOff = -(spTotalW + 8) + (si - 1) * (spBtnW + spBtnGap)
-	local sBtn = Instance.new("TextButton")
-	sBtn.Size                   = UDim2.new(0, spBtnW, 0, 20)
-	sBtn.Position               = UDim2.new(1, xOff, 0, 7)
-	sBtn.BackgroundColor3       = (math.abs(spd - Settings.speed) < 0.01)
-		and currentTheme.accent or Color3.fromRGB(30, 30, 46)
-	sBtn.BackgroundTransparency = 0.15
-	sBtn.Text                   = HUD_LABELS[si]
-	sBtn.TextColor3             = Color3.new(1, 1, 1)
-	sBtn.Font                   = Enum.Font.GothamBold
-	sBtn.TextSize               = 10
-	sBtn.ZIndex                 = 502
-	sBtn.Parent                 = HUD
-	Instance.new("UICorner", sBtn).CornerRadius = UDim.new(0, 5)
-	hudSpeedBtns[si] = sBtn
-
-	sBtn.MouseButton1Click:Connect(function()
-		Settings.speed = spd
-		-- Anlık hız uygula (AdjustSpeed)
-		if currentAnimTrack and currentAnimTrack.IsPlaying then
-			pcall(function() currentAnimTrack:AdjustSpeed(spd) end)
-		end
-		RefreshHUDSpeedBtns()
-		SaveData()
-	end)
-end
-
--- ▸ Bilgi Paneli — gui'ye bağlı ayrı sekme (HUD'a değil)
--- HUD'dan bağımsız; ClipsDescendants sorunu olmaz (forward declared above — do NOT add local here)
-infoPanel = Instance.new("Frame")
-infoPanel.Name                   = "VexroInfoPanel"
-infoPanel.Size                   = UDim2.new(0, 270, 0, 260)
-infoPanel.Position               = UDim2.new(0, -290, 1, -285) -- Başlangıç: sol dışarıda
-infoPanel.BackgroundColor3       = Color3.fromRGB(10, 10, 18)
-infoPanel.BackgroundTransparency = 0.08
-infoPanel.BorderSizePixel        = 0
-infoPanel.Visible                = false
-infoPanel.ZIndex                 = 700
-infoPanel.Parent                 = gui
-Instance.new("UICorner", infoPanel).CornerRadius = UDim.new(0, 14)
-
-local infoPanelStroke = Instance.new("UIStroke")
-infoPanelStroke.Color       = currentTheme.accent
-infoPanelStroke.Thickness   = 1.5
-infoPanelStroke.Transparency = 0.30
-infoPanelStroke.Parent      = infoPanel
-
--- Başlık çubuğu (sürükleme tutacağı)
-local infoPanelTitle = Instance.new("Frame")
-infoPanelTitle.Size             = UDim2.new(1, 0, 0, 36)
-infoPanelTitle.BackgroundColor3 = currentTheme.accent
-infoPanelTitle.BackgroundTransparency = 0.55
-infoPanelTitle.ZIndex           = 701
-infoPanelTitle.Active           = true   -- input alabilsin
-infoPanelTitle.Parent           = infoPanel
-Instance.new("UICorner", infoPanelTitle).CornerRadius = UDim.new(0, 14)
--- Alt köşeleri düzeltmek için overlay
-local infoPanelTitleOverlay = Instance.new("Frame")
-infoPanelTitleOverlay.Size             = UDim2.new(1, 0, 0, 14)
-infoPanelTitleOverlay.Position         = UDim2.new(0, 0, 1, -14)
-infoPanelTitleOverlay.BackgroundColor3 = currentTheme.accent
-infoPanelTitleOverlay.BackgroundTransparency = 0.55
-infoPanelTitleOverlay.BorderSizePixel  = 0
-infoPanelTitleOverlay.ZIndex           = 701
-infoPanelTitleOverlay.Parent           = infoPanelTitle
-
--- Başlık ikonu (Icons.Info)
-local infoPanelTitleIcon = Instance.new("ImageLabel")
-infoPanelTitleIcon.Size             = UDim2.new(0, 20, 0, 20)
-infoPanelTitleIcon.Position         = UDim2.new(0, 10, 0.5, -10)
-infoPanelTitleIcon.BackgroundTransparency = 1
-infoPanelTitleIcon.Image            = ResolveAssetImage(Icons.Info)
-infoPanelTitleIcon.ImageColor3      = Color3.new(1, 1, 1)
-infoPanelTitleIcon.ZIndex           = 702
-infoPanelTitleIcon.Parent           = infoPanelTitle
-
-local infoPanelTitleLbl = Instance.new("TextLabel")
-infoPanelTitleLbl.Size                   = UDim2.new(1, -62, 1, 0)
-infoPanelTitleLbl.Position               = UDim2.new(0, 36, 0, 0)
-infoPanelTitleLbl.BackgroundTransparency = 1
-infoPanelTitleLbl.Text                   = L.infoTitle
-infoPanelTitleLbl.TextColor3             = Color3.new(1, 1, 1)
-infoPanelTitleLbl.Font                   = Enum.Font.GothamBold
-infoPanelTitleLbl.TextSize               = 14
-infoPanelTitleLbl.TextXAlignment         = Enum.TextXAlignment.Left
-infoPanelTitleLbl.ZIndex                 = 702
-infoPanelTitleLbl.Parent                 = infoPanelTitle
-
--- Kapat butonu — orijinal CLOSE_SHAPE (iki çapraz çizgi, emoji yok)
-local infoPanelClose = Instance.new("TextButton")
-infoPanelClose.Size             = UDim2.new(0, 24, 0, 24)
-infoPanelClose.Position         = UDim2.new(1, -30, 0.5, -12)
-infoPanelClose.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
-infoPanelClose.BackgroundTransparency = 0.30
-infoPanelClose.Text             = ""
-infoPanelClose.ZIndex           = 703
-infoPanelClose.Parent           = infoPanelTitle
-Instance.new("UICorner", infoPanelClose).CornerRadius = UDim.new(1, 0)
-
--- Çarpı çizgileri (MakeBtn'deki CLOSE_SHAPE ile aynı mantık)
-do
-	local thick = 2
-	local lineLen = 10
-	local cl1 = Instance.new("Frame")
-	cl1.BorderSizePixel = 0
-	cl1.Size       = UDim2.new(0, lineLen, 0, thick)
-	cl1.AnchorPoint = Vector2.new(0.5, 0.5)
-	cl1.Position   = UDim2.fromScale(0.5, 0.5)
-	cl1.Rotation   = 45
-	cl1.BackgroundColor3 = Color3.new(1, 1, 1)
-	cl1.ZIndex     = 704
-	cl1.Parent     = infoPanelClose
-	Instance.new("UICorner", cl1).CornerRadius = UDim.new(0, 2)
-	local cl2 = cl1:Clone()
-	cl2.Rotation  = -45
-	cl2.Parent    = infoPanelClose
-end
-
--- İçerik alanı
-local infoPanelBody = Instance.new("Frame")
-infoPanelBody.Size                   = UDim2.new(1, -24, 1, -46)
-infoPanelBody.Position               = UDim2.new(0, 12, 0, 42)
-infoPanelBody.BackgroundTransparency = 1
-infoPanelBody.ZIndex                 = 701
-infoPanelBody.Parent                 = infoPanel
-
--- 1) Emote adı
-local infoEmoteName = Instance.new("TextLabel")
-infoEmoteName.Size                   = UDim2.new(1, 0, 0, 22)
-infoEmoteName.Position               = UDim2.new(0, 0, 0, 0)
-infoEmoteName.BackgroundTransparency = 1
-infoEmoteName.Text                   = "—"
-infoEmoteName.TextColor3             = Color3.new(1, 1, 1)
-infoEmoteName.Font                   = Enum.Font.GothamBold
-infoEmoteName.TextSize               = 16
-infoEmoteName.TextXAlignment         = Enum.TextXAlignment.Left
-infoEmoteName.TextTruncate           = Enum.TextTruncate.AtEnd
-infoEmoteName.ZIndex                 = 702
-infoEmoteName.Parent                 = infoPanelBody
-
--- 2) Açıklama (ismin hemen altı)
-local infoDescLbl = Instance.new("TextLabel")
-infoDescLbl.Size                   = UDim2.new(1, 0, 0, 28)
-infoDescLbl.Position               = UDim2.new(0, 0, 0, 24)
-infoDescLbl.BackgroundTransparency = 1
-infoDescLbl.Text                   = "—"
-infoDescLbl.TextColor3             = Color3.fromRGB(140, 140, 165)
-infoDescLbl.Font                   = Enum.Font.Gotham
-infoDescLbl.TextSize               = 11
-infoDescLbl.TextXAlignment         = Enum.TextXAlignment.Left
-infoDescLbl.TextYAlignment         = Enum.TextYAlignment.Top
-infoDescLbl.TextWrapped            = true
-infoDescLbl.ZIndex                 = 702
-infoDescLbl.Parent                 = infoPanelBody
-
--- Ayırıcı çizgi
-local infoDivider = Instance.new("Frame")
-infoDivider.Size             = UDim2.new(1, 0, 0, 1)
-infoDivider.Position         = UDim2.new(0, 0, 0, 56)
-infoDivider.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-infoDivider.BorderSizePixel  = 0
-infoDivider.ZIndex           = 702
-infoDivider.Parent           = infoPanelBody
-
--- 3) Creator
-do
-	local ic = Instance.new("ImageLabel")
-	ic.Size = UDim2.new(0, 13, 0, 13); ic.Position = UDim2.new(0, 0, 0, 63)
-	ic.BackgroundTransparency = 1; ic.Image = Icons.Crown; ic.ZIndex = 702
-	ic.Parent = infoPanelBody
-end
-local infoCreatorLbl = Instance.new("TextLabel")
-infoCreatorLbl.Size                   = UDim2.new(1, -18, 0, 16)
-infoCreatorLbl.Position               = UDim2.new(0, 18, 0, 61)
-infoCreatorLbl.BackgroundTransparency = 1
-infoCreatorLbl.Text                   = "—"
-infoCreatorLbl.TextColor3             = Color3.fromRGB(140, 200, 255)
-infoCreatorLbl.Font                   = Enum.Font.Gotham
-infoCreatorLbl.TextSize               = 12
-infoCreatorLbl.TextXAlignment         = Enum.TextXAlignment.Left
-infoCreatorLbl.ZIndex                 = 702
-infoCreatorLbl.Parent                 = infoPanelBody
-
--- 4) Hız
-do
-	local ic = Instance.new("ImageLabel")
-	ic.Size = UDim2.new(0, 13, 0, 13); ic.Position = UDim2.new(0, 0, 0, 83)
-	ic.BackgroundTransparency = 1; ic.Image = Icons.Emote; ic.ZIndex = 702
-	ic.Parent = infoPanelBody
-end
--- infoSpeedLbl: forward declared above
-infoSpeedLbl = Instance.new("TextLabel")
-infoSpeedLbl.Size                   = UDim2.new(1, -18, 0, 16)
-infoSpeedLbl.Position               = UDim2.new(0, 18, 0, 81)
-infoSpeedLbl.BackgroundTransparency = 1
-infoSpeedLbl.Text                   = L.speed .. ": 1x"
-infoSpeedLbl.TextColor3             = Color3.fromRGB(160, 160, 185)
-infoSpeedLbl.Font                   = Enum.Font.Gotham
-infoSpeedLbl.TextSize               = 12
-infoSpeedLbl.TextXAlignment         = Enum.TextXAlignment.Left
-infoSpeedLbl.ZIndex                 = 702
-infoSpeedLbl.Parent                 = infoPanelBody
-
--- RefreshHUDSpeedBtns ve infoSpeedLbl artık tanımlı — bridge'i bağla
-_onSpeedChanged = function()
-	RefreshHUDSpeedBtns()
-	if infoSpeedLbl then
-		infoSpeedLbl.Text = L.speed .. ": " .. tostring(Settings.speed) .. "x"
-	end
-end
-
--- 5) Fiyat (tam genişlik)
-local infoPriceLbl = Instance.new("TextLabel")
-infoPriceLbl.Size                   = UDim2.new(1, 0, 0, 16)
-infoPriceLbl.Position               = UDim2.new(0, 0, 0, 101)
-infoPriceLbl.BackgroundTransparency = 1
-infoPriceLbl.Text                   = "—"
-infoPriceLbl.TextColor3             = Color3.fromRGB(160, 160, 185)
-infoPriceLbl.Font                   = Enum.Font.GothamBold
-infoPriceLbl.TextSize               = 12
-infoPriceLbl.TextXAlignment         = Enum.TextXAlignment.Left
-infoPriceLbl.ZIndex                 = 702
-infoPriceLbl.Parent                 = infoPanelBody
-
--- 6) Favori sayısı (tam genişlik)
-local infoFavLbl = Instance.new("TextLabel")
-infoFavLbl.Size                   = UDim2.new(1, 0, 0, 16)
-infoFavLbl.Position               = UDim2.new(0, 0, 0, 120)
-infoFavLbl.BackgroundTransparency = 1
-infoFavLbl.Text                   = "—"
-infoFavLbl.TextColor3             = Color3.fromRGB(160, 160, 185)
-infoFavLbl.Font                   = Enum.Font.Gotham
-infoFavLbl.TextSize               = 12
-infoFavLbl.TextXAlignment         = Enum.TextXAlignment.Left
-infoFavLbl.ZIndex                 = 702
-infoFavLbl.Parent                 = infoPanelBody
-
--- 7) Yaratılma tarihi
-do
-	local ic = Instance.new("ImageLabel")
-	ic.Size = UDim2.new(0, 13, 0, 13); ic.Position = UDim2.new(0, 0, 0, 141)
-	ic.BackgroundTransparency = 1; ic.Image = Icons.Recent; ic.ZIndex = 702
-	ic.Parent = infoPanelBody
-end
-local infoDateLbl = Instance.new("TextLabel")
-infoDateLbl.Size                   = UDim2.new(1, -18, 0, 16)
-infoDateLbl.Position               = UDim2.new(0, 18, 0, 139)
-infoDateLbl.BackgroundTransparency = 1
-infoDateLbl.Text                   = "—"
-infoDateLbl.TextColor3             = Color3.fromRGB(130, 130, 155)
-infoDateLbl.Font                   = Enum.Font.Gotham
-infoDateLbl.TextSize               = 11
-infoDateLbl.TextXAlignment         = Enum.TextXAlignment.Left
-infoDateLbl.ZIndex                 = 702
-infoDateLbl.Parent                 = infoPanelBody
-
--- 8) Copy ID butonu + Arkadaş Ekle Modu butonu
-friendAddModeBtn = Instance.new("TextButton")
-friendAddModeBtn.Size             = UDim2.new(0.48, -2, 0, 26)
-friendAddModeBtn.Position         = UDim2.new(0, 0, 0, 161)
-friendAddModeBtn.BackgroundColor3 = currentTheme.critical
-friendAddModeBtn.Text             = ""
-friendAddModeBtn.ZIndex           = 703
-friendAddModeBtn.Parent           = infoPanelBody
-Instance.new("UICorner", friendAddModeBtn).CornerRadius = UDim.new(0, 8)
-local _faBtnImg = Instance.new("ImageLabel")
-_faBtnImg.Size = UDim2.new(0, 16, 0, 16)
-_faBtnImg.AnchorPoint = Vector2.new(0.5, 0.5)
-_faBtnImg.Position = UDim2.new(0.5, 0, 0.5, 0)
-_faBtnImg.BackgroundTransparency = 1
-_faBtnImg.Image = ResolveAssetImage("rbxassetid://119398141999369")
-_faBtnImg.ImageColor3 = Color3.new(1,1,1)
-_faBtnImg.ZIndex = 704
-_faBtnImg.Parent = friendAddModeBtn
-
-friendAddModeBtn.MouseButton1Click:Connect(function()
-	_SetAddMode(not FriendData.addModeActive)
-end)
-
-local copyIdBtn = Instance.new("TextButton")
-copyIdBtn.Size             = UDim2.new(0.52, -2, 0, 26)
-copyIdBtn.Position         = UDim2.new(0.48, 2, 0, 161)
-copyIdBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
-copyIdBtn.Text             = L.copyId
-copyIdBtn.TextColor3       = Color3.fromRGB(180, 180, 210)
-copyIdBtn.Font             = Enum.Font.GothamBold
-copyIdBtn.TextSize         = 12
-copyIdBtn.ZIndex           = 703
-copyIdBtn.Parent           = infoPanelBody
-Instance.new("UICorner", copyIdBtn).CornerRadius = UDim.new(0, 8)
-local copyIdStroke = Instance.new("UIStroke")
-copyIdStroke.Color       = Color3.fromRGB(70, 70, 100)
-copyIdStroke.Thickness   = 1
-copyIdStroke.Parent      = copyIdBtn
-
-local infoIdLbl = nil -- eski referans (kaldırıldı)
-
--- Panel aç/kapa fonksiyonu
-local infoPanelOpen = false
-local INFO_OPEN_POS  = UDim2.new(0, 10, 1, -285)
-local INFO_CLOSE_POS = UDim2.new(0, -290, 1, -285)
-
-local _copyIdTarget = 0  -- Copy ID için mevcut emote id'si
-
-local function _applyMetaToInfoPanel(meta)
-	-- Yaratıcı
-	infoCreatorLbl.Text = (meta.creatorName and meta.creatorName ~= "") and meta.creatorName or "—"
-	-- Açıklama
-	infoDescLbl.Text    = (meta.description and meta.description ~= "") and meta.description or L.noDesc
-	-- Fiyat
-	if meta.priceStatus == "Free" or meta.price == 0 then
-		infoPriceLbl.Text       = L.freePrice
-		infoPriceLbl.TextColor3 = Color3.fromRGB(100, 220, 130)
-	elseif meta.price and meta.price > 0 then
-		infoPriceLbl.Text       = tostring(meta.price) .. " R$"
-		infoPriceLbl.TextColor3 = Color3.fromRGB(255, 200, 80)
-	else
-		infoPriceLbl.Text       = (meta.priceStatus and meta.priceStatus ~= "") and meta.priceStatus or "—"
-		infoPriceLbl.TextColor3 = Color3.fromRGB(160, 160, 185)
-	end
-	-- Favori sayısı
-	infoFavLbl.Text = meta.favoriteCount
-		and ("♥ " .. tostring(meta.favoriteCount))
-		or "—"
-	-- Tarih
-	if meta.createdUtc and meta.createdUtc ~= "" then
-		infoDateLbl.Text = meta.createdUtc:sub(1, 10)
-	else
-		infoDateLbl.Text = "—"
-	end
-	-- HUD creator
-	hudCreator.Text = (meta.creatorName and meta.creatorName ~= "") and meta.creatorName or "Vexro Emotes"
-end
-
-local function _fetchAndCacheMeta(numId, targetId)
-	-- MarketplaceService ile metadata çek (native Roblox, HTTP'ye gerek yok)
-	local ok, info = pcall(function()
-		return game:GetService("MarketplaceService"):GetProductInfo(numId)
-	end)
-	if not ok or not info then return end
-
-	local price      = info.PriceInRobux
-	local isFree     = info.IsPublicDomain or (price and price == 0)
-	local isNotSale  = info.IsForSale == false and not isFree
-
-	local meta = {
-		creatorName   = tostring((info.Creator and info.Creator.Name) or ""),
-		description   = tostring(info.Description or ""),
-		price         = isFree and 0 or price,
-		priceStatus   = isFree and "Free" or (isNotSale and "Not for sale" or ""),
-		favoriteCount = nil,
-		createdUtc    = "",
-	}
-
-	_emoteMetaCache[numId] = meta
-
-	-- emotes tablosunu da güncelle (gelecekteki arama için)
-	local eData = EmotesById[numId]
-	if eData then
-		eData.creatorName   = meta.creatorName
-		eData.description   = meta.description
-		eData.price         = meta.price
-		eData.priceStatus   = meta.priceStatus
-		eData.favoriteCount = meta.favoriteCount
-		eData.createdUtc    = meta.createdUtc
-	end
-
-	-- Panel hâlâ aynı emote için açıksa UI'yi güncelle
-	if infoPanelOpen and _copyIdTarget == numId then
-		_applyMetaToInfoPanel(meta)
-	end
-end
-
-local function OpenInfoPanel(emoteId, emoteName)
-	infoEmoteName.Text  = emoteName or "—"
-	infoSpeedLbl.Text   = L.speed .. ": " .. tostring(Settings.speed) .. "x"
-	infoPanelStroke.Color           = currentTheme.accent
-	infoPanelTitle.BackgroundColor3 = currentTheme.accent
-	_copyIdTarget = tonumber(emoteId) or 0
-
-	local numId = tonumber(emoteId)
-
-	-- Önce önbellekten veya Emotes tablosundan bak
-	local meta = _emoteMetaCache[numId]
-	if not meta then
-		local eData = EmotesById[numId]
-		if eData and eData.creatorName ~= "" then
-			-- Emotes tablosunda zaten tam veri var
-			meta = eData
-		end
-	end
-
-	if meta then
-		_applyMetaToInfoPanel(meta)
-	else
-		-- Placeholder göster, arka planda çek
-		infoCreatorLbl.Text = "…"
-		infoDescLbl.Text    = "…"
-		infoPriceLbl.Text   = "…"
-		infoPriceLbl.TextColor3 = Color3.fromRGB(160, 160, 185)
-		infoFavLbl.Text     = "…"
-		infoDateLbl.Text    = "…"
-		hudCreator.Text     = "Vexro Emotes"
-		if numId and numId > 0 then
-			task.spawn(_fetchAndCacheMeta, numId, numId)
-		end
-	end
-
-	-- Copy ID buton tıklama
-	copyIdBtn.Text = L.copyId .. ": " .. tostring(numId)
-
-	infoPanel.Position = INFO_CLOSE_POS
-	infoPanel.Visible  = true
-	infoPanelOpen      = true
-	TweenService:Create(infoPanel,
-		TweenInfo.new(0.30, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-		{Position = INFO_OPEN_POS}
-	):Play()
-	TweenService:Create(hudInfoBtn, TweenInfo.new(0.15),
-		{BackgroundTransparency = 0.05}):Play()
-end
-
-copyIdBtn.MouseButton1Click:Connect(function()
-	pcall(function()
-		if setclipboard then
-			setclipboard(tostring(_copyIdTarget))
-		end
-	end)
-	local orig = copyIdBtn.Text
-	copyIdBtn.Text            = L.copied
-	copyIdBtn.TextColor3      = Color3.fromRGB(100, 220, 130)
-	task.delay(1.5, function()
-		copyIdBtn.Text       = orig
-		copyIdBtn.TextColor3 = Color3.fromRGB(180, 180, 210)
-	end)
-end)
-
-local function CloseInfoPanel()
-	infoPanelOpen = false
-	-- Panelin şu anki konumundan sola kayarak kapan (sürüklendiyse oradan çıkar)
-	local curX = infoPanel.AbsolutePosition.X
-	local curY = infoPanel.AbsolutePosition.Y
-	local exitPos = UDim2.new(0, curX - 300, 0, curY)
-	TweenService:Create(infoPanel,
-		TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{Position = exitPos}
-	):Play()
-	TweenService:Create(hudInfoBtn, TweenInfo.new(0.15),
-		{BackgroundTransparency = 0.40}):Play()
-	task.delay(0.22, function()
-		if not infoPanelOpen then infoPanel.Visible = false end
-	end)
-end
-
--- "i" butonuna tıklayınca panel aç/kapat
-hudInfoBtn.MouseButton1Click:Connect(function()
-	if infoPanelOpen then
-		CloseInfoPanel()
-	else
-		OpenInfoPanel(_currentInfoId or 0, _currentInfoName or "Emote")
-	end
-end)
-infoPanelClose.MouseButton1Click:Connect(CloseInfoPanel)
-
--- ▸ InfoPanel sürükle-bırak — başlık çubuğundan tutarak taşı
-local _ipDragActive     = false
-local _ipDragMouseStart = Vector2.zero
-local _ipDragPanelStart = Vector2.zero
-
-infoPanelTitle.InputBegan:Connect(function(inp)
-	if inp.UserInputType ~= Enum.UserInputType.MouseButton1
-	and inp.UserInputType ~= Enum.UserInputType.Touch then return end
-	_ipDragActive     = true
-	_ipDragMouseStart = Vector2.new(inp.Position.X, inp.Position.Y)
-	_ipDragPanelStart = Vector2.new(
-		infoPanel.AbsolutePosition.X,
-		infoPanel.AbsolutePosition.Y
-	)
-end)
-
-UserInputService.InputChanged:Connect(function(inp)
-	if not _ipDragActive then return end
-	if inp.UserInputType ~= Enum.UserInputType.MouseMovement
-	and inp.UserInputType ~= Enum.UserInputType.Touch then return end
-	local delta = Vector2.new(inp.Position.X, inp.Position.Y) - _ipDragMouseStart
-	infoPanel.Position = UDim2.new(0, _ipDragPanelStart.X + delta.X,
-	                               0, _ipDragPanelStart.Y + delta.Y)
-end)
-
-UserInputService.InputEnded:Connect(function(inp)
-	if inp.UserInputType == Enum.UserInputType.MouseButton1
-	or inp.UserInputType == Enum.UserInputType.Touch then
-		_ipDragActive = false
-	end
-end)
-
--- ▸ Slider knob sürükleme
-local hudKnobDragging = false
-
-hudKnob.InputBegan:Connect(function(inp)
-	if inp.UserInputType == Enum.UserInputType.MouseButton1
-	or inp.UserInputType == Enum.UserInputType.Touch then
-		hudKnobDragging = true
-	end
-end)
-
--- Slider arka planına tıkla → o noktaya atla
-hudSliderBg.InputBegan:Connect(function(inp)
-	if inp.UserInputType ~= Enum.UserInputType.MouseButton1
-	and inp.UserInputType ~= Enum.UserInputType.Touch then return end
-	if currentAnimTrack and currentAnimTrack.Length and currentAnimTrack.Length > 0 then
-		local alpha = math.clamp(
-			(inp.Position.X - hudSliderBg.AbsolutePosition.X) / hudSliderBg.AbsoluteSize.X,
-			0, 1)
-		pcall(function() currentAnimTrack.TimePosition = alpha * currentAnimTrack.Length end)
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(inp)
-	if inp.UserInputType == Enum.UserInputType.MouseButton1
-	or inp.UserInputType == Enum.UserInputType.Touch then
-		hudKnobDragging = false
-	end
-end)
-
--- Sürükleme → TimePosition güncelle
-UserInputService.InputChanged:Connect(function(inp)
-	if not hudKnobDragging then return end
-	if inp.UserInputType ~= Enum.UserInputType.MouseMovement
-	and inp.UserInputType ~= Enum.UserInputType.Touch then return end
-	if currentAnimTrack and currentAnimTrack.Length and currentAnimTrack.Length > 0 then
-		local alpha = math.clamp(
-			(inp.Position.X - hudSliderBg.AbsolutePosition.X) / hudSliderBg.AbsoluteSize.X,
-			0, 1)
-		pcall(function() currentAnimTrack.TimePosition = alpha * currentAnimTrack.Length end)
-	end
-end)
-
--- ▸ RenderStepped: slider'ı her kare canlı güncelle
-local function StartHUDTracking()
-	-- Önceki bağlantıyı kes → FPS kaybını önle
-	if hudTrackerConn then
-		hudTrackerConn:Disconnect()
-		hudTrackerConn = nil
-	end
-
-	hudTrackerConn = RunService.RenderStepped:Connect(function()
-		if not currentAnimTrack or not currentAnimTrack.IsPlaying then return end
-		local len = currentAnimTrack.Length
-		if not len or len <= 0 then return end
-
-		-- TimePosition / Length = ilerleme oranı (0..1)
-		local alpha = math.clamp(currentAnimTrack.TimePosition / len, 0, 1)
-
-		-- Slider fill ve knob'u güncelle (tween gerekmez, her frame smooth)
-		hudFill.Size     = UDim2.new(alpha, 0, 1, 0)
-		hudKnob.Position = UDim2.new(alpha, 0, 0.5, 0)
-
-		-- Tema renkleriyle senkron tut
-		hudFill.BackgroundColor3    = currentTheme.accent
-		hudStroke.Color             = currentTheme.stroke
-		hudInfoBtn.BackgroundColor3 = currentTheme.accent
-		infoPanelStroke.Color       = currentTheme.accent
-	end)
-end
-
-local function StopHUDTracking()
-	-- Disconnect -> RenderStepped baglantisini kes (FPS korunur)
-	if hudTrackerConn then
-		hudTrackerConn:Disconnect()
-		hudTrackerConn = nil
-	end
-end
-
--- ShowEmoteHUD: HUD'u asagidan kaydirarak goster
-ShowEmoteHUD = function(emoteId, emoteName)
-	if not Settings.showHUD then return end
-	-- Bekleyen gizleme işlemini iptal et (hızlı geçiş hatası düzeltmesi)
-	_hudHideToken = _hudHideToken + 1
-
-	_currentInfoId   = emoteId
-	_currentInfoName = emoteName
-
-	RefreshHUDFavBtn()
-	hudName.Text    = emoteName or "Emote"
-	hudCreator.Text = "Vexro Emotes"
-
-	-- Duraklat butonunu sıfırla
-	_isPaused = false
-	RefreshHudPauseBtn()
-
-	if infoPanelOpen then
-		OpenInfoPanel(emoteId, emoteName)
-	end
-
-	HUD.Position               = UDim2.new(0.5, 0, 1, -88)
-	HUD.BackgroundTransparency = 1
-	HUD.Visible                = true
-
-	TweenService:Create(HUD,
-		TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-		{Position = UDim2.new(0.5, 0, 1, -120), BackgroundTransparency = 0.30}
-	):Play()
-
-	RefreshHUDSpeedBtns()
-	StartHUDTracking()
-end
-
--- HideEmoteHUD: HUD'u asagiya kaydirarak gizle
-HideEmoteHUD = function()
-	_isPaused = false
-	RefreshHudPauseBtn()
-	-- stopBtn görselini sıfırla (doğrudan, döngü yaratmamak için)
-	if _stopBtnSquare then _stopBtnSquare.Image = ResolveAssetImage("rbxassetid://113416463749658") end
-	StopHUDTracking()
-	TweenService:Create(HUD,
-		TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{Position = UDim2.new(0.5, 0, 1, -88), BackgroundTransparency = 1}
-	):Play()
-	-- Token tabanlı iptal: sadece güncel token eşleşiyorsa gizle
-	local token = _hudHideToken
-	task.delay(0.22, function()
-		if HUD and _hudHideToken == token then
-			HUD.Visible = false
-		end
-	end)
-	if infoPanelOpen then CloseInfoPanel() end
-end
-
--- ----------------------------------------------------------------
--- BOLUM 4 - HUD & BLENDING ENTEGRASYONU
--- ----------------------------------------------------------------
-
-local _origPlayEmote = PlayEmote
-PlayEmote = function(id, name, silent)
-	_origPlayEmote(id, name, silent)
-	-- Anlık token'ı yakala: bu emote için geçerli token
-	local myToken = _hudHideToken + 1
-	_hudHideToken = myToken
-	task.defer(function()
-		-- Başka bir emote daha geçildiyse bu defer'ı atla
-		if _hudHideToken ~= myToken then return end
-		if currentAnimTrack then
-			ShowEmoteHUD(id, name)
-			local tracked = currentAnimTrack
-			tracked.Stopped:Connect(function()
-				if (currentAnimTrack == tracked or not currentAnimTrack)
-				and not isComboActive then
-					HideEmoteHUD()
-				end
-			end)
-		end
-	end)
-end
-
-local _origStopEmote = StopEmote
-StopEmote = function(showNotif)
-	_origStopEmote(showNotif)
-	isComboActive = false
-	ComboQueue    = {}
-	HideEmoteHUD()
-end
-
--- ----------------------------------------------------------------
--- BOLUM 5 - COMBO SIRASI
--- ----------------------------------------------------------------
-
--- comboQueue_UI forward declared above; reset here
-comboQueue_UI = {}
-
-local comboRow = MakeRow("", L.comboTitle, "", 25, 196)
-comboRow.Size             = UDim2.new(1, 0, 0, 196)
-comboRow.ClipsDescendants = true
-
-local comboTitleLbl = comboRow:FindFirstChildWhichIsA("TextLabel")
-if comboTitleLbl then
-	comboTitleLbl.Size     = UDim2.new(1, -12, 0, 20)
-	comboTitleLbl.Position = UDim2.new(0, 10, 0, 5)
-	comboTitleLbl.TextSize = 13
-end
-
-local slotHolder = Instance.new("Frame")
-slotHolder.Size             = UDim2.new(1, -12, 0, 36)
-slotHolder.Position         = UDim2.new(0, 6, 0, 28)
-slotHolder.BackgroundTransparency = 1
-slotHolder.ZIndex           = 9
-slotHolder.Parent           = comboRow
-local slotLayout = Instance.new("UIListLayout")
-slotLayout.FillDirection    = Enum.FillDirection.Horizontal
-slotLayout.Padding          = UDim.new(0, 5)
-slotLayout.Parent           = slotHolder
-
--- comboSlots forward declared above; populate here
-comboSlots = {}
-for si = 1, 3 do
-	local s = Instance.new("TextButton")
-	s.Size             = UDim2.new(0.316, 0, 1, 0)
-	s.BackgroundColor3 = Color3.fromRGB(30, 30, 46)
-	s.Text             = L.slotLabel .. " " .. si
-	s.TextColor3       = Color3.fromRGB(120, 120, 148)
-	s.Font             = Enum.Font.Gotham
-	s.TextSize         = 11
-	s.ZIndex           = 9
-	s.Parent           = slotHolder
-	Instance.new("UICorner", s).CornerRadius = UDim.new(0, 8)
-	comboSlots[si] = s
-	s.MouseButton1Click:Connect(function()
-		if comboQueue_UI[si] then
-			table.remove(comboQueue_UI, si)
-			for j = 1, 3 do
-				local e = comboQueue_UI[j]
-				comboSlots[j].Text = e and e.name:sub(1,9) or ("Slot " .. j)
-				TweenService:Create(comboSlots[j], TweenInfo.new(0.15), {
-					BackgroundColor3 = e and currentTheme.accent or Color3.fromRGB(30,30,46)
-				}):Play()
-			end
-		end
-	end)
-end
-
-local comboBtnHolder = Instance.new("Frame")
-comboBtnHolder.Size             = UDim2.new(1, -12, 0, 30)
-comboBtnHolder.Position         = UDim2.new(0, 6, 0, 70)
-comboBtnHolder.BackgroundTransparency = 1
-comboBtnHolder.ZIndex           = 9
-comboBtnHolder.Parent           = comboRow
-local comboBtnLayout = Instance.new("UIListLayout")
-comboBtnLayout.FillDirection    = Enum.FillDirection.Horizontal
-comboBtnLayout.Padding          = UDim.new(0, 5)
-comboBtnLayout.Parent           = comboBtnHolder
-
-local addComboBtn = Instance.new("TextButton")
-addComboBtn.Size             = UDim2.new(0.5, -2, 1, 0)
-addComboBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 170)
-addComboBtn.Text             = L.addEmote
-addComboBtn.TextColor3       = Color3.new(1, 1, 1)
-addComboBtn.Font             = Enum.Font.GothamBold
-addComboBtn.TextSize         = 12
-addComboBtn.ZIndex           = 9
-addComboBtn.Parent           = comboBtnHolder
-Instance.new("UICorner", addComboBtn).CornerRadius = UDim.new(0, 8)
-
-local playComboBtn = Instance.new("TextButton")
-playComboBtn.Size             = UDim2.new(0.5, -2, 1, 0)
-playComboBtn.BackgroundColor3 = Color3.fromRGB(60, 140, 80)
-playComboBtn.Text             = L.playCombo
-playComboBtn.TextColor3       = Color3.new(1, 1, 1)
-playComboBtn.Font             = Enum.Font.GothamBold
-playComboBtn.TextSize         = 12
-playComboBtn.ZIndex           = 9
-playComboBtn.Parent           = comboBtnHolder
-Instance.new("UICorner", playComboBtn).CornerRadius = UDim.new(0, 8)
-
--- ▸ Loop toggle butonu
-local loopComboBtn = Instance.new("TextButton")
-loopComboBtn.Size             = UDim2.new(1, -12, 0, 26)
-loopComboBtn.Position         = UDim2.new(0, 6, 0, 106)
-loopComboBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 46)
-loopComboBtn.Text             = L.loopText .. ": " .. L.off
-loopComboBtn.TextColor3       = Color3.fromRGB(120, 120, 148)
-loopComboBtn.Font             = Enum.Font.GothamBold
-loopComboBtn.TextSize         = 12
-loopComboBtn.ZIndex           = 9
-loopComboBtn.Parent           = comboRow
-Instance.new("UICorner", loopComboBtn).CornerRadius = UDim.new(0, 8)
-local loopStroke = Instance.new("UIStroke")
-loopStroke.Color        = Color3.fromRGB(60, 60, 90)
-loopStroke.Thickness    = 1
-loopStroke.Transparency = 0.5
-loopStroke.Parent       = loopComboBtn
--- Sol taraftaki loop ikonu (Icons.Refresh asset'i)
-local loopIcon = Instance.new("ImageLabel")
-loopIcon.Size                   = UDim2.new(0, 14, 0, 14)
-loopIcon.Position               = UDim2.new(0, 8, 0.5, -7)
-loopIcon.BackgroundTransparency = 1
-loopIcon.Image                  = ResolveAssetImage(Icons.Refresh)
-loopIcon.ImageColor3            = Color3.fromRGB(120, 120, 148)
-loopIcon.ZIndex                 = 10
-loopIcon.Parent                 = loopComboBtn
--- İkona yer açmak için text'i sağa kaydır
-loopComboBtn.TextXAlignment = Enum.TextXAlignment.Center
-
-loopComboBtn.MouseButton1Click:Connect(function()
-	_comboLoopEnabled = not _comboLoopEnabled
-	if _comboLoopEnabled then
-		loopComboBtn.Text             = L.loopText .. ": " .. L.on
-		loopComboBtn.TextColor3       = Color3.new(1, 1, 1)
-		loopIcon.ImageColor3          = Color3.new(1, 1, 1)
-		TweenService:Create(loopComboBtn, TweenInfo.new(0.2), {
-			BackgroundColor3 = currentTheme.accent
-		}):Play()
-		loopStroke.Color = currentTheme.accent
-	else
-		loopComboBtn.Text             = L.loopText .. ": " .. L.off
-		loopComboBtn.TextColor3       = Color3.fromRGB(120, 120, 148)
-		loopIcon.ImageColor3          = Color3.fromRGB(120, 120, 148)
-		TweenService:Create(loopComboBtn, TweenInfo.new(0.2), {
-			BackgroundColor3 = Color3.fromRGB(30, 30, 46)
-		}):Play()
-		loopStroke.Color = Color3.fromRGB(60, 60, 90)
-	end
-end)
-
-local clearComboBtn = Instance.new("TextButton")
-clearComboBtn.Size             = UDim2.new(1, -12, 0, 26)
-clearComboBtn.Position         = UDim2.new(0, 6, 0, 138)
-clearComboBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 40)
-clearComboBtn.Text             = L.clearCombo
-clearComboBtn.TextColor3       = Color3.new(1, 1, 1)
-clearComboBtn.Font             = Enum.Font.GothamBold
-clearComboBtn.TextSize         = 12
-clearComboBtn.ZIndex           = 9
-clearComboBtn.Parent           = comboRow
-Instance.new("UICorner", clearComboBtn).CornerRadius = UDim.new(0, 8)
-
-addComboBtn.MouseButton1Click:Connect(function()
-	if #comboQueue_UI >= 3 then return end
-	if not _currentInfoId then
-		-- Emote seçilmedi — butonu kısa süre kırmızı yak
-		local origCol = addComboBtn.BackgroundColor3
-		addComboBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-		addComboBtn.Text = L.selectFirst
-		task.delay(0.7, function()
-			addComboBtn.BackgroundColor3 = origCol
-			addComboBtn.Text = L.addEmote
-		end)
-		return
-	end
-	table.insert(comboQueue_UI, {id = _currentInfoId, name = _currentInfoName or "Emote"})
-	local idx = #comboQueue_UI
-	comboSlots[idx].Text = (comboQueue_UI[idx].name):sub(1, 9)
-	TweenService:Create(comboSlots[idx], TweenInfo.new(0.15), {
-		BackgroundColor3 = currentTheme.accent
-	}):Play()
-end)
-
-playComboBtn.MouseButton1Click:Connect(function()
-	if #comboQueue_UI == 0 then return end
-	local list = {}
-	for _, e in ipairs(comboQueue_UI) do
-		table.insert(list, {id = e.id, name = e.name})
-	end
-	StartCombo(list)
-end)
-
-clearComboBtn.MouseButton1Click:Connect(function()
-	comboQueue_UI    = {}
-	isComboActive    = false
-	ComboQueue       = {}
-	_comboLoopList   = {}
-	-- Loop kapatılsın
-	if _comboLoopEnabled then
-		_comboLoopEnabled             = false
-		loopComboBtn.Text             = L.loopText .. ": " .. L.off
-		loopComboBtn.TextColor3       = Color3.fromRGB(120, 120, 148)
-		loopComboBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 46)
-		loopStroke.Color              = Color3.fromRGB(60, 60, 90)
-		loopIcon.ImageColor3          = Color3.fromRGB(120, 120, 148)
-	end
-	for j = 1, 3 do
-		comboSlots[j].Text = L.slotLabel .. " " .. j
-		TweenService:Create(comboSlots[j], TweenInfo.new(0.15), {
-			BackgroundColor3 = Color3.fromRGB(30, 30, 46)
-		}):Play()
-	end
-end)
-
--- Tema değişince loop butonu aktifse yeni accent rengine güncelle
-do
-	local _prevApply = ApplyTheme
-	ApplyTheme = function(name)
-		_prevApply(name)
-		if _comboLoopEnabled and loopComboBtn and loopComboBtn.Parent then
-			pcall(function()
-				loopComboBtn.BackgroundColor3 = currentTheme.accent
-				loopStroke.Color             = currentTheme.accent
-				loopIcon.ImageColor3         = Color3.new(1, 1, 1)
-			end)
-		end
-	end
-end
-
-end -- _VexroExtend kapatiliyor
-_VexroExtend()
