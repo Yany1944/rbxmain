@@ -898,7 +898,7 @@ getgenv().Notify = function(data)
     end
 end
 
-local SettingsLib = SafeLoad("https://github.com/Yany1944/rbxmain/blob/main/Scripts/Settings.lua", "Settings Library")
+local SettingsLib = SafeLoad("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Settings.lua", "Settings Library")
 
 local ToggleContainer = Instance.new("Frame")
 ToggleContainer.Name = "open/Close"
