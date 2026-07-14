@@ -688,7 +688,7 @@ function SafeLoad(url, name)
     return res
 end
 
-SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain/refs/heads/main/Scripts/Notify.lua", "Notify System")
+SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Notify.lua", "Notify System")
 
 function GetAsset(asset)
     if not asset or asset == "" then return "" end
@@ -898,7 +898,7 @@ getgenv().Notify = function(data)
     end
 end
 
-local SettingsLib = SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain/refs/heads/main/Scripts/Settings.lua", "Settings Library")
+local SettingsLib = SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Settings.lua", "Settings Library")
 
 local ToggleContainer = Instance.new("Frame")
 ToggleContainer.Name = "open/Close"
@@ -3645,7 +3645,7 @@ BtnImportSettings.MouseButton1Click:Connect(function() HandleImportPrompt("Setti
 BtnImportFavorites.MouseButton1Click:Connect(function() HandleImportPrompt("Favorites") end)
 
 pcall(function()
-    SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain/refs/heads/main/Scripts/count-emote", "Count Emote")
+    SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/count-emote", "Count Emote")
 end)
 
 getgenv().Notify({
@@ -5761,7 +5761,7 @@ function fetchAllEmotes()
 
     local function fetchFromUrl()
         local success, result = pcall(function()
-            local jsonContent = game:HttpGet("https://cdn.jsdelivr.net/gh/7yd7/sniper-Emote/refs/heads/test/EmoteSniper.json")
+            local jsonContent = game:HttpGet("https://cdn.jsdelivr.net/gh/7yd7/sniper-Emote@test/EmoteSniper.json")
             if jsonContent and jsonContent ~= "" then
                 local data = HttpService:JSONDecode(jsonContent)
                 return data.data or {}
@@ -5881,7 +5881,7 @@ function fetchAllAnimations()
     task.spawn(function()
         while true do
             local success, result = pcall(function()
-                local jsonContent = game:HttpGet("https://cdn.jsdelivr.net/gh/7yd7/sniper-Emote/refs/heads/test/AnimationSniper.json")
+                local jsonContent = game:HttpGet("https://cdn.jsdelivr.net/gh/7yd7/sniper-Emote@test/AnimationSniper.json")
                 if jsonContent and jsonContent ~= "" then
                     local data = HttpService:JSONDecode(jsonContent)
                     return data.data or {}
@@ -5892,7 +5892,7 @@ function fetchAllAnimations()
             local offsaleSuccess, offsaleResult
             if offsaleAnimationJson then
                 offsaleSuccess, offsaleResult = pcall(function()
-                    local jsonContent = game:HttpGet("https://cdn.jsdelivr.net/gh/7yd7/sniper-Emote/refs/heads/test/AnimationSniperoffsale.json")
+                    local jsonContent = game:HttpGet("https://cdn.jsdelivr.net/gh/7yd7/sniper-Emote@test/AnimationSniperoffsale.json")
                     if jsonContent and jsonContent ~= "" then
                         local data = HttpService:JSONDecode(jsonContent)
                         return data.data or {}
@@ -8639,7 +8639,7 @@ task.spawn(function()
 end)
 
 if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-    SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain/refs/heads/main/Scripts/OpenEmote.lua", "Open Emote")
+    SafeLoad("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/OpenEmote.lua", "Open Emote")
     getgenv().Notify({
         Title = '7yd7 | Emote Mobile',
         Content = '📱 Added emote open button for ease of use',
