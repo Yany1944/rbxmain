@@ -140,7 +140,7 @@ end
 getgenv().Notify = function(options)
     local title = options.Title or "Notification"
     local content = options.Content or "No content provided"
-    local duration = options.Duration or 5
+    local duration = options.Duration or 3
     task.spawn(function()
         createNotification(title, content, duration)
     end)

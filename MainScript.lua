@@ -21,9 +21,9 @@ local AUTOFARM_ENABLED = false
 local WHITELIST_IDS = {10341870648}
 
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
---[[
+--[
 pcall(function()
-    local url = "https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"
+    local url = "https://cdn.jsdelivr.net/gh/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"
     local ok, result = pcall(function()
         return game:HttpGet(url, true)
     end)
@@ -7534,7 +7534,7 @@ local function HandleAutoReconnect(enabled)
     end
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
+local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
