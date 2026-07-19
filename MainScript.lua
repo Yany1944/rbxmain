@@ -127,10 +127,10 @@ local State = {
     AvatarDisplayEnabled = false,
 
     -- Character settings
-    WalkSpeed = 18,
-    JumpPower = 50,
-    MaxCameraZoom = 100,
-    CameraFOV = 90,
+    WalkSpeed = 17,
+    JumpPower = 53,
+    MaxCameraZoom = 80,
+    CameraFOV = 75,
     
     -- Camera 
     ViewClipEnabled = false,
@@ -7939,15 +7939,15 @@ do
 
         VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
-        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
-        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",true)
         VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers")
 
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
-        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", true)
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
         VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
