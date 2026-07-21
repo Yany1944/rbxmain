@@ -872,7 +872,10 @@ return function(env)
                 return bindButton
             end
 
-            function TabFunctions:CreatePlayerDropdown(title, desc)
+            -- stateKey - в какое поле State писать выбор. Разные вкладки передают
+            -- разные ключи, иначе списки затирают друг друга.
+            function TabFunctions:CreatePlayerDropdown(title, desc, stateKey)
+                stateKey = stateKey or "SelectedPlayerForFling"
                 local card = Create("Frame", {
                     BackgroundColor3 = CONFIG.Colors.Section,
                     BackgroundTransparency = BACK_TRANSPARENCY,
@@ -1011,7 +1014,7 @@ return function(env)
                         padding.Parent = pb
 
                         pb.MouseButton1Click:Connect(function()
-                            State.SelectedPlayerForFling = playerName
+                            State[stateKey] = playerName
                             dropdown.Text = (#playerName > 12 and playerName:sub(1, 12) .. "..." or playerName)
                             closeDropdown()
                         end)
