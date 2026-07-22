@@ -7054,6 +7054,30 @@ knifeThrow = function(silent)
     end
 end
 
+-- ─── Предикт точки попадания под серверный hitscan ────────────────────────────
+-- Сервер стреляет лучом origin→target и убивает первого задетого. Значит важна
+-- ТОЧНОСТЬ мировой точки прицела НА ТЕЛЕ цели в момент обработки на сервере.
+--   • Горизонталь (XZ): линейная экстраполяция по скорости. По XZ гравитации нет —
+--     это физически точно, strafe компенсируется полностью.
+--   • Вертикаль (Y): параболическая, с учётом гравитации (pos + vy*t − ½·g·t²).
+--     Линейный предикт по Y — и есть причина промахов при прыжке: на подъёме он
+--     завышает точку (пуля «чуть выше»), на падении/приземлении занижает
+--     («сильно ниже», т.к. земля останавливает падение, а линейный предикт нет).
+--   • Кламп по Y к телу (±2.4 студа от центра HRP): даже при рывке/приземлении
+--     прицел не выходит за торс. Луч всё равно засчитывается по любой части тела,
+--     поэтому центр масс = максимально надёжная точка.
+local function predictAimPoint(hrp, t)
+    t = math.clamp(t, 0.03, 0.25)  -- отсекаем выбросы при огромном пинге
+    local pos = hrp.Position
+    local vel = hrp.AssemblyLinearVelocity
+    local g = Workspace.Gravity
+    local predX = pos.X + vel.X * t
+    local predZ = pos.Z + vel.Z * t
+    local predY = pos.Y + vel.Y * t - 0.5 * g * t * t
+    predY = math.clamp(predY, pos.Y - 2.4, pos.Y + 2.4)
+    return Vector3.new(predX, predY, predZ)
+end
+
 shootMurderer = function(forceMagic)
     -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
     local useMode = forceMagic and "Magic" or (State.ShootMurdererMode or "Magic")
@@ -7131,8 +7155,9 @@ shootMurderer = function(forceMagic)
         local predictionTime = (pingValue / 1000) + 0.05
         
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
-        
+        -- Гравитационно-корректный предикт с клампом по Y (см. predictAimPoint)
+        local predictedPos = predictAimPoint(murdererHRP, predictionTime)
+
         local spawnPosition, targetPosition
 
         if enemyVelocity.Magnitude > 2 then
@@ -7173,15 +7198,14 @@ shootMurderer = function(forceMagic)
         
         local muzzlePosition = muzzleCFrame.Position
         
-        -- 2. ПРЕДИКЦИЯ (ИДЕНТИЧНА MAGIC MODE)
+        -- 2. ПРЕДИКЦИЯ: горизонталь линейно, вертикаль с гравитацией + кламп к телу
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
         local predictionTime = (pingValue / 1000) + 0.05
-        
-        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
-        
-        -- 3. ФОРМИРОВАНИЕ CFrame (стреляем от дула в предсказанную позицию)
+
+        local predictedPos = predictAimPoint(murdererHRP, predictionTime)
+
+        -- 3. ФОРМИРОВАНИЕ CFrame (стреляем от дула в точку прицела на теле цели)
         local shootFromCFrame = CFrame.lookAt(muzzlePosition, predictedPos)
         local shootToCFrame = CFrame.new(predictedPos)
         
