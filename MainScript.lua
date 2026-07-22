@@ -8575,7 +8575,12 @@ local function HandleAutoReconnect(enabled)
     end
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain/Libraryes/GUI.lua"))()({
+-- Адрес прибит к коммиту, а не к ветке. jsdelivr отдаёт файл с заголовком
+-- max-age=604800, то есть скачанная копия живёт в кэше клиента неделю, и purge
+-- на неё не действует — правка в ветке доезжает не сразу. Ссылка на коммит
+-- уникальна, кэшу нечего подставить.
+-- ВАЖНО: поменял GUI.lua и запушил — обнови хеш здесь, иначе подтянется старый.
+local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@94aeab5a4dbf20146a1b47e18b55c277859a07b1/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
