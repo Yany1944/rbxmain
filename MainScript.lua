@@ -198,6 +198,8 @@ local State = {
     -- Single-flight флаги: два одновременных телепорта = вылет клиента
     RejoinInProgress = false,
     ServerHopInProgress = false,
+    -- Выгрузка перед телепортом выполняется ровно один раз за сессию
+    TeleportCleanupDone = false,
 
     -- XP Farm
     XPFarmEnabled = false,
@@ -2070,7 +2072,18 @@ local function FullShutdown()
         State.FriendViewerEnabled = false
     end)
 
-    pcall(function() GUI.Cleanup() end)
+    -- GUI.Cleanup() здесь звать нельзя: локал GUI объявлен ниже по файлу, и
+    -- вызов молча съедался pcall'ом — ScreenGui переживал шатдаун и телепорт.
+    -- Сносим окно напрямую, благо библиотека кладёт его в State.UIElements.
+    pcall(function()
+        if State.UIElements.MainGui then
+            State.UIElements.MainGui:Destroy()
+            State.UIElements.MainGui = nil
+        end
+        for _, child in ipairs(CoreGui:GetChildren()) do
+            if child.Name == "MM2_ESP_UI" then child:Destroy() end
+        end
+    end)
 
     -- ✅ Остановка Trolling threads
     pcall(function()
@@ -2198,6 +2211,63 @@ local function FullShutdown()
     ScriptAlive = false
     --print("[FullShutdown] ✅ Complete!")
 end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- PREPARE FOR TELEPORT — обязательная выгрузка перед любым телепортом
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Причина серого экрана и вылета клиента на серверхопе: телепорт стартовал при
+-- живом скрипте. Пока движок уничтожает старый DataModel, наши RenderStepped/
+-- Heartbeat-коллбэки продолжают дёргать Workspace.CurrentCamera и Character,
+-- Drawing-объекты (они не принадлежат DataModel и переживают его) продолжают
+-- рендериться, а GUI висит в gethui() — на этом executor и роняет процесс.
+-- Чем дольше сессия, тем больше живых коннектов и инстансов, поэтому «побегав
+-- пару минут» словить краш проще, чем сразу после запуска.
+local function PrepareForTeleport()
+    if State.TeleportCleanupDone then return end
+    State.TeleportCleanupDone = true
+
+    -- 1) Штатный шатдаун: фичи, ESP-инстансы, GUI, треды, коннекты.
+    pcall(FullShutdown)
+
+    -- 2) Подметаем то, что могло не попасть в FullShutdown: любые коннекты и
+    --    треды, лежащие прямо в State (их там больше десятка на разные фичи).
+    pcall(function()
+        for key, value in pairs(State) do
+            if typeof(value) == "RBXScriptConnection" then
+                pcall(function() value:Disconnect() end)
+                State[key] = nil
+            elseif type(value) == "thread" and coroutine.status(value) == "suspended" then
+                pcall(function() task.cancel(value) end)
+                State[key] = nil
+            end
+        end
+    end)
+
+    -- 3) Drawing живёт вне DataModel — пережившие телепорт объекты держат
+    --    ссылку на мёртвую камеру. cleardrawcache есть не везде, отсюда pcall.
+    pcall(function()
+        if cleardrawcache then cleardrawcache() end
+    end)
+
+    -- 4) Снимаем guard: getgenv() переживает телепорт на большинстве
+    --    executor'ов, и без сброса queue_on_teleport-загрузка на новом сервере
+    --    упрётся в "Already running!" и молча выйдет. Заодно это гасит
+    --    while-циклы Anti-AFK, завязанные на getgenv().MM2_Script.
+    getgenv().MM2_Script = false
+
+    -- 5) Пара кадров движку, чтобы отработали Destroy/Disconnect до телепорта.
+    task.wait(0.2)
+end
+
+-- Страховка на телепорты, инициированные не нами (сама игра, другой скрипт):
+-- чистимся по факту старта телепорта. Повторный вызов безопасен — внутри флаг.
+pcall(function()
+    LocalPlayer.OnTeleport:Connect(function(teleportState)
+        if teleportState == Enum.TeleportState.Started then
+            PrepareForTeleport()
+        end
+    end)
+end)
 
 
 -- findNearestPlayer() - Поиск ближайшего игрока
@@ -8207,6 +8277,10 @@ local function Rejoin()
         local jobId = game.JobId
         local instanceTried = false
 
+        -- Тот же обязательный шаг, что и в ServerHop: живой скрипт в момент
+        -- уничтожения DataModel = серый экран и вылет клиента.
+        PrepareForTeleport()
+
         if connectionAlive and type(jobId) == "string" and jobId ~= "" then
             instanceTried = pcall(function()
                 TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
@@ -8337,13 +8411,19 @@ local function ServerHop()
         local SH = CONFIG.ServerHop
         local now = os.time()
 
+        -- pcall обязателен: после PrepareForTeleport UI уже уничтожен, а
+        -- сообщать об ошибке телепорта всё ещё нужно — уходим в warn.
         local function notify(color, text)
+            local shown = false
             if State.NotificationsEnabled then
-                ShowNotification(
-                    string.format("<font color=\"%s\">ServerHop: </font><font color=\"rgb(220,220,220)\">%s</font>", color, text),
-                    CONFIG.Colors.Text
-                )
+                shown = pcall(function()
+                    ShowNotification(
+                        string.format("<font color=\"%s\">ServerHop: </font><font color=\"rgb(220,220,220)\">%s</font>", color, text),
+                        CONFIG.Colors.Text
+                    )
+                end)
             end
+            if not shown then warn("[ServerHop] " .. text) end
         end
 
         -- ── Файловое хранилище (executor-функций может не быть) ──────────────
@@ -8546,6 +8626,11 @@ local function ServerHop()
                 target.playing, target.maxPlayers, target.score
             ))
 
+            -- Выгружаемся ДО телепорта, иначе живые рендер-коллбэки и Drawing
+            -- уходят в уничтожаемый DataModel и роняют клиент (серый экран).
+            -- Идемпотентно: на повторных попытках уже ничего не делает.
+            PrepareForTeleport()
+
             failed = false
             local started = pcall(function()
                 TeleportService:TeleportToPlaceInstance(game.PlaceId, target.id, LocalPlayer)
@@ -8571,7 +8656,9 @@ local function ServerHop()
         if conn then pcall(function() conn:Disconnect() end) end
 
         if failed then
-            notify("rgb(255, 85, 85)", "Teleport failed, try again")
+            -- Скрипт к этому моменту уже выгружен (PrepareForTeleport), поэтому
+            -- сообщение уйдёт в консоль: GUI больше нет, нужен перезапуск.
+            notify("rgb(255, 85, 85)", "Teleport failed — re-execute the script")
         end
         State.ServerHopInProgress = false
     end)
