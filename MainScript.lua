@@ -97,31 +97,6 @@ local CONFIG = {
         Duration = 3,
         FadeTime = 0.4
         },
-        -- Единственное место, где задаётся шрифт интерфейса. Раньше по всему коду
-        -- стояли легаси-энумы Enum.Font.Gotham*, а это лишь алиасы: во что именно
-        -- их развернёт движок, решает Roblox, и он это уже менял — отсюда и
-        -- «острые» буквы. Здесь семейство прибито гвоздями через FontFace.
-        -- Чтобы сменить шрифт на весь интерфейс — правится только AssetId.
-        Fonts = {
-            -- M PLUS Rounded 1c из каталога Roblox:
-            -- create.roblox.com/store/asset/12188570269
-            -- Каталожный шрифт живёт как ассет, а не файлом в клиенте, поэтому
-            -- задаётся айди, а не путём rbxasset://fonts/families/*.json.
-            AssetId = 12188570269,
-            -- Нативные начертания семейства, без синтетического жирного: у
-            -- M PLUS Rounded 1c эти три веса есть в самом файле, движок ничего
-            -- не дорисовывает. Порядок соответствует токенам ниже.
-            Weights = {
-                Regular = Enum.FontWeight.Regular,  -- 400
-                Medium  = Enum.FontWeight.Medium,   -- 500
-                Bold    = Enum.FontWeight.Bold,     -- 700
-            },
-            -- Запасной вариант: подставляется, если ассет не отдался (нет сети на
-            -- ассеты, урезанный клиент). Обычный Gotham, а не узкий GothamSSm —
-            -- именно в него разворачиваются легаси-энумы Enum.Font.Gotham*, и
-            -- именно он даёт «острые» буквы.
-            FallbackFamily = "rbxasset://fonts/families/Gotham.json",
-        },
         -- Настройки Server Hop / Rejoin. Всё, что можно крутить, — только здесь.
         ServerHop = {
             VisitedFile      = "7yd7/serverhop_visited.json", -- {jobId = os.time()}
@@ -150,49 +125,6 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 local LocalPlayer = Players.LocalPlayer
-
--- Готовые FontFace для всего интерфейса. Собираются один раз: держать три
--- константы дешевле, чем создавать Font на каждый лейбл. Порядок попыток —
--- каталожный ассет, затем запасное семейство, затем легаси-энум: меню не должно
--- остаться без текста ни на урезанном клиенте, ни без доступа к ассетам.
-do
-    local function faceOf(legacyEnum)
-        local probe = Instance.new("TextLabel")
-        probe.Font = legacyEnum
-        local face = probe.FontFace
-        probe:Destroy()
-        return face
-    end
-
-    local function make(weight, legacyEnum)
-        local assetId = CONFIG.Fonts.AssetId
-        if assetId then
-            -- Font.fromId есть не во всех сборках; там, где нет, тот же ассет
-            -- берётся обычным Font.new по content-строке. Стиль везде Normal:
-            -- курсив у семейства свой отсутствует, а синтетический выглядит
-            -- скошенной кашей.
-            local ok, face = pcall(function()
-                if Font.fromId then
-                    return Font.fromId(assetId, weight, Enum.FontStyle.Normal)
-                end
-                return Font.new("rbxassetid://" .. assetId, weight, Enum.FontStyle.Normal)
-            end)
-            if ok and face then return face end
-        end
-
-        local ok, face = pcall(function()
-            return Font.new(CONFIG.Fonts.FallbackFamily, weight)
-        end)
-        if ok and face then return face end
-
-        return faceOf(legacyEnum)
-    end
-
-    local weights = CONFIG.Fonts.Weights
-    CONFIG.Fonts.Regular = make(weights.Regular, Enum.Font.Gotham)
-    CONFIG.Fonts.Medium  = make(weights.Medium,  Enum.Font.GothamMedium)
-    CONFIG.Fonts.Bold    = make(weights.Bold,    Enum.Font.GothamBold)
-end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 3: STATE MANAGEMENT (СТРОКИ 116-252)
@@ -1298,7 +1230,7 @@ do
             lbl.Name                  = "Label"
             lbl.BackgroundTransparency = 1
             lbl.Size                  = UDim2.new(1, 0, 1, 0)
-            lbl.FontFace              = CONFIG.Fonts.Bold
+            lbl.Font                  = Enum.Font.GothamBold
             lbl.TextScaled            = false
             lbl.TextSize              = 14
             lbl.TextColor3            = CONFIG.Colors.Accent
@@ -2777,7 +2709,7 @@ local function ShowNotification(richText, defaultColor)
         label.BackgroundTransparency = 1
         label.RichText = true
         label.Text = richText or ""
-        label.FontFace = CONFIG.Fonts.Bold
+        label.Font = Enum.Font.GothamBold
         label.TextSize = 16
         label.TextColor3 = defaultColor or Color3.fromRGB(255, 255, 255)
         label.TextTransparency = 1
@@ -3071,7 +3003,7 @@ local function CreateAvatarUI()
             stroke = {Color = config.color, Thickness = 2},
             image = {Position = UDim2.new(0.5, 0, 0, 5), Size = UDim2.new(0, 60, 0, 60), AnchorPoint = Vector2.new(0.5, 0), BackgroundColor3 = Color3.fromRGB(40, 40, 45), Image = ""},
             imgCorner = {CornerRadius = UDim.new(0, 6)},
-            label = {Position = UDim2.new(0, 0, 1, -22), Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = config.text, TextColor3 = config.color, FontFace = CONFIG.Fonts.Bold, TextSize = 10, TextStrokeTransparency = 0.5}
+            label = {Position = UDim2.new(0, 0, 1, -22), Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Text = config.text, TextColor3 = config.color, Font = Enum.Font.GothamBold, TextSize = 10, TextStrokeTransparency = 0.5}
         }
         
         local frame = Instance.new("Frame", container)
@@ -3301,7 +3233,7 @@ local function CreateGunESP(gunPart)
     label.Size                   = UDim2.new(1, 0, 1, 0)
     label.Text                   = "GUN"
     label.TextColor3             = Color3.fromRGB(255, 255, 255)
-    label.FontFace               = CONFIG.Fonts.Bold
+    label.Font                   = Enum.Font.GothamBold
     label.TextSize               = 12
     label.TextStrokeTransparency = 0.6
     label.TextStrokeColor3       = Color3.fromRGB(0, 0, 0)
@@ -3409,7 +3341,7 @@ local function CreateTrapESP(trapModel)
     label.Size = UDim2.new(1, 0, 1, 0)
     label.Text = "Trap"
     label.TextColor3 = Color3.fromRGB(255, 85, 85)
-    label.FontFace = CONFIG.Fonts.Bold
+    label.Font = Enum.Font.GothamBold
     label.TextSize = 12
     label.TextStrokeTransparency = 0.7
     label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -6755,7 +6687,7 @@ local function CreatePlayerNicknameESP(player)
     label.Size = UDim2.new(1, 0, 1, 0)
     label.Text = player.Name
     label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.FontFace = CONFIG.Fonts.Bold
+    label.Font = Enum.Font.GothamBold
     label.TextSize = 12
     label.TextStrokeTransparency = 0.6
     label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -8927,7 +8859,7 @@ task.spawn(function()
     coinsLabel.Name = "CoinsDisplay"
     coinsLabel.Text = ""
     coinsLabel.RichText = true
-    coinsLabel.FontFace = CONFIG.Fonts.Bold
+    coinsLabel.Font = Enum.Font.GothamBold
     coinsLabel.TextSize = 14
     coinsLabel.TextColor3 = CONFIG.Colors.Text
     coinsLabel.TextXAlignment = Enum.TextXAlignment.Right
