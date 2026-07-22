@@ -31,6 +31,25 @@ return function(env)
         return obj
     end
 
+    -- Ширина текста тем же шрифтом, которым он реально рисуется. Старый
+    -- GetTextSize принимает только легаси-энум Enum.Font, то есть мерил бы не тот
+    -- крой, что стоит в CONFIG.Fonts, и вкладки съезжали бы. Async-вариант умеет
+    -- FontFace; если его в клиенте нет — откатываемся на старый замер.
+    local function MeasureTextWidth(text, size, face)
+        local ok, width = pcall(function()
+            local params = Instance.new("GetTextBoundsParams")
+            params.Text = text
+            params.Size = size
+            params.Font = face
+            params.Width = 999
+            return game:GetService("TextService"):GetTextBoundsAsync(params).X
+        end)
+        if ok and width then return width end
+        return game:GetService("TextService"):GetTextSize(
+            text, size, Enum.Font.GothamBold, Vector2.new(999, 35)
+        ).X
+    end
+
     local function AddCorner(parent, radius)
         return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
     end
@@ -110,7 +129,7 @@ return function(env)
         local titleLabel = Create("TextLabel", {
             Text = "MM2 <font color=\"rgb(240, 150, 200)\">for my кошичка жена!</font>",
             RichText = true,
-            Font = Enum.Font.GothamBold,
+            FontFace = CONFIG.Fonts.Bold,
             TextSize = 16,
             TextColor3 = CONFIG.Colors.Text,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -122,7 +141,7 @@ return function(env)
 
         local closeButton = Create("TextButton", {
             Text = "X",
-            Font = Enum.Font.GothamMedium,
+            FontFace = CONFIG.Fonts.Medium,
             TextSize = 24,
             TextColor3 = CONFIG.Colors.TextDark,
             BackgroundTransparency = 1,
@@ -135,7 +154,7 @@ return function(env)
             Name = "SearchBox",
             PlaceholderText = "Поиск...",
             Text = "",
-            Font = Enum.Font.Gotham,
+            FontFace = CONFIG.Fonts.Regular,
             TextSize = 12,
             TextColor3 = CONFIG.Colors.Text,
             PlaceholderColor3 = CONFIG.Colors.TextDark,
@@ -180,7 +199,7 @@ return function(env)
 
         local footer = Create("TextLabel", {
             Text = "Toggle Menu: " .. CONFIG.HideKey.Name .. " | Delete = Clear Bind",
-            Font = Enum.Font.Gotham,
+            FontFace = CONFIG.Fonts.Regular,
             TextSize = 11,
             TextColor3 = CONFIG.Colors.TextDark,
             BackgroundTransparency = 1,
@@ -280,7 +299,7 @@ return function(env)
         local function CreateTab(name)
             local tabBtn = Create("TextButton", {
                 Text = name,
-                Font = Enum.Font.GothamBold,
+                FontFace = CONFIG.Fonts.Bold,
                 TextSize = 13,
                 TextColor3 = CONFIG.Colors.TextDark,
                 BackgroundColor3 = CONFIG.Colors.Section,
@@ -291,9 +310,7 @@ return function(env)
             })
             AddCorner(tabBtn, 6)
 
-            local textWidth = game:GetService("TextService"):GetTextSize(
-                name, 13, Enum.Font.GothamBold, Vector2.new(999, 35)
-            ).X
+            local textWidth = MeasureTextWidth(name, 13, CONFIG.Fonts.Bold)
             tabBtn.Size = UDim2.new(0, textWidth + 20, 1, 0)
 
             -- Контейнер двух колонок для этой вкладки
@@ -389,7 +406,7 @@ return function(env)
                 end
                 local label = Create("TextLabel", {
                     Text = title,
-                    Font = Enum.Font.GothamBold,
+                    FontFace = CONFIG.Fonts.Bold,
                     TextSize = 13,
                     TextColor3 = CONFIG.Colors.TextDark,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -415,7 +432,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = title,
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 14,
                     TextColor3 = CONFIG.Colors.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -427,7 +444,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = desc,
-                    Font = Enum.Font.Gotham,
+                    FontFace = CONFIG.Fonts.Regular,
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.TextDark,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -439,7 +456,7 @@ return function(env)
 
                 local dropdown = Create("TextButton", {
                     Text = default .. " ▼",
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
@@ -483,7 +500,7 @@ return function(env)
                 for _, option in ipairs(options) do
                     local optionBtn = Create("TextButton", {
                         Text = option,
-                        Font = Enum.Font.Gotham,
+                        FontFace = CONFIG.Fonts.Regular,
                         TextSize = 10,
                         TextColor3 = CONFIG.Colors.Text,
                         BackgroundColor3 = Color3.fromRGB(50, 50, 55),
@@ -571,7 +588,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = title,
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 14,
                     TextColor3 = CONFIG.Colors.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -583,7 +600,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = desc,
-                    Font = Enum.Font.Gotham,
+                    FontFace = CONFIG.Fonts.Regular,
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.TextDark,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -654,7 +671,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = title,
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 14,
                     TextColor3 = CONFIG.Colors.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -666,7 +683,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = desc,
-                    Font = Enum.Font.Gotham,
+                    FontFace = CONFIG.Fonts.Regular,
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.TextDark,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -678,7 +695,7 @@ return function(env)
 
                 local inputBox = Create("TextBox", {
                     Text = tostring(defaultValue),
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 13,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
@@ -717,7 +734,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = title,
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 14,
                     TextColor3 = CONFIG.Colors.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -729,7 +746,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = description,
-                    Font = Enum.Font.Gotham,
+                    FontFace = CONFIG.Fonts.Regular,
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.TextDark,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -769,7 +786,7 @@ return function(env)
 
                 local valueLabel = Create("TextLabel", {
                     Text = step >= 1 and string.format("%d", default) or string.format("%.2f", default),
-                    Font = Enum.Font.GothamBold,
+                    FontFace = CONFIG.Fonts.Bold,
                     TextSize = 12,
                     TextColor3 = CONFIG.Colors.Accent,
                     BackgroundTransparency = 1,
@@ -835,7 +852,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = title,
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 14,
                     TextColor3 = CONFIG.Colors.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -849,7 +866,7 @@ return function(env)
                     Name = keybindKey .. "_Button",
                     Text = State.Keybinds[keybindKey] ~= Enum.KeyCode.Unknown
                         and State.Keybinds[keybindKey].Name or "Not Bound",
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 12,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
@@ -889,7 +906,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = title,
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 14,
                     TextColor3 = CONFIG.Colors.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -901,7 +918,7 @@ return function(env)
 
                 Create("TextLabel", {
                     Text = desc,
-                    Font = Enum.Font.Gotham,
+                    FontFace = CONFIG.Fonts.Regular,
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.TextDark,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -913,7 +930,7 @@ return function(env)
 
                 local dropdown = Create("TextButton", {
                     Text = "Select Player ▼",
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 11,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = Color3.fromRGB(45, 45, 50),
@@ -973,7 +990,7 @@ return function(env)
                     if #players == 0 then
                         Create("TextLabel", {
                             Text = "No players",
-                            Font = Enum.Font.Gotham,
+                            FontFace = CONFIG.Fonts.Regular,
                             TextSize = 11,
                             TextColor3 = CONFIG.Colors.TextDark,
                             BackgroundTransparency = 1,
@@ -994,7 +1011,7 @@ return function(env)
                     for _, playerName in ipairs(players) do
                         local pb = Create("TextButton", {
                             Text = playerName,
-                            Font = Enum.Font.Gotham,
+                            FontFace = CONFIG.Fonts.Regular,
                             TextSize = 11,
                             TextColor3 = CONFIG.Colors.Text,
                             BackgroundColor3 = Color3.fromRGB(50, 50, 55),
@@ -1121,7 +1138,7 @@ return function(env)
                 if title ~= "" and title ~= nil then
                     Create("TextLabel", {
                         Text = title,
-                        Font = Enum.Font.GothamMedium,
+                        FontFace = CONFIG.Fonts.Medium,
                         TextSize = 13,
                         TextColor3 = CONFIG.Colors.Text,
                         BackgroundTransparency = 1,
@@ -1134,7 +1151,7 @@ return function(env)
 
                 local button = Create("TextButton", {
                     Text = buttonText,
-                    Font = Enum.Font.GothamMedium,
+                    FontFace = CONFIG.Fonts.Medium,
                     TextSize = 13,
                     TextColor3 = CONFIG.Colors.Text,
                     BackgroundColor3 = color or CONFIG.Colors.Accent,
@@ -1258,7 +1275,7 @@ return function(env)
         local resizeGrip = Create("TextButton", {
             Name = "ResizeGrip",
             Text = "↘",
-            Font = Enum.Font.GothamBold,
+            FontFace = CONFIG.Fonts.Bold,
             TextSize = 14,
             TextColor3 = CONFIG.Colors.TextDark,
             BackgroundColor3 = CONFIG.Colors.Section,
