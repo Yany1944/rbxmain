@@ -96,6 +96,21 @@ local CONFIG = {
         Notification = {
         Duration = 3,
         FadeTime = 0.4
+        },
+        -- Настройки Server Hop / Rejoin. Всё, что можно крутить, — только здесь.
+        ServerHop = {
+            VisitedFile      = "7yd7/serverhop_visited.json", -- {jobId = os.time()}
+            CacheFile        = "7yd7/serverhop_cache.json",   -- кэш списка серверов
+            VisitedLifetime  = 30 * 60,  -- сколько секунд считать сервер «только что посещённым»
+            VisitedLimit     = 250,      -- страховка от разрастания файла истории
+            CacheLifetime    = 240,      -- сколько секунд переиспользовать список серверов
+            MinPlayers       = 1,        -- пустые сервера чаще всего мертвы/приватны
+            MaxFillPercent   = 0.9,      -- не лезем в почти полный сервер (телепорт отвалится)
+            FetchLimit       = 100,      -- limit= в запросе к games.roblox.com
+            MaxPages         = 5,        -- максимум страниц пагинации за один хоп
+            TopPick          = 5,        -- из скольких лучших кандидатов тянем случайного
+            TeleportRetry    = 3,        -- сколько РАЗНЫХ серверов пробуем при явном отказе
+            TeleportTimeout  = 12,       -- сек ожидания вердикта по одному телепорту
         }
 	}
 
@@ -180,6 +195,9 @@ local State = {
     AutoReconnectEnabled = false,
     ReconnectInterval = 60 * 60, -- 25 минут в секундах
     ReconnectThread = nil,
+    -- Single-flight флаги: два одновременных телепорта = вылет клиента
+    RejoinInProgress = false,
+    ServerHopInProgress = false,
 
     -- XP Farm
     XPFarmEnabled = false,
@@ -362,8 +380,11 @@ if queue_on_teleport then
         end
     end)
     
-    -- Попытка 2: Сразу добавляем в очередь (для ручной смены серверов)
+    -- Попытка 2: Сразу добавляем в очередь (для ручной смены серверов).
+    -- TeleportCheck взводим здесь же, иначе OnTeleport добавит скрипт в очередь
+    -- второй раз и после хопа MainScript качается/стартует дважды.
     queue_on_teleport(teleportScript)
+    TeleportCheck = true
 end
 --]]
 
@@ -2070,9 +2091,22 @@ local function FullShutdown()
         State.BlockPathEnabled = false
     end)
 
+    -- Гасим авто-реджойн/реконнект напрямую, а не через HandleAutoRejoin/
+    -- HandleAutoReconnect: они объявлены ниже по файлу, здесь это ещё nil, и
+    -- вызов молча съедался pcall'ом — после Shutdown коннект оставался жив и
+    -- следующий ErrorPrompt дёргал телепорт из уже выгруженного скрипта.
     pcall(function()
-        if State.AutoRejoinEnabled then HandleAutoRejoin(false) end
-        if State.AutoReconnectEnabled then HandleAutoReconnect(false) end
+        State.AutoRejoinEnabled = false
+        if getgenv().AutoRejoinConnection then
+            pcall(function() getgenv().AutoRejoinConnection:Disconnect() end)
+            getgenv().AutoRejoinConnection = nil
+        end
+
+        State.AutoReconnectEnabled = false
+        if State.ReconnectThread then
+            pcall(function() task.cancel(State.ReconnectThread) end)
+            State.ReconnectThread = nil
+        end
     end)
 
     -- ✅ Очистка всех general connections
@@ -8136,14 +8170,69 @@ local function SetupAntiAFK()
     end)
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- REJOIN v2 — перезаход без вылета
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Старая версия роняла клиент по двум причинам:
+--   1) она ВСЕГДА через 2 секунды дожимала вторым Teleport() поверх первого,
+--      ещё летящего TeleportToPlaceInstance — два телепорта одновременно
+--      и есть тот самый краш;
+--   2) она вызывалась прямо в потоке клика по кнопке и делала там task.wait.
+-- Теперь: одна попытка за раз (single-flight), инстанс-перезаход только пока
+-- соединение с сервером живо, фолбэк на обычный Teleport — исключительно после
+-- реального отказа (TeleportInitFailed), а не по таймеру.
 local function Rejoin()
-    task.wait(0.5)
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-    end)
-    task.wait(2)
-    pcall(function()
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    if State.RejoinInProgress then return end
+    State.RejoinInProgress = true
+
+    task.spawn(function()
+        local failed = false
+        local conn
+
+        -- Единственный достоверный сигнал провала телепорта на клиенте.
+        pcall(function()
+            conn = TeleportService.TeleportInitFailed:Connect(function(player)
+                if player == LocalPlayer then failed = true end
+            end)
+        end)
+
+        -- Если реплика уже отвалилась (кик/дисконнект), то заходить в тот же
+        -- JobId бессмысленно — инстанс нас ещё держит, и телепорт зависает.
+        local connectionAlive = false
+        pcall(function()
+            connectionAlive = game:GetService("NetworkClient")
+                :FindFirstChildWhichIsA("ClientReplicator") ~= nil
+        end)
+
+        local jobId = game.JobId
+        local instanceTried = false
+
+        if connectionAlive and type(jobId) == "string" and jobId ~= "" then
+            instanceTried = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
+            end)
+
+            -- Ждём вердикт. Если телепорт принят — этот тред умрёт вместе с
+            -- клиентом, и дальше мы просто не дойдём.
+            if instanceTried then
+                local elapsed = 0
+                while elapsed < CONFIG.ServerHop.TeleportTimeout and not failed do
+                    task.wait(0.25)
+                    elapsed += 0.25
+                end
+            end
+        end
+
+        -- Фолбэк: либо инстанс-перезаход не запускался, либо он явно отказал.
+        if (not instanceTried) or failed then
+            pcall(function()
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end)
+            task.wait(CONFIG.ServerHop.TeleportTimeout)
+        end
+
+        if conn then pcall(function() conn:Disconnect() end) end
+        State.RejoinInProgress = false
     end)
 end
 
@@ -8215,204 +8304,277 @@ game.Players.PlayerRemoving:Connect(function(plr)
     respawning[plr.UserId] = nil
 end)
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- SERVER HOP v3 — механика из serverhop.lua + история посещений по времени
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Что чинили в v2:
+--   * вся сеть (до 5 последовательных HttpGet) крутилась прямо в потоке клика по
+--     кнопке — UI вешался на секунды, клиент вылетал; теперь всё в task.spawn;
+--   * история посещений ключевалась номером часа (os.date("!*t").hour), поэтому
+--     в тот же час другого дня подтягивался чёрный список недельной давности;
+--     теперь на каждый jobId пишется os.time() и запись протухает через
+--     CONFIG.ServerHop.VisitedLifetime — вернуться на сервер, где был 5 часов
+--     или неделю назад, ничто не мешает;
+--   * «ретрай» телепорта долбил тот же jobId, хотя pcall вокруг
+--     TeleportToPlaceInstance возвращает true всегда — реальный отказ не ловился;
+--     теперь отказ ловится через TeleportInitFailed и уводит на ДРУГОЙ сервер;
+--   * список серверов не кэшировался — каждый хоп бил по games.roblox.com и
+--     ловил 429; теперь кэш живёт CONFIG.ServerHop.CacheLifetime секунд.
 local function ServerHop()
-    -- ═══════════════════════════════════════════════════════════
-    -- SERVER HOP SYSTEM v2.0 - Enhanced with file tracking
-    -- ═══════════════════════════════════════════════════════════
-
-    local CONFIG_SH = {
-        FILE_NAME = "server-hop-cache.json",
-        MIN_PLAYERS = 1,
-        MAX_PLAYERS_PERCENT = 0.9,
-        FETCH_LIMIT = 100,
-        MAX_PAGES = 5,
-        TELEPORT_RETRY = 3
-    }
-
-    local visitedServers = {}
-    local currentHour = os.date("!*t").hour
-
-    -- Загрузка кэша
-    local function InitializeCache()
-        local success, data = pcall(function()
-            return HttpService:JSONDecode(readfile(CONFIG_SH.FILE_NAME))
-        end)
-
-        if success and data then
-            if data.hour and data.hour == currentHour and data.servers then
-                visitedServers = data.servers
-                return
-            end
-        end
-
-        visitedServers = {}
-        pcall(function()
-            writefile(CONFIG_SH.FILE_NAME, HttpService:JSONEncode({
-                hour = currentHour,
-                servers = {}
-            }))
-        end)
-    end
-
-    -- Сохранение кэша
-    local function SaveCache()
-        pcall(function()
-            writefile(CONFIG_SH.FILE_NAME, HttpService:JSONEncode({
-                hour = currentHour,
-                servers = visitedServers
-            }))
-        end)
-    end
-
-    -- Проверка посещённого сервера
-    local function IsServerVisited(jobId)
-        for _, id in ipairs(visitedServers) do
-            if id == jobId then return true end
-        end
-        return false
-    end
-
-    -- Получение серверов
-    local function FetchServers(cursor)
-        local url = string.format(
-            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=%d",
-            game.PlaceId,
-            CONFIG_SH.FETCH_LIMIT
-        )
-
-        if cursor then url = url .. "&cursor=" .. cursor end
-
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet(url))
-        end)
-
-        return success and result or nil
-    end
-
-    -- Оценка сервера
-    local function CalculateScore(playing, maxPlayers)
-        local fillRatio = playing / maxPlayers
-        local score = (1 - fillRatio) * 100
-
-        if playing >= 2 and playing <= 6 then
-            score = score + 50
-        end
-
-        return score
-    end
-
-    -- Фильтрация серверов
-    local function FilterServers(serverList)
-        local validServers = {}
-
-        for _, server in ipairs(serverList) do
-            local jobId = server.id
-            local playing = server.playing
-            local maxPlayers = server.maxPlayers
-
-            local isNotCurrentServer = jobId ~= game.JobId
-            local isNotVisited = not IsServerVisited(jobId)
-            local hasPlayers = playing >= CONFIG_SH.MIN_PLAYERS
-            local notFull = playing < (maxPlayers * CONFIG_SH.MAX_PLAYERS_PERCENT)
-
-            if isNotCurrentServer and isNotVisited and hasPlayers and notFull then
-                table.insert(validServers, {
-                    id = jobId,
-                    playing = playing,
-                    maxPlayers = maxPlayers,
-                    score = CalculateScore(playing, maxPlayers)
-                })
-            end
-        end
-
-        return validServers
-    end
-
-    -- Телепортация
-    local function TeleportToServer(jobId)
-        for attempt = 1, CONFIG_SH.TELEPORT_RETRY do
-            local success = pcall(function()
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
-            end)
-
-            if success then
-                table.insert(visitedServers, jobId)
-                SaveCache()
-                return true
-            else
-                task.wait(2)
-            end
-        end
-
-        return false
-    end
-
-    -- Основная логика
-    InitializeCache()
-
-    local allServers = {}
-    local cursor = nil
-    local pagesScanned = 0
-
-    repeat
-        local result = FetchServers(cursor)
-
-        if not result or not result.data then
-            if State.NotificationsEnabled then
-                ShowNotification(
-                    "<font color=\"rgb(255, 85, 85)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Failed to fetch servers</font>",
-                    CONFIG.Colors.Text
-                )
-            end
-            break
-        end
-
-        local filtered = FilterServers(result.data)
-
-        for _, server in ipairs(filtered) do
-            table.insert(allServers, server)
-        end
-
-        cursor = result.nextPageCursor
-        pagesScanned = pagesScanned + 1
-
-        if #allServers >= 20 then break end
-
-        task.wait(0.1)
-
-    until not cursor or pagesScanned >= CONFIG_SH.MAX_PAGES
-
-    if #allServers == 0 then
+    if State.ServerHopInProgress then
         if State.NotificationsEnabled then
             ShowNotification(
-                "<font color=\"rgb(255, 85, 85)\">ServerHop: </font><font color=\"rgb(220,220,220)\">No suitable servers found</font>",
+                "<font color=\"rgb(255, 170, 50)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Already searching...</font>",
                 CONFIG.Colors.Text
             )
         end
         return
     end
+    State.ServerHopInProgress = true
 
-    -- Сортировка и выбор
-    table.sort(allServers, function(a, b)
-        return a.score > b.score
+    -- Сеть и ожидание телепорта не должны блокировать поток клика по кнопке.
+    task.spawn(function()
+        local SH = CONFIG.ServerHop
+        local now = os.time()
+
+        local function notify(color, text)
+            if State.NotificationsEnabled then
+                ShowNotification(
+                    string.format("<font color=\"%s\">ServerHop: </font><font color=\"rgb(220,220,220)\">%s</font>", color, text),
+                    CONFIG.Colors.Text
+                )
+            end
+        end
+
+        -- ── Файловое хранилище (executor-функций может не быть) ──────────────
+        local function LoadJSON(path, default)
+            local ok, data = pcall(function()
+                if isfile and isfile(path) then
+                    return HttpService:JSONDecode(readfile(path))
+                end
+                return nil
+            end)
+            if ok and type(data) == "table" then return data end
+            return default
+        end
+
+        local function SaveJSON(path, data)
+            pcall(function()
+                if not writefile then return end
+                if isfolder and makefolder and not isfolder("7yd7") then makefolder("7yd7") end
+                writefile(path, HttpService:JSONEncode(data))
+            end)
+        end
+
+        -- ── История посещений: {jobId = timestamp}, протухает по времени ─────
+        local visited = {}
+        do
+            local raw = LoadJSON(SH.VisitedFile, {})
+            local ordered = {}
+            for jobId, stamp in pairs(raw) do
+                if type(jobId) == "string" and type(stamp) == "number"
+                    and (now - stamp) < SH.VisitedLifetime then
+                    table.insert(ordered, { id = jobId, t = stamp })
+                end
+            end
+            -- Свежие — вперёд, хвост сверх лимита выбрасываем, чтобы файл не рос.
+            table.sort(ordered, function(a, b) return a.t > b.t end)
+            for i = 1, math.min(#ordered, SH.VisitedLimit) do
+                visited[ordered[i].id] = ordered[i].t
+            end
+        end
+
+        local function SaveVisited()
+            SaveJSON(SH.VisitedFile, visited)
+        end
+
+        local function MarkVisited(jobId)
+            if type(jobId) == "string" and jobId ~= "" then
+                visited[jobId] = os.time()
+                SaveVisited()
+            end
+        end
+
+        -- Текущий сервер тоже в историю: иначе после хопа с нового сервера можно
+        -- сразу прыгнуть обратно (пинг-понг A → B → A).
+        MarkVisited(game.JobId)
+
+        -- ── Получение списка серверов ────────────────────────────────────────
+        local function FetchPage(cursor)
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=%d",
+                game.PlaceId,
+                SH.FetchLimit
+            )
+            if cursor then url = url .. "&cursor=" .. cursor end
+
+            local ok, result = pcall(function()
+                return HttpService:JSONDecode(game:HttpGet(url))
+            end)
+            if ok and type(result) == "table" then return result end
+            return nil
+        end
+
+        local function FetchServers()
+            local list, cursor, pages = {}, nil, 0
+            repeat
+                local page = FetchPage(cursor)
+                if not page or type(page.data) ~= "table" then break end
+
+                for _, srv in ipairs(page.data) do
+                    if type(srv.id) == "string"
+                        and type(srv.playing) == "number"
+                        and type(srv.maxPlayers) == "number" then
+                        table.insert(list, {
+                            id = srv.id,
+                            playing = srv.playing,
+                            maxPlayers = srv.maxPlayers
+                        })
+                    end
+                end
+
+                cursor = page.nextPageCursor
+                pages += 1
+                task.wait(0.15)
+            until (not cursor) or pages >= SH.MaxPages
+            return list
+        end
+
+        -- ── Кэш списка серверов ──────────────────────────────────────────────
+        local cache = LoadJSON(SH.CacheFile, nil)
+        local cacheValid = cache
+            and cache.place == game.PlaceId
+            and type(cache.servers) == "table"
+            and #cache.servers > 0
+            and (now - (tonumber(cache.timestamp) or 0)) < SH.CacheLifetime
+
+        local servers
+        if cacheValid then
+            servers = cache.servers
+        else
+            servers = FetchServers()
+            if #servers > 0 then
+                SaveJSON(SH.CacheFile, {
+                    place = game.PlaceId,
+                    timestamp = now,
+                    servers = servers
+                })
+            elseif cache and cache.place == game.PlaceId and type(cache.servers) == "table" then
+                -- API не ответил — лучше протухший список, чем ничего.
+                servers = cache.servers
+            end
+        end
+
+        if type(servers) ~= "table" or #servers == 0 then
+            notify("rgb(255, 85, 85)", "Failed to fetch servers")
+            State.ServerHopInProgress = false
+            return
+        end
+
+        -- ── Отбор кандидатов ─────────────────────────────────────────────────
+        local function Score(playing, maxPlayers)
+            local score = (1 - playing / maxPlayers) * 100
+            if playing >= 2 and playing <= 6 then score = score + 50 end
+            return score
+        end
+
+        local function Collect(skipVisited, strict)
+            local out = {}
+            for _, srv in ipairs(servers) do
+                local pass = srv.id ~= game.JobId
+                    and srv.playing > 0
+                    and srv.playing < srv.maxPlayers
+
+                if pass and skipVisited and visited[srv.id] then pass = false end
+                if pass and strict then
+                    pass = srv.playing >= SH.MinPlayers
+                        and srv.playing < srv.maxPlayers * SH.MaxFillPercent
+                end
+
+                if pass then
+                    table.insert(out, {
+                        id = srv.id,
+                        playing = srv.playing,
+                        maxPlayers = srv.maxPlayers,
+                        score = Score(srv.playing, srv.maxPlayers)
+                    })
+                end
+            end
+            return out
+        end
+
+        local candidates = Collect(true, true)
+        if #candidates == 0 then candidates = Collect(true, false) end
+        if #candidates == 0 then
+            -- Все известные сервера посещены за последние VisitedLifetime секунд.
+            -- Без сброса хоп встал бы намертво, поэтому историю чистим.
+            visited = {}
+            MarkVisited(game.JobId)
+            candidates = Collect(true, true)
+            if #candidates == 0 then candidates = Collect(true, false) end
+        end
+
+        if #candidates == 0 then
+            notify("rgb(255, 85, 85)", "No suitable servers found")
+            State.ServerHopInProgress = false
+            return
+        end
+
+        table.sort(candidates, function(a, b) return a.score > b.score end)
+
+        -- ── Телепорт ─────────────────────────────────────────────────────────
+        local failed = false
+        local conn
+        pcall(function()
+            conn = TeleportService.TeleportInitFailed:Connect(function(player)
+                if player == LocalPlayer then failed = true end
+            end)
+        end)
+
+        for attempt = 1, SH.TeleportRetry do
+            if #candidates == 0 then break end
+
+            -- Случайный из топа — чтобы все клиенты не сваливались в один сервер.
+            local target = table.remove(candidates, math.random(1, math.min(SH.TopPick, #candidates)))
+            if not target then break end
+
+            -- Пишем ДО телепорта: после успешного телепорта код уже не отработает.
+            MarkVisited(target.id)
+
+            notify("rgb(85, 255, 120)", string.format(
+                "Joining %d/%d players (Score: %.0f)",
+                target.playing, target.maxPlayers, target.score
+            ))
+
+            failed = false
+            local started = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, target.id, LocalPlayer)
+            end)
+
+            if started then
+                local elapsed = 0
+                while elapsed < SH.TeleportTimeout and not failed do
+                    task.wait(0.25)
+                    elapsed += 0.25
+                end
+                -- Отказа не было: телепорт принят. Второй телепорт поверх первого
+                -- — ровно та причина вылетов, из-за которой всё это переписывалось.
+                if not failed then break end
+            end
+
+            -- Явный отказ: сервер умер/полон. Список серверов протух — сбрасываем
+            -- кэш, чтобы следующий хоп сходил в API заново.
+            SaveJSON(SH.CacheFile, { place = game.PlaceId, timestamp = 0, servers = {} })
+            task.wait(1)
+        end
+
+        if conn then pcall(function() conn:Disconnect() end) end
+
+        if failed then
+            notify("rgb(255, 85, 85)", "Teleport failed, try again")
+        end
+        State.ServerHopInProgress = false
     end)
-
-    local topCount = math.min(3, #allServers)
-    local selectedServer = allServers[math.random(1, topCount)]
-
-    if State.NotificationsEnabled then
-        ShowNotification(
-            string.format(
-                "<font color=\"rgb(85, 255, 120)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Joining %d/%d players (Score: %.0f)</font>",
-                selectedServer.playing,
-                selectedServer.maxPlayers,
-                selectedServer.score
-            ),
-            CONFIG.Colors.Text
-        )
-    end
-
-    TeleportToServer(selectedServer.id)
 end
 
 local function ServerLagger()
@@ -8632,30 +8794,44 @@ end
 -- Auto Rejoin on Disconnect
 local function HandleAutoRejoin(enabled)
     State.AutoRejoinEnabled = enabled
-    
-    if enabled then
-        task.spawn(function()
-            repeat task.wait() until game.CoreGui:FindFirstChild('RobloxPromptGui')
-            
-            local promptOverlay = game.CoreGui.RobloxPromptGui.promptOverlay
-            local connection
-            
-            connection = promptOverlay.ChildAdded:Connect(function(prompt)
-                if State.AutoRejoinEnabled and prompt.Name == 'ErrorPrompt' then
-                    task.wait(0.5)
-                    Rejoin()
-                end
-            end)
-            
-            getgenv().AutoRejoinConnection = connection
-            TrackConnection(connection)
-        end)
-    else
-        if getgenv().AutoRejoinConnection then
-            getgenv().AutoRejoinConnection:Disconnect()
-            getgenv().AutoRejoinConnection = nil
-        end
+
+    -- Пересоздаём коннект с нуля: без этого повторное включение тумблера
+    -- вешало второй ChildAdded и Rejoin вызывался дважды на один ErrorPrompt.
+    if getgenv().AutoRejoinConnection then
+        pcall(function() getgenv().AutoRejoinConnection:Disconnect() end)
+        getgenv().AutoRejoinConnection = nil
     end
+
+    if not enabled then return end
+
+    task.spawn(function()
+        local promptGui
+        local waited = 0
+        -- Ограниченное ожидание: на части executor'ов RobloxPromptGui нет вовсе,
+        -- и бесконечный repeat висел бы в памяти до конца сессии.
+        repeat
+            promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
+            if promptGui then break end
+            task.wait(0.25)
+            waited += 0.25
+        until waited >= 30
+
+        local overlay = promptGui and promptGui:FindFirstChild("promptOverlay")
+        if not overlay then
+            warn("[Auto Rejoin] RobloxPromptGui не найден — автореджойн недоступен")
+            return
+        end
+
+        local connection = overlay.ChildAdded:Connect(function(prompt)
+            if State.AutoRejoinEnabled and prompt.Name == "ErrorPrompt" then
+                task.wait(0.5)
+                Rejoin() -- сам разберётся: соединение мертво → обычный Teleport
+            end
+        end)
+
+        getgenv().AutoRejoinConnection = connection
+        TrackConnection(connection)
+    end)
 end
 
 local DEFAULT_INTERVAL = 25 * 60
@@ -8688,7 +8864,8 @@ local function HandleAutoReconnect(enabled)
         end)
     else
         if State.ReconnectThread then
-            task.cancel(State.ReconnectThread)
+            -- Тред мог уже завершиться сам — task.cancel по мёртвому треду кидает.
+            pcall(function() task.cancel(State.ReconnectThread) end)
             State.ReconnectThread = nil
         end
     end
