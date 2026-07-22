@@ -101,12 +101,21 @@ local CONFIG = {
         -- стояли легаси-энумы Enum.Font.Gotham*, а это лишь алиасы: во что именно
         -- их развернёт движок, решает Roblox, и он это уже менял — отсюда и
         -- «острые» буквы. Здесь семейство прибито гвоздями через FontFace.
-        -- Чтобы сменить шрифт на весь интерфейс — правится только Family.
+        -- Чтобы сменить шрифт на весь интерфейс — правится только AssetId.
         Fonts = {
-            -- Mukta из каталога Roblox: create.roblox.com/store/asset/12187365559
+            -- M PLUS Rounded 1c из каталога Roblox:
+            -- create.roblox.com/store/asset/12188570269
             -- Каталожный шрифт живёт как ассет, а не файлом в клиенте, поэтому
             -- задаётся айди, а не путём rbxasset://fonts/families/*.json.
-            AssetId = 12187365559,
+            AssetId = 12188570269,
+            -- Нативные начертания семейства, без синтетического жирного: у
+            -- M PLUS Rounded 1c эти три веса есть в самом файле, движок ничего
+            -- не дорисовывает. Порядок соответствует токенам ниже.
+            Weights = {
+                Regular = Enum.FontWeight.Regular,  -- 400
+                Medium  = Enum.FontWeight.Medium,   -- 500
+                Bold    = Enum.FontWeight.Bold,     -- 700
+            },
             -- Запасной вариант: подставляется, если ассет не отдался (нет сети на
             -- ассеты, урезанный клиент). Обычный Gotham, а не узкий GothamSSm —
             -- именно в него разворачиваются легаси-энумы Enum.Font.Gotham*, и
@@ -159,12 +168,14 @@ do
         local assetId = CONFIG.Fonts.AssetId
         if assetId then
             -- Font.fromId есть не во всех сборках; там, где нет, тот же ассет
-            -- берётся обычным Font.new по content-строке.
+            -- берётся обычным Font.new по content-строке. Стиль везде Normal:
+            -- курсив у семейства свой отсутствует, а синтетический выглядит
+            -- скошенной кашей.
             local ok, face = pcall(function()
                 if Font.fromId then
-                    return Font.fromId(assetId, weight)
+                    return Font.fromId(assetId, weight, Enum.FontStyle.Normal)
                 end
-                return Font.new("rbxassetid://" .. assetId, weight)
+                return Font.new("rbxassetid://" .. assetId, weight, Enum.FontStyle.Normal)
             end)
             if ok and face then return face end
         end
@@ -177,9 +188,10 @@ do
         return faceOf(legacyEnum)
     end
 
-    CONFIG.Fonts.Regular = make(Enum.FontWeight.Regular, Enum.Font.Gotham)
-    CONFIG.Fonts.Medium  = make(Enum.FontWeight.Medium,  Enum.Font.GothamMedium)
-    CONFIG.Fonts.Bold    = make(Enum.FontWeight.Bold,    Enum.Font.GothamBold)
+    local weights = CONFIG.Fonts.Weights
+    CONFIG.Fonts.Regular = make(weights.Regular, Enum.Font.Gotham)
+    CONFIG.Fonts.Medium  = make(weights.Medium,  Enum.Font.GothamMedium)
+    CONFIG.Fonts.Bold    = make(weights.Bold,    Enum.Font.GothamBold)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
