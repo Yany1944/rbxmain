@@ -220,6 +220,12 @@ local State = {
     FlingMethod = "skidfling",
     SkidLead = 0.9,        -- верхняя граница коридора предикта, секунды (0.6...1.2)
 
+    -- Гост-режим: прятать настоящего персонажа и показывать неподвижный клон.
+    -- ВЫКЛЮЧЕН: маскировка ставила LocalTransparencyModifier = 1 на все части
+    -- тела, из-за чего пропадало оружие и эффекты скинченджера, а StopTracks
+    -- сбивал их анимации. Клон-якорь для возврата на место при этом сохранён.
+    FlingGhostVisual = false,
+
     OldPos = nil,
     TrapTrackingConnection = nil,
 
@@ -3502,7 +3508,9 @@ local Fling = {
     -- L1: очередь и сессия
     Queue = {},
     Cooldowns = {},
-    SessionModel = nil,
+    SessionActive = false,   -- идёт ли сессия флинга
+    ReturnCF = nil,          -- точка возврата (была позиция клона)
+    ReturnPhases = nil,
     RootAnchored = false,
     AnchorFrames = 0,
     SkidHold = nil,
@@ -3514,6 +3522,7 @@ local Fling = {
     SavedScriptDisabled = {},
     TargetCollision = {},
     AntiFlingCollision = {},
+    SelfCollision = {},      -- свои части, которым skidfling поднял CanCollide
 
     -- L9: избирательный режим антифлинга (во время WalkFling)
     StrippedChars = {},   -- персонаж -> с него снята коллизия
@@ -3702,35 +3711,8 @@ function Fling.RestoreHumanoidState()
     s.hum.BreakJointsOnDeath = s.breakJointsOnDeath
 end
 
-function Fling.RestoreAlpha()
-    for p, s in pairs(Fling.SavedPartState) do
-        if p.Parent then
-            p.LocalTransparencyModifier = s.transparency
-            p.CanCollide = s.collision
-        end
-    end
-    table.clear(Fling.SavedPartState)
-    Fling.MaskedChar = nil
-end
 
-function Fling.SuspendAnimate(char)
-    if not char then return end
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("LocalScript") and obj.Name == "Animate" then
-            if Fling.SavedScriptDisabled[obj] == nil then
-                Fling.SavedScriptDisabled[obj] = obj.Disabled
-            end
-            obj.Disabled = true
-        end
-    end
-end
 
-function Fling.RestoreAnimate()
-    for scr, disabled in pairs(Fling.SavedScriptDisabled) do
-        if scr.Parent then scr.Disabled = disabled end
-    end
-    table.clear(Fling.SavedScriptDisabled)
-end
 
 function Fling.StopTracks(hum, airOnly)
     local animator = hum and hum:FindFirstChildOfClass("Animator")
@@ -3742,36 +3724,35 @@ function Fling.StopTracks(hum, airOnly)
     end
 end
 
--- Вызывается каждый кадр из RenderStepped, пока жив клон: иначе игра успевает
--- вернуть прозрачность и коллизию обратно.
-function Fling.MaskChar(char)
-    if not char then return end
-    if Fling.MaskedChar and Fling.MaskedChar ~= char then
-        Fling.RestoreAlpha()
-    end
-    Fling.MaskedChar = char
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if Fling.SavedPartState[obj] == nil then
-                Fling.SavedPartState[obj] = {
-                    transparency = obj.LocalTransparencyModifier,
-                    collision = obj.CanCollide,
-                }
-            end
-            obj.LocalTransparencyModifier = 1
-            obj.CanCollide = false
-            Fling.ZeroVelocity(obj)
-        end
-    end
-    Fling.SuspendAnimate(char)
-    Fling.StopTracks(char:FindFirstChildOfClass("Humanoid"))
-end
 
+
+-- Контакт skidfling'а даёт только тело персонажа, поэтому поднимаем CanCollide
+-- ТОЛЬКО прямым детям-BasePart. Раньше шли по GetDescendants и включали коллизию
+-- аксессуарам и инструментам, а обратно их никто не выключал: после флинга шляпы
+-- продолжали цепляться за геометрию и ноклип "переставал работать" — его цикл
+-- гасит коллизию тоже только у прямых детей. Исходные значения запоминаем и
+-- возвращаем в EndSession.
 function Fling.EnableSkidCollision(char)
     if not char then return end
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("BasePart") then obj.CanCollide = true end
+    for _, obj in ipairs(char:GetChildren()) do
+        if obj:IsA("BasePart") then
+            if Fling.SelfCollision[obj] == nil then
+                Fling.SelfCollision[obj] = obj.CanCollide
+            end
+            if obj.CanCollide ~= true then obj.CanCollide = true end
+        end
     end
+end
+
+-- Возврат своей коллизии. Если ноклип включён, его Stepped-цикл следующим кадром
+-- снова опустит эти же части в false — специально ничего доделывать не нужно.
+function Fling.RestoreSelfCollision()
+    for p, c in pairs(Fling.SelfCollision) do
+        if p.Parent then
+            pcall(function() p.CanCollide = c end)
+        end
+    end
+    table.clear(Fling.SelfCollision)
 end
 
 -- ─── L3: зеркалирование поз и анимаций ────────────────────────────────────────
@@ -3828,26 +3809,7 @@ function Fling.ApplyTrackPhases(hum, phases)
     end
 end
 
-function Fling.SnapshotPose(model)
-    local pose = {}
-    if not model then return pose end
-    for _, obj in ipairs(model:GetDescendants()) do
-        if obj:IsA("Motor6D") then
-            pose[obj.Name] = obj.Transform
-        end
-    end
-    return pose
-end
 
-function Fling.ApplyPose(model, pose)
-    if not model or not pose then return end
-    for _, obj in ipairs(model:GetDescendants()) do
-        if obj:IsA("Motor6D") then
-            local transform = pose[obj.Name]
-            if transform then obj.Transform = transform end
-        end
-    end
-end
 
 function Fling.CreateTrack(animator, id, priority, looped)
     if not id or #id == 0 then return nil end
@@ -3863,153 +3825,7 @@ function Fling.CreateTrack(animator, id, priority, looped)
     return nil
 end
 
--- prepareSessionModel сносит в клоне все скрипты, включая Animate, поэтому клон
--- сам анимироваться не может. Без этой функции он летал бы в T-позе.
-function Fling.AnimateSessionModel(char, hum, phases)
-    local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator")
-    animator.Parent = hum
 
-    local isR15 = hum.RigType == Enum.HumanoidRigType.R15
-    local set = isR15 and Fling.Anims.R15 or Fling.Anims.R6
-    local idlePriority   = isR15 and Enum.AnimationPriority.Idle     or Enum.AnimationPriority.Core
-    local movePriority   = isR15 and Enum.AnimationPriority.Movement or Enum.AnimationPriority.Core
-    local actionPriority = isR15 and Enum.AnimationPriority.Action   or Enum.AnimationPriority.Core
-
-    local currentName, currentTrack = nil, nil
-
-    local function animationId(name)
-        if name == "idle" and not isR15 then
-            return (math.random(1, 10) == 10) and Fling.Anims.R6.idleAlt or Fling.Anims.R6.idle
-        end
-        if name == "walk" then return set.walk end
-        if name == "run"  then return set.run  end
-        if name == "jump" then return set.jump end
-        if name == "fall" then return set.fall end
-        return set.idle
-    end
-
-    local function animationPriority(name)
-        if name == "walk" or name == "run" then return movePriority end
-        if name == "jump" or name == "fall" then return actionPriority end
-        return idlePriority
-    end
-
-    local function play(name, fade)
-        if currentName == name and currentTrack and currentTrack.IsPlaying then return end
-        local id = animationId(name)
-        local track = Fling.CreateTrack(animator, id, animationPriority(name), name ~= "jump")
-        if not track then return end
-        if currentTrack then
-            currentTrack:Stop(fade)
-            currentTrack:Destroy()
-        end
-        currentName = name
-        currentTrack = track
-        track:Play(fade)
-
-        local phase = id and phases and phases[id]
-        if phase == nil and not Fling.IsAirAnimationId(id) then
-            phase = phases and phases[Fling.MainPhaseKey]
-        end
-        if phase ~= nil then
-            pcall(function()
-                local len = track.Length
-                track.TimePosition = (len > 0) and (phase % len) or phase
-            end)
-        end
-    end
-
-    local function moveSpeed()
-        local _, root = Fling.CharParts(char)
-        local flat = 0
-        if root then
-            local v = root.AssemblyLinearVelocity
-            flat = Vector3.new(v.X, 0, v.Z).Magnitude
-        end
-        local inputSpeed = hum.WalkSpeed * math.min(Fling.Keys.move.Magnitude, 1)
-        return math.max(flat, inputSpeed)
-    end
-
-    local function playMove(speed)
-        speed = speed or moveSpeed()
-        if not isR15 then
-            play("walk", 0.1)
-            if currentTrack then currentTrack:AdjustSpeed(math.max(speed / 14.5, 0.1)) end
-            return
-        end
-        local name = (speed > 7 and set.run) and "run" or "walk"
-        play(name, 0.15)
-        if currentTrack then currentTrack:AdjustSpeed(math.max(speed / 16, 0.1)) end
-    end
-
-    local jumpTime = 0
-    local lastTick = os.clock()
-    local conn
-    conn = RunService.PreAnimation:Connect(function()
-        if not Fling.SessionModel or not Fling.SessionModel.Parent or not hum.Parent then
-            conn:Disconnect()
-            return
-        end
-
-        local now = os.clock()
-        local dt = now - lastTick
-        lastTick = now
-        if jumpTime > 0 then jumpTime = math.max(jumpTime - dt, 0) end
-
-        local st = hum:GetState()
-        local speed = moveSpeed()
-        local inputMoving = Fling.Keys.move.Magnitude > 0.05
-
-        if Fling.RootAnchored then
-            if inputMoving then playMove(speed) else play("idle", 0.1) end
-            return
-        end
-
-        local threshold = State.IsFlingInProgress and 3.4 or 4.2
-        local moving = inputMoving or speed > threshold
-
-        if st == Enum.HumanoidStateType.Jumping or hum.Jump then
-            jumpTime = 0.3
-            play("jump", 0.1)
-        elseif st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.FallingDown then
-            if jumpTime > 0 then
-                play("jump", 0.1)
-                return
-            end
-            play("fall", 0.2)
-        elseif moving then
-            playMove(speed)
-        else
-            play("idle", 0.2)
-        end
-    end)
-    -- Намеренно не в State.Connections: связь создаётся заново на каждый флинг и
-    -- снимает себя сама (по Destroying клона и по проверке в теле). При LoopFling
-    -- это сотни записей в час, которые никто не чистит.
-
-    char.Destroying:Once(function()
-        conn:Disconnect()
-        if currentTrack then
-            currentTrack:Stop(0)
-            currentTrack:Destroy()
-        end
-    end)
-end
-
-function Fling.PrepareSessionModel(char)
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("Script") or obj:IsA("LocalScript") then
-            obj:Destroy()
-        elseif obj:IsA("BasePart") then
-            obj.Anchored = false
-            obj.CanTouch = false
-            obj.CanQuery = false
-            obj.LocalTransparencyModifier = 0
-        elseif obj:IsA("ForceField") then
-            obj.Visible = false
-        end
-    end
-end
 
 -- ─── L4: session model ────────────────────────────────────────────────────────
 
@@ -4021,119 +3837,53 @@ function Fling.SetCameraSubject(subject)
     cam.CFrame = cf
 end
 
-function Fling.SetRootAnchored(anchored)
-    local hum, root = Fling.CharParts(Fling.SessionModel)
-    if not root then return end
-    root.Anchored = anchored
-    Fling.RootAnchored = anchored
-    Fling.ZeroVelocity(root)
-    if not anchored and hum then
-        hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-    end
-end
 
--- Клон якорится на один кадр после спавна, иначе проваливается сквозь пол
--- до того, как физика его подхватит.
-function Fling.TickSpawnAnchor()
-    if not Fling.RootAnchored then return end
-    if Fling.AnchorFrames > 0 then
-        Fling.AnchorFrames = Fling.AnchorFrames - 1
-        return
-    end
-    Fling.SetRootAnchored(false)
-end
 
-function Fling.SpawnSessionModel()
+-- ⚠️ Гост-режим («визуально остаюсь на месте, пока флингую») ВЫРЕЗАН.
+-- Раньше на время флинга спавнился клон персонажа, игрок смотрел и управлял им,
+-- а настоящее тело пряталось: MaskChar ставил LocalTransparencyModifier = 1 на
+-- ВСЕ части и глушил анимации. Вместе с телом пропадало всё, что на нём висит —
+-- нож, второй нож Dual, эффекты скинченджера, — и вернуть их удавалось не
+-- всегда. Теперь клона нет: виден реальный полёт, а точка возврата просто
+-- запоминается здесь.
+function Fling.BeginSession()
     local char = LocalPlayer.Character
     local _, rp = Fling.CharParts(char)
-    if not char or not rp then return nil end
-
-    local spawnPivot = char:GetPivot()
-    local spawnPose = Fling.SnapshotPose(char)
-    local spawnPhases = Fling.SnapshotTrackPhases(char)
-
-    if Fling.SessionModel then Fling.SessionModel:Destroy() end
-
-    local archivable = char.Archivable
-    char.Archivable = true
-    local clone = char:Clone()
-    char.Archivable = archivable
-    if not clone then return nil end
-
-    clone.Name = "MM2FlingRig"
-    Fling.PrepareSessionModel(clone)
-    clone.Parent = Workspace
-    clone:PivotTo(spawnPivot)
-
-    local sessionHum, sessionRoot = Fling.CharParts(clone)
-    if not sessionHum or not sessionRoot then
-        clone:Destroy()
-        return nil
-    end
-
-    sessionHum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-    sessionHum.RequiresNeck = false
-    sessionHum.BreakJointsOnDeath = false
-    sessionHum.UseJumpPower = true
-    sessionHum.WalkSpeed = math.max(sessionHum.WalkSpeed, 16)
-    sessionHum.JumpPower = math.max(sessionHum.JumpPower, 50)
-    sessionHum.Health = sessionHum.MaxHealth
-    sessionHum.AutoRotate = true
-    sessionHum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
-
-    -- перебивает настоящий рут: камера и управление уходят на клон
-    sessionRoot.RootPriority = 67
-
-    clone:PivotTo(spawnPivot)
-    Fling.ZeroVelocity(sessionRoot)
-    sessionRoot.Anchored = true
-    Fling.RootAnchored = true
-    Fling.AnchorFrames = 1
-    sessionHum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-
-    Fling.SessionModel = clone
-    Fling.AnimateSessionModel(clone, sessionHum, spawnPhases)
-    Fling.ApplyPose(clone, spawnPose)
-
-    return clone, sessionHum, sessionRoot
+    if not char or not rp then return false end
+    -- Запоминаем, куда вернуть. Раньше эту роль играл рут клона.
+    Fling.ReturnCF = rp.CFrame
+    Fling.ReturnPhases = Fling.SnapshotTrackPhases(char)
+    Fling.SessionActive = true
+    return true
 end
 
--- sync = true  -> вернуть игрока на позицию клона
+-- sync = true  -> вернуть игрока в точку, где начался флинг
 -- sync = false -> бросить всё (смерть, аварийная остановка)
-function Fling.ClearSessionModel(sync)
-    local model = Fling.SessionModel
-    local _, sessionRoot = Fling.CharParts(model)
+function Fling.EndSession(sync)
     local char = LocalPlayer.Character
     local hum, rp = Fling.CharParts(char)
 
-    local retCf = (sync and sessionRoot) and sessionRoot.CFrame or nil
-    local retVelRaw = (sync and sessionRoot) and sessionRoot.AssemblyLinearVelocity or Vector3.zero
-    local retVel = retVelRaw
-    if retVelRaw.Y < 0.5 then
-        retVel = Vector3.new(retVelRaw.X, 0, retVelRaw.Z)
-    end
-    local retPose = sync and Fling.SnapshotPose(model) or nil
-    local retPhases = sync and Fling.SnapshotTrackPhases(model) or nil
+    local retCf = sync and Fling.ReturnCF or nil
+    local retPhases = sync and Fling.ReturnPhases or nil
 
     State.IsFlingInProgress = false
-    if model then model:Destroy() end
-    Fling.SessionModel = nil
-    Fling.RootAnchored = false
-    Fling.AnchorFrames = 0
+    Fling.SessionActive = false
+    Fling.ReturnCF = nil
+    Fling.ReturnPhases = nil
 
     Fling.RestoreTargetCollision()
+    Fling.RestoreSelfCollision()
     Fling.ResetRoot()
     Fling.RestoreHumanoidState()
     Fling.RestoreClickToMove()
     Fling.StopTracks(hum, true)
     Fling.ApplyTrackPhases(hum, retPhases)
-    Fling.ApplyPose(char, retPose)
 
     if retCf and rp then
         rp.CFrame = retCf
-        rp.AssemblyLinearVelocity = retVel
+        rp.AssemblyLinearVelocity = Vector3.zero
         rp.AssemblyAngularVelocity = Vector3.zero
-        rp.Velocity = retVel
+        rp.Velocity = Vector3.zero
         rp.RotVelocity = Vector3.zero
     end
 
@@ -4150,11 +3900,7 @@ function Fling.ClearSessionModel(sync)
         hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
 
         task.defer(function()
-            if not hum.Parent then
-                Fling.RestoreAnimate()
-                Fling.RestoreAlpha()
-                return
-            end
+            if not hum.Parent then return end
             hum.Jump = false
             hum.Sit = false
             hum.PlatformStand = false
@@ -4163,8 +3909,11 @@ function Fling.ClearSessionModel(sync)
             Fling.StopTracks(hum, true)
             Fling.ApplyTrackPhases(hum, retPhases)
             hum:ChangeState(Enum.HumanoidStateType.Running)
-            Fling.ApplyPose(char, retPose)
-            Fling.RestoreAlpha()
+            -- Возврат мог сбиться, пока движок доигрывал физику: ставим ещё раз.
+            if retCf and rp and rp.Parent then
+                rp.CFrame = retCf
+                rp.AssemblyLinearVelocity = Vector3.zero
+            end
             Fling.SetCameraSubject(hum)
 
             task.spawn(function()
@@ -4177,15 +3926,13 @@ function Fling.ClearSessionModel(sync)
                 pcall(function() sethiddenproperty(hum, "NetworkHumanoidState", Enum.HumanoidStateType.Running) end)
                 hum:ChangeState(Enum.HumanoidStateType.Running)
                 Fling.ApplyTrackPhases(hum, retPhases)
-                Fling.ApplyPose(char, retPose)
-                Fling.RestoreAnimate()
             end)
         end)
     else
-        if hum then hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true) end
-        Fling.RestoreAnimate()
-        Fling.RestoreAlpha()
-        if hum then Fling.SetCameraSubject(hum) end
+        if hum then
+            hum:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+            Fling.SetCameraSubject(hum)
+        end
     end
 
     Fling.RestoreDestroyHeight()
@@ -4196,7 +3943,7 @@ function Fling.DropDeadChar(char)
     table.clear(Fling.Queue)
     table.clear(Fling.Cooldowns)
     State.IsFlingInProgress = false
-    Fling.ClearSessionModel(false)
+    Fling.EndSession(false)
 end
 
 function Fling.BindCharacter(char)
@@ -4325,7 +4072,7 @@ end
 function Fling.NoCollideTarget(tgt)
     if typeof(tgt) ~= "Instance" then return end
     local char = tgt:IsA("Model") and tgt or (tgt:IsA("BasePart") and Fling.CharFromPart(tgt) or nil)
-    if not char or char == LocalPlayer.Character or char == Fling.SessionModel then return end
+    if not char or char == LocalPlayer.Character then return end
     for _, obj in ipairs(char:GetDescendants()) do
         if obj:IsA("BasePart") then
             if Fling.TargetCollision[obj] == nil then
@@ -4382,8 +4129,8 @@ function Fling.Predict(tgt, item)
     if item and item.Repeat then
         local part = Fling.RepeatPart(item)
         if not part then
-            local _, sessionRoot = Fling.CharParts(Fling.SessionModel)
-            local cf = item.LastCFrame or (sessionRoot and sessionRoot.CFrame) or CFrame.identity
+            local _, selfRoot = Fling.CharParts(LocalPlayer.Character)
+            local cf = item.LastCFrame or (selfRoot and selfRoot.CFrame) or CFrame.identity
             return cf, (item.Player ~= nil and not item.Player.Parent)
         end
         tgt = part
@@ -4540,7 +4287,7 @@ function Fling.FinishCurrentItem(sync)
         )
     end
 
-    Fling.ClearSessionModel(sync)
+    Fling.EndSession(sync)
 end
 
 function Fling.QueueTarget(tgt, duration, repeatMode, playerName, method)
@@ -4549,11 +4296,10 @@ function Fling.QueueTarget(tgt, duration, repeatMode, playerName, method)
     for _, q in ipairs(Fling.Queue) do
         if q.Target == tgt then return false end
     end
-    if tgt == Fling.SessionModel or tgt == LocalPlayer.Character then return false end
+    if tgt == LocalPlayer.Character then return false end
 
     if typeof(tgt) == "Instance" then
         if LocalPlayer.Character and tgt:IsDescendantOf(LocalPlayer.Character) then return false end
-        if Fling.SessionModel and tgt:IsDescendantOf(Fling.SessionModel) then return false end
         -- антидубль: одна и та же цель не ставится в очередь чаще раза в секунду
         if Fling.Cooldowns[tgt] ~= nil then return false end
         Fling.Cooldowns[tgt] = true
@@ -4575,11 +4321,8 @@ end
 function Fling.ActivateSession()
     State.IsFlingInProgress = true
     Fling.SuppressClickToMove()
-    if not Fling.SessionModel then Fling.SpawnSessionModel() end
+    if not Fling.SessionActive then Fling.BeginSession() end
     Fling.ResetRoot()
-    Fling.MaskChar(LocalPlayer.Character)
-    local sessionHum = Fling.CharParts(Fling.SessionModel)
-    if sessionHum then Fling.SetCameraSubject(sessionHum) end
 end
 
 function Fling.ClearQueue(sync)
@@ -4587,9 +4330,10 @@ function Fling.ClearQueue(sync)
     table.clear(Fling.Queue)
     table.clear(Fling.Cooldowns)
     Fling.RestoreTargetCollision()
+    Fling.RestoreSelfCollision()
     State.IsFlingInProgress = false
-    if Fling.SessionModel then
-        Fling.ClearSessionModel(sync)
+    if Fling.SessionActive then
+        Fling.EndSession(sync)
     else
         Fling.ResetRoot()
     end
@@ -4749,15 +4493,12 @@ TrackConnection(RunService.PreSimulation:Connect(function()
         return
     end
 
-    if not Fling.Queue[1] and not Fling.SessionModel then return end
-    if Fling.Queue[1] and not Fling.SessionModel then Fling.SpawnSessionModel() end
-
-    local sessionHum, sessionRoot = Fling.CharParts(Fling.SessionModel)
-    if not Fling.SessionModel or not sessionHum or not sessionRoot then return end
+    if not Fling.Queue[1] and not Fling.SessionActive then return end
+    if Fling.Queue[1] and not Fling.SessionActive then Fling.BeginSession() end
+    if not Fling.SessionActive then return end
 
     Fling.SetFlingDestroyHeight()
     Fling.SaveHumanoidState(hum)
-    Fling.MaskChar(char)
 
     hum.AutoRotate = false
     hum.RequiresNeck = false
@@ -4768,7 +4509,7 @@ TrackConnection(RunService.PreSimulation:Connect(function()
 
     local item = Fling.NextItem()
     if not item then
-        Fling.ClearSessionModel(true)
+        Fling.EndSession(true)
         return
     end
     if Fling.ShouldBackOff(item) then
@@ -4793,7 +4534,7 @@ end))
 -- Удержание позиции для skid: физика перетирает CFrame между кадрами.
 TrackConnection(RunService.PostSimulation:Connect(function()
     local wanted = Fling.SkidHold
-    if not wanted or Fling.Queue[1] == nil or not Fling.SessionModel
+    if not wanted or Fling.Queue[1] == nil or not Fling.SessionActive
        or Fling.ActiveMethod() ~= "skidfling" then
         Fling.SkidHold = nil
         return
@@ -4808,76 +4549,10 @@ TrackConnection(RunService.PostSimulation:Connect(function()
     char:PivotTo(wanted)
 end))
 
--- Движение клона относительно камеры.
-TrackConnection(RunService.PreAnimation:Connect(function()
-    local sessionHum, sessionRoot = Fling.CharParts(Fling.SessionModel)
-    if not Fling.SessionModel or not sessionHum or not sessionRoot then return end
-
-    local cam = Workspace.CurrentCamera
-    if cam and cam.CameraSubject ~= sessionHum then
-        Fling.SetCameraSubject(sessionHum)
-    end
-
-    local cf = (cam and cam.CFrame) or sessionRoot.CFrame
-    local _, yaw = cf:ToEulerAnglesYXZ()
-
-    if UserInputService:GetFocusedTextBox() then
-        Fling.ClearMove()
-    else
-        Fling.CalcMove()
-    end
-
-    Fling.TickSpawnAnchor()
-    sessionHum:Move(CFrame.Angles(0, yaw, 0):VectorToWorldSpace(Fling.Keys.move))
-    sessionHum.Jump = Fling.Keys.wantJump
-end))
-
--- Ввод для управления клоном. Работает только пока клон жив, чтобы не мешать
--- обычной игре и остальным биндам MainScript.
-TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed or not Fling.SessionModel then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        local kc = input.KeyCode
-        if kc == Enum.KeyCode.W or kc == Enum.KeyCode.Up then Fling.Keys.w = true end
-        if kc == Enum.KeyCode.S or kc == Enum.KeyCode.Down then Fling.Keys.s = true end
-        if kc == Enum.KeyCode.A then Fling.Keys.a = true end
-        if kc == Enum.KeyCode.D then Fling.Keys.d = true end
-        if kc == Enum.KeyCode.Space then Fling.Keys.jump = true end
-    end
-    if input.KeyCode == Enum.KeyCode.ButtonA then Fling.Keys.padJump = true end
-end))
-
-TrackConnection(UserInputService.InputChanged:Connect(function(input)
-    if not Fling.SessionModel then return end
-    if input.KeyCode == Enum.KeyCode.Thumbstick1 then
-        Fling.Keys.stick = Vector2.new(input.Position.X, -input.Position.Y)
-    end
-end))
-
--- InputEnded слушается всегда: клавишу могли отпустить после того, как клон
--- уже исчез, иначе персонаж уедет с залипшей кнопкой.
-TrackConnection(UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        local kc = input.KeyCode
-        if kc == Enum.KeyCode.W or kc == Enum.KeyCode.Up then Fling.Keys.w = false end
-        if kc == Enum.KeyCode.S or kc == Enum.KeyCode.Down then Fling.Keys.s = false end
-        if kc == Enum.KeyCode.A then Fling.Keys.a = false end
-        if kc == Enum.KeyCode.D then Fling.Keys.d = false end
-        if kc == Enum.KeyCode.Space then Fling.Keys.jump = false end
-    end
-    if input.KeyCode == Enum.KeyCode.ButtonA then Fling.Keys.padJump = false end
-    if input.KeyCode == Enum.KeyCode.Thumbstick1 then Fling.Keys.stick = Vector2.zero end
-end))
-
--- Маскировка обновляется каждый кадр рендера, с приоритетом Last: иначе игра
--- успевает вернуть прозрачность и коллизию настоящему персонажу.
--- Единственная связь, которая не ложится в State.Connections — снимается
--- явным UnbindFromRenderStep в FullShutdown.
-RunService:BindToRenderStep("MM2FlingMask", Enum.RenderPriority.Last.Value, function()
-    if Fling.SessionModel then
-        Fling.MaskChar(LocalPlayer.Character)
-    end
-end)
+-- ⚠️ Здесь были: движение клона относительно камеры, ввод для управления клоном
+-- (WASD/стик) и BindToRenderStep("MM2FlingMask") с ежекадровой маскировкой
+-- настоящего персонажа. Всё вырезано вместе с гост-режимом: клона больше нет,
+-- игрок сам управляет своим телом и видит реальный полёт.
 
 Fling.BindCharacter(LocalPlayer.Character)
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
@@ -4886,10 +4561,9 @@ end))
 
 -- Хук для FullShutdown: он объявлен выше по файлу, где локал Fling ещё не виден.
 State.FlingCleanup = function()
-    -- sync = false: не тащить игрока на позицию клона, просто всё свернуть
+    -- sync = false: не возвращать игрока, просто всё свернуть
     Fling.ClearQueue(false)
     DisableAntiFling()
-    RunService:UnbindFromRenderStep("MM2FlingMask")
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -5113,39 +4787,56 @@ end
 local function EnableNoClip()
     if State.NoClipEnabled then return end
     State.NoClipEnabled = true
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local NoClipObjects = {}
-    
-    for _, obj in ipairs(character:GetChildren()) do
-        if obj:IsA("BasePart") then
-            table.insert(NoClipObjects, obj)
-        end
-    end
-    
-    State.NoClipObjects = NoClipObjects
-    
-    State.NoClipRespawnConnection = TrackConnection(LocalPlayer.CharacterAdded:Connect(function(newChar)
 
-        task.wait(0.15)
-        
+    local NoClipObjects = {}
+    -- Персонаж, под который собран список. Пересобираем не только по
+    -- CharacterAdded: флинг и прочие фичи могут подменить/дополнить части, а
+    -- пустой список молча выключал ноклип навсегда.
+    local boundChar = nil
+
+    local function collect(character)
         table.clear(NoClipObjects)
-        
-        for _, obj in ipairs(newChar:GetChildren()) do
+        boundChar = character
+        if not character then return end
+        for _, obj in ipairs(character:GetChildren()) do
             if obj:IsA("BasePart") then
                 table.insert(NoClipObjects, obj)
             end
         end
+    end
+
+    collect(LocalPlayer.Character)
+    State.NoClipObjects = NoClipObjects
+
+    State.NoClipRespawnConnection = TrackConnection(LocalPlayer.CharacterAdded:Connect(function(newChar)
+        task.wait(0.15)
+        if not State.NoClipEnabled then return end
+        collect(newChar)
     end))
-    
+
     State.NoClipConnection = TrackConnection(RunService.Stepped:Connect(function()
+        -- Во время флинга коллизия тела — рабочий инструмент skidfling'а.
+        -- Ноклип на это время уступает, свои значения флинг вернёт сам.
+        -- Три условия, а не одно: если State.IsFlingInProgress где-то залипнет,
+        -- пустая очередь и закрытая сессия всё равно вернут ноклип в работу.
+        if State.IsFlingInProgress and Fling.SessionActive and Fling.Queue[1] then
+            return
+        end
+
+        local character = LocalPlayer.Character
+        if character ~= boundChar or #NoClipObjects == 0 then
+            collect(character)
+            State.NoClipObjects = NoClipObjects
+        end
+
         for i = 1, #NoClipObjects do
-            NoClipObjects[i].CanCollide = false
+            local part = NoClipObjects[i]
+            if part.Parent and part.CanCollide then
+                part.CanCollide = false
+            end
         end
     end))
-    
+
     if State.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220,220,220)\">Noclip: </font><font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
@@ -5182,6 +4873,19 @@ local function DisableNoClip()
         table.clear(State.NoClipObjects)
         State.NoClipObjects = nil
     end
+
+    -- Снимок, снятый флингом, мог быть сделан при включённом ноклипе — то есть
+    -- со значениями false. Если ноклип выключили посреди флинга, его завершение
+    -- вернуло бы эти false и оставило тело неcтолкновимым уже без ноклипа.
+    -- Набор частей у обоих одинаковый (прямые дети), поэтому снимок отдаём:
+    -- рут возвращаем по нему (цикл выше его намеренно не трогает), остальное
+    -- уже поднято в true.
+    for part, saved in pairs(Fling.SelfCollision) do
+        if part.Parent and part.Name == "HumanoidRootPart" then
+            pcall(function() part.CanCollide = saved end)
+        end
+    end
+    table.clear(Fling.SelfCollision)
     
     if State.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220,220,220)\">Noclip:</font> <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Red)
