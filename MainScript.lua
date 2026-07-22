@@ -7057,24 +7057,52 @@ end
 -- ─── Предикт точки попадания под серверный hitscan ────────────────────────────
 -- Сервер стреляет лучом origin→target и убивает первого задетого. Значит важна
 -- ТОЧНОСТЬ мировой точки прицела НА ТЕЛЕ цели в момент обработки на сервере.
---   • Горизонталь (XZ): линейная экстраполяция по скорости. По XZ гравитации нет —
---     это физически точно, strafe компенсируется полностью.
---   • Вертикаль (Y): параболическая, с учётом гравитации (pos + vy*t − ½·g·t²).
---     Линейный предикт по Y — и есть причина промахов при прыжке: на подъёме он
---     завышает точку (пуля «чуть выше»), на падении/приземлении занижает
---     («сильно ниже», т.к. земля останавливает падение, а линейный предикт нет).
---   • Кламп по Y к телу (±2.4 студа от центра HRP): даже при рывке/приземлении
---     прицел не выходит за торс. Луч всё равно засчитывается по любой части тела,
---     поэтому центр масс = максимально надёжная точка.
-local function predictAimPoint(hrp, t)
+--   • Горизонталь (XZ): по ИНТЕНТУ — MoveDirection·WalkSpeed, а не по наблюдаемой
+--     скорости. Намерение реплицируется без пинг-задержки и без шума от книбэков,
+--     раньше ловит смену strafe. Если цель не управляется (стоит / летит / во
+--     флинге, MoveDirection≈0) — падаем на фактическую XZ-скорость.
+--   • Вертикаль (Y): параболическая, с учётом гравитации (pos + vy·t − ½·g·t²).
+--     Линейный предикт по Y — причина промахов при прыжке: на подъёме завышает
+--     («чуть выше»), на падении занижает.
+--   • Пол под предсказанной XZ-колонкой (луч вниз): не даём прицелу уйти под
+--     землю при приземлении — именно это давало «сильно ниже». Кламп ±2.4 к
+--     ТЕКУЩЕМУ Y убран: при большом прыжке/высоком пинге тело уезжает дальше и
+--     кламп сам уводил в промах. Параболу + пол не клампим, они уже физичны.
+local function predictAimPoint(hrp, thum, t)
     t = math.clamp(t, 0.03, 0.25)  -- отсекаем выбросы при огромном пинге
     local pos = hrp.Position
     local vel = hrp.AssemblyLinearVelocity
+    local char = hrp.Parent
+
+    -- горизонталь по интенту
+    local hx, hz
+    local md = thum and thum.MoveDirection
+    if md and md.Magnitude > 0.05 then
+        local ws = (thum.WalkSpeed and thum.WalkSpeed > 0) and thum.WalkSpeed or 16
+        local unit = Vector3.new(md.X, 0, md.Z).Unit
+        hx, hz = unit.X * ws, unit.Z * ws
+    else
+        hx, hz = vel.X, vel.Z
+    end
+    local predX = pos.X + hx * t
+    local predZ = pos.Z + hz * t
+
+    -- вертикаль: парабола + пол под предсказанной точкой
     local g = Workspace.Gravity
-    local predX = pos.X + vel.X * t
-    local predZ = pos.Z + vel.Z * t
     local predY = pos.Y + vel.Y * t - 0.5 * g * t * t
-    predY = math.clamp(predY, pos.Y - 2.4, pos.Y + 2.4)
+
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = { char, LocalPlayer.Character }
+    local down = Workspace:Raycast(Vector3.new(predX, pos.Y + 3, predZ), Vector3.new(0, -80, 0), rp)
+    if down then
+        -- превышение центра HRP над полом сейчас (адаптация под R6/R15/HipHeight)
+        local standOffset = 2.9
+        local curDown = Workspace:Raycast(Vector3.new(pos.X, pos.Y + 3, pos.Z), Vector3.new(0, -80, 0), rp)
+        if curDown then standOffset = math.clamp(pos.Y - curDown.Position.Y, 1.5, 4) end
+        predY = math.max(predY, down.Position.Y + standOffset)
+    end
+
     return Vector3.new(predX, predY, predZ)
 end
 
@@ -7138,7 +7166,8 @@ shootMurderer = function(forceMagic)
     end
     
     local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
-    
+    local murdererHum = murderer.Character:FindFirstChildOfClass("Humanoid")
+
     if not murdererHRP then
         if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">Murderer has no HRP</font>", nil)
@@ -7155,8 +7184,8 @@ shootMurderer = function(forceMagic)
         local predictionTime = (pingValue / 1000) + 0.05
         
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        -- Гравитационно-корректный предикт с клампом по Y (см. predictAimPoint)
-        local predictedPos = predictAimPoint(murdererHRP, predictionTime)
+        -- Интент-предикт: горизонталь по MoveDirection, вертикаль парабола + пол
+        local predictedPos = predictAimPoint(murdererHRP, murdererHum, predictionTime)
 
         local spawnPosition, targetPosition
 
@@ -7198,20 +7227,39 @@ shootMurderer = function(forceMagic)
         
         local muzzlePosition = muzzleCFrame.Position
         
-        -- 2. ПРЕДИКЦИЯ: горизонталь линейно, вертикаль с гравитацией + кламп к телу
+        -- 2. ПРЕДИКЦИЯ: горизонталь по интенту, вертикаль парабола + пол
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
         local predictionTime = (pingValue / 1000) + 0.05
 
-        local predictedPos = predictAimPoint(murdererHRP, predictionTime)
+        local predictedPos = predictAimPoint(murdererHRP, murdererHum, predictionTime)
 
-        -- 3. ФОРМИРОВАНИЕ CFrame (стреляем от дула в точку прицела на теле цели)
-        local shootFromCFrame = CFrame.lookAt(muzzlePosition, predictedPos)
-        local shootToCFrame = CFrame.new(predictedPos)
-        
+        -- 3. LOS-ГЕЙТ: сервер origin не валидирует, но луч origin→target идёт от
+        --    дула и его может перекрыть стена/другой игрок → выстрел уходит «в
+        --    воздух». Проверяем прямую видимость дуло→точка; если перекрыто —
+        --    разово двигаем origin вплотную к цели (гарантированно чистый короткий
+        --    луч сквозь тело). Пока LOS чист, стреляем от дула — Silent выглядит
+        --    легитимно; magic-origin включается только когда иначе точно промах.
+        local originPos = muzzlePosition
+        local losParams = RaycastParams.new()
+        losParams.FilterType = Enum.RaycastFilterType.Exclude
+        losParams.FilterDescendantsInstances = { LocalPlayer.Character }
+        local dirToTarget = predictedPos - muzzlePosition
+        local losHit = dirToTarget.Magnitude > 0.05
+            and Workspace:Raycast(muzzlePosition, dirToTarget, losParams)
+            or nil
+        local losClear = (not losHit) or losHit.Instance:IsDescendantOf(murderer.Character)
+        if not losClear then
+            local dirUnit = dirToTarget.Magnitude > 0 and dirToTarget.Unit
+                or murdererHRP.CFrame.LookVector
+            -- 2.5 студа перед целью со стороны стрелка: внутри/у самого тела,
+            -- между этой точкой и центром стены быть уже не может
+            originPos = predictedPos - dirUnit * 2.5
+        end
+
         argsShootRemote = {
-            [1] = shootFromCFrame,
-            [2] = shootToCFrame
+            [1] = CFrame.lookAt(originPos, predictedPos),
+            [2] = CFrame.new(predictedPos)
         }
     end
 
