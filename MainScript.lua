@@ -103,9 +103,15 @@ local CONFIG = {
         -- «острые» буквы. Здесь семейство прибито гвоздями через FontFace.
         -- Чтобы сменить шрифт на весь интерфейс — правится только Family.
         Fonts = {
-            Family = "rbxasset://fonts/families/Gotham.json",
-            -- Куда легаси-энумы разворачиваются сейчас (узкий крой для мелкого
-            -- текста, он и выглядит жёстче): "rbxasset://fonts/families/GothamSSm.json"
+            -- Mukta из каталога Roblox: create.roblox.com/store/asset/12187365559
+            -- Каталожный шрифт живёт как ассет, а не файлом в клиенте, поэтому
+            -- задаётся айди, а не путём rbxasset://fonts/families/*.json.
+            AssetId = 12187365559,
+            -- Запасной вариант: подставляется, если ассет не отдался (нет сети на
+            -- ассеты, урезанный клиент). Обычный Gotham, а не узкий GothamSSm —
+            -- именно в него разворачиваются легаси-энумы Enum.Font.Gotham*, и
+            -- именно он даёт «острые» буквы.
+            FallbackFamily = "rbxasset://fonts/families/Gotham.json",
         },
         -- Настройки Server Hop / Rejoin. Всё, что можно крутить, — только здесь.
         ServerHop = {
@@ -136,10 +142,10 @@ local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 local LocalPlayer = Players.LocalPlayer
 
--- Готовые FontFace для всего интерфейса. Собираются один раз: Font.new дешевле
--- держать в трёх константах, чем создавать на каждый лейбл. Если семейства из
--- CONFIG.Fonts.Family в клиенте нет, мягко откатываемся на легаси-энум — так
--- меню не останется без текста на экзотическом клиенте.
+-- Готовые FontFace для всего интерфейса. Собираются один раз: держать три
+-- константы дешевле, чем создавать Font на каждый лейбл. Порядок попыток —
+-- каталожный ассет, затем запасное семейство, затем легаси-энум: меню не должно
+-- остаться без текста ни на урезанном клиенте, ни без доступа к ассетам.
 do
     local function faceOf(legacyEnum)
         local probe = Instance.new("TextLabel")
@@ -150,10 +156,24 @@ do
     end
 
     local function make(weight, legacyEnum)
+        local assetId = CONFIG.Fonts.AssetId
+        if assetId then
+            -- Font.fromId есть не во всех сборках; там, где нет, тот же ассет
+            -- берётся обычным Font.new по content-строке.
+            local ok, face = pcall(function()
+                if Font.fromId then
+                    return Font.fromId(assetId, weight)
+                end
+                return Font.new("rbxassetid://" .. assetId, weight)
+            end)
+            if ok and face then return face end
+        end
+
         local ok, face = pcall(function()
-            return Font.new(CONFIG.Fonts.Family, weight)
+            return Font.new(CONFIG.Fonts.FallbackFamily, weight)
         end)
         if ok and face then return face end
+
         return faceOf(legacyEnum)
     end
 
