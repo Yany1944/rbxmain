@@ -6843,11 +6843,13 @@ end
 
 State.Session = {
     Version    = "2.2",
-    -- Coins/h считается с загрузки скрипта; StartCoins фиксируется при первом
-    -- чтении баланса. Включение автофарма делает «сброс сессии»
-    -- (MarkFarmStart) — точка отсчёта переезжает на момент старта фарма.
-    StartedAt  = tick(),
+    -- База (StartCoins + StartedAt) НЕ ставится при загрузке: счётчик монет в
+    -- шопе догружается/дощёлкивает с нуля, и раннее чтение дало бы ложную базу,
+    -- из-за которой Coins/h подскакивал. База фиксируется в EnsureBaseline, когда
+    -- баланс стабилизировался. Включение автофарма делает сброс (MarkFarmStart).
+    StartedAt  = nil,
     StartCoins = nil,
+    _pending   = nil,   -- кандидат в базу, ждём стабилизации
 }
 
 function State.Session.FormatThousands(n)
@@ -6856,7 +6858,7 @@ function State.Session.FormatThousands(n)
     return (out:gsub("^,", ""))
 end
 
--- Первое удачное чтение баланса фиксирует базовую точку для Coins/h.
+-- Только читает баланс, базу не трогает.
 function State.Session.ReadCoins()
     local ok, value = pcall(function()
         local label = LocalPlayer.PlayerGui
@@ -6864,19 +6866,31 @@ function State.Session.ReadCoins()
         return tonumber((tostring(label.Text):gsub(",", "")))
     end)
     if ok and type(value) == "number" then
-        if not State.Session.StartCoins then
-            State.Session.StartCoins = value
-        end
         return value
     end
     return nil
 end
 
+-- База фиксируется, только когда баланс совпал в двух чтениях подряд — то есть
+-- данные догрузились и счётчик перестал дощёлкивать. Так загрузка/анимация не
+-- засчитывается в фарм. StartedAt стартует тем же моментом, что и StartCoins.
+function State.Session.EnsureBaseline(coins)
+    if State.Session.StartCoins then return end
+    if State.Session._pending == coins then
+        State.Session.StartCoins = coins
+        State.Session.StartedAt = tick()
+        State.Session._pending = nil
+    else
+        State.Session._pending = coins
+    end
+end
+
 -- Сброс сессии: точка отсчёта Coins/h переезжает на текущий момент.
--- Вызывается при включении автофарма
+-- Вызывается при включении автофарма (монеты к этому времени уже загружены)
 function State.Session.MarkFarmStart()
     State.Session.StartedAt = tick()
     State.Session.StartCoins = State.Session.ReadCoins() or 0
+    State.Session._pending = nil
 end
 
 function State.Session.GetCoinsText()
@@ -6887,10 +6901,11 @@ end
 
 function State.Session.GetRateText()
     local coins = State.Session.ReadCoins()
-    if not coins or not State.Session.StartCoins then return nil end
-    -- Считаем сразу, без «прогрева»: до первой монеты gained = 0 → показываем 0,
-    -- с первой же монетой пошёл счёт. Знаменатель зажат снизу до 1 секунды,
-    -- чтобы не делить на ~0 в первый тик (иначе rate уходил бы в бесконечность).
+    if not coins then return nil end           -- монеты ещё не загрузились
+    State.Session.EnsureBaseline(coins)
+    if not State.Session.StartCoins then return "—" end   -- база стабилизируется
+    -- Считаем сразу: до первой монеты gained = 0 → показываем 0, с первой
+    -- монетой пошёл счёт. Знаменатель зажат снизу до 1с, чтобы не делить на ~0.
     local hours = (tick() - State.Session.StartedAt) / 3600
     if hours < (1 / 3600) then hours = 1 / 3600 end
     local gained = coins - State.Session.StartCoins
