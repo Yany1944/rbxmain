@@ -18,71 +18,220 @@ return function(env)
     local GUI = {}
 
     ----------------------------------------------------------------
-    -- ТОКЕНЫ ДИЗАЙНА (поверх CONFIG.Colors)
+    -- ТОКЕНЫ ДИЗАЙНА — Vercel Geist (dark theme)
+    -- Значения сняты с живого vercel.com/geist: --ds-gray-*, --ds-background-*.
+    -- Ключевое отличие от прошлой версии: бордеры СПЛОШНЫЕ (gray-400 #2E2E2E),
+    -- а не полупрозрачный белый — именно из-за альфы обводка выглядела грязной.
     ----------------------------------------------------------------
-    -- Нейтральная цинковая шкала — строгий монохром, акцент только на состояниях
+    local G = {
+        Bg100    = Color3.fromRGB(10, 10, 10),     -- background-100: карточки, поля
+        Bg200    = Color3.fromRGB(0, 0, 0),        -- background-200: полотно окна
+        Gray100  = Color3.fromRGB(26, 26, 26),     -- default bg (hover строки)
+        Gray200  = Color3.fromRGB(31, 31, 31),     -- hover bg
+        Gray300  = Color3.fromRGB(41, 41, 41),     -- active bg / разделители
+        Gray400  = Color3.fromRGB(46, 46, 46),     -- border
+        Gray500  = Color3.fromRGB(69, 69, 69),     -- border hover / скроллбар
+        Gray600  = Color3.fromRGB(135, 135, 135),  -- high-contrast bg
+        Gray700  = Color3.fromRGB(143, 143, 143),  -- вторичный текст, иконки
+        Gray1000 = Color3.fromRGB(237, 237, 237),  -- основной текст
+        Blue700  = Color3.fromRGB(0, 112, 243),    -- #0070F3
+        Blue900  = Color3.fromRGB(82, 173, 250),   -- focus / ссылки
+        Purple700 = Color3.fromRGB(142, 78, 198),  -- #8E4EC6
+        Red800   = Color3.fromRGB(217, 48, 54),    -- заливка destructive-кнопки
+        Red900   = Color3.fromRGB(255, 97, 102),   -- текст ошибки на тёмном
+        Amber800 = Color3.fromRGB(255, 153, 10),
+        Green900 = Color3.fromRGB(98, 193, 116),
+    }
+
+    -- Семантические алиасы: код ниже работает с ними, а не с номерами шкалы
     local T = {
-        Canvas    = Color3.fromRGB(9, 9, 11),
-        Surface1  = Color3.fromRGB(19, 19, 22),
-        Surface2  = Color3.fromRGB(31, 31, 35),
-        HairCol   = Color3.fromRGB(255, 255, 255),
-        HairTrans = 0.90,
-        Text      = Color3.fromRGB(237, 237, 240),
-        TextDark  = Color3.fromRGB(140, 140, 148),
-        Accent    = CONFIG.Colors.Accent,
-        AccentInk = Color3.fromRGB(15, 15, 17),   -- тёмный текст на акцентной заливке
-        Danger    = CONFIG.Colors.Red,
-        TrackBg   = Color3.fromRGB(45, 45, 50),   -- фон трека слайдера / выкл. тогла
+        Canvas    = G.Bg200,      -- полотно окна
+        Surface1  = G.Bg100,      -- карточка секции, поле ввода, поповер
+        Surface2  = G.Gray100,    -- заливка контрола / hover строки
+        Border    = G.Gray400,    -- обводка (сплошная!)
+        BorderHi  = G.Gray500,    -- обводка на hover
+        Divider   = G.Gray300,    -- разделитель строк внутри карточки
+        Text      = G.Gray1000,
+        TextDark  = G.Gray700,
+        Accent    = CONFIG.Colors.Accent or G.Purple700,
+        AccentInk = G.Bg100,      -- тёмный текст на светлой/акцентной заливке
+        Danger    = G.Red900,
+        DangerBg  = G.Red800,
+        TrackBg   = G.Gray400,    -- трек слайдера / выключенный тогл (Geist)
     }
 
-    -- Шрифты — та же пара, что в Scripts/Notify.lua: на мелких кеглях
-    -- GothamSemibold/GothamMedium растрируются заметно мягче, чем GothamBold,
-    -- а Enum.Font.Code (пиксельный моноширинный) убран совсем — именно он
-    -- давал «квадратный» вид значениям и статусбару.
-    local FONT = {
-        Bold = Enum.Font.GothamSemibold, -- названия фич, заголовки, кнопки
-        Body = Enum.Font.GothamMedium,   -- описания, второстепенный текст
-        Mono = Enum.Font.GothamMedium,   -- значения, чипы, статусбар
-    }
+    ----------------------------------------------------------------
+    -- ШРИФТЫ: Geist Sans ≈ Inter. В Roblox Inter нет (проверено —
+    -- rbxasset://fonts/families/Inter.json не резолвится), ближайший
+    -- нейтральный гротеск — BuilderSans. Веса как в Geist: 400 для текста,
+    -- 500 для названий и кнопок, 600 для логотипа. Никаких Bold-700 на
+    -- мелком кегле — от него и была «жирная квадратность».
+    ----------------------------------------------------------------
+    local FONT_FAMILY = "rbxasset://fonts/families/BuilderSans.json"
+    local FONT_FAMILY_FALLBACK = "rbxasset://fonts/families/GothamSSm.json"
 
-    -- Единая шкала кеглей. Меняется только здесь — по месту цифры не пишем
+    local FONT
+    do
+        local function face(weight, fallbackEnum)
+            local ok, f = pcall(function()
+                return Font.new(FONT_FAMILY, weight, Enum.FontStyle.Normal)
+            end)
+            if ok and f then return f end
+            ok, f = pcall(function()
+                return Font.new(FONT_FAMILY_FALLBACK, weight, Enum.FontStyle.Normal)
+            end)
+            if ok and f then return f end
+            return fallbackEnum
+        end
+        FONT = {
+            -- Bold/Body/Mono — исторические имена ключей, менять их незачем
+            Bold = face(Enum.FontWeight.Medium, Enum.Font.GothamSemibold),   -- 500
+            Body = face(Enum.FontWeight.Regular, Enum.Font.Gotham),          -- 400
+            Mono = face(Enum.FontWeight.Regular, Enum.Font.Gotham),          -- значения
+            Head = face(Enum.FontWeight.SemiBold, Enum.Font.GothamSemibold), -- 600
+        }
+    end
+
+    -- Кегли по шкале Geist: heading-md 20/600 — заголовок вкладки,
+    -- label-sm 500 — названия и кнопки, body 400 — описания.
+    -- Вся типографика поднята на ступень: мелкий текст читался «дёшево»
     local TS = {
-        Logo      = 18,   -- «Violite»
-        LogoSub   = 12,   -- «mm2»
-        TabTitle  = 16,   -- заголовок вкладки в хедере
-        Nav       = 14,   -- пункты сайдбара
-        Section   = 12,   -- заголовки секций (CAPS)
-        Title     = 14,   -- название строки
-        Desc      = 12,   -- описание строки
-        Button    = 13,   -- кнопки, дропдауны, кейбинд-кнопки
-        Value     = 13,   -- значения в полях ввода
-        Chip      = 12,   -- узкие чипы бинда
-        Status    = 12,   -- футер-статусбар
-        Option    = 12,   -- пункты выпадающих списков
-        Search    = 13,   -- поле поиска
+        Logo      = 18,   -- heading
+        LogoSub   = 12,   -- body-sm
+        TabTitle  = 20,   -- heading-md
+        Nav       = 15,
+        Section   = 14,   -- body-md
+        Title     = 15,   -- label
+        Desc      = 13,
+        Button    = 14,   -- button-md
+        Value     = 14,
+        Chip      = 13,
+        Status    = 13,
+        Option    = 14,
+        Search    = 14,
     }
 
-    -- Единый вертикальный ритм строк и правых контролов
-    local ROW_H       = 46   -- строка без описания
-    local ROW_H_DESC  = 60   -- строка с описанием
-    local CTRL_H      = 28   -- высота дропдаунов/кнопок/полей ввода
-    local EDGE        = 14   -- отступ контролов от правого края строки
+    -- Геометрия Geist: --ds-size-medium 36 под увеличенный кегль,
+    -- радиус контролов 6, карточек 12, строка поповера 36 при padding 6
+    local ROW_H        = 50   -- строка без описания
+    local ROW_H_DESC   = 66   -- строка с описанием
+    local CTRL_H       = 36   -- --ds-size-medium
+    local EDGE         = 16   -- горизонтальный отступ внутри карточки
+    local PAGE_PAD     = 2    -- запас в колонке, чтобы не срезалась обводка карточек
+    local R_CTRL       = 6    -- --geist-radius
+    local R_CARD       = 12   -- карточка секции, окно, поповер
+    local R_SM         = 4    -- мелкие элементы (чипы списка)
+    local POPOVER_PAD  = 6    -- --ds-popover-padding
+    local POPOVER_ROW  = 36   -- --ds-popover-row-height
+    local STROKE_W     = 1
 
-    -- Единственное место с прозрачностью — корневой фрейм окна
-    local ROOT_TRANSPARENCY = 0.06
+    -- Окно непрозрачное: Geist держится на чистых сплошных поверхностях,
+    -- полупрозрачность размывала и цвет, и границы
+    local ROOT_TRANSPARENCY = 0
 
-    local SIDEBAR_W  = 188
-    local HEADER_H   = 48
-    local FOOTER_H   = 28
+    local SIDEBAR_W  = 200
+    local HEADER_H   = 56
+    local FOOTER_H   = 32
+
+    ----------------------------------------------------------------
+    -- ВНЕШНИЕ АССЕТЫ: пак иконок WindUI и логотип бренда
+    ----------------------------------------------------------------
+
+    -- Иконки вкладок — пак «geist» из набора WindUI (Footagesus/Icons).
+    -- Формат: Spritesheets[n] = rbxassetid, Icons[name] = {Image = n,
+    -- ImageRectPosition, ImageRectSize} — тайлы 128x128 на общем листе.
+    -- Тянем один раз за сессию и кэшируем в getgenv, чтобы каждая
+    -- перезагрузка GUI не ходила в сеть.
+    local ICON_PACK_URL =
+        "https://raw.githubusercontent.com/Footagesus/Icons/refs/heads/main/geist/dist/Icons.lua"
+
+    local function loadIconPack()
+        local cached = getgenv().Violite_GeistIcons
+        if cached ~= nil then
+            return cached or nil
+        end
+        local pack
+        pcall(function()
+            local src = game:HttpGet(ICON_PACK_URL, true)
+            if type(src) ~= "string" or #src == 0 then return end
+            local chunk = loadstring(src)
+            if not chunk then return end
+            local ok, res = pcall(chunk)
+            if ok and type(res) == "table" and type(res.Icons) == "table"
+                and type(res.Spritesheets) == "table" then
+                pack = res
+            end
+        end)
+        getgenv().Violite_GeistIcons = pack or false
+        return pack
+    end
+
+    local ICON_PACK = loadIconPack()
+
+    -- Возвращает {Image = "rbxassetid://…", Offset = Vector2, Size = Vector2}
+    -- или nil, если пак недоступен либо имени в нём нет
+    local function iconData(name)
+        if not ICON_PACK or not name then return nil end
+        local entry = ICON_PACK.Icons[name]
+        if not entry then return nil end
+        local sheet = ICON_PACK.Spritesheets[tostring(entry.Image)]
+            or ICON_PACK.Spritesheets[entry.Image]
+        if type(sheet) ~= "string" then return nil end
+        return {
+            Image = sheet,
+            Offset = entry.ImageRectPosition,
+            Size = entry.ImageRectSize,
+        }
+    end
+
+    -- Логотип бренда: PNG из репозитория кладём в 7yd7/Assets и отдаём
+    -- движку через getcustomasset. Если executor не умеет в файлы —
+    -- фолбэк на нарисованный акцентный ромб
+    local LOGO_URL = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/V_pale_pink_glow_fullhd.png"
+    local LOGO_DIR = "7yd7"
+    local LOGO_ASSETS = "7yd7/Assets"
+    local LOGO_PATH = "7yd7/Assets/violite_logo.png"
+
+    local function loadLogoAsset()
+        local cached = getgenv().Violite_LogoAsset
+        if cached ~= nil then
+            return cached or nil
+        end
+        local asset
+        pcall(function()
+            if not (isfile and writefile and getcustomasset) then return end
+            if not isfile(LOGO_PATH) then
+                if makefolder then
+                    if not (isfolder and isfolder(LOGO_DIR)) then pcall(makefolder, LOGO_DIR) end
+                    if not (isfolder and isfolder(LOGO_ASSETS)) then pcall(makefolder, LOGO_ASSETS) end
+                end
+                local data = game:HttpGet(LOGO_URL, true)
+                if type(data) ~= "string" or #data == 0 then return end
+                writefile(LOGO_PATH, data)
+            end
+            if isfile(LOGO_PATH) then
+                asset = getcustomasset(LOGO_PATH)
+            end
+        end)
+        getgenv().Violite_LogoAsset = asset or false
+        return asset
+    end
 
     ----------------------------------------------------------------
     -- ХЕЛПЕРЫ UI (БЛОК 19)
     ----------------------------------------------------------------
 
+    -- Font = <Font-объект> кладём в FontFace (весовые шрифты), Font = <Enum>
+    -- остаётся обычным Font — так все существующие вызовы работают без правок
     local function Create(className, properties, children)
         local obj = Instance.new(className)
         for k, v in pairs(properties or {}) do
-            obj[k] = v
+            if k == "Font" and typeof(v) == "Font" then
+                local ok = pcall(function() obj.FontFace = v end)
+                if not ok then obj.Font = Enum.Font.GothamSemibold end
+            else
+                obj[k] = v
+            end
         end
         for _, child in ipairs(children or {}) do
             child.Parent = obj
@@ -94,21 +243,23 @@ return function(env)
         return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
     end
 
+    -- Сплошная обводка Geist. transparency оставлен в сигнатуре ради
+    -- совместимости вызовов, по умолчанию — 0 (никакой альфы)
     local function AddStroke(parent, thickness, color, transparency)
         return Create("UIStroke", {
-            Thickness = thickness or 1,
-            Color = color or T.HairCol,
-            Transparency = transparency or T.HairTrans,
+            Thickness = thickness or STROKE_W,
+            Color = color or T.Border,
+            Transparency = transparency or 0,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Parent = parent
         })
     end
 
-    -- Горизонтальный hairline-разделитель
+    -- Разделитель строк: сплошной gray-300, без прозрачности
     local function Hairline(props)
         props = props or {}
-        props.BackgroundColor3 = T.HairCol
-        props.BackgroundTransparency = T.HairTrans
+        props.BackgroundColor3 = props.BackgroundColor3 or T.Divider
+        props.BackgroundTransparency = 0
         props.BorderSizePixel = 0
         return Create("Frame", props)
     end
@@ -164,7 +315,7 @@ return function(env)
                 BorderSizePixel = 0,
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.new(0.5, 0, 0.5, 0),
-                Size = UDim2.new(0, 1.4, 0, 12),
+                Size = UDim2.new(0, 1.5, 0, 11),
                 Rotation = rot,
                 ZIndex = (parent.ZIndex or 1) + 1,
                 Parent = parent
@@ -269,8 +420,8 @@ return function(env)
             Active = true,
             Parent = gui
         })
-        AddCorner(mainFrame, 10)
-        AddStroke(mainFrame, 1, T.HairCol, 0.88)
+        AddCorner(mainFrame, R_CARD)
+        AddStroke(mainFrame, STROKE_W, T.Border)
 
         ----------------------------------------------------------------
         -- САЙДБАР: логотип + вертикальная навигация вкладок
@@ -286,21 +437,68 @@ return function(env)
 
         Hairline({
             Name = "SidebarSep",
+            BackgroundColor3 = T.Border,
             Position = UDim2.new(0, SIDEBAR_W, 0, 0),
             Size = UDim2.new(0, 1, 1, 0),
             Parent = mainFrame
         })
 
+        -- Логотип бренда. Исходник 1920x1080, светящийся глиф «V» занимает
+        -- по центру всего ~304px высоты — при обычном кропе всего кадра знак
+        -- утонул бы в пустом поле. Резать пиксельным ImageRect нельзя:
+        -- движок ужимает текстуры больше 1024px, и координаты исходника
+        -- промахиваются. Поэтому кроп делаем геометрией: картинка со
+        -- ScaleType.Crop берётся заведомо крупнее рамки, а рамка её клипает.
+        -- Множитель 1080/400 наводит на глиф, пропорции не трогаются.
+        local LOGO_BOX = 26
+        local LOGO_ZOOM = 1080 / 400
+        local logoAsset = loadLogoAsset()
+        if logoAsset then
+            local logoBox = Create("Frame", {
+                Name = "LogoMark",
+                BackgroundTransparency = 1,
+                ClipsDescendants = true,
+                Position = UDim2.new(0, EDGE, 0, 17),
+                Size = UDim2.new(0, LOGO_BOX, 0, LOGO_BOX),
+                Parent = sidebar
+            })
+            AddCorner(logoBox, R_CTRL)
+            Create("ImageLabel", {
+                Name = "Image",
+                Image = logoAsset,
+                ScaleType = Enum.ScaleType.Crop,
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, math.floor(LOGO_BOX * LOGO_ZOOM),
+                                 0, math.floor(LOGO_BOX * LOGO_ZOOM)),
+                Parent = logoBox
+            })
+        else
+            local logoMark = Create("Frame", {
+                Name = "LogoMark",
+                BackgroundColor3 = T.Accent,
+                BorderSizePixel = 0,
+                Position = UDim2.new(0, EDGE + 6, 0, 23),
+                Size = UDim2.new(0, 13, 0, 13),
+                Rotation = 45,
+                Parent = sidebar
+            })
+            AddCorner(logoMark, 3)
+        end
+
+        local LOGO_TEXT_X = EDGE + LOGO_BOX + 8
+
         Create("TextLabel", {
             Name = "LogoName",
             Text = "Violite",
-            Font = FONT.Bold,
+            Font = FONT.Head,
             TextSize = TS.Logo,
-            TextColor3 = T.Accent,
+            TextColor3 = T.Text,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 18, 0, 15),
-            Size = UDim2.new(0, 150, 0, 22),
+            Position = UDim2.new(0, LOGO_TEXT_X, 0, 15),
+            Size = UDim2.new(0, 150, 0, 20),
             Parent = sidebar
         })
 
@@ -312,7 +510,7 @@ return function(env)
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 18, 0, 37),
+            Position = UDim2.new(0, LOGO_TEXT_X, 0, 35),
             Size = UDim2.new(0, 150, 0, 16),
             Parent = sidebar
         })
@@ -320,8 +518,8 @@ return function(env)
         local navScroll = Create("ScrollingFrame", {
             Name = "NavScroll",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 10, 0, 62),
-            Size = UDim2.new(0, SIDEBAR_W - 20, 1, -100),
+            Position = UDim2.new(0, 8, 0, 76),
+            Size = UDim2.new(0, SIDEBAR_W - 16, 1, -116),
             CanvasSize = UDim2.new(0, 0, 0, 0),
             ScrollBarThickness = 0,
             BorderSizePixel = 0,
@@ -347,8 +545,8 @@ return function(env)
             TextTransparency = 0.35,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 18, 1, -26),
-            Size = UDim2.new(0, 160, 0, 16),
+            Position = UDim2.new(0, EDGE, 1, -28),
+            Size = UDim2.new(0, 170, 0, 16),
             Parent = sidebar
         })
 
@@ -368,12 +566,12 @@ return function(env)
         local tabTitle = Create("TextLabel", {
             Name = "TabTitle",
             Text = "",
-            Font = FONT.Bold,
+            Font = FONT.Head,
             TextSize = TS.TabTitle,
             TextColor3 = T.Text,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 18, 0, 0),
+            Position = UDim2.new(0, EDGE + 4, 0, 0),
             Size = UDim2.new(0, 300, 1, 0),
             Parent = header
         })
@@ -386,31 +584,39 @@ return function(env)
             TextSize = TS.Search,
             TextColor3 = T.Text,
             PlaceholderColor3 = T.TextDark,
-            BackgroundColor3 = T.Surface2,
-            Position = UDim2.new(1, -278, 0.5, -15),
-            Size = UDim2.new(0, 220, 0, 30),
+            BackgroundColor3 = T.Surface1,
+            Position = UDim2.new(1, -(240 + CTRL_H + 8 + EDGE), 0.5, -CTRL_H / 2),
+            Size = UDim2.new(0, 240, 0, CTRL_H),
             TextXAlignment = Enum.TextXAlignment.Left,
             ClearTextOnFocus = false,
             Parent = header,
         })
-        AddCorner(searchBox, 6)
-        AddStroke(searchBox, 1, T.HairCol, T.HairTrans)
+        AddCorner(searchBox, R_CTRL)
+        local searchStroke = AddStroke(searchBox, STROKE_W, T.Border)
         Create("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = searchBox})
+        -- Geist input: рамка подсвечивается на фокусе, а не на hover
+        searchBox.Focused:Connect(function()
+            TweenService:Create(searchStroke, TweenInfo.new(0.15), {Color = G.Gray600}):Play()
+        end)
+        searchBox.FocusLost:Connect(function()
+            TweenService:Create(searchStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+        end)
 
         local closeButton = Create("TextButton", {
             Text = "",
-            BackgroundColor3 = T.Danger,
+            BackgroundColor3 = G.Gray200,
             BackgroundTransparency = 1,
-            Position = UDim2.new(1, -44, 0.5, -15),
-            Size = UDim2.new(0, 30, 0, 30),
+            Position = UDim2.new(1, -(CTRL_H + EDGE), 0.5, -CTRL_H / 2),
+            Size = UDim2.new(0, CTRL_H, 0, CTRL_H),
             AutoButtonColor = false,
             Parent = header
         })
-        AddCorner(closeButton, 6)
+        AddCorner(closeButton, R_CTRL)
         local closeStrokes = glyphCross(closeButton)
 
         Hairline({
             Name = "HeaderSep",
+            BackgroundColor3 = T.Border,
             Position = UDim2.new(0, SIDEBAR_W + 1, 0, HEADER_H),
             Size = UDim2.new(1, -(SIDEBAR_W + 1), 0, 1),
             Parent = mainFrame
@@ -423,13 +629,14 @@ return function(env)
         local pagesContainer = Create("Frame", {
             Name = "PagesContainer",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, SIDEBAR_W + 15, 0, HEADER_H + 13),
-            Size = UDim2.new(1, -(SIDEBAR_W + 29), 1, -(HEADER_H + 13 + FOOTER_H + 13)),
+            Position = UDim2.new(0, SIDEBAR_W + 1 + EDGE, 0, HEADER_H + EDGE),
+            Size = UDim2.new(1, -(SIDEBAR_W + 1 + EDGE * 2), 1, -(HEADER_H + EDGE + FOOTER_H + EDGE)),
             Parent = mainFrame
         })
 
         Hairline({
             Name = "FooterSep",
+            BackgroundColor3 = T.Border,
             Position = UDim2.new(0, SIDEBAR_W + 1, 1, -(FOOTER_H + 1)),
             Size = UDim2.new(1, -(SIDEBAR_W + 1), 0, 1),
             Parent = mainFrame
@@ -447,7 +654,7 @@ return function(env)
         local roleChip = Create("Frame", {
             Name = "RoleChip",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 14, 0, 0),
+            Position = UDim2.new(0, EDGE, 0, 0),
             Size = UDim2.new(0, 140, 1, 0),
             Visible = false,
             Parent = footer
@@ -536,8 +743,9 @@ return function(env)
         ----------------------------------------------------------------
         -- КАСТОМНЫЙ SCROLLBAR (thumb без родного track)
         ----------------------------------------------------------------
-        local SCROLL_THUMB_COLOR = T.Accent
-        local SCROLL_THUMB_TRANSPARENCY = 0.35
+        -- Geist: скроллбар нейтральный (gray-500), а не акцентный
+        local SCROLL_THUMB_COLOR = G.Gray500
+        local SCROLL_THUMB_TRANSPARENCY = 0
         local SCROLL_THUMB_WIDTH = 4
 
         local function AttachCustomScrollbar(scrollingFrame, container, anchorX)
@@ -638,18 +846,63 @@ return function(env)
         end
 
         ----------------------------------------------------------------
-        -- ЛИНЕЙНЫЕ ИКОНКИ ВКЛАДОК (16x16, собраны из Frame/UIStroke —
-        -- без внешних ассетов, 1px-контуры в стиле lucide)
+        -- ИКОНКИ ВКЛАДОК в стиле Geist Icons: сетка 16x16, штрих 1.5,
+        -- геометрия из Frame/UIStroke, без внешних ассетов
         ----------------------------------------------------------------
+        local ICON_STROKE = 1.5
+        local ICON_SIZE = 18
+
+        -- Имя вкладки → имя иконки в паке geist (WindUI)
+        local TAB_ICON_NAMES = {
+            main     = "grid-square",
+            home     = "grid-square",
+            aim      = "target",
+            visuals  = "eye",
+            visual   = "eye",
+            esp      = "eye",
+            combat   = "crosshair",
+            farming  = "dollar",
+            farm     = "dollar",
+            fun      = "sparkles",
+            troll    = "lightning",
+            server   = "servers",
+            servers  = "servers",
+            settings = "settings-sliders",
+            config   = "settings-gear",
+            player   = "user",
+            players  = "users",
+            misc     = "box",
+            shop     = "coins",
+            debug    = "bug",
+        }
 
         local function makeTabIcon(tabName, parent)
             local holder = Create("Frame", {
                 Name = "Icon",
                 BackgroundTransparency = 1,
-                Position = UDim2.new(0, 10, 0.5, -8),
-                Size = UDim2.new(0, 16, 0, 16),
+                Position = UDim2.new(0, 10, 0.5, -ICON_SIZE / 2),
+                Size = UDim2.new(0, ICON_SIZE, 0, ICON_SIZE),
                 Parent = parent
             })
+
+            -- Основной путь: спрайт из пака WindUI
+            local data = iconData(TAB_ICON_NAMES[tabName:lower()])
+            if data then
+                local img = Create("ImageLabel", {
+                    Name = "Sprite",
+                    Image = data.Image,
+                    ImageRectOffset = data.Offset,
+                    ImageRectSize = data.Size,
+                    ImageColor3 = T.TextDark,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 1, 0),
+                    Parent = holder
+                })
+                return function(col)
+                    img.ImageColor3 = col
+                end
+            end
+            -- Фолбэк (нет сети / имени нет в паке): рисованная иконка
 
             local fills, strokes, labels = {}, {}, {}
 
@@ -662,7 +915,7 @@ return function(env)
             end
 
             local function ring(x, y, w, h, corner)
-                local f, s = glyphRing(holder, x, y, w, h, corner)
+                local f, s = glyphRing(holder, x, y, w, h, corner, ICON_STROKE)
                 table.insert(strokes, s)
                 return f
             end
@@ -682,57 +935,67 @@ return function(env)
                 return l
             end
 
+            -- Все штрихи 1.5px, радиусы кратны 2 — как в наборе Geist Icons
             local n = tabName:lower()
             if n == "main" then
-                -- сетка 2x2 (dashboard)
+                -- grid 2x2 (dashboard)
                 ring(1, 1, 6, 6, 2)
                 ring(9, 1, 6, 6, 2)
                 ring(1, 9, 6, 6, 2)
                 ring(9, 9, 6, 6, 2)
             elseif n == "aim" then
-                -- мишень: два кольца и точка
+                -- target: два кольца и точка
                 ring(1, 1, 14, 14, 7)
                 ring(5, 5, 6, 6, 3)
                 line(7, 7, 2, 2, 0, 1)
             elseif n == "combat" then
-                -- прицел: кольцо + 4 риски
+                -- crosshair: кольцо + 4 риски
                 ring(2, 2, 12, 12, 6)
-                line(7, 0, 1, 3)
-                line(7, 13, 1, 3)
-                line(0, 7, 3, 1)
-                line(13, 7, 3, 1)
+                line(7.25, 0, 1.5, 3)
+                line(7.25, 13, 1.5, 3)
+                line(0, 7.25, 3, 1.5)
+                line(13, 7.25, 3, 1.5)
             elseif n == "visuals" then
-                -- глаз: пилюля-контур + зрачок
+                -- eye: пилюля-контур + зрачок
                 ring(0, 4, 16, 8, 4)
-                line(6, 6, 3, 3, 0, 2)
+                line(6, 6, 4, 4, 0, 2)
             elseif n == "farming" or n == "farm" then
-                -- монета: кольцо + «$» по центру (прежние две прорези
-                -- читались как значок «пауза»)
+                -- dollar: кольцо + «$» по центру
                 ring(2, 2, 12, 12, 6)
                 label("$", 10)
             elseif n == "fun" then
-                -- искра: 4 луча из центра
-                line(7, 1, 1, 14)
-                line(1, 7, 14, 1)
-                line(7, 2, 1, 12, 45)
-                line(7, 2, 1, 12, -45)
+                -- sparkle: 4 луча из центра
+                line(7.25, 1, 1.5, 14)
+                line(1, 7.25, 14, 1.5)
+                line(7.25, 2, 1.5, 12, 45)
+                line(7.25, 2, 1.5, 12, -45)
             elseif n == "troll" then
-                -- смайл: кольцо + глаза + рот
+                -- smiley: кольцо + глаза + рот
                 ring(2, 2, 12, 12, 6)
                 line(5, 6, 2, 2, 0, 1)
                 line(9, 6, 2, 2, 0, 1)
-                line(5, 10, 6, 1, 0, 1)
+                line(5, 10, 6, 1.5, 0, 1)
+            elseif n == "server" or n == "servers" then
+                -- stack: две плашки-контура друг над другом
+                ring(1, 2, 14, 5, 2)
+                ring(1, 9, 14, 5, 2)
+                line(3.5, 4, 1.5, 1.5, 0, 1)
+                line(3.5, 11, 1.5, 1.5, 0, 1)
+            elseif n == "player" or n == "players" then
+                -- user: голова + плечи
+                ring(5, 1, 6, 6, 3)
+                ring(2, 9, 12, 10, 5)
             elseif n == "settings" then
-                -- слайдеры: 3 линии с бегунками
-                line(2, 3, 12, 1)
+                -- sliders: 3 линии с бегунками
+                line(2, 3, 12, 1.5)
                 line(4, 1, 3, 4, 0, 1)
-                line(2, 7, 12, 1)
+                line(2, 7.25, 12, 1.5)
                 line(9, 5, 3, 4, 0, 1)
-                line(2, 12, 12, 1)
-                line(6, 10, 3, 4, 0, 1)
+                line(2, 11.5, 12, 1.5)
+                line(6, 9.5, 3, 4, 0, 1)
             else
-                -- дефолт: рамка
-                ring(2, 2, 12, 12, 3)
+                -- дефолт: скруглённая рамка
+                ring(2, 2, 12, 12, 4)
             end
 
             local function setColor(col)
@@ -751,13 +1014,13 @@ return function(env)
         local function CreateTab(name)
             local tabBtn = Create("TextButton", {
                 Text = "",
-                BackgroundColor3 = T.Surface1,
+                BackgroundColor3 = G.Gray200,
                 BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 36),
+                Size = UDim2.new(1, 0, 0, CTRL_H),
                 AutoButtonColor = false,
                 Parent = navScroll
             })
-            AddCorner(tabBtn, 6)
+            AddCorner(tabBtn, R_CTRL)
 
             local setIconColor = makeTabIcon(name, tabBtn)
 
@@ -769,20 +1032,9 @@ return function(env)
                 TextXAlignment = Enum.TextXAlignment.Left,
                 BackgroundTransparency = 1,
                 Position = UDim2.new(0, 34, 0, 0),
-                Size = UDim2.new(1, -38, 1, 0),
+                Size = UDim2.new(1, -42, 1, 0),
                 Parent = tabBtn
             })
-
-            local accentBar = Create("Frame", {
-                Name = "AccentBar",
-                BackgroundColor3 = T.Accent,
-                Position = UDim2.new(0, 0, 0.5, -9),
-                Size = UDim2.new(0, 3, 0, 18),
-                BorderSizePixel = 0,
-                Visible = false,
-                Parent = tabBtn
-            })
-            AddCorner(accentBar, 2)
 
             -- Контейнер двух колонок для этой вкладки
             local pageHolder = Create("Frame", {
@@ -804,12 +1056,23 @@ return function(env)
                 Parent = pageHolder
             })
             local leftLayout = Create("UIListLayout", {
-                Padding = UDim.new(0, 12),
+                Padding = UDim.new(0, EDGE),
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = leftPage
             })
+            -- UIStroke рисуется СНАРУЖИ фрейма, а ScrollingFrame режет всё,
+            -- что вышло за его границы: без этого паддинга у верхней карточки
+            -- пропадала верхняя грань обводки (оставались только уголки),
+            -- а у крайних — боковые. Паддинг учтён в CanvasSize.
+            Create("UIPadding", {
+                PaddingTop = UDim.new(0, PAGE_PAD),
+                PaddingLeft = UDim.new(0, PAGE_PAD),
+                PaddingRight = UDim.new(0, PAGE_PAD),
+                Parent = leftPage
+            })
             leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                leftPage.CanvasSize = UDim2.new(0, 0, 0, leftLayout.AbsoluteContentSize.Y + 20)
+                leftPage.CanvasSize = UDim2.new(0, 0, 0,
+                    leftLayout.AbsoluteContentSize.Y + PAGE_PAD * 2 + 20)
             end)
             AttachCustomScrollbar(leftPage, pageHolder, UDim.new(0.5, -2))
 
@@ -824,12 +1087,19 @@ return function(env)
                 Parent = pageHolder
             })
             local rightLayout = Create("UIListLayout", {
-                Padding = UDim.new(0, 12),
+                Padding = UDim.new(0, EDGE),
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = rightPage
             })
+            Create("UIPadding", {
+                PaddingTop = UDim.new(0, PAGE_PAD),
+                PaddingLeft = UDim.new(0, PAGE_PAD),
+                PaddingRight = UDim.new(0, PAGE_PAD),
+                Parent = rightPage
+            })
             rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                rightPage.CanvasSize = UDim2.new(0, 0, 0, rightLayout.AbsoluteContentSize.Y + 20)
+                rightPage.CanvasSize = UDim2.new(0, 0, 0,
+                    rightLayout.AbsoluteContentSize.Y + PAGE_PAD * 2 + 20)
             end)
             AttachCustomScrollbar(rightPage, pageHolder, UDim.new(1, 4))
 
@@ -854,14 +1124,14 @@ return function(env)
                     ):Play()
                     currentTab.Label.TextColor3 = T.TextDark
                     currentTab.SetIcon(T.TextDark)
-                    currentTab.Bar.Visible = false
                     currentTab.Holder.Visible = false
                 end
                 currentTab = {
-                    Btn = tabBtn, Holder = pageHolder, Bar = accentBar,
+                    Btn = tabBtn, Holder = pageHolder,
                     Label = tabLabel, SetIcon = setIconColor
                 }
-                tabBtn.BackgroundColor3 = T.Surface2
+                -- активный пункт: gray-200 подложка + gray-1000 текст (Geist nav)
+                tabBtn.BackgroundColor3 = G.Gray200
                 TweenService:Create(
                     tabBtn,
                     TweenInfo.new(0.12, Enum.EasingStyle.Quad),
@@ -869,7 +1139,6 @@ return function(env)
                 ):Play()
                 tabLabel.TextColor3 = T.Text
                 setIconColor(T.Text)
-                accentBar.Visible = true
                 pageHolder.Visible = true
                 tabTitle.Text = name
             end
@@ -878,7 +1147,7 @@ return function(env)
 
             tabBtn.MouseEnter:Connect(function()
                 if not isActive() then
-                    tabBtn.BackgroundColor3 = T.Surface1
+                    tabBtn.BackgroundColor3 = G.Gray100
                     TweenService:Create(tabBtn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
                         BackgroundTransparency = 0
                     }):Play()
@@ -914,32 +1183,34 @@ return function(env)
                     BorderSizePixel = 0,
                     Parent = currentPage
                 })
-                AddCorner(sec, 8)
-                AddStroke(sec, 1, T.HairCol, 0.9)
+                AddCorner(sec, R_CARD)
+                AddStroke(sec, STROKE_W, T.Border)
 
                 local layout = Create("UIListLayout", {
                     Padding = UDim.new(0, 0),
                     SortOrder = Enum.SortOrder.LayoutOrder,
                     Parent = sec
                 })
-                -- +8 снизу = PaddingTop заголовка: карточка дышит одинаково
+                -- нижний воздух равен верхнему отступу шапки карточки
                 layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
                     sec.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y + 8)
                 end)
 
+                -- Шапка карточки как в Geist: обычный регистр, gray-700,
+                -- под ней сплошной разделитель — верхний блок читается как header
                 if title and title ~= "" then
                     local head = Create("TextLabel", {
-                        Text = title:upper(),
+                        Text = title,
                         Font = FONT.Bold,
                         TextSize = TS.Section,
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 36),
+                        Size = UDim2.new(1, 0, 0, 40),
                         LayoutOrder = 1,
                         Parent = sec
                     })
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, 14), PaddingTop = UDim.new(0, 8), Parent = head})
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, EDGE), PaddingTop = UDim.new(0, 8), Parent = head})
                 end
 
                 local data = {frame = sec, layout = layout, rows = {}, order = 1}
@@ -969,14 +1240,15 @@ return function(env)
                 end
                 data.order = data.order + 1
                 local row = Create("Frame", {
-                    BackgroundColor3 = T.Surface2,
+                    -- hover-подложка строки = gray-100 (Geist «default background»)
+                    BackgroundColor3 = G.Gray100,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, height),
                     LayoutOrder = data.order,
                     Parent = data.frame
                 })
                 row.MouseEnter:Connect(function()
-                    TweenService:Create(row, TweenInfo.new(0.12), {BackgroundTransparency = 0.5}):Play()
+                    TweenService:Create(row, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
                 end)
                 row.MouseLeave:Connect(function()
                     TweenService:Create(row, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
@@ -996,7 +1268,7 @@ return function(env)
             local function addRowText(row, title, desc, reserved)
                 reserved = reserved or 200
                 if desc and desc ~= "" then
-                    -- 11 + 20 + 18 + 11 = ROW_H_DESC: сверху и снизу поровну
+                    -- 13 + 21 + 19 + 13 = ROW_H_DESC: сверху и снизу поровну
                     Create("TextLabel", {
                         Text = title,
                         Font = FONT.Bold,
@@ -1006,8 +1278,8 @@ return function(env)
                         TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, EDGE, 0, 11),
-                        Size = UDim2.new(1, -reserved, 0, 20),
+                        Position = UDim2.new(0, EDGE, 0, 13),
+                        Size = UDim2.new(1, -reserved, 0, 21),
                         Parent = row
                     })
                     Create("TextLabel", {
@@ -1019,8 +1291,8 @@ return function(env)
                         TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, EDGE, 0, 31),
-                        Size = UDim2.new(1, -reserved, 0, 18),
+                        Position = UDim2.new(0, EDGE, 0, 34),
+                        Size = UDim2.new(1, -reserved, 0, 19),
                         Parent = row
                     })
                 else
@@ -1050,14 +1322,14 @@ return function(env)
                     TextSize = TS.Chip,
                     TextTruncate = Enum.TextTruncate.AtEnd,
                     TextColor3 = T.Text,
-                    BackgroundColor3 = T.Surface2,
+                    BackgroundColor3 = T.Surface1,
                     Position = posX,
                     Size = UDim2.new(0, width, 0, height),
                     AutoButtonColor = false,
                     Parent = parent
                 })
-                AddCorner(chip, 6)
-                local chipStroke = AddStroke(chip, 1, T.HairCol, T.HairTrans)
+                AddCorner(chip, R_CTRL)
+                local chipStroke = AddStroke(chip, STROKE_W, T.Border)
 
                 State.UIElements[keybindKey .. "_Button"] = chip
 
@@ -1065,11 +1337,14 @@ return function(env)
                     chip.Text = "..."
                     State.ListeningForKeybind = {key = keybindKey, button = chip}
                 end)
+                -- Geist secondary button: на hover светлеет только рамка и фон
                 chip.MouseEnter:Connect(function()
-                    TweenService:Create(chipStroke, TweenInfo.new(0.15), {Transparency = 0.5, Color = T.Accent}):Play()
+                    TweenService:Create(chipStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
+                    TweenService:Create(chip, TweenInfo.new(0.15), {BackgroundColor3 = G.Gray200}):Play()
                 end)
                 chip.MouseLeave:Connect(function()
-                    TweenService:Create(chipStroke, TweenInfo.new(0.15), {Transparency = T.HairTrans, Color = T.HairCol}):Play()
+                    TweenService:Create(chipStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+                    TweenService:Create(chip, TweenInfo.new(0.15), {BackgroundColor3 = T.Surface1}):Play()
                 end)
                 return chip
             end
@@ -1077,25 +1352,34 @@ return function(env)
             -- Выпадающий список поверх mainFrame + закрытие по клику мимо.
             -- Общая механика для CreateDropdown и CreatePlayerDropdown.
             local function makeOverlayList(anchorBtn, width)
+                -- Geist popover: bg background-100, сплошная рамка, радиус 12,
+                -- внутренний padding 6 и шаг строк 2 (--ds-popover-*)
                 local overlay = Create("ScrollingFrame", {
-                    BackgroundColor3 = T.Surface2,
+                    BackgroundColor3 = T.Surface1,
                     Position = UDim2.new(0, 0, 0, 0),
                     Size = UDim2.new(0, width, 0, 0),
                     Visible = false,
                     CanvasSize = UDim2.new(0, 0, 0, 0),
                     ScrollBarThickness = 4,
-                    ScrollBarImageColor3 = T.Accent,
+                    ScrollBarImageColor3 = G.Gray500,
                     ClipsDescendants = true,
                     BorderSizePixel = 0,
                     ZIndex = 1000,
                     Parent = mainFrame
                 })
-                AddCorner(overlay, 6)
-                AddStroke(overlay, 1, T.HairCol, 0.8)
+                AddCorner(overlay, R_CARD)
+                AddStroke(overlay, STROKE_W, T.Border)
 
                 Create("UIListLayout", {
                     Padding = UDim.new(0, 2),
                     SortOrder = Enum.SortOrder.LayoutOrder,
+                    Parent = overlay
+                })
+                Create("UIPadding", {
+                    PaddingTop = UDim.new(0, POPOVER_PAD),
+                    PaddingBottom = UDim.new(0, POPOVER_PAD),
+                    PaddingLeft = UDim.new(0, POPOVER_PAD),
+                    PaddingRight = UDim.new(0, POPOVER_PAD),
                     Parent = overlay
                 })
 
@@ -1177,35 +1461,38 @@ return function(env)
                 default = default or false
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
-                -- правый блок: 44(пилюля)+14 и, если есть чип, ещё 56+8 слева
-                addRowText(row, title, desc, keybindKey and 148 or 84)
+                -- правый блок: 40(тогл)+16 и, если есть чип, ещё 60+8 слева
+                addRowText(row, title, desc, keybindKey and 156 or 82)
 
-                -- Пилюля 44x24, позиция/цвет зависят от состояния
+                -- Geist Toggle (large): трек 40x24, ручка 20 с инсетом 2,
+                -- выкл. — gray-400, вкл. — акцент. Обводки у трека нет
+                local TOG_W, TOG_H, KNOB = 40, 24, 20
+                local KNOB_ON  = TOG_W - KNOB - 2
+                local KNOB_OFF = 2
+
                 local toggleBg = Create("TextButton", {
                     Text = "",
                     BackgroundColor3 = default and T.Accent or T.TrackBg,
-                    Position = UDim2.new(1, -(44 + EDGE), 0.5, -12),
-                    Size = UDim2.new(0, 44, 0, 24),
+                    Position = UDim2.new(1, -(TOG_W + EDGE), 0.5, -TOG_H / 2),
+                    Size = UDim2.new(0, TOG_W, 0, TOG_H),
                     AutoButtonColor = false,
                     Parent = row
                 })
-                AddCorner(toggleBg, 12)
-                -- В выключенном состоянии пилюля почти сливается со строкой —
-                -- держим на ней hairline и прячем его при включении
-                local toggleStroke = AddStroke(toggleBg, 1, T.HairCol, default and 1 or 0.88)
+                AddCorner(toggleBg, TOG_H / 2)
 
                 local toggleCircle = Create("Frame", {
                     BackgroundColor3 = T.Text,
-                    Position = default and UDim2.new(0, 23, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
-                    Size = UDim2.new(0, 18, 0, 18),
+                    BackgroundTransparency = 0.16,   -- rgba(237,237,237,.84) в Geist
+                    Position = UDim2.new(0, default and KNOB_ON or KNOB_OFF, 0.5, -KNOB / 2),
+                    Size = UDim2.new(0, KNOB, 0, KNOB),
                     BorderSizePixel = 0,
                     Parent = toggleBg
                 })
-                AddCorner(toggleCircle, 9)
+                AddCorner(toggleCircle, KNOB / 2)
 
                 -- Опциональный чип бинда слева от тогла
                 if keybindKey then
-                    makeKeybindChip(row, keybindKey, 56, CTRL_H, UDim2.new(1, -122, 0.5, -CTRL_H / 2))
+                    makeKeybindChip(row, keybindKey, 60, CTRL_H, UDim2.new(1, -(TOG_W + EDGE + 8 + 60), 0.5, -CTRL_H / 2))
                 end
 
                 local state = default
@@ -1221,10 +1508,9 @@ return function(env)
                 TrackConnection(toggleBg.MouseButton1Click:Connect(function()
                     state = not state
                     local targetColor = state and T.Accent or T.TrackBg
-                    local targetPos = state and UDim2.new(0, 23, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+                    local targetPos = UDim2.new(0, state and KNOB_ON or KNOB_OFF, 0.5, -KNOB / 2)
 
                     TweenService:Create(toggleBg, TweenInfo.new(0.15), {BackgroundColor3 = targetColor}):Play()
-                    TweenService:Create(toggleStroke, TweenInfo.new(0.15), {Transparency = state and 1 or 0.88}):Play()
                     TweenService:Create(toggleCircle, TweenInfo.new(0.15), {Position = targetPos}):Play()
 
                     callHandler(handlerKey, state)
@@ -1236,9 +1522,9 @@ return function(env)
             function TabFunctions:CreateDropdown(title, desc, options, default, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
-                addRowText(row, title, desc, 150)
+                addRowText(row, title, desc, 156)
 
-                local DD_W = 110
+                local DD_W = 120
                 local dropdown = Create("TextButton", {
                     Text = default,
                     Font = FONT.Bold,
@@ -1246,42 +1532,49 @@ return function(env)
                     TextColor3 = T.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     TextTruncate = Enum.TextTruncate.AtEnd,
-                    BackgroundColor3 = T.Surface2,
+                    BackgroundColor3 = T.Surface1,
                     Position = UDim2.new(1, -(DD_W + EDGE), 0.5, -CTRL_H / 2),
                     Size = UDim2.new(0, DD_W, 0, CTRL_H),
                     AutoButtonColor = false,
                     ZIndex = 5,
                     Parent = row
                 })
-                AddCorner(dropdown, 6)
-                AddStroke(dropdown, 1, T.HairCol, T.HairTrans)
-                -- правый паддинг 22 — место под рисованный шеврон
+                AddCorner(dropdown, R_CTRL)
+                local ddStroke = AddStroke(dropdown, STROKE_W, T.Border)
+                -- правый паддинг 24 — место под рисованный шеврон
                 Create("UIPadding", {
-                    PaddingLeft = UDim.new(0, 10),
-                    PaddingRight = UDim.new(0, 22),
+                    PaddingLeft = UDim.new(0, 12),
+                    PaddingRight = UDim.new(0, 24),
                     Parent = dropdown
                 })
-                glyphChevron(dropdown, 22)
+                glyphChevron(dropdown, 24)
+                dropdown.MouseEnter:Connect(function()
+                    TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
+                end)
+                dropdown.MouseLeave:Connect(function()
+                    TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+                end)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
 
+                -- строка поповера Geist: 36px, радиус 6, hover — gray-200
                 for _, option in ipairs(options) do
                     local optionBtn = Create("TextButton", {
                         Text = option,
                         Font = FONT.Body,
                         TextSize = TS.Option,
                         TextColor3 = T.Text,
-                        BackgroundColor3 = T.Surface2,
-                        Size = UDim2.new(1, 0, 0, 28),
+                        BackgroundColor3 = G.Gray200,
+                        BackgroundTransparency = 1,
+                        Size = UDim2.new(1, 0, 0, POPOVER_ROW),
                         AutoButtonColor = false,
                         ZIndex = 1001,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         Parent = overlay
                     })
-                    AddCorner(optionBtn, 4)
-                    -- пункт выравнивается по тексту закрытой кнопки (те же 10px)
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, 10), Parent = optionBtn})
+                    AddCorner(optionBtn, R_CTRL)
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = optionBtn})
 
                     optionBtn.MouseButton1Click:Connect(function()
                         dropdown.Text = option
@@ -1290,16 +1583,20 @@ return function(env)
                     end)
 
                     optionBtn.MouseEnter:Connect(function()
-                        TweenService:Create(optionBtn, TweenInfo.new(0.15), {
-                            BackgroundColor3 = T.Accent
+                        TweenService:Create(optionBtn, TweenInfo.new(0.12), {
+                            BackgroundTransparency = 0
                         }):Play()
                     end)
 
                     optionBtn.MouseLeave:Connect(function()
-                        TweenService:Create(optionBtn, TweenInfo.new(0.15), {
-                            BackgroundColor3 = T.Surface2
+                        TweenService:Create(optionBtn, TweenInfo.new(0.12), {
+                            BackgroundTransparency = 1
                         }):Play()
                     end)
+                end
+
+                local function listHeight()
+                    return #options * (POPOVER_ROW + 2) + POPOVER_PAD * 2
                 end
 
                 dropdown.MouseButton1Click:Connect(function()
@@ -1307,8 +1604,8 @@ return function(env)
                         close()
                     else
                         overlay.Visible = true
-                        overlay.CanvasSize = UDim2.new(0, 0, 0, #options * 30 + 4)
-                        openAt(math.min(154, #options * 30 + 4))
+                        overlay.CanvasSize = UDim2.new(0, 0, 0, listHeight())
+                        openAt(math.min(232, listHeight()))
                     end
                 end)
 
@@ -1318,25 +1615,30 @@ return function(env)
             function TabFunctions:CreateInputField(title, desc, defaultValue, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
-                addRowText(row, title, desc, 104)
+                addRowText(row, title, desc, 118)
 
                 local inputBox = Create("TextBox", {
                     Text = tostring(defaultValue),
                     Font = FONT.Mono,
                     TextSize = TS.Value,
                     TextColor3 = T.Text,
-                    BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -(64 + EDGE), 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(0, 64, 0, CTRL_H),
+                    BackgroundColor3 = T.Surface1,
+                    Position = UDim2.new(1, -(72 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 72, 0, CTRL_H),
                     PlaceholderText = "…",
                     PlaceholderColor3 = T.TextDark,
                     ClearTextOnFocus = false,
                     Parent = row
                 })
-                AddCorner(inputBox, 6)
-                AddStroke(inputBox, 1, T.HairCol, T.HairTrans)
+                AddCorner(inputBox, R_CTRL)
+                local inputStroke = AddStroke(inputBox, STROKE_W, T.Border)
+                Create("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), Parent = inputBox})
+                inputBox.Focused:Connect(function()
+                    TweenService:Create(inputStroke, TweenInfo.new(0.15), {Color = G.Gray600}):Play()
+                end)
 
                 inputBox.FocusLost:Connect(function()
+                    TweenService:Create(inputStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
                     local value = tonumber(inputBox.Text)
                     if value then
                         callHandler(handlerKey, value)
@@ -1350,7 +1652,7 @@ return function(env)
                 step = step or 1
                 local hasDesc = description ~= nil and description ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, description or "")
-                addRowText(row, title, description, 206)
+                addRowText(row, title, description, 224)
 
                 local function fmt(v)
                     return step >= 1 and string.format("%d", v) or string.format("%.2f", v)
@@ -1358,11 +1660,12 @@ return function(env)
 
                 local currentValue = default
 
-                -- Трек 110x4 (кончается за 10px до поля значения) и значение-TextBox
+                -- Трек 100x4, кончается за 12px до поля значения (Geist slider:
+                -- gray-400 фон, акцентная заливка, ручка gray-1000 в кольце фона)
                 local sliderBg = Create("Frame", {
                     BackgroundColor3 = T.TrackBg,
-                    Position = UDim2.new(1, -180, 0.5, -2),
-                    Size = UDim2.new(0, 110, 0, 4),
+                    Position = UDim2.new(1, -190, 0.5, -2),
+                    Size = UDim2.new(0, 100, 0, 4),
                     BorderSizePixel = 0,
                     Parent = row
                 })
@@ -1382,23 +1685,25 @@ return function(env)
                     Position = UDim2.new((default - min) / (max - min), -7, 0.5, -7),
                     Size = UDim2.new(0, 14, 0, 14),
                     AutoButtonColor = false,
+                    ZIndex = 3,
                     Parent = sliderBg
                 })
                 AddCorner(sliderButton, 7)
+                AddStroke(sliderButton, 2, T.Surface1)
 
                 local valueBox = Create("TextBox", {
                     Text = fmt(default),
                     Font = FONT.Mono,
                     TextSize = TS.Value,
-                    TextColor3 = T.Accent,
-                    BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -(46 + EDGE), 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(0, 46, 0, CTRL_H),
+                    TextColor3 = T.Text,
+                    BackgroundColor3 = T.Surface1,
+                    Position = UDim2.new(1, -(62 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 62, 0, CTRL_H),
                     ClearTextOnFocus = true,
                     Parent = row
                 })
-                AddCorner(valueBox, 6)
-                AddStroke(valueBox, 1, T.HairCol, T.HairTrans)
+                AddCorner(valueBox, R_CTRL)
+                AddStroke(valueBox, STROKE_W, T.Border)
 
                 local function applyValue(value, fire)
                     value = math.floor(value / step + 0.5) * step
@@ -1453,8 +1758,9 @@ return function(env)
 
             function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
                 local row = addRow(ROW_H, title, "")
-                addRowText(row, title, nil, 140)
+                addRowText(row, title, nil, 148)
 
+                -- Geist secondary button
                 local bound = State.Keybinds and State.Keybinds[keybindKey]
                 local bindButton = Create("TextButton", {
                     Name = keybindKey .. "_Button",
@@ -1463,20 +1769,28 @@ return function(env)
                     TextSize = TS.Button,
                     TextColor3 = T.Text,
                     TextTruncate = Enum.TextTruncate.AtEnd,
-                    BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -(100 + EDGE), 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(0, 100, 0, CTRL_H),
+                    BackgroundColor3 = T.Surface1,
+                    Position = UDim2.new(1, -(106 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 106, 0, CTRL_H),
                     AutoButtonColor = false,
                     Parent = row
                 })
-                AddCorner(bindButton, 6)
-                AddStroke(bindButton, 1, T.HairCol, T.HairTrans)
+                AddCorner(bindButton, R_CTRL)
+                local bindStroke = AddStroke(bindButton, STROKE_W, T.Border)
 
                 State.UIElements[keybindKey .. "_Button"] = bindButton
 
                 bindButton.MouseButton1Click:Connect(function()
                     bindButton.Text = "Press Key..."
                     State.ListeningForKeybind = {key = keybindKey, button = bindButton}
+                end)
+                bindButton.MouseEnter:Connect(function()
+                    TweenService:Create(bindStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
+                    TweenService:Create(bindButton, TweenInfo.new(0.15), {BackgroundColor3 = G.Gray200}):Play()
+                end)
+                bindButton.MouseLeave:Connect(function()
+                    TweenService:Create(bindStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+                    TweenService:Create(bindButton, TweenInfo.new(0.15), {BackgroundColor3 = T.Surface1}):Play()
                 end)
 
                 return bindButton
@@ -1488,9 +1802,9 @@ return function(env)
                 stateKey = stateKey or "SelectedPlayerForFling"
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
-                addRowText(row, title, desc, 205)
+                addRowText(row, title, desc, 216)
 
-                local DD_W = 165
+                local DD_W = 176
                 local dropdown = Create("TextButton", {
                     Text = "Select player",
                     Font = FONT.Bold,
@@ -1498,22 +1812,28 @@ return function(env)
                     TextColor3 = T.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     TextTruncate = Enum.TextTruncate.AtEnd,
-                    BackgroundColor3 = T.Surface2,
+                    BackgroundColor3 = T.Surface1,
                     Position = UDim2.new(1, -(DD_W + EDGE), 0.5, -CTRL_H / 2),
                     Size = UDim2.new(0, DD_W, 0, CTRL_H),
                     AutoButtonColor = false,
                     ZIndex = 5,
                     Parent = row
                 })
-                AddCorner(dropdown, 6)
-                AddStroke(dropdown, 1, T.HairCol, T.HairTrans)
-                -- правый паддинг 22 — место под рисованный шеврон
+                AddCorner(dropdown, R_CTRL)
+                local pdStroke = AddStroke(dropdown, STROKE_W, T.Border)
+                -- правый паддинг 24 — место под рисованный шеврон
                 Create("UIPadding", {
-                    PaddingLeft = UDim.new(0, 10),
-                    PaddingRight = UDim.new(0, 22),
+                    PaddingLeft = UDim.new(0, 12),
+                    PaddingRight = UDim.new(0, 24),
                     Parent = dropdown
                 })
-                glyphChevron(dropdown, 22)
+                glyphChevron(dropdown, 24)
+                dropdown.MouseEnter:Connect(function()
+                    TweenService:Create(pdStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
+                end)
+                dropdown.MouseLeave:Connect(function()
+                    TweenService:Create(pdStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+                end)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
 
@@ -1533,20 +1853,20 @@ return function(env)
                             TextColor3 = T.TextDark,
                             TextXAlignment = Enum.TextXAlignment.Left,
                             BackgroundTransparency = 1,
-                            Size = UDim2.new(1, 0, 0, 28),
+                            Size = UDim2.new(1, 0, 0, POPOVER_ROW),
                             ZIndex = 1001,
                             Parent = overlay
                         })
-                        Create("UIPadding", {PaddingLeft = UDim.new(0, 10), Parent = empty})
-                        overlay.CanvasSize = UDim2.new(0, 0, 0, 32)
+                        Create("UIPadding", {PaddingLeft = UDim.new(0, 8), Parent = empty})
+                        overlay.CanvasSize = UDim2.new(0, 0, 0, POPOVER_ROW + POPOVER_PAD * 2)
                         return
                     end
 
                     -- ширина строк — на всю ширину списка: UIListLayout всё равно
                     -- перебивает Position, а инсет давал «съеденный» правый край
-                    local buttonHeight = 28
                     local buttonSpacing = 2
-                    overlay.CanvasSize = UDim2.new(0, 0, 0, #players * (buttonHeight + buttonSpacing) + 4)
+                    overlay.CanvasSize = UDim2.new(0, 0, 0,
+                        #players * (POPOVER_ROW + buttonSpacing) + POPOVER_PAD * 2)
 
                     for _, playerName in ipairs(players) do
                         local pb = Create("TextButton", {
@@ -1554,16 +1874,17 @@ return function(env)
                             Font = FONT.Body,
                             TextSize = TS.Option,
                             TextColor3 = T.Text,
-                            BackgroundColor3 = T.Surface2,
-                            Size = UDim2.new(1, 0, 0, buttonHeight),
+                            BackgroundColor3 = G.Gray200,
+                            BackgroundTransparency = 1,
+                            Size = UDim2.new(1, 0, 0, POPOVER_ROW),
                             AutoButtonColor = false,
                             ZIndex = 1001,
                             TextXAlignment = Enum.TextXAlignment.Left,
                             TextTruncate = Enum.TextTruncate.AtEnd,
                             Parent = overlay
                         })
-                        AddCorner(pb, 4)
-                        Create("UIPadding", {PaddingLeft = UDim.new(0, 10), Parent = pb})
+                        AddCorner(pb, R_CTRL)
+                        Create("UIPadding", {PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = pb})
 
                         pb.MouseButton1Click:Connect(function()
                             State[stateKey] = playerName
@@ -1573,14 +1894,14 @@ return function(env)
                         end)
 
                         pb.MouseEnter:Connect(function()
-                            TweenService:Create(pb, TweenInfo.new(0.15), {
-                                BackgroundColor3 = T.Accent
+                            TweenService:Create(pb, TweenInfo.new(0.12), {
+                                BackgroundTransparency = 0
                             }):Play()
                         end)
 
                         pb.MouseLeave:Connect(function()
-                            TweenService:Create(pb, TweenInfo.new(0.15), {
-                                BackgroundColor3 = T.Surface2
+                            TweenService:Create(pb, TweenInfo.new(0.12), {
+                                BackgroundTransparency = 1
                             }):Play()
                         end)
                     end
@@ -1592,8 +1913,8 @@ return function(env)
                     else
                         overlay.Visible = true
                         updatePlayerList()
-                        local playerCount = #getAllPlayers()
-                        openAt(math.min(184, math.max(32, playerCount * 30 + 4)))
+                        local playerCount = math.max(1, #getAllPlayers())
+                        openAt(math.min(240, playerCount * (POPOVER_ROW + 2) + POPOVER_PAD * 2))
                     end
                 end)
 
@@ -1614,7 +1935,7 @@ return function(env)
 
             function TabFunctions:CreateButton(title, buttonText, color, handlerKey)
                 local hasTitle = title ~= nil and title ~= ""
-                local row = addRow(hasTitle and 78 or ROW_H + 4, title or "", buttonText)
+                local row = addRow(hasTitle and 82 or ROW_H + 8, title or "", buttonText)
 
                 if hasTitle then
                     Create("TextLabel", {
@@ -1625,57 +1946,56 @@ return function(env)
                         TextXAlignment = Enum.TextXAlignment.Left,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, EDGE, 0, 10),
+                        Position = UDim2.new(0, EDGE, 0, 12),
                         Size = UDim2.new(1, -EDGE * 2, 0, 20),
                         Parent = row
                     })
                 end
 
-                local useColor = color or T.Accent
+                -- Варианты кнопки Geist:
+                --   primary  (color = nil)  — заливка gray-1000, тёмный текст
+                --   error    (color = Red)  — заливка red-800, белый текст
+                --   custom   (свой цвет)    — заливка переданным цветом
                 local isDanger = color == CONFIG.Colors.Red
+                local isPrimary = color == nil
+                local baseColor = isDanger and T.DangerBg or (isPrimary and T.Text or color)
+                local hoverColor
+                if isPrimary then
+                    hoverColor = Color3.fromRGB(255, 255, 255)          -- primary hover: белее
+                elseif isDanger then
+                    hoverColor = Color3.fromRGB(233, 68, 74)
+                else
+                    hoverColor = Color3.fromRGB(
+                        math.min(255, baseColor.R * 255 + 20),
+                        math.min(255, baseColor.G * 255 + 20),
+                        math.min(255, baseColor.B * 255 + 20)
+                    )
+                end
 
                 local button = Create("TextButton", {
                     Text = buttonText,
                     Font = FONT.Bold,
                     TextSize = TS.Button,
-                    TextColor3 = isDanger and T.Danger or T.AccentInk,
-                    BackgroundColor3 = useColor,
-                    BackgroundTransparency = isDanger and 0.85 or 0,
-                    -- 10 + 20 + 4 + 32 + 12 = 78 при заголовке; иначе строго по центру
-                    Position = hasTitle and UDim2.new(0, EDGE, 0, 34) or UDim2.new(0, EDGE, 0.5, -16),
-                    Size = UDim2.new(1, -EDGE * 2, 0, 32),
+                    TextColor3 = isDanger and Color3.fromRGB(255, 255, 255) or T.AccentInk,
+                    BackgroundColor3 = baseColor,
+                    -- 12 + 20 + 6 + 32 + 12 = 82 при заголовке; иначе строго по центру
+                    Position = hasTitle and UDim2.new(0, EDGE, 0, 38) or UDim2.new(0, EDGE, 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(1, -EDGE * 2, 0, CTRL_H),
                     AutoButtonColor = false,
                     Parent = row
                 })
-                AddCorner(button, 6)
-                if isDanger then
-                    AddStroke(button, 1, T.Danger, 0.6)
-                end
+                AddCorner(button, R_CTRL)
 
                 button.MouseButton1Click:Connect(function()
                     callHandler(handlerKey)
                 end)
 
-                if isDanger then
-                    button.MouseEnter:Connect(function()
-                        TweenService:Create(button, TweenInfo.new(0.15), {BackgroundTransparency = 0.7}):Play()
-                    end)
-                    button.MouseLeave:Connect(function()
-                        TweenService:Create(button, TweenInfo.new(0.15), {BackgroundTransparency = 0.85}):Play()
-                    end)
-                else
-                    button.MouseEnter:Connect(function()
-                        local hoverColor = Color3.fromRGB(
-                            math.min(255, useColor.R * 255 + 20),
-                            math.min(255, useColor.G * 255 + 20),
-                            math.min(255, useColor.B * 255 + 20)
-                        )
-                        TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = hoverColor}):Play()
-                    end)
-                    button.MouseLeave:Connect(function()
-                        TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = useColor}):Play()
-                    end)
-                end
+                button.MouseEnter:Connect(function()
+                    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = hoverColor}):Play()
+                end)
+                button.MouseLeave:Connect(function()
+                    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = baseColor}):Play()
+                end)
 
                 return button
             end
@@ -1692,12 +2012,13 @@ return function(env)
             callHandler("Shutdown")
         end)
 
+        -- Geist ghost button: на hover подложка gray-200, иконка gray-1000
         closeButton.MouseEnter:Connect(function()
             TweenService:Create(closeButton, TweenInfo.new(0.15), {
-                BackgroundTransparency = 0.85
+                BackgroundTransparency = 0
             }):Play()
             for _, s in ipairs(closeStrokes) do
-                TweenService:Create(s, TweenInfo.new(0.15), {BackgroundColor3 = T.Danger}):Play()
+                TweenService:Create(s, TweenInfo.new(0.15), {BackgroundColor3 = T.Text}):Play()
             end
         end)
         closeButton.MouseLeave:Connect(function()
