@@ -42,7 +42,8 @@ local CONFIG = {
         Murder = Color3.fromRGB(255, 50, 50),
         Sheriff = Color3.fromRGB(50, 150, 255),
         Gun = Color3.fromRGB(255, 200, 50),
-        Innocent = Color3.fromRGB(85, 255, 120)
+        Innocent = Color3.fromRGB(85, 255, 120),
+        Tracers = Color3.fromRGB(220, 145, 230)
         },
     Notification = {
         Duration = 3,
@@ -88,6 +89,7 @@ local State = {
     CanShootMurderer = true,
     ShootCooldown = 3,
     ShootMurdererMode = "Magic",
+    ShootLead = 0.09,   -- упреждение выстрела по убийце (сек), поверх пинга
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -391,6 +393,67 @@ local function PerformRaycast(origin, direction, maxDistance)
     else
         return origin + (direction * maxDistance)
     end
+end
+
+-- Луч-трейсер между двумя точками (Beam с плавным затуханием).
+-- Раньше вызывался ниже, но не был определён — латентный баг; теперь на месте.
+local function CreateTracer(startPos, endPos, duration)
+    if not State.BulletTracersEnabled then return end
+
+    local attachment0 = Instance.new("Attachment")
+    attachment0.WorldPosition = startPos
+    attachment0.Parent = Workspace.Terrain
+
+    local attachment1 = Instance.new("Attachment")
+    attachment1.WorldPosition = endPos
+    attachment1.Parent = Workspace.Terrain
+
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Color = ColorSequence.new(CONFIG.Colors.Tracers)
+    beam.FaceCamera = true
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Brightness = 5
+    beam.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    beam.TextureMode = Enum.TextureMode.Stretch
+    beam.TextureSpeed = 0
+    beam.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    beam.Width0 = 0.3
+    beam.Width1 = 0.3
+    beam.ZOffset = 0.1
+    beam.Parent = attachment0
+
+    table.insert(State.TracersList, {beam = beam, att0 = attachment0, att1 = attachment1, time = tick()})
+
+    task.delay(duration or 0.3, function()
+        local fadeTime = 0.1
+        local startTime = tick()
+        while tick() - startTime < fadeTime do
+            local alpha = (tick() - startTime) / fadeTime
+            beam.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, alpha),
+                NumberSequenceKeypoint.new(1, alpha)
+            })
+            beam.Brightness = 5 * (1 - alpha)
+            task.wait()
+        end
+        pcall(function()
+            beam:Destroy()
+            attachment0:Destroy()
+            attachment1:Destroy()
+        end)
+        for i, v in ipairs(State.TracersList) do
+            if v.beam == beam then
+                table.remove(State.TracersList, i)
+                break
+            end
+        end
+    end)
 end
 
 local function CreateTracerFromTool(tool)
@@ -5205,6 +5268,83 @@ knifeThrow = function(silent)
     end
 end
 
+-- ─── Предсказание точки прицела (перенесено из MainScript) ─────────────────────
+local function predictAimPoint(hrp, thum, t)
+    t = math.clamp(t, 0.03, 0.25)  -- отсекаем выбросы при огромном пинге
+    local pos = hrp.Position
+    local vel = hrp.AssemblyLinearVelocity
+    local char = hrp.Parent
+
+    -- горизонталь по интенту
+    local hx, hz
+    local md = thum and thum.MoveDirection
+    if md and md.Magnitude > 0.05 then
+        local ws = (thum.WalkSpeed and thum.WalkSpeed > 0) and thum.WalkSpeed or 16
+        local unit = Vector3.new(md.X, 0, md.Z).Unit
+        hx, hz = unit.X * ws, unit.Z * ws
+    else
+        hx, hz = vel.X, vel.Z
+    end
+    local predX = pos.X + hx * t
+    local predZ = pos.Z + hz * t
+
+    -- вертикаль: парабола + пол под предсказанной точкой
+    local g = Workspace.Gravity
+    local predY = pos.Y + vel.Y * t - 0.5 * g * t * t
+
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = { char, LocalPlayer.Character }
+    local down = Workspace:Raycast(Vector3.new(predX, pos.Y + 3, predZ), Vector3.new(0, -80, 0), rp)
+    if down then
+        -- превышение центра HRP над полом сейчас (адаптация под R6/R15/HipHeight)
+        local standOffset = 2.9
+        local curDown = Workspace:Raycast(Vector3.new(pos.X, pos.Y + 3, pos.Z), Vector3.new(0, -80, 0), rp)
+        if curDown then standOffset = math.clamp(pos.Y - curDown.Position.Y, 1.5, 4) end
+        predY = math.max(predY, down.Position.Y + standOffset)
+    end
+
+    return Vector3.new(predX, predY, predZ)
+end
+
+-- ─── Выбор части-цели для луча ─────────────────────────────────────────────────
+-- Серверный hitscan засчитывает попадание по ВИДИМЫМ частям тела, а не по
+-- невидимому HumanoidRootPart. У обычного рига HRP совпадает с торсом, но:
+--   • скины со смещённым/нестандартным ригом уводят HRP от реальной геометрии;
+--   • анимации (замах, подкат, эмоции) сильно двигают торс/конечности от HRP.
+-- Тогда прицел в HRP попадает в пустоту рядом с телом → промах. Поэтому целимся
+-- в реальную центральную часть: торс → голова → крупнейшая часть тела.
+local AIM_PART_PRIORITY = { "UpperTorso", "Torso", "LowerTorso", "Head" }
+local function pickAimPart(char)
+    if not char then return nil end
+    for _, name in ipairs(AIM_PART_PRIORITY) do
+        local p = char:FindFirstChild(name)
+        if p and p:IsA("BasePart") then return p end
+    end
+    -- фолбэк под нестандартные скины: крупнейший BasePart тела
+    local best, bestVol
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("BasePart")
+           and not obj:FindFirstAncestorOfClass("Accessory")
+           and not obj:FindFirstAncestorOfClass("Tool") then
+            local v = obj.Size.X * obj.Size.Y * obj.Size.Z
+            if not bestVol or v > bestVol then best, bestVol = obj, v end
+        end
+    end
+    return best
+end
+
+-- Итоговая точка прицела: реальная часть тела + предсказанное перемещение
+-- персонажа. predictAimPoint даёт будущую позицию HRP → берём её дельту и сдвигаем
+-- на неё выбранную часть (анимационный оффсет части берём текущий — за окно пинга
+-- он почти не меняется). Так прицел всегда на реальной геометрии, а не на корне.
+local function computeAimPoint(char, hrp, thum, t)
+    local predictedHRP = predictAimPoint(hrp, thum, t)
+    local part = pickAimPart(char)
+    if not part then return predictedHRP end
+    return part.Position + (predictedHRP - hrp.Position)
+end
+
 shootMurderer = function(forceMagic)
     -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
     local useMode = forceMagic and "Magic" or (State.ShootMurdererMode or "Magic")
@@ -5217,17 +5357,23 @@ shootMurderer = function(forceMagic)
         return
     end
     
+    -- Персонаж может быть nil (респавн/смерть) — без него стрелять нечем
+    local shooterChar = LocalPlayer.Character
+    if not shooterChar then return end
+    local shooterBackpack = LocalPlayer:FindFirstChild("Backpack")
+
     -- МГНОВЕННАЯ ЭКИПИРОВКА ПИСТОЛЕТА (С фиксом репликации)
-    local gun = LocalPlayer.Character:FindFirstChild("Gun")
-    
+    local gun = shooterChar:FindFirstChild("Gun")
+
     if not gun then
-        if LocalPlayer.Backpack:FindFirstChild("Gun") then
-            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        local backpackGun = shooterBackpack and shooterBackpack:FindFirstChild("Gun")
+        if backpackGun then
+            local hum = shooterChar:FindFirstChild("Humanoid")
             if hum then
-                hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
+                hum:EquipTool(backpackGun)
                 -- ВАЖНО: Микро-задержка, чтобы сервер успел понять, что оружие в руках
                 task.wait(0.03)
-                gun = LocalPlayer.Character:FindFirstChild("Gun")
+                gun = shooterChar:FindFirstChild("Gun")
             end
         end
         
@@ -5265,7 +5411,8 @@ shootMurderer = function(forceMagic)
     end
     
     local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
-    
+    local murdererHum = murderer.Character:FindFirstChildOfClass("Humanoid")
+
     if not murdererHRP then
         if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">Murderer has no HRP</font>", nil)
@@ -5279,11 +5426,12 @@ shootMurderer = function(forceMagic)
         -- === MAGIC MODE: Телепортация пули (текущая логика) ===
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + 0.05
+        local predictionTime = (pingValue / 1000) + (State.ShootLead or 0.09)
         
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
-        
+        -- Интент-предикт: горизонталь по MoveDirection, вертикаль парабола + пол
+        local predictedPos = computeAimPoint(murderer.Character, murdererHRP, murdererHum, predictionTime)
+
         local spawnPosition, targetPosition
 
         if enemyVelocity.Magnitude > 2 then
@@ -5324,21 +5472,20 @@ shootMurderer = function(forceMagic)
         
         local muzzlePosition = muzzleCFrame.Position
         
-        -- 2. ПРЕДИКЦИЯ (ИДЕНТИЧНА MAGIC MODE)
+        -- 2. ПРЕДИКЦИЯ: горизонталь по интенту, вертикаль парабола + пол
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + 0.05
-        
-        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        local predictedPos = murdererHRP.Position + (enemyVelocity * predictionTime)
-        
-        -- 3. ФОРМИРОВАНИЕ CFrame (стреляем от дула в предсказанную позицию)
-        local shootFromCFrame = CFrame.lookAt(muzzlePosition, predictedPos)
-        local shootToCFrame = CFrame.new(predictedPos)
-        
+        local predictionTime = (pingValue / 1000) + (State.ShootLead or 0.09)
+
+        local predictedPos = computeAimPoint(murderer.Character, murdererHRP, murdererHum, predictionTime)
+
+        -- 3. Чистый Silent: origin ВСЕГДА дуло, target — предсказанная точка на теле.
+        --    Луч origin→target идёт от пистолета; стена между вами ловит пулю — это
+        --    и есть честный сайлент. Никакого magic-origin/пробива стен: вся ставка
+        --    на точность предикта (predictAimPoint), а не на подмену источника.
         argsShootRemote = {
-            [1] = shootFromCFrame,
-            [2] = shootToCFrame
+            [1] = CFrame.lookAt(muzzlePosition, predictedPos),
+            [2] = CFrame.new(predictedPos)
         }
     end
 
@@ -5374,7 +5521,19 @@ shootMurderer = function(forceMagic)
             local modeText = useMode == "Magic" and "Magic" or "Silent"
             ShowNotification("<font color=\"rgb(168,228,160)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
         end
-        
+
+        -- Bullet tracer (свой выстрел) — рисуем Beam между точкой выстрела и целью.
+        -- Используем те же 2 CFrame, что отправляем на сервер.
+        if State.BulletTracersEnabled then
+            pcall(function()
+                local startPos = argsShootRemote[1].Position
+                local endPos = argsShootRemote[2].Position
+                for _ = 1, 4 do
+                    CreateTracer(startPos, endPos, 2)
+                end
+            end)
+        end
+
         -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
         task.delay(State.ShootCooldown, function()
             State.CanShootMurderer = true
@@ -5468,8 +5627,12 @@ local function EnableInstantPickup()
                     continue
                 end
                 
-                if LocalPlayer.Character:FindFirstChild("Gun") or 
-                   LocalPlayer.Backpack:FindFirstChild("Gun") then
+                -- Character/Backpack могут быть nil при респавне — обращаемся
+                -- через FindFirstChild, иначе индексация nil роняет поток
+                local myChar = LocalPlayer.Character
+                local myBackpack = LocalPlayer:FindFirstChild("Backpack")
+                if (myChar and myChar:FindFirstChild("Gun")) or
+                   (myBackpack and myBackpack:FindFirstChild("Gun")) then
                     lastAttemptedGun = gun
                     continue
                 end
@@ -5484,9 +5647,11 @@ local function EnableInstantPickup()
                     
                     pickupGun(true)
                     task.wait(0.15)
-                    
-                    if LocalPlayer.Character:FindFirstChild("Gun") or 
-                       LocalPlayer.Backpack:FindFirstChild("Gun") then
+
+                    local curChar = LocalPlayer.Character
+                    local curBackpack = LocalPlayer:FindFirstChild("Backpack")
+                    if (curChar and curChar:FindFirstChild("Gun")) or
+                       (curBackpack and curBackpack:FindFirstChild("Gun")) then
                         pickupSuccess = true
                         
                         if State.NotificationsEnabled then
