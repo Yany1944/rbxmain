@@ -373,6 +373,112 @@ return function(env)
     end
 
     ----------------------------------------------------------------
+    -- МИНИ-ИКОНКИ 16x16 для системы конфигов (пилюля и строки списка).
+    -- Основной путь — спрайт из пака WindUI geist, фолбэк — рисованный
+    -- глиф из Frame/UIStroke (сетка 16x16, штрих ~1.4 — как иконки вкладок)
+    ----------------------------------------------------------------
+
+    local GLYPH_DRAW = {
+        -- дискета: контур + шторка сверху + этикетка снизу
+        save = function(h)
+            glyphRing(h, 2, 2, 12, 12, 3, 1.4)
+            glyphLine(h, 6, 2.5, 4.5, 3.5, 0, 1)
+            glyphLine(h, 5, 8.5, 6, 3.5, 0, 1)
+        end,
+        -- три точки «...»
+        ellipsis = function(h)
+            glyphLine(h, 2, 6.75, 2.5, 2.5, 0, 2)
+            glyphLine(h, 6.75, 6.75, 2.5, 2.5, 0, 2)
+            glyphLine(h, 11.5, 6.75, 2.5, 2.5, 0, 2)
+        end,
+        -- плюс
+        plus = function(h)
+            glyphLine(h, 7.25, 3, 1.5, 10, 0, 1)
+            glyphLine(h, 3, 7.25, 10, 1.5, 0, 1)
+        end,
+        -- корзина: ручка + крышка + корпус
+        trash = function(h)
+            glyphLine(h, 6.5, 1, 3, 1.5, 0, 1)
+            glyphLine(h, 3, 3, 10, 1.5, 0, 1)
+            glyphRing(h, 4, 6, 8, 9, 2, 1.4)
+        end,
+        -- карандаш: корпус по диагонали + грифель
+        pencil = function(h)
+            glyphLine(h, 7, 1.5, 2, 11, 45, 1)
+            glyphLine(h, 2.5, 11.5, 2.2, 2.2, 0, 1)
+        end,
+        -- копирование (share): два наложенных листа
+        copy = function(h)
+            glyphRing(h, 2, 2, 9, 9, 2, 1.4)
+            glyphRing(h, 5.5, 5.5, 9, 9, 2, 1.4)
+        end,
+    }
+
+    -- Имена в паке WindUI geist, соответствующие нашим глифам
+    local ICON_NAMES = {
+        save = "save",
+        ellipsis = "ellipsis",
+        plus = "plus",
+        trash = "trash-2",
+        pencil = "pencil",
+        copy = "copy",
+    }
+
+    -- Кнопка-иконка в стиле ghost (как closeButton): прозрачная, на hover
+    -- подложка gray-200. size — сторона квадрата хитбокса.
+    local function makeIconButton(parent, position, size, glyphName)
+        local z = (parent.ZIndex or 1) + 2
+        local btn = Create("TextButton", {
+            Name = glyphName .. "IconButton",
+            Text = "",
+            BackgroundColor3 = G.Gray200,
+            BackgroundTransparency = 1,
+            Position = position,
+            Size = UDim2.new(0, size, 0, size),
+            AutoButtonColor = false,
+            ZIndex = z,
+            Parent = parent
+        })
+        AddCorner(btn, R_SM)
+
+        local holder = Create("Frame", {
+            Name = "Glyph",
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            Size = UDim2.new(0, 16, 0, 16),
+            ZIndex = z + 1,
+            Parent = btn
+        })
+
+        local data = iconData(ICON_NAMES[glyphName])
+        if data then
+            Create("ImageLabel", {
+                Name = "Sprite",
+                Image = data.Image,
+                ImageRectOffset = data.Offset,
+                ImageRectSize = data.Size,
+                ImageColor3 = T.TextDark,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                ZIndex = z + 1,
+                Parent = holder
+            })
+        elseif GLYPH_DRAW[glyphName] then
+            GLYPH_DRAW[glyphName](holder)
+        end
+
+        btn.MouseEnter:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
+        end)
+        btn.MouseLeave:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+        end)
+
+        return btn
+    end
+
+    ----------------------------------------------------------------
     -- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ИЗ MAIN (через Handlers)
     ----------------------------------------------------------------
 
@@ -380,6 +486,67 @@ return function(env)
         local fn = Handlers[name]
         if fn then
             fn(...)
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- РЕЕСТР ФЛАГОВ: сериализуемые контролы для системы конфигов.
+    -- Каждый контрол с строковым handlerKey регистрирует геттер и сеттер;
+    -- Set(value, fire=true) обновляет и визуал, и State (через handler) —
+    -- один путь для клика пользователя и для загрузки конфига.
+    -- PlayerDropdown и кейбинды сюда не попадают: у первых нет handlerKey,
+    -- вторые сериализует хост из State.Keybinds.
+    ----------------------------------------------------------------
+
+    GUI.Flags = {}
+
+    local function registerFlag(handlerKey, kind, get, set)
+        -- функция вместо ключа (легаси-вызовы) — молча не регистрируем
+        if type(handlerKey) ~= "string" or handlerKey == "" then return end
+        -- значение на момент создания контрола; через if, а не and/or —
+        -- иначе default=false у тогла превращался бы в nil
+        local okDef, def = pcall(get)
+        if not okDef then def = nil end
+        GUI.Flags[handlerKey] = {
+            Kind = kind,
+            Get = get,
+            Set = set,
+            Default = def,
+        }
+    end
+
+    -- Снимок текущих значений всех зарегистрированных контролов
+    function GUI.GetFlagSnapshot()
+        local snap = {}
+        for key, flag in pairs(GUI.Flags) do
+            local ok, v = pcall(flag.Get)
+            if ok and (type(v) == "boolean" or type(v) == "number" or type(v) == "string") then
+                snap[key] = v
+            end
+        end
+        return snap
+    end
+
+    -- Снимок дефолтов — из него собирается «пустой» конфиг
+    function GUI.GetDefaultSnapshot()
+        local snap = {}
+        for key, flag in pairs(GUI.Flags) do
+            local v = flag.Default
+            if type(v) == "boolean" or type(v) == "number" or type(v) == "string" then
+                snap[key] = v
+            end
+        end
+        return snap
+    end
+
+    -- Применение снимка: неизвестные ключи пропускаются, каждый Set в pcall
+    function GUI.ApplyFlagSnapshot(snap)
+        if type(snap) ~= "table" then return end
+        for key, value in pairs(snap) do
+            local flag = GUI.Flags[key]
+            if flag then
+                pcall(flag.Set, value, true)
+            end
         end
     end
 
@@ -906,18 +1073,54 @@ return function(env)
             Parent = mainFrame
         })
 
-        local tabTitle = Create("TextLabel", {
-            Name = "TabTitle",
+        ----------------------------------------------------------------
+        -- ПИЛЮЛЯ КОНФИГА: вместо заголовка вкладки (имя вкладки и так
+        -- подсвечено в сайдбаре). Слева — быстрое сохранение в текущий
+        -- конфиг, по центру — имя конфига, справа — шеврон. Клик по пилюле
+        -- открывает панель конфигов (собирается ниже, после makeOverlayList)
+        ----------------------------------------------------------------
+
+        local PILL_W, PILL_H = 190, 32
+        local configPill = Create("TextButton", {
+            Name = "ConfigPill",
             Text = "",
-            Font = FONT.Head,
-            TextSize = TS.TabTitle,
-            TextColor3 = T.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, EDGE + 4, 0, 0),
-            Size = UDim2.new(0, 300, 1, 0),
+            BackgroundColor3 = T.Surface1,
+            Position = UDim2.new(0, EDGE + 4, 0.5, -PILL_H / 2),
+            Size = UDim2.new(0, PILL_W, 0, PILL_H),
+            AutoButtonColor = false,
+            ZIndex = 5,
             Parent = header
         })
+        AddCorner(configPill, PILL_H / 2)
+        local pillStroke = AddStroke(configPill, STROKE_W, T.Border)
+
+        -- Быстрое сохранение — отдельный хитбокс поверх пилюли
+        local pillSaveBtn = makeIconButton(
+            configPill, UDim2.new(0, 5, 0.5, -11), 22, "save")
+
+        local pillName = Create("TextLabel", {
+            Name = "ConfigName",
+            Text = "no config",
+            Font = FONT.Bold,
+            TextSize = TS.Button,
+            TextColor3 = T.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 34, 0, 0),
+            Size = UDim2.new(1, -(34 + 26), 1, 0),
+            ZIndex = 6,
+            Parent = configPill
+        })
+
+        glyphChevron(configPill, -8)
+
+        configPill.MouseEnter:Connect(function()
+            TweenService:Create(pillStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
+        end)
+        configPill.MouseLeave:Connect(function()
+            TweenService:Create(pillStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+        end)
 
         local searchBox = Create("TextBox", {
             Name = "SearchBox",
@@ -1325,6 +1528,553 @@ return function(env)
         end
 
         ----------------------------------------------------------------
+        -- ПОПОВЕРЫ: общий оверлей-список и единая строка списка.
+        -- Раньше makeOverlayList жил внутри CreateTab; поднят сюда, потому
+        -- что панель конфигов живёт на уровне окна, а не вкладки.
+        ----------------------------------------------------------------
+
+        -- Выпадающий список поверх mainFrame + закрытие по клику мимо.
+        -- opts.headerH > 0 добавляет нескроллируемую шапку над списком
+        -- (панель конфигов); без opts поведение прежнее (дропдауны).
+        -- Возвращает: overlay (ScrollingFrame со строками), openAt, close,
+        -- root (то, что позиционируется и тянется), headerFrame (или nil).
+        local function makeOverlayList(anchorBtn, width, opts)
+            opts = opts or {}
+            local headerH = opts.headerH or 0
+
+            local root, headerFrame, overlay
+            if headerH > 0 then
+                root = Create("Frame", {
+                    BackgroundColor3 = T.Surface1,
+                    Position = UDim2.new(0, 0, 0, 0),
+                    Size = UDim2.new(0, width, 0, 0),
+                    Visible = false,
+                    ClipsDescendants = true,
+                    BorderSizePixel = 0,
+                    ZIndex = 1000,
+                    Parent = mainFrame
+                })
+                AddCorner(root, R_CARD)
+                AddStroke(root, STROKE_W, T.Border)
+
+                headerFrame = Create("Frame", {
+                    Name = "PanelHeader",
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, headerH),
+                    ZIndex = 1001,
+                    Parent = root
+                })
+
+                overlay = Create("ScrollingFrame", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 0, 0, headerH),
+                    Size = UDim2.new(1, 0, 1, -headerH),
+                    CanvasSize = UDim2.new(0, 0, 0, 0),
+                    ScrollBarThickness = 4,
+                    ScrollBarImageColor3 = G.Gray500,
+                    ClipsDescendants = true,
+                    BorderSizePixel = 0,
+                    ZIndex = 1000,
+                    Parent = root
+                })
+            else
+                -- Geist popover: bg background-100, сплошная рамка, радиус 12,
+                -- внутренний padding 6 и шаг строк 2 (--ds-popover-*)
+                overlay = Create("ScrollingFrame", {
+                    BackgroundColor3 = T.Surface1,
+                    Position = UDim2.new(0, 0, 0, 0),
+                    Size = UDim2.new(0, width, 0, 0),
+                    Visible = false,
+                    CanvasSize = UDim2.new(0, 0, 0, 0),
+                    ScrollBarThickness = 4,
+                    ScrollBarImageColor3 = G.Gray500,
+                    ClipsDescendants = true,
+                    BorderSizePixel = 0,
+                    ZIndex = 1000,
+                    Parent = mainFrame
+                })
+                AddCorner(overlay, R_CARD)
+                AddStroke(overlay, STROKE_W, T.Border)
+                root = overlay
+            end
+
+            Create("UIListLayout", {
+                Padding = UDim.new(0, 2),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = overlay
+            })
+            Create("UIPadding", {
+                PaddingTop = UDim.new(0, POPOVER_PAD),
+                PaddingBottom = UDim.new(0, POPOVER_PAD),
+                PaddingLeft = UDim.new(0, POPOVER_PAD),
+                PaddingRight = UDim.new(0, POPOVER_PAD),
+                Parent = overlay
+            })
+
+            -- Скрытие после твина — через task.delay, а не блокирующий wait:
+            -- close() зовут из обработчиков, поток которых может быть
+            -- невыдаваемым (тогда wait ронял бы весь обработчик)
+            local function close()
+                if root.Visible then
+                    TweenService:Create(
+                        root,
+                        TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                        {Size = UDim2.new(0, width, 0, 0)}
+                    ):Play()
+                    task.delay(0.2, function()
+                        if root.Size.Y.Offset <= 0 then
+                            root.Visible = false
+                        end
+                    end)
+                end
+            end
+
+            local function openAt(targetHeight)
+                local absPos = anchorBtn.AbsolutePosition
+                local absSize = anchorBtn.AbsoluteSize
+                local mainPos = mainFrame.AbsolutePosition
+                root.Position = UDim2.new(
+                    0, absPos.X - mainPos.X,
+                    0, absPos.Y - mainPos.Y + absSize.Y + 5
+                )
+                root.Size = UDim2.new(0, width, 0, 0)
+                root.Visible = true
+                TweenService:Create(
+                    root,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                    {Size = UDim2.new(0, width, 0, targetHeight)}
+                ):Play()
+            end
+
+            -- Закрытие по клику вне списка и вне кнопки
+            local clickOutsideConnection = UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 and root.Visible then
+                    local mousePos = UserInputService:GetMouseLocation()
+                    local framePos = root.AbsolutePosition
+                    local frameSize = root.AbsoluteSize
+                    local btnPos = anchorBtn.AbsolutePosition
+                    local btnSize = anchorBtn.AbsoluteSize
+
+                    local outsideFrame =
+                        mousePos.X < framePos.X or mousePos.X > framePos.X + frameSize.X or
+                        mousePos.Y < framePos.Y or mousePos.Y > framePos.Y + frameSize.Y
+
+                    local outsideButton =
+                        mousePos.X < btnPos.X or mousePos.X > btnPos.X + btnSize.X or
+                        mousePos.Y < btnPos.Y or mousePos.Y > btnPos.Y + btnSize.Y
+
+                    if outsideFrame and outsideButton then
+                        close()
+                    end
+                end
+            end)
+            table.insert(State.Connections, clickOutsideConnection)
+
+            if not State.UIElements.OpenDropdowns then
+                State.UIElements.OpenDropdowns = {}
+            end
+            table.insert(State.UIElements.OpenDropdowns, close)
+
+            return overlay, openAt, close, root, headerFrame
+        end
+
+        -- Единая строка поповера: 36px, радиус 6, hover — gray-200.
+        -- opts: height, indent (левый паддинг), danger (красный текст),
+        -- dim (приглушённый текст), order (LayoutOrder)
+        local function popoverRow(overlay, text, opts)
+            opts = opts or {}
+            local btn = Create("TextButton", {
+                Text = text,
+                Font = FONT.Body,
+                TextSize = TS.Option,
+                TextColor3 = opts.danger and T.Danger or (opts.dim and T.TextDark or T.Text),
+                BackgroundColor3 = G.Gray200,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, opts.height or POPOVER_ROW),
+                AutoButtonColor = false,
+                ZIndex = 1001,
+                LayoutOrder = opts.order or 0,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                Parent = overlay
+            })
+            AddCorner(btn, R_CTRL)
+            Create("UIPadding", {
+                PaddingLeft = UDim.new(0, opts.indent or 8),
+                PaddingRight = UDim.new(0, 8),
+                Parent = btn
+            })
+            btn.MouseEnter:Connect(function()
+                TweenService:Create(btn, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
+            end)
+            btn.MouseLeave:Connect(function()
+                TweenService:Create(btn, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+            end)
+            return btn
+        end
+
+        ----------------------------------------------------------------
+        -- ПАНЕЛЬ КОНФИГОВ: список профилей под пилюлей хедера.
+        -- GUI не знает про файлы — все операции идут через менеджер,
+        -- переданный хостом в GUI.AttachConfigSystem (контракт: List, Save,
+        -- Load, Create, Delete, Rename, Share, SetAutoload, GetAutoload).
+        ----------------------------------------------------------------
+
+        local CFG_PANEL_W  = 250
+        local CFG_HEADER_H = 40
+        local CFG_SUB_H    = 30   -- строка «...»-подменю
+        local CFG_MAX_H    = 380
+
+        local configManager = nil
+        local activeConfigName = nil
+        local cfgExpanded = nil    -- конфиг с раскрытым «...»-меню
+        local cfgRenaming = nil    -- конфиг в режиме переименования
+        local cfgCreating = false  -- показывать строку ввода нового имени
+
+        local cfgList, cfgOpenAt, cfgClose, cfgPanel, cfgHeader =
+            makeOverlayList(configPill, CFG_PANEL_W, {headerH = CFG_HEADER_H})
+
+        -- Шапка панели: подпись + «+» справа, разделитель снизу
+        Create("TextLabel", {
+            Text = "CONFIGS",
+            Font = FONT.Bold,
+            TextSize = TS.Chip,
+            TextColor3 = T.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 14, 0, 0),
+            Size = UDim2.new(1, -50, 1, 0),
+            ZIndex = 1001,
+            Parent = cfgHeader
+        })
+        local cfgPlusBtn = makeIconButton(cfgHeader, UDim2.new(1, -31, 0.5, -11), 22, "plus")
+        Hairline({
+            Position = UDim2.new(0, POPOVER_PAD, 1, -1),
+            Size = UDim2.new(1, -POPOVER_PAD * 2, 0, 1),
+            ZIndex = 1001,
+            Parent = cfgHeader
+        })
+
+        -- Фидбек конфиг-операций показываем всегда: ShowNotification хоста
+        -- гейтится State.NotificationsEnabled, на время вызова форсируем флаг
+        local function cfgNotify(msg)
+            if not ShowNotification then return end
+            pcall(function()
+                local was = State.NotificationsEnabled
+                State.NotificationsEnabled = true
+                ShowNotification(msg)
+                State.NotificationsEnabled = was
+            end)
+        end
+
+        -- Тихое чтение (List/GetAutoload): ошибки не показываем
+        local function managerGet(op, ...)
+            if not configManager then return nil end
+            local fn = configManager[op]
+            if type(fn) ~= "function" then return nil end
+            local ok, res = pcall(fn, ...)
+            if ok then return res end
+            return nil
+        end
+
+        -- Мутации: ошибка менеджера → нотификация
+        local function managerCall(op, ...)
+            if not configManager then
+                cfgNotify("Config system unavailable")
+                return false
+            end
+            local fn = configManager[op]
+            if type(fn) ~= "function" then return false end
+            local ok, res, err = pcall(fn, ...)
+            if not ok then
+                cfgNotify("Config error: " .. tostring(res))
+                return false
+            end
+            if res == false then
+                cfgNotify(tostring(err or "Config operation failed"))
+                return false
+            end
+            return true
+        end
+
+        local rebuildAndResize   -- forward: нужен обработчикам строк
+
+        -- Строка-инпут (создание/переименование). Enter — коммит,
+        -- всё остальное — отмена режима
+        local function addCfgInputRow(order, initialText, placeholder, onCommit)
+            local row = Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, POPOVER_ROW),
+                ZIndex = 1001,
+                LayoutOrder = order,
+                Parent = cfgList
+            })
+            local box = Create("TextBox", {
+                Text = initialText or "",
+                PlaceholderText = placeholder,
+                Font = FONT.Body,
+                TextSize = TS.Option,
+                TextColor3 = T.Text,
+                PlaceholderColor3 = T.TextDark,
+                BackgroundColor3 = T.Surface2,
+                Position = UDim2.new(0, 2, 0.5, -CTRL_H / 2),
+                Size = UDim2.new(1, -4, 0, CTRL_H),
+                ClearTextOnFocus = false,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 1002,
+                Parent = row
+            })
+            AddCorner(box, R_CTRL)
+            AddStroke(box, STROKE_W, T.BorderHi)
+            Create("UIPadding", {PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = box})
+
+            task.defer(function()
+                pcall(function() box:CaptureFocus() end)
+            end)
+
+            box.FocusLost:Connect(function(enterPressed)
+                local txt = (box.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                if enterPressed and txt ~= "" then
+                    onCommit(txt)
+                else
+                    cfgCreating, cfgRenaming = false, nil
+                    rebuildAndResize()
+                end
+            end)
+            return row
+        end
+
+        -- Обычная строка конфига: имя + save + «...». Активный — акцентом,
+        -- автозагрузочный — с точкой слева
+        local function addCfgRow(order, name, autoloadName)
+            local isActive = (name == activeConfigName)
+            local isAuto = (name == autoloadName)
+
+            local row = Create("Frame", {
+                Name = "Cfg_" .. name,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, POPOVER_ROW),
+                ZIndex = 1001,
+                LayoutOrder = order,
+                Parent = cfgList
+            })
+
+            local fill = Create("TextButton", {
+                Text = "",
+                BackgroundColor3 = G.Gray200,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                AutoButtonColor = false,
+                ZIndex = 1001,
+                Parent = row
+            })
+            AddCorner(fill, R_CTRL)
+            fill.MouseEnter:Connect(function()
+                TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
+            end)
+            fill.MouseLeave:Connect(function()
+                TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+            end)
+
+            if isAuto then
+                local dot = Create("Frame", {
+                    BackgroundColor3 = T.Accent,
+                    BorderSizePixel = 0,
+                    Position = UDim2.new(0, 10, 0.5, -3),
+                    Size = UDim2.new(0, 6, 0, 6),
+                    ZIndex = 1002,
+                    Parent = row
+                })
+                AddCorner(dot, 3)
+            end
+
+            local textX = isAuto and 22 or 10
+            Create("TextLabel", {
+                Text = name,
+                Font = isActive and FONT.Bold or FONT.Body,
+                TextSize = TS.Option,
+                TextColor3 = isActive and T.Accent or T.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, textX, 0, 0),
+                Size = UDim2.new(1, -(textX + 54), 1, 0),
+                ZIndex = 1002,
+                Parent = row
+            })
+
+            local saveBtn = makeIconButton(row, UDim2.new(1, -50, 0.5, -11), 22, "save")
+            local dotsBtn = makeIconButton(row, UDim2.new(1, -26, 0.5, -11), 22, "ellipsis")
+
+            -- Клик по имени — загрузка конфига
+            fill.MouseButton1Click:Connect(function()
+                if managerCall("Load", name) then
+                    GUI.SetActiveConfigName(name)
+                    cfgClose()
+                end
+            end)
+            saveBtn.MouseButton1Click:Connect(function()
+                managerCall("Save", name)
+            end)
+            dotsBtn.MouseButton1Click:Connect(function()
+                cfgExpanded = (cfgExpanded ~= name) and name or nil
+                cfgRenaming = nil
+                rebuildAndResize()
+            end)
+        end
+
+        -- Полная пересборка списка. Возвращает целевую высоту панели
+        local function rebuildConfigList()
+            for _, child in ipairs(cfgList:GetChildren()) do
+                if child:IsA("GuiObject") then child:Destroy() end
+            end
+
+            local contentH = POPOVER_PAD * 2
+            local orderN = 0
+            local function nextOrder(h)
+                orderN = orderN + 1
+                contentH = contentH + h + 2
+                return orderN
+            end
+
+            if not configManager then
+                popoverRow(cfgList, "Config system unavailable",
+                    {dim = true, order = nextOrder(POPOVER_ROW)})
+            else
+                local names = managerGet("List")
+                if type(names) ~= "table" then names = {} end
+                local autoloadName = managerGet("GetAutoload")
+
+                if cfgCreating then
+                    addCfgInputRow(nextOrder(POPOVER_ROW), "", "Config name…", function(txt)
+                        cfgCreating = false
+                        managerCall("Create", txt)
+                        rebuildAndResize()
+                    end)
+                end
+
+                for _, name in ipairs(names) do
+                    if cfgRenaming == name then
+                        addCfgInputRow(nextOrder(POPOVER_ROW), name, "New name…", function(txt)
+                            cfgRenaming = nil
+                            if txt ~= name and managerCall("Rename", name, txt) then
+                                if activeConfigName == name then
+                                    GUI.SetActiveConfigName(txt)
+                                end
+                                if cfgExpanded == name then cfgExpanded = txt end
+                            end
+                            rebuildAndResize()
+                        end)
+                    else
+                        addCfgRow(nextOrder(POPOVER_ROW), name, autoloadName)
+
+                        if cfgExpanded == name then
+                            local saveRow = popoverRow(cfgList, "Save current settings",
+                                {height = CFG_SUB_H, indent = 26, order = nextOrder(CFG_SUB_H)})
+                            saveRow.MouseButton1Click:Connect(function()
+                                cfgExpanded = nil
+                                managerCall("Save", name)
+                                rebuildAndResize()
+                            end)
+
+                            local renameRow = popoverRow(cfgList, "Rename",
+                                {height = CFG_SUB_H, indent = 26, order = nextOrder(CFG_SUB_H)})
+                            renameRow.MouseButton1Click:Connect(function()
+                                cfgRenaming = name
+                                cfgExpanded = nil
+                                rebuildAndResize()
+                            end)
+
+                            local shareRow = popoverRow(cfgList, "Share (copy to clipboard)",
+                                {height = CFG_SUB_H, indent = 26, order = nextOrder(CFG_SUB_H)})
+                            shareRow.MouseButton1Click:Connect(function()
+                                managerCall("Share", name)
+                            end)
+
+                            local isAuto = (autoloadName == name)
+                            local autoRow = popoverRow(cfgList,
+                                isAuto and "Autoload: on" or "Autoload: off",
+                                {height = CFG_SUB_H, indent = 26, order = nextOrder(CFG_SUB_H)})
+                            autoRow.MouseButton1Click:Connect(function()
+                                managerCall("SetAutoload", isAuto and nil or name)
+                                rebuildAndResize()
+                            end)
+
+                            local deleteRow = popoverRow(cfgList, "Delete",
+                                {height = CFG_SUB_H, indent = 26, danger = true,
+                                 order = nextOrder(CFG_SUB_H)})
+                            deleteRow.MouseButton1Click:Connect(function()
+                                cfgExpanded = nil
+                                if managerCall("Delete", name) then
+                                    if activeConfigName == name then
+                                        GUI.SetActiveConfigName(nil)
+                                    end
+                                end
+                                rebuildAndResize()
+                            end)
+                        end
+                    end
+                end
+
+                if #names == 0 and not cfgCreating then
+                    popoverRow(cfgList, "No configs — press +",
+                        {dim = true, order = nextOrder(POPOVER_ROW)})
+                end
+            end
+
+            cfgList.CanvasSize = UDim2.new(0, 0, 0, contentH)
+            return math.min(CFG_MAX_H, CFG_HEADER_H + contentH)
+        end
+
+        rebuildAndResize = function()
+            local h = rebuildConfigList()
+            if cfgPanel.Visible then
+                TweenService:Create(cfgPanel, TweenInfo.new(0.15, Enum.EasingStyle.Quad),
+                    {Size = UDim2.new(0, CFG_PANEL_W, 0, h)}):Play()
+            end
+        end
+
+        -- Пилюля: клик — открыть/закрыть панель (режимы сбрасываются)
+        configPill.MouseButton1Click:Connect(function()
+            if cfgPanel.Visible then
+                cfgClose()
+            elseif not configManager then
+                cfgNotify("Config system unavailable")
+            else
+                cfgExpanded, cfgRenaming, cfgCreating = nil, nil, false
+                cfgOpenAt(rebuildConfigList())
+            end
+        end)
+
+        -- Быстрое сохранение в текущий конфиг
+        pillSaveBtn.MouseButton1Click:Connect(function()
+            if not activeConfigName then
+                cfgNotify("No config selected")
+                return
+            end
+            managerCall("Save", activeConfigName)
+        end)
+
+        -- «+»: строка ввода имени нового конфига
+        cfgPlusBtn.MouseButton1Click:Connect(function()
+            cfgCreating = true
+            cfgExpanded, cfgRenaming = nil, nil
+            rebuildAndResize()
+        end)
+
+        -- Публичный API конфиг-системы
+        function GUI.SetActiveConfigName(name)
+            activeConfigName = name
+            pillName.Text = name or "no config"
+            pillName.TextColor3 = name and T.Text or T.TextDark
+        end
+
+        function GUI.AttachConfigSystem(manager)
+            configManager = manager
+            rebuildAndResize()
+        end
+
+        ----------------------------------------------------------------
         -- ВНУТРЕННИЙ КОНСТРУКТОР ТАБА + TabFunctions
         ----------------------------------------------------------------
 
@@ -1457,7 +2207,6 @@ return function(env)
                 tabLabel.TextColor3 = T.Text
                 setIconColor(T.Text)
                 pageHolder.Visible = true
-                tabTitle.Text = name
             end
 
             tabBtn.MouseButton1Click:Connect(Activate)
@@ -1693,100 +2442,6 @@ return function(env)
                 return chip
             end
 
-            -- Выпадающий список поверх mainFrame + закрытие по клику мимо.
-            -- Общая механика для CreateDropdown и CreatePlayerDropdown.
-            local function makeOverlayList(anchorBtn, width)
-                -- Geist popover: bg background-100, сплошная рамка, радиус 12,
-                -- внутренний padding 6 и шаг строк 2 (--ds-popover-*)
-                local overlay = Create("ScrollingFrame", {
-                    BackgroundColor3 = T.Surface1,
-                    Position = UDim2.new(0, 0, 0, 0),
-                    Size = UDim2.new(0, width, 0, 0),
-                    Visible = false,
-                    CanvasSize = UDim2.new(0, 0, 0, 0),
-                    ScrollBarThickness = 4,
-                    ScrollBarImageColor3 = G.Gray500,
-                    ClipsDescendants = true,
-                    BorderSizePixel = 0,
-                    ZIndex = 1000,
-                    Parent = mainFrame
-                })
-                AddCorner(overlay, R_CARD)
-                AddStroke(overlay, STROKE_W, T.Border)
-
-                Create("UIListLayout", {
-                    Padding = UDim.new(0, 2),
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                    Parent = overlay
-                })
-                Create("UIPadding", {
-                    PaddingTop = UDim.new(0, POPOVER_PAD),
-                    PaddingBottom = UDim.new(0, POPOVER_PAD),
-                    PaddingLeft = UDim.new(0, POPOVER_PAD),
-                    PaddingRight = UDim.new(0, POPOVER_PAD),
-                    Parent = overlay
-                })
-
-                local function close()
-                    if overlay.Visible then
-                        TweenService:Create(
-                            overlay,
-                            TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-                            {Size = UDim2.new(0, width, 0, 0)}
-                        ):Play()
-                        task.wait(0.2)
-                        overlay.Visible = false
-                    end
-                end
-
-                local function openAt(targetHeight)
-                    local absPos = anchorBtn.AbsolutePosition
-                    local absSize = anchorBtn.AbsoluteSize
-                    local mainPos = mainFrame.AbsolutePosition
-                    overlay.Position = UDim2.new(
-                        0, absPos.X - mainPos.X,
-                        0, absPos.Y - mainPos.Y + absSize.Y + 5
-                    )
-                    overlay.Size = UDim2.new(0, width, 0, 0)
-                    TweenService:Create(
-                        overlay,
-                        TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                        {Size = UDim2.new(0, width, 0, targetHeight)}
-                    ):Play()
-                end
-
-                -- Закрытие по клику вне списка и вне кнопки
-                local clickOutsideConnection = UserInputService.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 and overlay.Visible then
-                        local mousePos = UserInputService:GetMouseLocation()
-                        local framePos = overlay.AbsolutePosition
-                        local frameSize = overlay.AbsoluteSize
-                        local btnPos = anchorBtn.AbsolutePosition
-                        local btnSize = anchorBtn.AbsoluteSize
-
-                        local outsideFrame =
-                            mousePos.X < framePos.X or mousePos.X > framePos.X + frameSize.X or
-                            mousePos.Y < framePos.Y or mousePos.Y > framePos.Y + frameSize.Y
-
-                        local outsideButton =
-                            mousePos.X < btnPos.X or mousePos.X > btnPos.X + btnSize.X or
-                            mousePos.Y < btnPos.Y or mousePos.Y > btnPos.Y + btnSize.Y
-
-                        if outsideFrame and outsideButton then
-                            close()
-                        end
-                    end
-                end)
-                table.insert(State.Connections, clickOutsideConnection)
-
-                if not State.UIElements.OpenDropdowns then
-                    State.UIElements.OpenDropdowns = {}
-                end
-                table.insert(State.UIElements.OpenDropdowns, close)
-
-                return overlay, openAt, close
-            end
-
             --------------------------------------------
             -- TabFunctions (API 1:1, всё через Handlers)
             --------------------------------------------
@@ -1841,6 +2496,23 @@ return function(env)
 
                 local state = default
 
+                -- Единый сеттер: и клик пользователя, и загрузка конфига
+                -- обновляют визуал и State одним путём
+                local function setState(v, fire)
+                    state = v and true or false
+                    local targetColor = state and T.Accent or T.TrackBg
+                    local targetPos = UDim2.new(0, state and KNOB_ON or KNOB_OFF, 0.5, -KNOB / 2)
+
+                    TweenService:Create(toggleBg, TweenInfo.new(0.15), {BackgroundColor3 = targetColor}):Play()
+                    TweenService:Create(toggleCircle, TweenInfo.new(0.15), {Position = targetPos}):Play()
+
+                    if fire then
+                        callHandler(handlerKey, state)
+                    end
+                end
+
+                registerFlag(handlerKey, "toggle", function() return state end, setState)
+
                 -- Сразу вызываем handler с начальным значением, чтобы State
                 -- был синхронизирован с GUI
                 if default then
@@ -1850,14 +2522,7 @@ return function(env)
                 end
 
                 TrackConnection(toggleBg.MouseButton1Click:Connect(function()
-                    state = not state
-                    local targetColor = state and T.Accent or T.TrackBg
-                    local targetPos = UDim2.new(0, state and KNOB_ON or KNOB_OFF, 0.5, -KNOB / 2)
-
-                    TweenService:Create(toggleBg, TweenInfo.new(0.15), {BackgroundColor3 = targetColor}):Play()
-                    TweenService:Create(toggleCircle, TweenInfo.new(0.15), {Position = targetPos}):Play()
-
-                    callHandler(handlerKey, state)
+                    setState(not state, true)
                 end))
 
                 return toggleBg
@@ -1901,41 +2566,23 @@ return function(env)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
 
-                -- строка поповера Geist: 36px, радиус 6, hover — gray-200
-                for _, option in ipairs(options) do
-                    local optionBtn = Create("TextButton", {
-                        Text = option,
-                        Font = FONT.Body,
-                        TextSize = TS.Option,
-                        TextColor3 = T.Text,
-                        BackgroundColor3 = G.Gray200,
-                        BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, POPOVER_ROW),
-                        AutoButtonColor = false,
-                        ZIndex = 1001,
-                        TextXAlignment = Enum.TextXAlignment.Left,
-                        TextTruncate = Enum.TextTruncate.AtEnd,
-                        Parent = overlay
-                    })
-                    AddCorner(optionBtn, R_CTRL)
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = optionBtn})
-
-                    optionBtn.MouseButton1Click:Connect(function()
-                        dropdown.Text = option
+                -- Единый сеттер: значение вне options просто ставится текстом
+                local function setOption(option, fire)
+                    dropdown.Text = tostring(option)
+                    if fire then
                         callHandler(handlerKey, option)
+                    end
+                end
+
+                registerFlag(handlerKey, "dropdown",
+                    function() return dropdown.Text end, setOption)
+
+                -- строки поповера — единая фабрика popoverRow
+                for _, option in ipairs(options) do
+                    local optionBtn = popoverRow(overlay, option)
+                    optionBtn.MouseButton1Click:Connect(function()
+                        setOption(option, true)
                         close()
-                    end)
-
-                    optionBtn.MouseEnter:Connect(function()
-                        TweenService:Create(optionBtn, TweenInfo.new(0.12), {
-                            BackgroundTransparency = 0
-                        }):Play()
-                    end)
-
-                    optionBtn.MouseLeave:Connect(function()
-                        TweenService:Create(optionBtn, TweenInfo.new(0.12), {
-                            BackgroundTransparency = 1
-                        }):Play()
                     end)
                 end
 
@@ -1981,11 +2628,25 @@ return function(env)
                     TweenService:Create(inputStroke, TweenInfo.new(0.15), {Color = G.Gray600}):Play()
                 end)
 
+                -- Единый сеттер: нечисловое значение игнорируется
+                local function setValue(v, fire)
+                    local num = tonumber(v)
+                    if not num then return end
+                    inputBox.Text = tostring(num)
+                    if fire then
+                        callHandler(handlerKey, num)
+                    end
+                end
+
+                registerFlag(handlerKey, "input",
+                    function() return tonumber(inputBox.Text) or tonumber(defaultValue) end,
+                    setValue)
+
                 inputBox.FocusLost:Connect(function()
                     TweenService:Create(inputStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
                     local value = tonumber(inputBox.Text)
                     if value then
-                        callHandler(handlerKey, value)
+                        setValue(value, true)
                     else
                         inputBox.Text = tostring(defaultValue)
                     end
@@ -2063,6 +2724,9 @@ return function(env)
                         callHandler(handlerKey, value)
                     end
                 end
+
+                registerFlag(handlerKey, "slider",
+                    function() return currentValue end, applyValue)
 
                 local dragging = false
                 local function updateSlider(input)
@@ -2212,41 +2876,15 @@ return function(env)
                     overlay.CanvasSize = UDim2.new(0, 0, 0,
                         #players * (POPOVER_ROW + buttonSpacing) + POPOVER_PAD * 2)
 
+                    -- строки — единая фабрика popoverRow; в реестр конфигов
+                    -- этот список не попадает (stateKey, а не handlerKey)
                     for _, playerName in ipairs(players) do
-                        local pb = Create("TextButton", {
-                            Text = playerName,
-                            Font = FONT.Body,
-                            TextSize = TS.Option,
-                            TextColor3 = T.Text,
-                            BackgroundColor3 = G.Gray200,
-                            BackgroundTransparency = 1,
-                            Size = UDim2.new(1, 0, 0, POPOVER_ROW),
-                            AutoButtonColor = false,
-                            ZIndex = 1001,
-                            TextXAlignment = Enum.TextXAlignment.Left,
-                            TextTruncate = Enum.TextTruncate.AtEnd,
-                            Parent = overlay
-                        })
-                        AddCorner(pb, R_CTRL)
-                        Create("UIPadding", {PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = pb})
-
+                        local pb = popoverRow(overlay, playerName)
                         pb.MouseButton1Click:Connect(function()
                             State[stateKey] = playerName
                             -- длинные ники режет TextTruncate, вручную не обрезаем
                             dropdown.Text = playerName
                             close()
-                        end)
-
-                        pb.MouseEnter:Connect(function()
-                            TweenService:Create(pb, TweenInfo.new(0.12), {
-                                BackgroundTransparency = 0
-                            }):Play()
-                        end)
-
-                        pb.MouseLeave:Connect(function()
-                            TweenService:Create(pb, TweenInfo.new(0.12), {
-                                BackgroundTransparency = 1
-                            }):Play()
                         end)
                     end
                 end
