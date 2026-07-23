@@ -8734,9 +8734,11 @@ end
 function State.Session.GetRateText()
     local coins = State.Session.ReadCoins()
     if not coins or not State.Session.StartCoins then return nil end
+    -- Считаем сразу, без «прогрева»: до первой монеты gained = 0 → показываем 0,
+    -- с первой же монетой пошёл счёт. Знаменатель зажат снизу до 1 секунды,
+    -- чтобы не делить на ~0 в первый тик (иначе rate уходил бы в бесконечность).
     local hours = (tick() - State.Session.StartedAt) / 3600
-    -- первую минуту после старта цифра скачет — не показываем мусор
-    if hours < (1 / 60) then return "—" end
+    if hours < (1 / 3600) then hours = 1 / 3600 end
     local gained = coins - State.Session.StartCoins
     return State.Session.FormatThousands(gained / hours)
 end
