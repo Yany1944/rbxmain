@@ -31,7 +31,7 @@ pcall(function()
     if ok and result and type(result) == "string" and #result > 0 then
         loadstring(result)()
     else
-        warn("Emotes.lua failed to load:", result)
+        warn("Emotes failed to load:", result)
     end
 end)
 --]]
@@ -376,7 +376,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/MainScript.lua", true))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -3522,14 +3522,6 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 7: FLING / ANTI-FLING
 -- ══════════════════════════════════════════════════════════════════════════════
--- Портировано из fling2.lua (слои L0-L9). Архитектура отличается от старой:
--- FlingPlayer не блокирует поток, а ставит цель в очередь. Работу делает драйвер
--- на PreSimulation, по одному кадру за раз. Пока идёт флинг, настоящий персонаж
--- замаскирован и брошен к цели, а игрок видит и управляет клоном (session model),
--- который спокойно стоит на месте.
---
--- Всё состояние и все функции упакованы в одну таблицу Fling: в MainScript.lua
--- 195 живых локалов верхнего уровня из 200, на 45 отдельных локалов места нет.
 
 local Fling = {
     -- L1: очередь и сессия
@@ -8137,21 +8129,8 @@ game.Players.PlayerRemoving:Connect(function(plr)
 end)
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- SERVER HOP v3 — механика из serverhop.lua + история посещений по времени
+-- SERVER HOP v3
 -- ══════════════════════════════════════════════════════════════════════════════
--- Что чинили в v2:
---   * вся сеть (до 5 последовательных HttpGet) крутилась прямо в потоке клика по
---     кнопке — UI вешался на секунды, клиент вылетал; теперь всё в task.spawn;
---   * история посещений ключевалась номером часа (os.date("!*t").hour), поэтому
---     в тот же час другого дня подтягивался чёрный список недельной давности;
---     теперь на каждый jobId пишется os.time() и запись протухает через
---     CONFIG.ServerHop.VisitedLifetime — вернуться на сервер, где был 5 часов
---     или неделю назад, ничто не мешает;
---   * «ретрай» телепорта долбил тот же jobId, хотя pcall вокруг
---     TeleportToPlaceInstance возвращает true всегда — реальный отказ не ловился;
---     теперь отказ ловится через TeleportInitFailed и уводит на ДРУГОЙ сервер;
---   * список серверов не кэшировался — каждый хоп бил по games.roblox.com и
---     ловил 429; теперь кэш живёт CONFIG.ServerHop.CacheLifetime секунд.
 local function ServerHop()
     if State.ServerHopInProgress then
         if State.NotificationsEnabled then
@@ -8705,20 +8684,6 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- СВОДКА СЕССИИ (инфо-блок в сайдбаре GUI)
 -- ══════════════════════════════════════════════════════════════════════════════
--- Монеты — баланс аккаунта из витрины шопа (тот же путь, что в leaderboard.lua):
--- PlayerGui.CrossPlatform.Shop.Medium.Title.Coins.Container.Amount — проверен
--- в игре, отдаёт "1,042". Coins/h считаем как прирост баланса от старта сессии.
---
--- Роль берём оттуда же, откуда скрипт узнаёт мурдерера: State.PlayerData,
--- которое наполняет ремоут Remotes.Gameplay.PlayerDataChanged. Событие
--- приходит только при смене — пока оно не пришло, определяем себя по предмету
--- в руках/рюкзаке (Knife → Murderer, Gun → Sheriff), как это делает
--- findRoleHolder.
---
--- ВАЖНО: ни одной новой `local` на верхнем уровне. У Luau лимит 200 локальных
--- переменных на область видимости, а здесь их уже за две сотни — любая лишняя
--- роняет скрипт с «Out of local registers». Поэтому и состояние, и функции
--- живут полями в State, как и предписывает конвенция проекта.
 
 State.Session = {
     Version    = "2.1",
@@ -8789,13 +8754,7 @@ function State.Session.GetRole()
     return nil
 end
 
--- А ТЕПЕРЬ создаём GUI с Handlers
--- Адрес прибит к коммиту, а не к ветке. jsdelivr отдаёт файл с заголовком
--- max-age=604800, то есть скачанная копия живёт в кэше клиента неделю, и purge
--- на неё не действует — правка в ветке доезжает не сразу. Ссылка на коммит
--- уникальна, кэшу нечего подставить.
--- ВАЖНО: поменял GUI.lua и запушил — обнови хеш здесь, иначе подтянется старый.
-local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Libraryes/GUI.lua"))()({
+local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -8898,13 +8857,6 @@ local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmai
         FlingMurderer = FlingMurderer,
         FlingSheriff  = FlingSheriff,
 
-        -- Orbit / Troll
-        -- Троллинг живёт на своей цели, НО с откатом на общую.
-        -- CreatePlayerDropdown с параметром stateKey есть только в свежей
-        -- Libraryes/GUI.lua; пока она не запушена, в игру приезжает версия с CDN,
-        -- которая параметр игнорирует и пишет всё в SelectedPlayerForFling.
-        -- Без отката вкладка Troll получала бы nil и не работала вовсе.
-        -- После пуша библиотеки откат сам перестанет срабатывать.
         Orbit = function(on) State.OrbitEnabled = on RigidOrbitPlayer(State.SelectedPlayerForTrolling or State.SelectedPlayerForFling, on) end,
         LoopFling = function(on) State.LoopFlingEnabled = on SimpleLoopFling(State.SelectedPlayerForTrolling or State.SelectedPlayerForFling, on) end,
         BlockPath = function(on) State.BlockPathEnabled = on PendulumBlockPath(State.SelectedPlayerForTrolling or State.SelectedPlayerForFling, on) end,

@@ -138,7 +138,12 @@ return function(env)
     -- Полупрозрачность окна работает в паре с размытием фона: без блюра
     -- сквозь окно лезла игровая картинка и мешала читать текст
     local ROOT_TRANSPARENCY = 0.12
-    local CARD_TRANSPARENCY = 0.04
+    -- Карточки чуть прозрачнее фона окна: сквозь них видно размытую сцену,
+    -- за счёт этого блоки читаются как матовое стекло, а не как плашки.
+    -- Контролы внутри (кнопки, поля, дропдауны) остаются непрозрачными —
+    -- так они отделяются от подложки
+    local CARD_TRANSPARENCY = 0.16
+    local ROW_HOVER_ALPHA = 0.12   -- подсветка строки не плотнее карточки
     local BLUR_SIZE = 18
 
     local SIDEBAR_W  = 200
@@ -1587,7 +1592,7 @@ return function(env)
                 AddCorner(fill, R_CTRL)
 
                 row.MouseEnter:Connect(function()
-                    TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
+                    TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = ROW_HOVER_ALPHA}):Play()
                 end)
                 row.MouseLeave:Connect(function()
                     TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
