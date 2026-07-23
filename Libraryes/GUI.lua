@@ -35,21 +35,38 @@ return function(env)
         TrackBg   = Color3.fromRGB(45, 45, 50),   -- фон трека слайдера / выкл. тогла
     }
 
-    -- Шрифты — только набор из Scripts/Emotes.lua (GothamMedium выпилен: он
-    -- отсутствует там и рендерится нестабильно).
-    -- Единая шкала размеров, без исключений:
-    --   названия строк      FONT.Bold 13
-    --   описания            FONT.Body 11
-    --   заголовки секций    FONT.Bold 11
-    --   значения / чипы     FONT.Mono 11
-    --   кнопки              FONT.Bold 12
-    --   статусбар           FONT.Mono 11
-    --   заголовок вкладки   FONT.Bold 15
+    -- Шрифты — та же пара, что в Scripts/Notify.lua: на мелких кеглях
+    -- GothamSemibold/GothamMedium растрируются заметно мягче, чем GothamBold,
+    -- а Enum.Font.Code (пиксельный моноширинный) убран совсем — именно он
+    -- давал «квадратный» вид значениям и статусбару.
     local FONT = {
-        Bold = Enum.Font.GothamBold,     -- заголовки, названия фич, кнопки
-        Body = Enum.Font.Gotham,         -- описания, второстепенный текст
-        Mono = Enum.Font.Code,           -- значения, чипы, статусбар
+        Bold = Enum.Font.GothamSemibold, -- названия фич, заголовки, кнопки
+        Body = Enum.Font.GothamMedium,   -- описания, второстепенный текст
+        Mono = Enum.Font.GothamMedium,   -- значения, чипы, статусбар
     }
+
+    -- Единая шкала кеглей. Меняется только здесь — по месту цифры не пишем
+    local TS = {
+        Logo      = 18,   -- «Violite»
+        LogoSub   = 12,   -- «mm2»
+        TabTitle  = 16,   -- заголовок вкладки в хедере
+        Nav       = 14,   -- пункты сайдбара
+        Section   = 12,   -- заголовки секций (CAPS)
+        Title     = 14,   -- название строки
+        Desc      = 12,   -- описание строки
+        Button    = 13,   -- кнопки, дропдауны, кейбинд-кнопки
+        Value     = 13,   -- значения в полях ввода
+        Chip      = 12,   -- узкие чипы бинда
+        Status    = 12,   -- футер-статусбар
+        Option    = 12,   -- пункты выпадающих списков
+        Search    = 13,   -- поле поиска
+    }
+
+    -- Единый вертикальный ритм строк и правых контролов
+    local ROW_H       = 46   -- строка без описания
+    local ROW_H_DESC  = 60   -- строка с описанием
+    local CTRL_H      = 28   -- высота дропдаунов/кнопок/полей ввода
+    local EDGE        = 14   -- отступ контролов от правого края строки
 
     -- Единственное место с прозрачностью — корневой фрейм окна
     local ROOT_TRANSPARENCY = 0.06
@@ -278,12 +295,12 @@ return function(env)
             Name = "LogoName",
             Text = "Violite",
             Font = FONT.Bold,
-            TextSize = 16,
+            TextSize = TS.Logo,
             TextColor3 = T.Accent,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 18, 0, 16),
-            Size = UDim2.new(0, 150, 0, 20),
+            Position = UDim2.new(0, 18, 0, 15),
+            Size = UDim2.new(0, 150, 0, 22),
             Parent = sidebar
         })
 
@@ -291,12 +308,12 @@ return function(env)
             Name = "LogoSub",
             Text = "mm2",
             Font = FONT.Body,
-            TextSize = 11,
+            TextSize = TS.LogoSub,
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 18, 0, 36),
-            Size = UDim2.new(0, 150, 0, 14),
+            Position = UDim2.new(0, 18, 0, 37),
+            Size = UDim2.new(0, 150, 0, 16),
             Parent = sidebar
         })
 
@@ -325,7 +342,7 @@ return function(env)
             Name = "Dedication",
             Text = "for my кошичка жена",
             Font = FONT.Body,
-            TextSize = 11,
+            TextSize = TS.LogoSub,
             TextColor3 = Color3.fromRGB(220, 145, 230),
             TextTransparency = 0.35,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -352,7 +369,7 @@ return function(env)
             Name = "TabTitle",
             Text = "",
             Font = FONT.Bold,
-            TextSize = 15,
+            TextSize = TS.TabTitle,
             TextColor3 = T.Text,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
@@ -366,24 +383,26 @@ return function(env)
             PlaceholderText = "Search...",
             Text = "",
             Font = FONT.Body,
-            TextSize = 12,
+            TextSize = TS.Search,
             TextColor3 = T.Text,
             PlaceholderColor3 = T.TextDark,
             BackgroundColor3 = T.Surface2,
-            Position = UDim2.new(1, -278, 0.5, -14),
-            Size = UDim2.new(0, 220, 0, 28),
+            Position = UDim2.new(1, -278, 0.5, -15),
+            Size = UDim2.new(0, 220, 0, 30),
+            TextXAlignment = Enum.TextXAlignment.Left,
             ClearTextOnFocus = false,
             Parent = header,
         })
         AddCorner(searchBox, 6)
         AddStroke(searchBox, 1, T.HairCol, T.HairTrans)
+        Create("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), Parent = searchBox})
 
         local closeButton = Create("TextButton", {
             Text = "",
             BackgroundColor3 = T.Danger,
             BackgroundTransparency = 1,
-            Position = UDim2.new(1, -42, 0.5, -14),
-            Size = UDim2.new(0, 28, 0, 28),
+            Position = UDim2.new(1, -44, 0.5, -15),
+            Size = UDim2.new(0, 30, 0, 30),
             AutoButtonColor = false,
             Parent = header
         })
@@ -444,7 +463,7 @@ return function(env)
         local roleText = Create("TextLabel", {
             Text = "",
             Font = FONT.Mono,
-            TextSize = 11,
+            TextSize = TS.Status,
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
@@ -456,7 +475,7 @@ return function(env)
         local pingLabel = Create("TextLabel", {
             Text = "Ping: -- ms",
             Font = FONT.Mono,
-            TextSize = 11,
+            TextSize = TS.Status,
             TextColor3 = T.TextDark,
             BackgroundTransparency = 1,
             Position = UDim2.new(0.5, -110, 0, 0),
@@ -467,7 +486,7 @@ return function(env)
         Create("TextLabel", {
             Text = "Toggle: " .. CONFIG.HideKey.Name,
             Font = FONT.Mono,
-            TextSize = 11,
+            TextSize = TS.Status,
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Right,
             BackgroundTransparency = 1,
@@ -652,8 +671,8 @@ return function(env)
             local function label(text, size)
                 local l = Create("TextLabel", {
                     Text = text,
-                    Font = FONT.Mono,
-                    TextSize = size or 9,
+                    Font = FONT.Bold,
+                    TextSize = size or 10,
                     TextColor3 = T.TextDark,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 1, 0),
@@ -690,7 +709,7 @@ return function(env)
                 -- монета: кольцо + «$» по центру (прежние две прорези
                 -- читались как значок «пауза»)
                 ring(2, 2, 12, 12, 6)
-                label("$", 9)
+                label("$", 10)
             elseif n == "fun" then
                 -- искра: 4 луча из центра
                 line(7, 1, 1, 14)
@@ -734,7 +753,7 @@ return function(env)
                 Text = "",
                 BackgroundColor3 = T.Surface1,
                 BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 34),
+                Size = UDim2.new(1, 0, 0, 36),
                 AutoButtonColor = false,
                 Parent = navScroll
             })
@@ -745,7 +764,7 @@ return function(env)
             local tabLabel = Create("TextLabel", {
                 Text = name,
                 Font = FONT.Bold,
-                TextSize = 13,
+                TextSize = TS.Nav,
                 TextColor3 = T.TextDark,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 BackgroundTransparency = 1,
@@ -903,23 +922,24 @@ return function(env)
                     SortOrder = Enum.SortOrder.LayoutOrder,
                     Parent = sec
                 })
+                -- +8 снизу = PaddingTop заголовка: карточка дышит одинаково
                 layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                    sec.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y + 6)
+                    sec.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y + 8)
                 end)
 
                 if title and title ~= "" then
                     local head = Create("TextLabel", {
                         Text = title:upper(),
                         Font = FONT.Bold,
-                        TextSize = 11,
+                        TextSize = TS.Section,
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 32),
+                        Size = UDim2.new(1, 0, 0, 36),
                         LayoutOrder = 1,
                         Parent = sec
                     })
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, 14), PaddingTop = UDim.new(0, 6), Parent = head})
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, 14), PaddingTop = UDim.new(0, 8), Parent = head})
                 end
 
                 local data = {frame = sec, layout = layout, rows = {}, order = 1}
@@ -976,40 +996,44 @@ return function(env)
             local function addRowText(row, title, desc, reserved)
                 reserved = reserved or 200
                 if desc and desc ~= "" then
+                    -- 11 + 20 + 18 + 11 = ROW_H_DESC: сверху и снизу поровну
                     Create("TextLabel", {
                         Text = title,
                         Font = FONT.Bold,
-                        TextSize = 13,
+                        TextSize = TS.Title,
                         TextColor3 = T.Text,
                         TextXAlignment = Enum.TextXAlignment.Left,
+                        TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, 14, 0, 9),
+                        Position = UDim2.new(0, EDGE, 0, 11),
                         Size = UDim2.new(1, -reserved, 0, 20),
                         Parent = row
                     })
                     Create("TextLabel", {
                         Text = desc,
                         Font = FONT.Body,
-                        TextSize = 11,
+                        TextSize = TS.Desc,
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
+                        TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, 14, 0, 30),
-                        Size = UDim2.new(1, -reserved, 0, 16),
+                        Position = UDim2.new(0, EDGE, 0, 31),
+                        Size = UDim2.new(1, -reserved, 0, 18),
                         Parent = row
                     })
                 else
                     Create("TextLabel", {
                         Text = title,
                         Font = FONT.Bold,
-                        TextSize = 13,
+                        TextSize = TS.Title,
                         TextColor3 = T.Text,
                         TextXAlignment = Enum.TextXAlignment.Left,
+                        TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, 14, 0, 0),
+                        Position = UDim2.new(0, EDGE, 0, 0),
                         Size = UDim2.new(1, -reserved, 1, 0),
                         Parent = row
                     })
@@ -1022,8 +1046,9 @@ return function(env)
                 local chip = Create("TextButton", {
                     Name = keybindKey .. "_Button",
                     Text = (bound and bound ~= Enum.KeyCode.Unknown) and bound.Name or "—",
-                    Font = FONT.Mono,
-                    TextSize = 11,
+                    Font = FONT.Bold,
+                    TextSize = TS.Chip,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
                     Position = posX,
@@ -1151,36 +1176,36 @@ return function(env)
             function TabFunctions:CreateToggle(title, desc, handlerKey, default, keybindKey)
                 default = default or false
                 local hasDesc = desc ~= nil and desc ~= ""
-                local row = addRow(hasDesc and 56 or 44, title, desc or "")
-                -- с чипом бинда правый блок шире: 56(чип)+8+40(пилюля)+14+26
-                addRowText(row, title, desc, keybindKey and 144 or 80)
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
+                -- правый блок: 44(пилюля)+14 и, если есть чип, ещё 56+8 слева
+                addRowText(row, title, desc, keybindKey and 148 or 84)
 
-                -- Пилюля 40x22, позиция/цвет зависят от состояния
+                -- Пилюля 44x24, позиция/цвет зависят от состояния
                 local toggleBg = Create("TextButton", {
                     Text = "",
                     BackgroundColor3 = default and T.Accent or T.TrackBg,
-                    Position = UDim2.new(1, -54, 0.5, -11),
-                    Size = UDim2.new(0, 40, 0, 22),
+                    Position = UDim2.new(1, -(44 + EDGE), 0.5, -12),
+                    Size = UDim2.new(0, 44, 0, 24),
                     AutoButtonColor = false,
                     Parent = row
                 })
-                AddCorner(toggleBg, 11)
+                AddCorner(toggleBg, 12)
                 -- В выключенном состоянии пилюля почти сливается со строкой —
                 -- держим на ней hairline и прячем его при включении
                 local toggleStroke = AddStroke(toggleBg, 1, T.HairCol, default and 1 or 0.88)
 
                 local toggleCircle = Create("Frame", {
                     BackgroundColor3 = T.Text,
-                    Position = default and UDim2.new(0, 21, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
-                    Size = UDim2.new(0, 16, 0, 16),
+                    Position = default and UDim2.new(0, 23, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+                    Size = UDim2.new(0, 18, 0, 18),
                     BorderSizePixel = 0,
                     Parent = toggleBg
                 })
-                AddCorner(toggleCircle, 8)
+                AddCorner(toggleCircle, 9)
 
                 -- Опциональный чип бинда слева от тогла
                 if keybindKey then
-                    makeKeybindChip(row, keybindKey, 56, 24, UDim2.new(1, -118, 0.5, -12))
+                    makeKeybindChip(row, keybindKey, 56, CTRL_H, UDim2.new(1, -122, 0.5, -CTRL_H / 2))
                 end
 
                 local state = default
@@ -1196,7 +1221,7 @@ return function(env)
                 TrackConnection(toggleBg.MouseButton1Click:Connect(function()
                     state = not state
                     local targetColor = state and T.Accent or T.TrackBg
-                    local targetPos = state and UDim2.new(0, 21, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+                    local targetPos = state and UDim2.new(0, 23, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
 
                     TweenService:Create(toggleBg, TweenInfo.new(0.15), {BackgroundColor3 = targetColor}):Play()
                     TweenService:Create(toggleStroke, TweenInfo.new(0.15), {Transparency = state and 1 or 0.88}):Play()
@@ -1210,20 +1235,20 @@ return function(env)
 
             function TabFunctions:CreateDropdown(title, desc, options, default, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
-                local row = addRow(hasDesc and 56 or 44, title, desc or "")
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
                 addRowText(row, title, desc, 150)
 
                 local DD_W = 110
                 local dropdown = Create("TextButton", {
                     Text = default,
                     Font = FONT.Bold,
-                    TextSize = 12,
+                    TextSize = TS.Button,
                     TextColor3 = T.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     TextTruncate = Enum.TextTruncate.AtEnd,
                     BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -(DD_W + 14), 0.5, -14),
-                    Size = UDim2.new(0, DD_W, 0, 28),
+                    Position = UDim2.new(1, -(DD_W + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, DD_W, 0, CTRL_H),
                     AutoButtonColor = false,
                     ZIndex = 5,
                     Parent = row
@@ -1244,15 +1269,19 @@ return function(env)
                     local optionBtn = Create("TextButton", {
                         Text = option,
                         Font = FONT.Body,
-                        TextSize = 11,
+                        TextSize = TS.Option,
                         TextColor3 = T.Text,
                         BackgroundColor3 = T.Surface2,
-                        Size = UDim2.new(1, 0, 0, 25),
+                        Size = UDim2.new(1, 0, 0, 28),
                         AutoButtonColor = false,
                         ZIndex = 1001,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd,
                         Parent = overlay
                     })
                     AddCorner(optionBtn, 4)
+                    -- пункт выравнивается по тексту закрытой кнопки (те же 10px)
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, 10), Parent = optionBtn})
 
                     optionBtn.MouseButton1Click:Connect(function()
                         dropdown.Text = option
@@ -1278,8 +1307,8 @@ return function(env)
                         close()
                     else
                         overlay.Visible = true
-                        overlay.CanvasSize = UDim2.new(0, 0, 0, #options * 27)
-                        openAt(math.min(120, #options * 27))
+                        overlay.CanvasSize = UDim2.new(0, 0, 0, #options * 30 + 4)
+                        openAt(math.min(154, #options * 30 + 4))
                     end
                 end)
 
@@ -1288,17 +1317,17 @@ return function(env)
 
             function TabFunctions:CreateInputField(title, desc, defaultValue, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
-                local row = addRow(hasDesc and 56 or 44, title, desc or "")
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
                 addRowText(row, title, desc, 104)
 
                 local inputBox = Create("TextBox", {
                     Text = tostring(defaultValue),
                     Font = FONT.Mono,
-                    TextSize = 11,
+                    TextSize = TS.Value,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -78, 0.5, -12),
-                    Size = UDim2.new(0, 64, 0, 24),
+                    Position = UDim2.new(1, -(64 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 64, 0, CTRL_H),
                     PlaceholderText = "…",
                     PlaceholderColor3 = T.TextDark,
                     ClearTextOnFocus = false,
@@ -1320,8 +1349,8 @@ return function(env)
             function TabFunctions:CreateSlider(title, description, min, max, default, handlerKey, step)
                 step = step or 1
                 local hasDesc = description ~= nil and description ~= ""
-                local row = addRow(hasDesc and 56 or 44, title, description or "")
-                addRowText(row, title, description, 204)
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, description or "")
+                addRowText(row, title, description, 206)
 
                 local function fmt(v)
                     return step >= 1 and string.format("%d", v) or string.format("%.2f", v)
@@ -1329,10 +1358,10 @@ return function(env)
 
                 local currentValue = default
 
-                -- Трек 110x4 и значение-TextBox в одной строке с заголовком
+                -- Трек 110x4 (кончается за 10px до поля значения) и значение-TextBox
                 local sliderBg = Create("Frame", {
                     BackgroundColor3 = T.TrackBg,
-                    Position = UDim2.new(1, -178, 0.5, -2),
+                    Position = UDim2.new(1, -180, 0.5, -2),
                     Size = UDim2.new(0, 110, 0, 4),
                     BorderSizePixel = 0,
                     Parent = row
@@ -1350,21 +1379,21 @@ return function(env)
                 local sliderButton = Create("TextButton", {
                     Text = "",
                     BackgroundColor3 = T.Text,
-                    Position = UDim2.new((default - min) / (max - min), -6, 0.5, -6),
-                    Size = UDim2.new(0, 12, 0, 12),
+                    Position = UDim2.new((default - min) / (max - min), -7, 0.5, -7),
+                    Size = UDim2.new(0, 14, 0, 14),
                     AutoButtonColor = false,
                     Parent = sliderBg
                 })
-                AddCorner(sliderButton, 6)
+                AddCorner(sliderButton, 7)
 
                 local valueBox = Create("TextBox", {
                     Text = fmt(default),
                     Font = FONT.Mono,
-                    TextSize = 11,
+                    TextSize = TS.Value,
                     TextColor3 = T.Accent,
                     BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -58, 0.5, -11),
-                    Size = UDim2.new(0, 44, 0, 22),
+                    Position = UDim2.new(1, -(46 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 46, 0, CTRL_H),
                     ClearTextOnFocus = true,
                     Parent = row
                 })
@@ -1378,7 +1407,7 @@ return function(env)
 
                     local normalizedValue = (value - min) / (max - min)
                     sliderFill.Size = UDim2.new(normalizedValue, 0, 1, 0)
-                    sliderButton.Position = UDim2.new(normalizedValue, -6, 0.5, -6)
+                    sliderButton.Position = UDim2.new(normalizedValue, -7, 0.5, -7)
                     valueBox.Text = fmt(value)
 
                     if fire then
@@ -1423,19 +1452,20 @@ return function(env)
             end
 
             function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
-                local row = addRow(44, title, "")
-                addRowText(row, title, nil, 135)
+                local row = addRow(ROW_H, title, "")
+                addRowText(row, title, nil, 140)
 
                 local bound = State.Keybinds and State.Keybinds[keybindKey]
                 local bindButton = Create("TextButton", {
                     Name = keybindKey .. "_Button",
                     Text = (bound and bound ~= Enum.KeyCode.Unknown) and bound.Name or "Not Bound",
                     Font = FONT.Bold,
-                    TextSize = 12,
+                    TextSize = TS.Button,
                     TextColor3 = T.Text,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -109, 0.5, -13),
-                    Size = UDim2.new(0, 95, 0, 26),
+                    Position = UDim2.new(1, -(100 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 100, 0, CTRL_H),
                     AutoButtonColor = false,
                     Parent = row
                 })
@@ -1457,20 +1487,20 @@ return function(env)
             function TabFunctions:CreatePlayerDropdown(title, desc, stateKey)
                 stateKey = stateKey or "SelectedPlayerForFling"
                 local hasDesc = desc ~= nil and desc ~= ""
-                local row = addRow(hasDesc and 56 or 44, title, desc or "")
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
                 addRowText(row, title, desc, 205)
 
                 local DD_W = 165
                 local dropdown = Create("TextButton", {
                     Text = "Select player",
                     Font = FONT.Bold,
-                    TextSize = 12,
+                    TextSize = TS.Button,
                     TextColor3 = T.Text,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     TextTruncate = Enum.TextTruncate.AtEnd,
                     BackgroundColor3 = T.Surface2,
-                    Position = UDim2.new(1, -(DD_W + 14), 0.5, -14),
-                    Size = UDim2.new(0, DD_W, 0, 28),
+                    Position = UDim2.new(1, -(DD_W + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, DD_W, 0, CTRL_H),
                     AutoButtonColor = false,
                     ZIndex = 5,
                     Parent = row
@@ -1496,33 +1526,36 @@ return function(env)
 
                     local players = getAllPlayers()
                     if #players == 0 then
-                        Create("TextLabel", {
+                        local empty = Create("TextLabel", {
                             Text = "No players",
                             Font = FONT.Body,
-                            TextSize = 11,
+                            TextSize = TS.Option,
                             TextColor3 = T.TextDark,
+                            TextXAlignment = Enum.TextXAlignment.Left,
                             BackgroundTransparency = 1,
-                            Size = UDim2.new(1, -10, 0, 25),
+                            Size = UDim2.new(1, 0, 0, 28),
                             ZIndex = 1001,
                             Parent = overlay
                         })
-                        overlay.CanvasSize = UDim2.new(0, 0, 0, 30)
+                        Create("UIPadding", {PaddingLeft = UDim.new(0, 10), Parent = empty})
+                        overlay.CanvasSize = UDim2.new(0, 0, 0, 32)
                         return
                     end
 
+                    -- ширина строк — на всю ширину списка: UIListLayout всё равно
+                    -- перебивает Position, а инсет давал «съеденный» правый край
                     local buttonHeight = 28
                     local buttonSpacing = 2
-                    overlay.CanvasSize = UDim2.new(0, 0, 0, #players * (buttonHeight + buttonSpacing) + 5)
+                    overlay.CanvasSize = UDim2.new(0, 0, 0, #players * (buttonHeight + buttonSpacing) + 4)
 
                     for _, playerName in ipairs(players) do
                         local pb = Create("TextButton", {
                             Text = playerName,
                             Font = FONT.Body,
-                            TextSize = 11,
+                            TextSize = TS.Option,
                             TextColor3 = T.Text,
                             BackgroundColor3 = T.Surface2,
-                            Size = UDim2.new(1, -10, 0, buttonHeight),
-                            Position = UDim2.new(0, 5, 0, 0),
+                            Size = UDim2.new(1, 0, 0, buttonHeight),
                             AutoButtonColor = false,
                             ZIndex = 1001,
                             TextXAlignment = Enum.TextXAlignment.Left,
@@ -1530,7 +1563,7 @@ return function(env)
                             Parent = overlay
                         })
                         AddCorner(pb, 4)
-                        Create("UIPadding", {PaddingLeft = UDim.new(0, 8), Parent = pb})
+                        Create("UIPadding", {PaddingLeft = UDim.new(0, 10), Parent = pb})
 
                         pb.MouseButton1Click:Connect(function()
                             State[stateKey] = playerName
@@ -1560,7 +1593,7 @@ return function(env)
                         overlay.Visible = true
                         updatePlayerList()
                         local playerCount = #getAllPlayers()
-                        openAt(math.min(150, math.max(30, playerCount * 30)))
+                        openAt(math.min(184, math.max(32, playerCount * 30 + 4)))
                     end
                 end)
 
@@ -1581,19 +1614,19 @@ return function(env)
 
             function TabFunctions:CreateButton(title, buttonText, color, handlerKey)
                 local hasTitle = title ~= nil and title ~= ""
-                local row = addRow(hasTitle and 70 or 44, title or "", buttonText)
+                local row = addRow(hasTitle and 78 or ROW_H + 4, title or "", buttonText)
 
                 if hasTitle then
                     Create("TextLabel", {
                         Text = title,
                         Font = FONT.Bold,
-                        TextSize = 13,
+                        TextSize = TS.Title,
                         TextColor3 = T.Text,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, 14, 0, 8),
-                        Size = UDim2.new(1, -28, 0, 18),
+                        Position = UDim2.new(0, EDGE, 0, 10),
+                        Size = UDim2.new(1, -EDGE * 2, 0, 20),
                         Parent = row
                     })
                 end
@@ -1604,12 +1637,13 @@ return function(env)
                 local button = Create("TextButton", {
                     Text = buttonText,
                     Font = FONT.Bold,
-                    TextSize = 12,
+                    TextSize = TS.Button,
                     TextColor3 = isDanger and T.Danger or T.AccentInk,
                     BackgroundColor3 = useColor,
                     BackgroundTransparency = isDanger and 0.85 or 0,
-                    Position = hasTitle and UDim2.new(0, 14, 0, 32) or UDim2.new(0, 14, 0.5, -15),
-                    Size = UDim2.new(1, -28, 0, 30),
+                    -- 10 + 20 + 4 + 32 + 12 = 78 при заголовке; иначе строго по центру
+                    Position = hasTitle and UDim2.new(0, EDGE, 0, 34) or UDim2.new(0, EDGE, 0.5, -16),
+                    Size = UDim2.new(1, -EDGE * 2, 0, 32),
                     AutoButtonColor = false,
                     Parent = row
                 })
