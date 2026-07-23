@@ -8702,6 +8702,93 @@ local function HandleAutoReconnect(enabled)
         end
     end
 end
+-- ══════════════════════════════════════════════════════════════════════════════
+-- СВОДКА СЕССИИ (инфо-блок в сайдбаре GUI)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Монеты — баланс аккаунта из витрины шопа (тот же путь, что в leaderboard.lua):
+-- PlayerGui.CrossPlatform.Shop.Medium.Title.Coins.Container.Amount — проверен
+-- в игре, отдаёт "1,042". Coins/h считаем как прирост баланса от старта сессии.
+--
+-- Роль берём оттуда же, откуда скрипт узнаёт мурдерера: State.PlayerData,
+-- которое наполняет ремоут Remotes.Gameplay.PlayerDataChanged. Событие
+-- приходит только при смене — пока оно не пришло, определяем себя по предмету
+-- в руках/рюкзаке (Knife → Murderer, Gun → Sheriff), как это делает
+-- findRoleHolder.
+--
+-- ВАЖНО: ни одной новой `local` на верхнем уровне. У Luau лимит 200 локальных
+-- переменных на область видимости, а здесь их уже за две сотни — любая лишняя
+-- роняет скрипт с «Out of local registers». Поэтому и состояние, и функции
+-- живут полями в State, как и предписывает конвенция проекта.
+
+State.Session = {
+    Version    = "2.1",
+    StartedAt  = tick(),
+    StartCoins = nil,     -- баланс на старте сессии, ставится при первом чтении
+}
+
+-- Разделитель тысяч: 26292 → 26,292
+function State.Session.FormatThousands(n)
+    local s = tostring(math.floor(n))
+    local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    return (out:gsub("^,", ""))
+end
+
+-- Баланс монет аккаунта. Витрина шопа существует и когда шоп закрыт
+function State.Session.ReadCoins()
+    local ok, value = pcall(function()
+        local label = LocalPlayer.PlayerGui
+            .CrossPlatform.Shop.Medium.Title.Coins.Container.Amount
+        return tonumber((tostring(label.Text):gsub(",", "")))
+    end)
+    if ok and type(value) == "number" then
+        if not State.Session.StartCoins then
+            State.Session.StartCoins = value
+        end
+        return value
+    end
+    return nil
+end
+
+function State.Session.GetCoinsText()
+    local coins = State.Session.ReadCoins()
+    if not coins then return nil end
+    return State.Session.FormatThousands(coins)
+end
+
+function State.Session.GetRateText()
+    local coins = State.Session.ReadCoins()
+    if not coins or not State.Session.StartCoins then return nil end
+    local hours = (tick() - State.Session.StartedAt) / 3600
+    -- до первой минуты цифра скачет как угодно — не показываем мусор
+    if hours < (1 / 60) then return "—" end
+    local gained = coins - State.Session.StartCoins
+    return State.Session.FormatThousands(gained / hours)
+end
+
+-- Роль: сперва серверные данные, затем предмет в руках/рюкзаке
+function State.Session.GetRole()
+    local name = LocalPlayer and LocalPlayer.Name
+    if name and State.PlayerData then
+        local data = State.PlayerData[name]
+        if data and type(data.Role) == "string" and data.Role ~= "" then
+            return data.Role
+        end
+    end
+    local ok, role = pcall(function()
+        local char = LocalPlayer.Character
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        local function has(item)
+            return (char and char:FindFirstChild(item) ~= nil)
+                or (bp and bp:FindFirstChild(item) ~= nil)
+        end
+        if has("Knife") then return "Murderer" end
+        if has("Gun") then return "Sheriff" end
+        return "Innocent"
+    end)
+    if ok then return role end
+    return nil
+end
+
 -- А ТЕПЕРЬ создаём GUI с Handlers
 -- Адрес прибит к коммиту, а не к ветке. jsdelivr отдаёт файл с заголовком
 -- max-age=604800, то есть скачанная копия живёт в кэше клиента неделю, и purge
@@ -8976,6 +9063,12 @@ local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmai
         AutoLoadOnTeleport = function(on)
             State.AutoLoadOnTeleport = on
         end,
+
+        -- ── Сводка для инфо-блока в сайдбаре ─────────────────────────────
+        GetCoins        = function() return State.Session.GetCoinsText() end,
+        GetCoinsPerHour = function() return State.Session.GetRateText() end,
+        GetVersion      = function() return State.Session.Version end,
+        GetRole         = function() return State.Session.GetRole() end,
     }
 })
 
@@ -9235,9 +9328,9 @@ do
         -- TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
 
         TrollingTab:CreateSection("ORBIT PRESETS", "right")
-        TrollingTab:CreateButton("", "⚡ Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
-        TrollingTab:CreateButton("", "🎢 Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
-        TrollingTab:CreateButton("", "💫 Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
+        TrollingTab:CreateButton("", "Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
+        TrollingTab:CreateButton("", "Vertical Loop", Color3.fromRGB(255, 85, 85), "OrbitPresetVerticalLoop")
+        TrollingTab:CreateButton("", "Chaotic Spin", Color3.fromRGB(200, 100, 200), "OrbitPresetChaoticSpin")
 
         TrollingTab:CreateSection("LOOP FLING SETTINGS", "right")
         TrollingTab:CreateDropdown("Loop Fling Method", "Method used by Loop Fling only", Fling.MethodChoices, Fling.MethodLabel(State.LoopFlingMethod), "LoopFlingMethod")
@@ -9248,13 +9341,13 @@ do
     local UtilityTab = GUI.CreateTab("Server")
 
         UtilityTab:CreateSection("SERVER MANAGEMENT")
-        UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
-        UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+        UtilityTab:CreateButton("", "Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
+        UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
         UtilityTab:CreateSection("DANGER ZONE", "right")
-        UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
+        UtilityTab:CreateButton("", "SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
 LocalPlayer.CharacterAdded:Connect(function()
