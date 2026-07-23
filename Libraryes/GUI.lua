@@ -2697,8 +2697,32 @@ return function(env)
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, description or "")
                 addRowText(row, title, description, 200)
 
+                -- Точность берём из шага: 1 → «22», 0.5 → «22.5», 0.05 → «0.85».
+                -- Раньше было жёстко «%d» либо «%.2f», из-за чего дробный шаг
+                -- всегда рисовал два знака, а дробное значение при шаге >= 1
+                -- уходило в «%d» — в Lua 5.4 это вообще ошибка, в Luau молча
+                -- обрезает. Формат ниже — «%.Nf», он безопасен для любых чисел
+                local decimals = 0
+                do
+                    local frac = tostring(step):match("%.(%d+)")
+                    if frac then
+                        frac = frac:gsub("0+$", "")   -- «10.0» — это всё-таки целый шаг
+                        decimals = math.min(#frac, 3)
+                    end
+                end
+                local fmtSpec = "%." .. decimals .. "f"
+                local roundFactor = 10 ^ decimals
+
                 local function fmt(v)
-                    return step >= 1 and string.format("%d", v) or string.format("%.2f", v)
+                    return string.format(fmtSpec, v)
+                end
+
+                -- Квантование по шагу даёт мусор в младших разрядах
+                -- (17 * 0.05 = 0.8500000000000001), поэтому дожимаем до
+                -- точности шага — иначе этот мусор уедет в State и в конфиг
+                local function quantize(v)
+                    v = math.floor(v / step + 0.5) * step
+                    return math.floor(v * roundFactor + 0.5) / roundFactor
                 end
 
                 local currentValue = default
@@ -2760,8 +2784,7 @@ return function(env)
                 function element:Set(value, fire)
                     value = tonumber(value)
                     if not value then return end
-                    value = math.floor(value / step + 0.5) * step
-                    value = math.clamp(value, min, max)
+                    value = math.clamp(quantize(value), min, max)
                     currentValue = value
                     self.Value = value
 

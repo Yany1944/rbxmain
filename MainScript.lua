@@ -663,6 +663,9 @@ State.AimbotConfig = {
 
     Distance = 2000,
     Fov = 50,
+    -- Непрозрачность круга FOV (свойство Transparency у Drawing работает
+    -- как альфа: 0 — круг не виден, 1 — сплошной)
+    FovTransparency = 0.7,
     PredictionValue = 0.03,
     Smoothness = 6,
     VerticalOffset = 0.7,
@@ -731,7 +734,7 @@ local function StartAimbot()
     AimbotState.FovCircle.Visible = State.AimbotConfig.FovCheck
     AimbotState.FovCircle.Radius = State.AimbotConfig.Fov
     AimbotState.FovCircle.Color = CONFIG.Colors.Accent
-    AimbotState.FovCircle.Transparency = 0.7
+    AimbotState.FovCircle.Transparency = State.AimbotConfig.FovTransparency
     AimbotState.FovCircle.ZIndex = 2
 
     AimbotState.FovCircleOutline = drawNew('Circle')
@@ -740,7 +743,8 @@ local function StartAimbot()
     AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
     AimbotState.FovCircleOutline.Radius = State.AimbotConfig.Fov
     AimbotState.FovCircleOutline.Color = colRgb(0, 0, 0)
-    AimbotState.FovCircleOutline.Transparency = 0.8
+    -- Тёмная обводка чуть плотнее самого круга — так у него читается край
+    AimbotState.FovCircleOutline.Transparency = math.clamp(State.AimbotConfig.FovTransparency + 0.1, 0, 1)
     AimbotState.FovCircleOutline.ZIndex = 1
 
     local function isValidTarget(root, hum)
@@ -9028,6 +9032,16 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             end
         end,
 
+        AimbotFovTransparency = function(value)
+            State.AimbotConfig.FovTransparency = value
+            if _G.AimbotState and _G.AimbotState.FovCircle then
+                _G.AimbotState.FovCircle.Transparency = value
+            end
+            if _G.AimbotState and _G.AimbotState.FovCircleOutline then
+                _G.AimbotState.FovCircleOutline.Transparency = math.clamp(value + 0.1, 0, 1)
+            end
+        end,
+
         AimbotSmoothness = function(value)
             State.AimbotConfig.Smoothness = value
         end,
@@ -9622,6 +9636,7 @@ do
         AimTab:CreateSection("TARGETING VALUES")
         AimTab:CreateSlider("Distance", "Maximum target distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
         AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
+        AimTab:CreateSlider("FOV Transparency", "Circle opacity: 0 = invisible, 1 = solid", 0, 1, State.AimbotConfig.FovTransparency, "AimbotFovTransparency", 0.05)
         AimTab:CreateSlider("Smoothness", "Aim smoothness", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
         AimTab:CreateSection("ADVANCED OPTIONS", "right")
