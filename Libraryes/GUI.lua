@@ -408,6 +408,147 @@ return function(env)
     end
 
     ----------------------------------------------------------------
+    -- ACRYLIC: размытие ТОЛЬКО под окном
+    ----------------------------------------------------------------
+    -- Честного backdrop-blur в Roblox нет: BlurEffect — это пост-обработка,
+    -- он мылит кадр целиком и вырезать из него прямоугольник нельзя.
+    -- Обход (техника Fluent, её же использует WindUI): перед камерой висит
+    -- плоская деталь из материала Glass, натянутая ровно на прямоугольник
+    -- окна. Стекло преломляет то, что за ним, а DepthOfFieldEffect с
+    -- NearIntensity = 1 размывает ближнее поле — мылится только та часть
+    -- сцены, что попала под деталь. Меню рисуется поверх мира и остаётся
+    -- резким.
+    --
+    -- Ограничения, о которых надо помнить:
+    --   • размывается только 3D-мир; чужие 2D-интерфейсы (худ игры, таблица
+    --     игроков) рисуются поверх мира и сквозь стекло не видны;
+    --   • преломление Glass требует достаточного уровня графики — на низких
+    --     настройках эффект выродится в лёгкое затемнение;
+    --   • деталь висит в дереве камеры, поэтому ей принудительно снимается
+    --     CanQuery, иначе она ловила бы лучи ESP и аимбота.
+    local ACRYLIC_DISTANCE = 0.001
+    local ACRYLIC_ALPHA = 0.98
+
+    local function attachAcrylic(target)
+        local Workspace = game:GetService("Workspace")
+        local Lighting = game:GetService("Lighting")
+        if not Workspace.CurrentCamera then return nil end
+
+        -- Свой DoF работает только когда чужие выключены, иначе они
+        -- перебивают ближнее поле. Исходные значения запоминаем.
+        local savedDof = {}
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("DepthOfFieldEffect") then
+                savedDof[e] = e.Enabled
+                e.Enabled = false
+            end
+        end
+
+        local dof = Create("DepthOfFieldEffect", {
+            Name = "Violite_Acrylic",
+            FarIntensity = 0,
+            InFocusRadius = 0.1,
+            NearIntensity = 1,
+            Parent = Lighting
+        })
+
+        local folder = Create("Folder", {
+            Name = "Violite_AcrylicBlur",
+            Parent = Workspace.CurrentCamera
+        })
+        local part = Create("Part", {
+            Name = "Body",
+            Color = Color3.new(0, 0, 0),
+            Material = Enum.Material.Glass,
+            Size = Vector3.new(1, 1, 0),
+            Anchored = true,
+            CanCollide = false,
+            Locked = true,
+            CastShadow = false,
+            Transparency = ACRYLIC_ALPHA,
+            Parent = folder
+        })
+        -- свойства новые, на старых клиентах их может не быть
+        pcall(function() part.CanQuery = false end)
+        pcall(function() part.CanTouch = false end)
+
+        local mesh = Create("SpecialMesh", {
+            MeshType = Enum.MeshType.Brick,
+            Offset = Vector3.new(0, 0, -0.000001),
+            Parent = part
+        })
+
+        local function toWorld(cam, point)
+            local ray = cam:ScreenPointToRay(point.X, point.Y)
+            return ray.Origin + ray.Direction * ACRYLIC_DISTANCE
+        end
+
+        local function render()
+            local cam = Workspace.CurrentCamera
+            if not cam or not part.Parent or not target.Parent then return end
+            -- Края стекла поджимаем, чтобы они не торчали из-под скруглений
+            -- окна. Формула из Fluent: чем выше вьюпорт, тем больше запас.
+            local offset = math.clamp(cam.ViewportSize.Y / 2560 * 48 + 8, 8, 56)
+            local size = target.AbsoluteSize - Vector2.new(offset, offset)
+            local pos = target.AbsolutePosition + Vector2.new(offset / 2, offset / 2)
+            if size.X <= 0 or size.Y <= 0 then return end
+
+            local topLeft = toWorld(cam, pos)
+            local topRight = toWorld(cam, pos + Vector2.new(size.X, 0))
+            local bottomRight = toWorld(cam, pos + size)
+
+            local camCF = cam.CFrame
+            part.CFrame = CFrame.fromMatrix(
+                (topLeft + bottomRight) / 2,
+                camCF.XVector, camCF.YVector, camCF.ZVector
+            )
+            mesh.Scale = Vector3.new(
+                (topRight - topLeft).Magnitude,
+                (topRight - bottomRight).Magnitude,
+                0
+            )
+        end
+
+        local conns = {}
+        local function bindCamera()
+            local cam = Workspace.CurrentCamera
+            if not cam then return end
+            table.insert(conns, cam:GetPropertyChangedSignal("CFrame"):Connect(render))
+            table.insert(conns, cam:GetPropertyChangedSignal("ViewportSize"):Connect(render))
+            table.insert(conns, cam:GetPropertyChangedSignal("FieldOfView"):Connect(render))
+        end
+        bindCamera()
+        table.insert(conns, Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+            if Workspace.CurrentCamera then
+                folder.Parent = Workspace.CurrentCamera
+                bindCamera()
+                render()
+            end
+        end))
+        table.insert(conns, target:GetPropertyChangedSignal("AbsolutePosition"):Connect(render))
+        table.insert(conns, target:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
+        task.defer(render)
+
+        return {
+            SetVisible = function(on)
+                pcall(function()
+                    part.Transparency = on and ACRYLIC_ALPHA or 1
+                    dof.Enabled = on
+                    if on then render() end
+                end)
+            end,
+            Destroy = function()
+                for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+                pcall(function() folder:Destroy() end)
+                pcall(function() dof:Destroy() end)
+                for e, enabled in pairs(savedDof) do
+                    pcall(function() e.Enabled = enabled end)
+                end
+            end,
+        }
+    end
+
+    ----------------------------------------------------------------
     -- СОЗДАНИЕ UI (БЛОК 20 → CreateUI, TabFunctions и т.д.)
     ----------------------------------------------------------------
 
@@ -435,24 +576,36 @@ return function(env)
         AddCorner(mainFrame, R_CARD)
         AddStroke(mainFrame, STROKE_W, T.Border)
 
-        -- Мягкое размытие фона. Настоящего backdrop-blur (размытия только под
-        -- окном) в Roblox нет, поэтому размываем сцену через BlurEffect в
-        -- Lighting и держим его ровно пока окно видно. В паре с
-        -- полупрозрачным окном это и даёт «матовое стекло»
+        -- Размытие фона. Основной путь — acrylic: мылится только прямоугольник
+        -- под окном. Если стекло не поднялось (нет камеры, старый клиент),
+        -- откатываемся на глобальный BlurEffect — лучше так, чем никак.
+        local acrylic
+        do
+            local ok, res = pcall(function() return attachAcrylic(mainFrame) end)
+            if ok then acrylic = res end
+        end
+        State.UIElements.Acrylic = acrylic
+
         local blurEffect
-        pcall(function()
-            local Lighting = game:GetService("Lighting")
-            local old = Lighting:FindFirstChild("Violite_Blur")
-            if old then old:Destroy() end
-            blurEffect = Create("BlurEffect", {
-                Name = "Violite_Blur",
-                Size = 0,
-                Parent = Lighting
-            })
-        end)
+        if not acrylic then
+            pcall(function()
+                local Lighting = game:GetService("Lighting")
+                local old = Lighting:FindFirstChild("Violite_Blur")
+                if old then old:Destroy() end
+                blurEffect = Create("BlurEffect", {
+                    Name = "Violite_Blur",
+                    Size = 0,
+                    Parent = Lighting
+                })
+            end)
+        end
         State.UIElements.Blur = blurEffect
 
         local function applyBlur(on)
+            if acrylic then
+                acrylic.SetVisible(on)
+                return
+            end
             if not blurEffect or not blurEffect.Parent then return end
             pcall(function()
                 TweenService:Create(
@@ -2352,7 +2505,14 @@ return function(env)
             end)
             State.UIElements.MainGui = nil
         end
-        -- BlurEffect живёт в Lighting, сам он не уберётся вместе с ScreenGui
+        -- Эффекты живут в Lighting и в дереве камеры, сами вместе с ScreenGui
+        -- они не уберутся: стекло надо снять и вернуть чужие DepthOfField
+        if State.UIElements.Acrylic then
+            pcall(function()
+                State.UIElements.Acrylic.Destroy()
+            end)
+            State.UIElements.Acrylic = nil
+        end
         if State.UIElements.Blur then
             pcall(function()
                 State.UIElements.Blur:Destroy()
