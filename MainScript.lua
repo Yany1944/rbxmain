@@ -150,7 +150,7 @@ local State = {
     -- ведёт себя как без скрипта; см. флаг SettingsDirty ниже
     WalkSpeed = 16,
     JumpPower = 50,
-    MaxCameraZoom = 128,
+    MaxCameraZoom = 10,
     CameraFOV = 70,
     -- Взводится любым Apply* — только после этого CharacterAdded
     -- перенакатывает настройки персонажа при респавне
