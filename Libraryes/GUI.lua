@@ -117,11 +117,13 @@ return function(env)
     -- радиус контролов 6, карточек 12, строка поповера 36 при padding 6.
     -- Высота контролов НЕ растёт вместе с кеглем: чем больше текста
     -- относительно хрома, тем легче читается интерфейс
-    local ROW_H        = 54   -- строка без описания
-    local ROW_H_DESC   = 70   -- строка с описанием
-    local CTRL_H       = 36   -- --ds-size-medium
-    local EDGE         = 20   -- горизонтальный отступ внутри карточки
-    local COL_GAP      = 20   -- зазор между колонками
+    local ROW_H        = 42   -- строка без описания
+    local ROW_H_DESC   = 56   -- строка с описанием
+    local CTRL_H       = 28   -- высота дропдаунов/кнопок/полей
+    local EDGE         = 14   -- горизонтальный отступ внутри карточки
+    local COL_GAP      = 14   -- зазор между колонками
+    local CARD_GAP     = 12   -- зазор между карточками
+    local CARD_PAD_B   = 6    -- нижний воздух карточки
     local PAGE_PAD     = 2    -- запас в колонке, чтобы не срезалась обводка карточек
     local R_CTRL       = 6    -- --geist-radius
     local R_CARD       = 12   -- карточка секции, окно, поповер
@@ -130,9 +132,11 @@ return function(env)
     local POPOVER_ROW  = 36   -- --ds-popover-row-height
     local STROKE_W     = 1
 
-    -- Окно непрозрачное: Geist держится на чистых сплошных поверхностях,
-    -- полупрозрачность размывала и цвет, и границы
-    local ROOT_TRANSPARENCY = 0
+    -- Полупрозрачность окна работает в паре с размытием фона: без блюра
+    -- сквозь окно лезла игровая картинка и мешала читать текст
+    local ROOT_TRANSPARENCY = 0.12
+    local CARD_TRANSPARENCY = 0.04
+    local BLUR_SIZE = 18
 
     local SIDEBAR_W  = 200
     local HEADER_H   = 56
@@ -428,6 +432,38 @@ return function(env)
         AddCorner(mainFrame, R_CARD)
         AddStroke(mainFrame, STROKE_W, T.Border)
 
+        -- Мягкое размытие фона. Настоящего backdrop-blur (размытия только под
+        -- окном) в Roblox нет, поэтому размываем сцену через BlurEffect в
+        -- Lighting и держим его ровно пока окно видно. В паре с
+        -- полупрозрачным окном это и даёт «матовое стекло»
+        local blurEffect
+        pcall(function()
+            local Lighting = game:GetService("Lighting")
+            local old = Lighting:FindFirstChild("Violite_Blur")
+            if old then old:Destroy() end
+            blurEffect = Create("BlurEffect", {
+                Name = "Violite_Blur",
+                Size = 0,
+                Parent = Lighting
+            })
+        end)
+        State.UIElements.Blur = blurEffect
+
+        local function applyBlur(on)
+            if not blurEffect or not blurEffect.Parent then return end
+            pcall(function()
+                TweenService:Create(
+                    blurEffect,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad),
+                    {Size = on and BLUR_SIZE or 0}
+                ):Play()
+            end)
+        end
+        applyBlur(true)
+        mainFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+            applyBlur(mainFrame.Visible)
+        end)
+
         ----------------------------------------------------------------
         -- САЙДБАР: логотип + вертикальная навигация вкладок
         ----------------------------------------------------------------
@@ -522,14 +558,14 @@ return function(env)
 
         -- Инфо-блок внизу сайдбара: COINS / NAME / COINS PER HOUR / ROLE /
         -- VERSION. Высота = 5 строк + подпись + отступы
-        local STAT_ROW_H = 19
-        local STAT_KEYS = {"Coins", "Name", "CoinsPerHour", "Role", "Version"}
+        local STAT_ROW_H = 18
+        local STAT_KEYS = {"Name", "Role", "Coins", "CoinsPerHour", "Version"}
         local STAT_TITLES = {
-            Coins = "COINS", Name = "NAME", CoinsPerHour = "COINS PER HOUR",
-            Role = "ROLE", Version = "VERSION",
+            Name = "NAME", Role = "ROLE", Coins = "COINS",
+            CoinsPerHour = "COINS/H", Version = "VER",
         }
-        local STATS_H = #STAT_KEYS * STAT_ROW_H + 10
-        local SIDEBAR_BOTTOM = STATS_H + 34   -- блок + строка подписи
+        local STATS_H = #STAT_KEYS * STAT_ROW_H + 14
+        local SIDEBAR_BOTTOM = STATS_H + 32   -- блок + строка подписи
 
         local navScroll = Create("ScrollingFrame", {
             Name = "NavScroll",
@@ -558,7 +594,7 @@ return function(env)
         local statsFrame = Create("Frame", {
             Name = "Stats",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, EDGE, 1, -(STATS_H + 34)),
+            Position = UDim2.new(0, EDGE, 1, -(STATS_H + 32)),
             Size = UDim2.new(0, SIDEBAR_W - EDGE * 2, 0, STATS_H),
             Parent = sidebar
         })
@@ -571,8 +607,52 @@ return function(env)
             Parent = statsFrame
         })
 
+        -- Кнопка сворачивания блока: шеврон у правого края линии-разделителя
+        local statsRows = Create("Frame", {
+            Name = "Rows",
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 0, 0, 0),
+            Size = UDim2.new(1, 0, 1, 0),
+            Parent = statsFrame
+        })
+
+        local statsToggle = Create("TextButton", {
+            Name = "StatsToggle",
+            Text = "",
+            BackgroundColor3 = G.Gray200,
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, 0, 0, 2),
+            Size = UDim2.new(0, 18, 0, 14),
+            AutoButtonColor = false,
+            ZIndex = 3,
+            Parent = statsFrame
+        })
+        AddCorner(statsToggle, R_SM)
+        local _, statsChevA, statsChevB = glyphChevron(statsToggle)
+
+        local statsHidden = getgenv().Violite_StatsHidden == true
+        local function applyStatsHidden()
+            statsRows.Visible = not statsHidden
+            -- свёрнутый блок: шеврон смотрит вверх
+            statsChevA.Rotation = statsHidden and 45 or -45
+            statsChevB.Rotation = statsHidden and -45 or 45
+        end
+
+        statsToggle.MouseButton1Click:Connect(function()
+            statsHidden = not statsHidden
+            getgenv().Violite_StatsHidden = statsHidden
+            applyStatsHidden()
+        end)
+        statsToggle.MouseEnter:Connect(function()
+            TweenService:Create(statsToggle, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
+        end)
+        statsToggle.MouseLeave:Connect(function()
+            TweenService:Create(statsToggle, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+        end)
+
         for i, key in ipairs(STAT_KEYS) do
-            local y = 10 + (i - 1) * STAT_ROW_H
+            local y = 12 + (i - 1) * STAT_ROW_H
             Create("TextLabel", {
                 Name = key .. "Label",
                 Text = STAT_TITLES[key],
@@ -584,7 +664,7 @@ return function(env)
                 BackgroundTransparency = 1,
                 Position = UDim2.new(0, 0, 0, y),
                 Size = UDim2.new(0.62, 0, 0, STAT_ROW_H),
-                Parent = statsFrame
+                Parent = statsRows
             })
             statValues[key] = Create("TextLabel", {
                 Name = key .. "Value",
@@ -597,9 +677,11 @@ return function(env)
                 BackgroundTransparency = 1,
                 Position = UDim2.new(0.62, 0, 0, y),
                 Size = UDim2.new(0.38, 0, 0, STAT_ROW_H),
-                Parent = statsFrame
+                Parent = statsRows
             })
         end
+
+        applyStatsHidden()
 
         -- Публичный сеттер: MainScript может пушить значения напрямую
         function GUI.SetStat(key, value)
@@ -607,6 +689,13 @@ return function(env)
             if label then
                 label.Text = (value == nil or value == "") and "—" or tostring(value)
             end
+        end
+
+        -- Программное скрытие/показ блока
+        function GUI.SetStatsVisible(on)
+            statsHidden = not on
+            getgenv().Violite_StatsHidden = statsHidden
+            applyStatsHidden()
         end
 
         -- Личная подпись внизу сайдбара — переехала из заголовка старой версии
@@ -1146,7 +1235,7 @@ return function(env)
                 Parent = pageHolder
             })
             local leftLayout = Create("UIListLayout", {
-                Padding = UDim.new(0, EDGE),
+                Padding = UDim.new(0, CARD_GAP),
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = leftPage
             })
@@ -1177,7 +1266,7 @@ return function(env)
                 Parent = pageHolder
             })
             local rightLayout = Create("UIListLayout", {
-                Padding = UDim.new(0, EDGE),
+                Padding = UDim.new(0, CARD_GAP),
                 SortOrder = Enum.SortOrder.LayoutOrder,
                 Parent = rightPage
             })
@@ -1268,6 +1357,7 @@ return function(env)
                 local sec = Create("Frame", {
                     Name = (title or "Section") .. "Card",
                     BackgroundColor3 = T.Surface1,
+                    BackgroundTransparency = CARD_TRANSPARENCY,
                     Size = UDim2.new(1, 0, 0, 0),
                     ClipsDescendants = true,
                     BorderSizePixel = 0,
@@ -1281,13 +1371,11 @@ return function(env)
                     SortOrder = Enum.SortOrder.LayoutOrder,
                     Parent = sec
                 })
-                -- нижний воздух равен верхнему отступу шапки карточки
                 layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                    sec.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y + 8)
+                    sec.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y + CARD_PAD_B)
                 end)
 
-                -- Шапка карточки как в Geist: обычный регистр, gray-700,
-                -- под ней сплошной разделитель — верхний блок читается как header
+                -- Шапка карточки: компактная строка 32px, gray-700
                 if title and title ~= "" then
                     local head = Create("TextLabel", {
                         Text = title,
@@ -1296,11 +1384,11 @@ return function(env)
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 46),
+                        Size = UDim2.new(1, 0, 0, 32),
                         LayoutOrder = 1,
                         Parent = sec
                     })
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, EDGE), PaddingTop = UDim.new(0, 12), Parent = head})
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, EDGE), PaddingTop = UDim.new(0, 8), Parent = head})
                 end
 
                 local data = {frame = sec, layout = layout, rows = {}, order = 1}
@@ -1315,19 +1403,12 @@ return function(env)
                 return currentSectionData
             end
 
-            -- Строка контрола: hairline-разделитель перед ней (кроме первой),
-            -- лёгкая подсветка при hover, регистрация в поиске
+            -- Строка контрола: подсветка при hover, регистрация в поиске.
+            -- Разделителей между строками нет — строки разделяет ритм и
+            -- hover-подложка; линии на каждой строке делали карточку решёткой
             local function addRow(height, searchName, searchDesc)
                 local data = ensureSection()
                 local sep = nil
-                if #data.rows > 0 then
-                    data.order = data.order + 1
-                    sep = Hairline({
-                        Size = UDim2.new(1, 0, 0, 1),
-                        LayoutOrder = data.order,
-                        Parent = data.frame
-                    })
-                end
                 data.order = data.order + 1
                 local row = Create("Frame", {
                     -- hover-подложка строки = gray-100 (Geist «default background»)
@@ -1358,7 +1439,7 @@ return function(env)
             local function addRowText(row, title, desc, reserved)
                 reserved = reserved or 200
                 if desc and desc ~= "" then
-                    -- 14 + 22 + 20 + 14 = ROW_H_DESC: сверху и снизу поровну
+                    -- 9 + 20 + 18 + 9 = ROW_H_DESC: сверху и снизу поровну
                     Create("TextLabel", {
                         Text = title,
                         Font = FONT.Bold,
@@ -1368,8 +1449,8 @@ return function(env)
                         TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, EDGE, 0, 14),
-                        Size = UDim2.new(1, -reserved, 0, 22),
+                        Position = UDim2.new(0, EDGE, 0, 9),
+                        Size = UDim2.new(1, -reserved, 0, 20),
                         Parent = row
                     })
                     Create("TextLabel", {
@@ -1381,8 +1462,8 @@ return function(env)
                         TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, EDGE, 0, 36),
-                        Size = UDim2.new(1, -reserved, 0, 20),
+                        Position = UDim2.new(0, EDGE, 0, 29),
+                        Size = UDim2.new(1, -reserved, 0, 18),
                         Parent = row
                     })
                 else
@@ -1552,7 +1633,7 @@ return function(env)
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
                 -- правый блок: 40(тогл)+16 и, если есть чип, ещё 60+8 слева
-                addRowText(row, title, desc, keybindKey and 156 or 82)
+                addRowText(row, title, desc, keybindKey and 148 or 80)
 
                 -- Geist Toggle (large): трек 40x24, ручка 20 с инсетом 2,
                 -- выкл. — gray-400, вкл. — акцент. Обводки у трека нет
@@ -1612,9 +1693,9 @@ return function(env)
             function TabFunctions:CreateDropdown(title, desc, options, default, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
-                addRowText(row, title, desc, 156)
+                addRowText(row, title, desc, 152)
 
-                local DD_W = 120
+                local DD_W = 112
                 local dropdown = Create("TextButton", {
                     Text = default,
                     Font = FONT.Bold,
@@ -1705,7 +1786,7 @@ return function(env)
             function TabFunctions:CreateInputField(title, desc, defaultValue, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
-                addRowText(row, title, desc, 118)
+                addRowText(row, title, desc, 92)
 
                 local inputBox = Create("TextBox", {
                     Text = tostring(defaultValue),
@@ -1713,8 +1794,8 @@ return function(env)
                     TextSize = TS.Value,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface1,
-                    Position = UDim2.new(1, -(72 + EDGE), 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(0, 72, 0, CTRL_H),
+                    Position = UDim2.new(1, -(52 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 52, 0, CTRL_H),
                     PlaceholderText = "…",
                     PlaceholderColor3 = T.TextDark,
                     ClearTextOnFocus = false,
@@ -1742,7 +1823,7 @@ return function(env)
                 step = step or 1
                 local hasDesc = description ~= nil and description ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, description or "")
-                addRowText(row, title, description, 224)
+                addRowText(row, title, description, 200)
 
                 local function fmt(v)
                     return step >= 1 and string.format("%d", v) or string.format("%.2f", v)
@@ -1754,7 +1835,7 @@ return function(env)
                 -- gray-400 фон, акцентная заливка, ручка gray-1000 в кольце фона)
                 local sliderBg = Create("Frame", {
                     BackgroundColor3 = T.TrackBg,
-                    Position = UDim2.new(1, -190, 0.5, -2),
+                    Position = UDim2.new(1, -174, 0.5, -2),
                     Size = UDim2.new(0, 100, 0, 4),
                     BorderSizePixel = 0,
                     Parent = row
@@ -1787,8 +1868,8 @@ return function(env)
                     TextSize = TS.Value,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface1,
-                    Position = UDim2.new(1, -(62 + EDGE), 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(0, 62, 0, CTRL_H),
+                    Position = UDim2.new(1, -(48 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 48, 0, CTRL_H),
                     ClearTextOnFocus = true,
                     Parent = row
                 })
@@ -1848,7 +1929,7 @@ return function(env)
 
             function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
                 local row = addRow(ROW_H, title, "")
-                addRowText(row, title, nil, 148)
+                addRowText(row, title, nil, 136)
 
                 -- Geist secondary button
                 local bound = State.Keybinds and State.Keybinds[keybindKey]
@@ -1860,8 +1941,8 @@ return function(env)
                     TextColor3 = T.Text,
                     TextTruncate = Enum.TextTruncate.AtEnd,
                     BackgroundColor3 = T.Surface1,
-                    Position = UDim2.new(1, -(106 + EDGE), 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(0, 106, 0, CTRL_H),
+                    Position = UDim2.new(1, -(96 + EDGE), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, 96, 0, CTRL_H),
                     AutoButtonColor = false,
                     Parent = row
                 })
@@ -1892,9 +1973,9 @@ return function(env)
                 stateKey = stateKey or "SelectedPlayerForFling"
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
-                addRowText(row, title, desc, 216)
+                addRowText(row, title, desc, 200)
 
-                local DD_W = 176
+                local DD_W = 160
                 local dropdown = Create("TextButton", {
                     Text = "Select player",
                     Font = FONT.Bold,
@@ -2249,6 +2330,13 @@ return function(env)
                 State.UIElements.MainGui:Destroy()
             end)
             State.UIElements.MainGui = nil
+        end
+        -- BlurEffect живёт в Lighting, сам он не уберётся вместе с ScreenGui
+        if State.UIElements.Blur then
+            pcall(function()
+                State.UIElements.Blur:Destroy()
+            end)
+            State.UIElements.Blur = nil
         end
     end
 
