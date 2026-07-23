@@ -50,7 +50,7 @@ return function(env)
         Surface2  = G.Gray100,    -- заливка контрола / hover строки
         Border    = G.Gray400,    -- обводка (сплошная!)
         BorderHi  = G.Gray500,    -- обводка на hover
-        Divider   = G.Gray300,    -- разделитель строк внутри карточки
+        Divider   = G.Gray200,    -- разделитель строк внутри карточки (тише рамки)
         Text      = G.Gray1000,
         TextDark  = G.Gray700,
         Accent    = CONFIG.Colors.Accent or G.Purple700,
@@ -96,27 +96,32 @@ return function(env)
     -- label-sm 500 — названия и кнопки, body 400 — описания.
     -- Вся типографика поднята на ступень: мелкий текст читался «дёшево»
     local TS = {
-        Logo      = 18,   -- heading
-        LogoSub   = 12,   -- body-sm
-        TabTitle  = 20,   -- heading-md
+        Logo      = 20,   -- heading-md
+        LogoSub   = 13,
+        TabTitle  = 22,   -- заголовок вкладки — самый крупный текст окна
         Nav       = 15,
-        Section   = 14,   -- body-md
-        Title     = 15,   -- label
-        Desc      = 13,
-        Button    = 14,   -- button-md
-        Value     = 14,
+        Section   = 15,
+        Title     = 16,   -- label
+        Desc      = 14,   -- body-md
+        Button    = 15,
+        Value     = 15,
         Chip      = 13,
         Status    = 13,
-        Option    = 14,
-        Search    = 14,
+        Option    = 15,
+        Search    = 15,
+        StatLabel = 12,   -- подписи инфо-блока в сайдбаре
+        StatValue = 13,
     }
 
     -- Геометрия Geist: --ds-size-medium 36 под увеличенный кегль,
-    -- радиус контролов 6, карточек 12, строка поповера 36 при padding 6
-    local ROW_H        = 50   -- строка без описания
-    local ROW_H_DESC   = 66   -- строка с описанием
+    -- радиус контролов 6, карточек 12, строка поповера 36 при padding 6.
+    -- Высота контролов НЕ растёт вместе с кеглем: чем больше текста
+    -- относительно хрома, тем легче читается интерфейс
+    local ROW_H        = 54   -- строка без описания
+    local ROW_H_DESC   = 70   -- строка с описанием
     local CTRL_H       = 36   -- --ds-size-medium
-    local EDGE         = 16   -- горизонтальный отступ внутри карточки
+    local EDGE         = 20   -- горизонтальный отступ внутри карточки
+    local COL_GAP      = 20   -- зазор между колонками
     local PAGE_PAD     = 2    -- запас в колонке, чтобы не срезалась обводка карточек
     local R_CTRL       = 6    -- --geist-radius
     local R_CARD       = 12   -- карточка секции, окно, поповер
@@ -414,8 +419,8 @@ return function(env)
             Name = "MainFrame",
             BackgroundColor3 = T.Canvas,
             BackgroundTransparency = ROOT_TRANSPARENCY,
-            Position = UDim2.new(0.5, -460, 0.5, -320),
-            Size = UDim2.new(0, 920, 0, 640),
+            Position = UDim2.new(0.5, -500, 0.5, -340),
+            Size = UDim2.new(0, 1000, 0, 680),
             ClipsDescendants = false,
             Active = true,
             Parent = gui
@@ -515,11 +520,22 @@ return function(env)
             Parent = sidebar
         })
 
+        -- Инфо-блок внизу сайдбара: COINS / NAME / COINS PER HOUR / ROLE /
+        -- VERSION. Высота = 5 строк + подпись + отступы
+        local STAT_ROW_H = 19
+        local STAT_KEYS = {"Coins", "Name", "CoinsPerHour", "Role", "Version"}
+        local STAT_TITLES = {
+            Coins = "COINS", Name = "NAME", CoinsPerHour = "COINS PER HOUR",
+            Role = "ROLE", Version = "VERSION",
+        }
+        local STATS_H = #STAT_KEYS * STAT_ROW_H + 10
+        local SIDEBAR_BOTTOM = STATS_H + 34   -- блок + строка подписи
+
         local navScroll = Create("ScrollingFrame", {
             Name = "NavScroll",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 8, 0, 76),
-            Size = UDim2.new(0, SIDEBAR_W - 16, 1, -116),
+            Position = UDim2.new(0, 8, 0, 84),
+            Size = UDim2.new(0, SIDEBAR_W - 16, 1, -(84 + SIDEBAR_BOTTOM + 12)),
             CanvasSize = UDim2.new(0, 0, 0, 0),
             ScrollBarThickness = 0,
             BorderSizePixel = 0,
@@ -535,6 +551,64 @@ return function(env)
             navScroll.CanvasSize = UDim2.new(0, 0, 0, navLayout.AbsoluteContentSize.Y + 4)
         end)
 
+        -- Сводка сессии: подпись слева, значение справа. Значения тянутся из
+        -- Handlers (если MainScript их отдаёт) либо ставятся через GUI.SetStat
+        local statValues = {}
+
+        local statsFrame = Create("Frame", {
+            Name = "Stats",
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, EDGE, 1, -(STATS_H + 34)),
+            Size = UDim2.new(0, SIDEBAR_W - EDGE * 2, 0, STATS_H),
+            Parent = sidebar
+        })
+
+        Hairline({
+            Name = "StatsSep",
+            BackgroundColor3 = T.Border,
+            Position = UDim2.new(0, 0, 0, 0),
+            Size = UDim2.new(1, 0, 0, 1),
+            Parent = statsFrame
+        })
+
+        for i, key in ipairs(STAT_KEYS) do
+            local y = 10 + (i - 1) * STAT_ROW_H
+            Create("TextLabel", {
+                Name = key .. "Label",
+                Text = STAT_TITLES[key],
+                Font = FONT.Body,
+                TextSize = TS.StatLabel,
+                TextColor3 = T.TextDark,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 0, 0, y),
+                Size = UDim2.new(0.62, 0, 0, STAT_ROW_H),
+                Parent = statsFrame
+            })
+            statValues[key] = Create("TextLabel", {
+                Name = key .. "Value",
+                Text = "—",
+                Font = FONT.Bold,
+                TextSize = TS.StatValue,
+                TextColor3 = T.Text,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0.62, 0, 0, y),
+                Size = UDim2.new(0.38, 0, 0, STAT_ROW_H),
+                Parent = statsFrame
+            })
+        end
+
+        -- Публичный сеттер: MainScript может пушить значения напрямую
+        function GUI.SetStat(key, value)
+            local label = statValues[key]
+            if label then
+                label.Text = (value == nil or value == "") and "—" or tostring(value)
+            end
+        end
+
         -- Личная подпись внизу сайдбара — переехала из заголовка старой версии
         Create("TextLabel", {
             Name = "Dedication",
@@ -545,7 +619,7 @@ return function(env)
             TextTransparency = 0.35,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, EDGE, 1, -28),
+            Position = UDim2.new(0, EDGE, 1, -26),
             Size = UDim2.new(0, 170, 0, 16),
             Parent = sidebar
         })
@@ -731,6 +805,22 @@ return function(env)
                     else
                         roleChip.Visible = false
                     end
+
+                    -- Сводка в сайдбаре. Handlers необязательны: чего нет —
+                    -- остаётся прочерк, ставить можно и через GUI.SetStat
+                    local function pull(handlerName)
+                        local fn = Handlers[handlerName]
+                        if not fn then return nil end
+                        local ok, res = pcall(fn)
+                        if ok and res ~= nil and res ~= "" then return tostring(res) end
+                        return nil
+                    end
+
+                    GUI.SetStat("Name", LocalPlayer and LocalPlayer.Name or nil)
+                    GUI.SetStat("Coins", pull("GetCoins"))
+                    GUI.SetStat("CoinsPerHour", pull("GetCoinsPerHour"))
+                    GUI.SetStat("Role", pull("GetRole"))
+                    GUI.SetStat("Version", CONFIG.Version or pull("GetVersion"))
                 end)
                 task.wait(1)
             end
@@ -1049,7 +1139,7 @@ return function(env)
                 Name = name .. "PageLeft",
                 BackgroundTransparency = 1,
                 Position = UDim2.new(0, 0, 0, 0),
-                Size = UDim2.new(0.5, -6, 1, 0),
+                Size = UDim2.new(0.5, -COL_GAP / 2, 1, 0),
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 ScrollBarThickness = 0,
                 BorderSizePixel = 0,
@@ -1074,13 +1164,13 @@ return function(env)
                 leftPage.CanvasSize = UDim2.new(0, 0, 0,
                     leftLayout.AbsoluteContentSize.Y + PAGE_PAD * 2 + 20)
             end)
-            AttachCustomScrollbar(leftPage, pageHolder, UDim.new(0.5, -2))
+            AttachCustomScrollbar(leftPage, pageHolder, UDim.new(0.5, -COL_GAP / 2 + 4))
 
             local rightPage = Create("ScrollingFrame", {
                 Name = name .. "PageRight",
                 BackgroundTransparency = 1,
-                Position = UDim2.new(0.5, 6, 0, 0),
-                Size = UDim2.new(0.5, -6, 1, 0),
+                Position = UDim2.new(0.5, COL_GAP / 2, 0, 0),
+                Size = UDim2.new(0.5, -COL_GAP / 2, 1, 0),
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 ScrollBarThickness = 0,
                 BorderSizePixel = 0,
@@ -1206,11 +1296,11 @@ return function(env)
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 40),
+                        Size = UDim2.new(1, 0, 0, 46),
                         LayoutOrder = 1,
                         Parent = sec
                     })
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, EDGE), PaddingTop = UDim.new(0, 8), Parent = head})
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, EDGE), PaddingTop = UDim.new(0, 12), Parent = head})
                 end
 
                 local data = {frame = sec, layout = layout, rows = {}, order = 1}
@@ -1268,7 +1358,7 @@ return function(env)
             local function addRowText(row, title, desc, reserved)
                 reserved = reserved or 200
                 if desc and desc ~= "" then
-                    -- 13 + 21 + 19 + 13 = ROW_H_DESC: сверху и снизу поровну
+                    -- 14 + 22 + 20 + 14 = ROW_H_DESC: сверху и снизу поровну
                     Create("TextLabel", {
                         Text = title,
                         Font = FONT.Bold,
@@ -1278,8 +1368,8 @@ return function(env)
                         TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, EDGE, 0, 13),
-                        Size = UDim2.new(1, -reserved, 0, 21),
+                        Position = UDim2.new(0, EDGE, 0, 14),
+                        Size = UDim2.new(1, -reserved, 0, 22),
                         Parent = row
                     })
                     Create("TextLabel", {
@@ -1291,8 +1381,8 @@ return function(env)
                         TextYAlignment = Enum.TextYAlignment.Center,
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
-                        Position = UDim2.new(0, EDGE, 0, 34),
-                        Size = UDim2.new(1, -reserved, 0, 19),
+                        Position = UDim2.new(0, EDGE, 0, 36),
+                        Size = UDim2.new(1, -reserved, 0, 20),
                         Parent = row
                     })
                 else
