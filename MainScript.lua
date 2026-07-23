@@ -9154,7 +9154,7 @@ do
         MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
         MainTab:CreateSection("TELEPORT & OTHER", "right")
-        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+        MainTab:CreateKeybindButton("Click TP (Hold Key + LMB)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
@@ -9174,15 +9174,15 @@ do
 
         AimTab:CreateSection("TARGETING CHECKS")
         AimTab:CreateToggle("Alive Check", "Only target alive players", "AimbotAliveCheck",true)
-        AimTab:CreateToggle("Distance Check", "Check maximum distance to target", "AimbotDistanceCheck",true)
+        AimTab:CreateToggle("Distance Check", "Set maximum distance to target", "AimbotDistanceCheck",true)
         AimTab:CreateToggle("FOV Check", "Only aim within FOV circle", "AimbotFovCheck",true)
         AimTab:CreateToggle("Team Check", "Don't target teammates", "AimbotTeamCheck",false)
         AimTab:CreateToggle("Visibility Check", "Only target visible players", "AimbotVisibilityCheck")
 
         AimTab:CreateSection("TARGETING VALUES")
-        AimTab:CreateSlider("Distance", "Maximum targeting distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
+        AimTab:CreateSlider("Distance", "Maximum target distance", 100, 5000, State.AimbotConfig.Distance, "AimbotDistance", 50)
         AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.AimbotConfig.Fov, "AimbotFov", 10)
-        AimTab:CreateSlider("Smoothness", "Aim smoothness (1-10)", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
+        AimTab:CreateSlider("Smoothness", "Aim smoothness", 1, 10, State.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
         AimTab:CreateSection("ADVANCED OPTIONS", "right")
         AimTab:CreateToggle("Lock On Target", "Stay locked to same target", "AimbotLockOn",true)
@@ -9192,7 +9192,7 @@ do
         AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.AimbotConfig.MouseButton, "AimbotMouseButton")
 
         AimTab:CreateSection("PREDICTION & OFFSET", "right")
-        AimTab:CreateSlider("Prediction", "Movement prediction strength (0-30)", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+        AimTab:CreateSlider("Prediction", "Movement prediction strength", 0, 30, State.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
         AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 end
 
@@ -9208,10 +9208,10 @@ do
         VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers")
 
         VisualsTab:CreateSection("Misc", "right")
-        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
+        VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
         VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", true)
         VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly")
+        VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
         VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
 end
@@ -9221,24 +9221,24 @@ do
 
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
-        CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to target instead of from your hand", "SpawnAtPlayer")
+        CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to closest target", "SpawnAtPlayer")
 
         CombatTab:CreateSection("KILL AURA")
-        CombatTab:CreateKeybindButton("Kill Aura (Toggle)", "killaura", "KillAura")
-        CombatTab:CreateSlider("Kill Aura Range", "Activation distance in studs", 1, 20, State.KillAuraRange, "KillAuraRange", 0.5)
-        CombatTab:CreateToggle("Static Zone", "Simple circle, no geometry checks", "KillAuraStatic", false)
-        CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
+        CombatTab:CreateKeybindButton("Kill Aura", "killaura", "KillAura")
+        CombatTab:CreateSlider("Kill Aura Range", "Kill distance in studs", 1, 20, State.KillAuraRange, "KillAuraRange", 0.5)
+        CombatTab:CreateToggle("Static Zone", "Disable circle animation", "KillAuraStatic", false)
+        CombatTab:CreateKeybindButton("Instant Kill All", "instantkillall", "InstantKillAll")
 
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
-        CombatTab:CreateSlider("Shoot Lead", "Prediction lead over ping (sec). Tune to your ping", 0, 0.2, State.ShootLead, "ShootLead", 0.01)
-        CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-        CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+        CombatTab:CreateSlider("Shoot Lead", "Prediction lead over ping", 0, 0.2, State.ShootLead, "ShootLead", 0.01)
+        CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer")
+        CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
 
         CombatTab:CreateSection("EXTENDED HITBOX", "right")
         CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
-        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit (10-30)", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
+        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit", 10, 30, State.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
 end
 
 do
@@ -9246,13 +9246,13 @@ do
 
         FarmTab:CreateSection("AUTO FARM")
         FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("XP Farm", "Auto win rounds", "XPFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
 
         FarmTab:CreateSection("FARM TUNING", "right")
-        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
-        FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("No Render", "Disable rendering to reduce GPU usage", "AFKMode")
+        FarmTab:CreateSlider("Fly Speed", "Flying speed", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+        FarmTab:CreateSlider("TP Delay", "Delay between first TP", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
+        FarmTab:CreateToggle("No Render", "Disable rendering", "AFKMode")
         FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 25 min", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
@@ -9270,15 +9270,15 @@ do
 
         FunTab:CreateSection("FLING SETTINGS")
         FunTab:CreateDropdown("Fling Method", "Vio: contact, stronger. NaN: precise aim, weaker", Fling.MethodChoices, Fling.MethodLabel(State.FlingMethod), "FlingMethod")
-        FunTab:CreateSlider("Prediction Range", "Lead time in seconds", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
+        FunTab:CreateSlider("Prediction Range", "Lead time", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
 
         FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", _G.AUTOEXEC_ENABLED)
 
         FunTab:CreateSection("FLING PLAYER", "right")
-        FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling", "SelectedPlayerForFling")
-        FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
+        FunTab:CreatePlayerDropdown("Select Target", "Choose target to fling", "SelectedPlayerForFling")
+        FunTab:CreateKeybindButton("Fling Selected Target", "fling", "FlingPlayer")
 
         FunTab:CreateSection("FLING ROLE", "right")
         FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
@@ -9292,21 +9292,21 @@ do
         TrollingTab:CreatePlayerDropdown("Target Player", "Choose victim for trolling", "SelectedPlayerForTrolling")
 
         TrollingTab:CreateSection("TROLLING MODES")
-        TrollingTab:CreateToggle("Orbit Mode", "Rotate around player (rigid)", "Orbit")
+        TrollingTab:CreateToggle("Orbit Mode", "Rotate around player", "Orbit")
         TrollingTab:CreateToggle("Loop Fling", "Fling target on a timer", "LoopFling")
-        TrollingTab:CreateToggle("Block Path", "Block path with pendulum motion", "BlockPath")
+        TrollingTab:CreateToggle("Block Path", "Block player path", "BlockPath")
 
         TrollingTab:CreateSection("BLOCK PATH SETTINGS")
-        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed (0.05-0.3)", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
+        TrollingTab:CreateSlider("Pendulum Speed", "Movement speed", 0.05, 0.3, State.BlockPathSpeed, "BlockPathSpeed", 0.05)
 
         -- ORBIT SETTINGS скрыты: значения ставятся пресетами ниже.
         -- Хендлеры OrbitRadius/OrbitSpeed/OrbitHeight/OrbitTilt оставлены на месте,
         -- так что вернуть ползунки можно просто раскомментировав этот блок.
         -- TrollingTab:CreateSection("ORBIT SETTINGS")
-        -- TrollingTab:CreateSlider("Radius", "Distance from target (2-20)", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
-        -- TrollingTab:CreateSlider("Speed", "Rotation speed (0.5-15)", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
-        -- TrollingTab:CreateSlider("Height", "Base height (-10 to 20)", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
-        -- TrollingTab:CreateSlider("Tilt", "Orbital angle (-90 to 90)", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
+        -- TrollingTab:CreateSlider("Radius", "Distance from target", 2, 20, State.OrbitRadius, "OrbitRadius", 0.5)
+        -- TrollingTab:CreateSlider("Speed", "Rotation speed", 0.5, 15, State.OrbitSpeed, "OrbitSpeed", 0.5)
+        -- TrollingTab:CreateSlider("Height", "Base height", -10, 20, State.OrbitHeight, "OrbitHeight", 1)
+        -- TrollingTab:CreateSlider("Tilt", "Orbital angle", -90, 90, State.OrbitTilt, "OrbitTilt", 5)
 
         TrollingTab:CreateSection("ORBIT PRESETS", "right")
         TrollingTab:CreateButton("", "Fast Spin", Color3.fromRGB(255, 170, 50), "OrbitPresetFastSpin")
