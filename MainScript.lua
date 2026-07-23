@@ -286,6 +286,8 @@ local State = {
     PingChamsGuiAnchor = nil,
     PingChamsGhostClone = nil,
     PingChamsGhostMap = {},
+    PingChamsGhostChar = nil,
+    PingChamsGhostPartCount = 0,
     PingChamsRenderConn = nil,
 
     -- Tracers
@@ -1149,6 +1151,8 @@ do
 
     function PingChams.clearGhostClone()
         State.PingChamsGhostMap = {}
+        State.PingChamsGhostChar = nil
+        State.PingChamsGhostPartCount = 0
         if State.PingChamsGhostClone then
             pcall(function() State.PingChamsGhostClone:Destroy() end)
             State.PingChamsGhostClone = nil
@@ -1161,7 +1165,14 @@ do
         State.PingChamsGhostClone.Name = "GhostClone"
         State.PingChamsGhostClone.Parent = State.PingChamsGhostModel
 
-        for _, src in ipairs(PingChams.collectRigParts(char)) do
+        -- Ключуем по инстансу, а не по имени: у аксессуаров/тулов все парты
+        -- называются "Handle" — по имени они перетирали друг друга в карте,
+        -- и осиротевшие гост-парты навсегда зависали на месте rebuild'а
+        local rigParts = PingChams.collectRigParts(char)
+        State.PingChamsGhostChar = char
+        State.PingChamsGhostPartCount = #rigParts
+
+        for _, src in ipairs(rigParts) do
             local gp
             if src:IsA("MeshPart") or src:IsA("Part") then
                 gp = src:Clone()
@@ -1185,7 +1196,7 @@ do
             gp.Color        = col
             gp.Transparency = trans
             gp.Parent       = State.PingChamsGhostClone
-            State.PingChamsGhostMap[src.Name] = gp
+            State.PingChamsGhostMap[src] = gp
         end
     end
 
@@ -1252,7 +1263,7 @@ do
         for _, d in ipairs(char:GetDescendants()) do
             if d:IsA("BasePart") and d ~= root then
                 pcall(function()
-                    map[d.Name] = root.CFrame:ToObjectSpace(d.CFrame)
+                    map[d] = root.CFrame:ToObjectSpace(d.CFrame)
                 end)
             end
         end
@@ -1302,14 +1313,14 @@ do
                 local alpha   = math.clamp((target - p.t) / (n.t - p.t), 0, 1)
                 local cf      = PingChams.lerpCFrame(p.cf, n.cf, alpha)
                 local offsets = {}
-                for name, aOff in pairs(p.offsets or {}) do
-                    local bOff = n.offsets and n.offsets[name] or aOff
-                    offsets[name] = PingChams.lerpCFrame(aOff, bOff, alpha)
+                for part, aOff in pairs(p.offsets or {}) do
+                    local bOff = n.offsets and n.offsets[part] or aOff
+                    offsets[part] = PingChams.lerpCFrame(aOff, bOff, alpha)
                 end
-                for name, bOff in pairs(n.offsets or {}) do
-                    if not offsets[name] then
-                        local aOff = p.offsets and p.offsets[name] or bOff
-                        offsets[name] = PingChams.lerpCFrame(aOff, bOff, alpha)
+                for part, bOff in pairs(n.offsets or {}) do
+                    if not offsets[part] then
+                        local aOff = p.offsets and p.offsets[part] or bOff
+                        offsets[part] = PingChams.lerpCFrame(aOff, bOff, alpha)
                     end
                 end
                 return {root = cf, offsets = offsets}
@@ -1335,7 +1346,13 @@ local function StartPingChams()
             if char then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
-                    if not State.PingChamsGhostModel or State.PingChamsGhostClone == nil then
+                    -- Пересобираем клон при респавне и при смене набора партов
+                    -- (эквип/анэквип тула, добавление аксессуара), иначе гост
+                    -- продолжает двигать несуществующие парты
+                    local needRebuild = State.PingChamsGhostClone == nil
+                        or State.PingChamsGhostChar ~= char
+                        or State.PingChamsGhostPartCount ~= #PingChams.collectRigParts(char)
+                    if needRebuild then
                         PingChams.rebuildGhostClone(char, CONFIG.Colors.Accent, 0.6)
                     end
                     PingChams.pushSample(tick(), char)
@@ -1389,12 +1406,18 @@ local function StartPingChams()
                 _G.GhostPastTransSm  = (_G.GhostPastTransSm or transPast) + (transPast - (_G.GhostPastTransSm or transPast)) * math.clamp(dt * 5.0, 0.05, 0.5)
                 _G.GhostPastTransT   = nowFadeT
 
-                for name, gp in pairs(State.PingChamsGhostMap) do
-                    local off = samplePast.offsets and samplePast.offsets[name]
-                    gp.Color        = CONFIG.Colors.Accent
-                    gp.Transparency = _G.GhostPastTransSm
-                    gp.Material     = Enum.Material.ForceField
-                    if off then gp.CFrame = _G.GhostPastSmooth * off end
+                for src, gp in pairs(State.PingChamsGhostMap) do
+                    local off = samplePast.offsets and samplePast.offsets[src]
+                    if off then
+                        gp.Color        = CONFIG.Colors.Accent
+                        gp.Transparency = _G.GhostPastTransSm
+                        gp.Material     = Enum.Material.ForceField
+                        gp.CFrame       = _G.GhostPastSmooth * off
+                    else
+                        -- Нет офсета в сэмпле (парт появился только что либо
+                        -- буфер ещё со старым персонажем) — прячем, а не морозим
+                        gp.Transparency = 1
+                    end
                 end
 
                 if State.PingChamsGUI and State.PingChamsGUI:FindFirstChild("Label") then
