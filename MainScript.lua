@@ -7110,6 +7110,44 @@ local function predictAimPoint(hrp, thum, t)
     return Vector3.new(predX, predY, predZ)
 end
 
+-- ─── Выбор части-цели для луча ─────────────────────────────────────────────────
+-- Серверный hitscan засчитывает попадание по ВИДИМЫМ частям тела, а не по
+-- невидимому HumanoidRootPart. У обычного рига HRP совпадает с торсом, но:
+--   • скины со смещённым/нестандартным ригом уводят HRP от реальной геометрии;
+--   • анимации (замах, подкат, эмоции) сильно двигают торс/конечности от HRP.
+-- Тогда прицел в HRP попадает в пустоту рядом с телом → промах. Поэтому целимся
+-- в реальную центральную часть: торс → голова → крупнейшая часть тела.
+local AIM_PART_PRIORITY = { "UpperTorso", "Torso", "LowerTorso", "Head" }
+local function pickAimPart(char)
+    if not char then return nil end
+    for _, name in ipairs(AIM_PART_PRIORITY) do
+        local p = char:FindFirstChild(name)
+        if p and p:IsA("BasePart") then return p end
+    end
+    -- фолбэк под нестандартные скины: крупнейший BasePart тела
+    local best, bestVol
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("BasePart")
+           and not obj:FindFirstAncestorOfClass("Accessory")
+           and not obj:FindFirstAncestorOfClass("Tool") then
+            local v = obj.Size.X * obj.Size.Y * obj.Size.Z
+            if not bestVol or v > bestVol then best, bestVol = obj, v end
+        end
+    end
+    return best
+end
+
+-- Итоговая точка прицела: реальная часть тела + предсказанное перемещение
+-- персонажа. predictAimPoint даёт будущую позицию HRP → берём её дельту и сдвигаем
+-- на неё выбранную часть (анимационный оффсет части берём текущий — за окно пинга
+-- он почти не меняется). Так прицел всегда на реальной геометрии, а не на корне.
+local function computeAimPoint(char, hrp, thum, t)
+    local predictedHRP = predictAimPoint(hrp, thum, t)
+    local part = pickAimPart(char)
+    if not part then return predictedHRP end
+    return part.Position + (predictedHRP - hrp.Position)
+end
+
 shootMurderer = function(forceMagic)
     -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
     local useMode = forceMagic and "Magic" or (State.ShootMurdererMode or "Magic")
@@ -7195,7 +7233,7 @@ shootMurderer = function(forceMagic)
         
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
         -- Интент-предикт: горизонталь по MoveDirection, вертикаль парабола + пол
-        local predictedPos = predictAimPoint(murdererHRP, murdererHum, predictionTime)
+        local predictedPos = computeAimPoint(murderer.Character, murdererHRP, murdererHum, predictionTime)
 
         local spawnPosition, targetPosition
 
@@ -7242,7 +7280,7 @@ shootMurderer = function(forceMagic)
         local pingValue = tonumber(ping:match("%d+")) or 50
         local predictionTime = (pingValue / 1000) + (State.ShootLead or 0.09)
 
-        local predictedPos = predictAimPoint(murdererHRP, murdererHum, predictionTime)
+        local predictedPos = computeAimPoint(murderer.Character, murdererHRP, murdererHum, predictionTime)
 
         -- 3. Чистый Silent: origin ВСЕГДА дуло, target — предсказанная точка на теле.
         --    Луч origin→target идёт от пистолета; стена между вами ловит пулю — это
