@@ -8687,7 +8687,10 @@ end
 
 State.Session = {
     Version    = "2.2",
-    StartedAt  = nil,
+    -- Coins/h считается с загрузки скрипта; StartCoins фиксируется при первом
+    -- чтении баланса. Включение автофарма делает «сброс сессии»
+    -- (MarkFarmStart) — точка отсчёта переезжает на момент старта фарма.
+    StartedAt  = tick(),
     StartCoins = nil,
 }
 
@@ -8698,7 +8701,8 @@ function State.Session.FormatThousands(n)
     return (out:gsub("^,", ""))
 end
 
--- Баланс монет аккаунта. Витрина шопа существует и когда шоп закрыт
+-- Баланс монет аккаунта. Витрина шопа существует и когда шоп закрыт.
+-- Первое удачное чтение фиксирует базовую точку для Coins/h.
 function State.Session.ReadCoins()
     local ok, value = pcall(function()
         local label = LocalPlayer.PlayerGui
@@ -8706,12 +8710,16 @@ function State.Session.ReadCoins()
         return tonumber((tostring(label.Text):gsub(",", "")))
     end)
     if ok and type(value) == "number" then
+        if not State.Session.StartCoins then
+            State.Session.StartCoins = value
+        end
         return value
     end
     return nil
 end
 
--- Точка отсчёта Coins/h — вызывается при включении автофарма
+-- Сброс сессии: точка отсчёта Coins/h переезжает на текущий момент.
+-- Вызывается при включении автофарма
 function State.Session.MarkFarmStart()
     State.Session.StartedAt = tick()
     State.Session.StartCoins = State.Session.ReadCoins() or 0
@@ -8724,10 +8732,8 @@ function State.Session.GetCoinsText()
 end
 
 function State.Session.GetRateText()
-    -- нет базовой точки — фарм ещё не запускали
-    if not State.Session.StartedAt or not State.Session.StartCoins then return "—" end
     local coins = State.Session.ReadCoins()
-    if not coins then return nil end
+    if not coins or not State.Session.StartCoins then return nil end
     local hours = (tick() - State.Session.StartedAt) / 3600
     -- первую минуту после старта цифра скачет — не показываем мусор
     if hours < (1 / 60) then return "—" end
