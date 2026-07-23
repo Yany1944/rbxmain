@@ -22,10 +22,6 @@ local WHITELIST_IDS = {}
 
 _G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED --and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
---pcall(function()
---    loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Scripts/Emotes.lua"))()
---end)
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 2: CONFIG & SERVICES (СТРОКИ 65-115)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -252,7 +248,7 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
-                loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/leaderboard.lua", true))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/leaderboard.lua", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -2085,14 +2081,6 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 7: FLING / ANTI-FLING
 -- ══════════════════════════════════════════════════════════════════════════════
--- Портировано из fling2.lua (слои L0-L9). Архитектура отличается от старой:
--- FlingPlayer не блокирует поток, а ставит цель в очередь. Работу делает драйвер
--- на PreSimulation, по одному кадру за раз. Пока идёт флинг, настоящий персонаж
--- замаскирован и брошен к цели, а игрок видит и управляет клоном (session model),
--- который спокойно стоит на месте.
---
--- Всё состояние и все функции упакованы в одну таблицу Fling: в MainScript.lua
--- 195 живых локалов верхнего уровня из 200, на 45 отдельных локалов места нет.
 
 local Fling = {
     -- L1: очередь и сессия
@@ -6685,7 +6673,7 @@ local function HandleAutoReconnect(enabled)
     end)
 end
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Libraryes/GUI.lua"))()({
+local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
