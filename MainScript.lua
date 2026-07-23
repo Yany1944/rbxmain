@@ -112,8 +112,7 @@ local CONFIG = {
         Configs = {
             Dir          = "VioCFG/Violite",              -- папка этого скрипта
             Extension    = ".vio",                        -- содержимое — JSON
-            IndexFile    = "VioCFG/Violite/index.json",   -- список имён (listfiles есть не везде)
-            AutoloadFile = "VioCFG/Violite/autoload.txt", -- маркер: имя конфига автозагрузки
+            IndexFile    = "VioCFG/Violite/index.json",   -- запасной список имён (listfiles есть не везде)
             Script       = "violite",                     -- метка принадлежности в файле
             Version      = 1,                             -- версия схемы файла
         },
@@ -9094,11 +9093,15 @@ GUI.Init()
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК: CONFIG MANAGER — профили настроек (.vio в VioCFG/Violite)
 -- ══════════════════════════════════════════════════════════════════════════════
--- Разделение ролей: GUI владеет реестром контролов и снапшотами
--- (GetFlagSnapshot/GetDefaultSnapshot/ApplyFlagSnapshot), менеджер — файлами,
--- индексом, маркером автозагрузки и сериализацией кейбиндов из State.Keybinds.
--- Контракт для GUI.AttachConfigSystem: List, Save, Load, Create, Delete,
--- Rename, Share, SetAutoload, GetAutoload.
+-- Разделение ролей (модель WindUI): GUI ведёт реестр элементов —
+-- GUI.GetElements() отдаёт flag → {__type, Value, Default, Set}, — а менеджер
+-- владеет файлами, типовыми парсерами и автозагрузкой.
+-- Файл .vio самоописывающийся, у каждого значения свой __type:
+--   { __version, __script, __savedAt, __autoload, __custom,
+--     __elements = { [flag] = { __type = "Toggle", value = true } } }
+-- __autoload лежит ВНУТРИ конфига, а не в отдельном маркере — рассинхрону
+-- взяться неоткуда. Контракт для GUI.AttachConfigSystem: List, Save, Load,
+-- Create, Delete, Rename, Share, SetAutoload, GetAutoload.
 
 -- IIFE вместо do-блока: внутренние локалы живут в своём скоупе регистров
 -- и не давят на лимит 200 локалов верхнего уровня файла
@@ -9126,6 +9129,59 @@ local ConfigManager = (function()
         end)
     end
 
+    ------------------------------------------------------------------
+    -- ПАРСЕРЫ ПО ТИПАМ ЭЛЕМЕНТОВ (аналог таблицы Parser в WindUI).
+    -- Save отдаёт запись для файла, Load приводит значение к типу и
+    -- применяет через element:Set(value, true) — тем же путём, что и клик
+    ------------------------------------------------------------------
+
+    -- Текущее значение элемента. У кейбинда Get читает State.Keybinds,
+    -- поэтому бинд, назначенный захватом клавиши, тоже попадает в конфиг
+    local function currentValue(element)
+        if element.Get then
+            local ok, v = pcall(element.Get, element)
+            if ok then return v end
+        end
+        return element.Value
+    end
+
+    local function saveEntry(element)
+        return { __type = element.__type, value = currentValue(element) }
+    end
+
+    local Parser = {
+        Toggle = {
+            Save = saveEntry,
+            Load = function(element, value) element:Set(value and true or false, true) end,
+        },
+        Slider = {
+            Save = saveEntry,
+            Load = function(element, value) element:Set(tonumber(value), true) end,
+        },
+        Input = {
+            Save = saveEntry,
+            Load = function(element, value) element:Set(tonumber(value), true) end,
+        },
+        Dropdown = {
+            Save = saveEntry,
+            Load = function(element, value) element:Set(tostring(value), true) end,
+        },
+        Keybind = {
+            Save = saveEntry,
+            Load = function(element, value) element:Set(tostring(value), true) end,
+        },
+    }
+
+    -- Порядок применения: сначала значения и бинды, тоглы последними —
+    -- фича, которую включает тогл, должна стартовать уже с нужными параметрами
+    local LOAD_ORDER = {
+        Slider = 1, Input = 1, Dropdown = 1, Keybind = 2, Toggle = 3,
+    }
+
+    ------------------------------------------------------------------
+    -- ФАЙЛЫ: имена, пути, перечисление
+    ------------------------------------------------------------------
+
     local function sanitizeName(name)
         name = tostring(name or "")
         name = name:gsub("[^%w_%-% ]", "")
@@ -9138,7 +9194,7 @@ local ConfigManager = (function()
         return CFG.Dir .. "/" .. name .. CFG.Extension
     end
 
-    -- Индекс имён — источник истины вместо listfiles (его нет в части executor'ов)
+    -- Индекс имён — подстраховка для executor'ов без listfiles
     local function readIndex()
         local list = Files.LoadJSON(CFG.IndexFile, {})
         local out = {}
@@ -9159,63 +9215,23 @@ local ConfigManager = (function()
         return nil
     end
 
-    -- Снапшот флагов + кейбинды → таблица файла конфига.
-    -- defaultKeybinds=true пишет все бинды как Unknown (для «пустого» конфига)
-    local function serialize(flags, defaultKeybinds)
-        local keybinds = {}
-        for bindName, keyCode in pairs(State.Keybinds) do
-            if defaultKeybinds then
-                keybinds[bindName] = "Unknown"
-            else
-                local okName, codeName = pcall(function() return keyCode.Name end)
-                keybinds[bindName] = okName and codeName or "Unknown"
+    local function readConfig(name)
+        local raw
+        local ok = pcall(function()
+            if isfile and isfile(configPath(name)) then
+                raw = readfile(configPath(name))
             end
+        end)
+        if not ok or type(raw) ~= "string" then
+            return nil, "Config file not found"
         end
-        return {
-            version = CFG.Version,
-            script = CFG.Script,
-            savedAt = os.time(),
-            flags = flags,
-            keybinds = keybinds,
-        }
-    end
-
-    -- Таблица конфига → GUI и State. Кейбинды рехидрируются из .Name
-    -- с фолбэком на Unknown; текст чипов обновляется как в SetKeybind
-    local function applyConfig(data)
-        if type(data) ~= "table" or type(data.flags) ~= "table" then
-            return false, "Config file is corrupted"
+        local okDecode, data = pcall(function()
+            return HttpService:JSONDecode(raw)
+        end)
+        if not okDecode or type(data) ~= "table" then
+            return nil, "Config file is corrupted"
         end
-        if data.script ~= CFG.Script then
-            return false, "Config belongs to another script"
-        end
-        if type(data.version) ~= "number" or data.version > CFG.Version then
-            return false, "Config version is not supported"
-        end
-
-        GUI.ApplyFlagSnapshot(data.flags)
-
-        if type(data.keybinds) == "table" then
-            for bindName, codeName in pairs(data.keybinds) do
-                if State.Keybinds[bindName] ~= nil and type(codeName) == "string" then
-                    local keyCode = Enum.KeyCode.Unknown
-                    pcall(function()
-                        if Enum.KeyCode[codeName] then
-                            keyCode = Enum.KeyCode[codeName]
-                        end
-                    end)
-                    State.Keybinds[bindName] = keyCode
-                    local chip = State.UIElements[bindName .. "_Button"]
-                    if chip then
-                        pcall(function()
-                            chip.Text = keyCode ~= Enum.KeyCode.Unknown
-                                and keyCode.Name or "Not Bound"
-                        end)
-                    end
-                end
-            end
-        end
-        return true
+        return data
     end
 
     local function writeConfig(name, data)
@@ -9232,68 +9248,165 @@ local ConfigManager = (function()
         return true
     end
 
-    local function readConfig(name)
-        local raw
-        local ok = pcall(function()
-            if isfile(configPath(name)) then
-                raw = readfile(configPath(name))
+    -- Сканируем папку через listfiles, индекс дополняет результат
+    local EXT_PATTERN = "([^\\/]+)" .. (CFG.Extension:gsub("(%W)", "%%%1")) .. "$"
+
+    local function listConfigs()
+        local names, seen = {}, {}
+        if listfiles and isfolder and isfolder(CFG.Dir) then
+            local ok, files = pcall(listfiles, CFG.Dir)
+            if ok and type(files) == "table" then
+                for _, path in ipairs(files) do
+                    local name = tostring(path):match(EXT_PATTERN)
+                    if name and not seen[name] then
+                        seen[name] = true
+                        table.insert(names, name)
+                    end
+                end
             end
-        end)
-        if not ok or type(raw) ~= "string" then
-            return nil, "Config file not found"
         end
-        local okDecode, data = pcall(function()
-            return HttpService:JSONDecode(raw)
-        end)
-        if not okDecode or type(data) ~= "table" then
-            return nil, "Config file is corrupted"
+        for _, name in ipairs(readIndex()) do
+            if not seen[name] and isfile and isfile(configPath(name)) then
+                seen[name] = true
+                table.insert(names, name)
+            end
         end
-        return data
+        table.sort(names)
+        return names
     end
+
+    ------------------------------------------------------------------
+    -- АВТОЗАГРУЗКА: флаг живёт внутри конфигов, имя кэшируем —
+    -- панель дёргает GetAutoload на каждой перерисовке
+    ------------------------------------------------------------------
+
+    local autoloadCache = nil   -- nil = не вычислен, false = автозагрузки нет
+
+    local function computeAutoload()
+        for _, name in ipairs(listConfigs()) do
+            local data = readConfig(name)
+            if data and data.__autoload then return name end
+        end
+        return false
+    end
+
+    ------------------------------------------------------------------
+    -- СБОРКА И ПРИМЕНЕНИЕ
+    ------------------------------------------------------------------
+
+    -- defaults = true собирает «пустой» конфиг: дефолты контролов вместо текущих
+    local function buildPayload(defaults, autoload)
+        local elements = {}
+        for flag, element in pairs(GUI.GetElements()) do
+            local parser = Parser[element.__type]
+            if parser then
+                local ok, entry = pcall(parser.Save, element)
+                if ok and type(entry) == "table" then
+                    if defaults then entry.value = element.Default end
+                    if entry.value ~= nil then elements[flag] = entry end
+                end
+            end
+        end
+        return {
+            __version  = CFG.Version,
+            __script   = CFG.Script,
+            __savedAt  = os.time(),
+            __autoload = autoload and true or false,
+            __custom   = {},
+            __elements = elements,
+        }
+    end
+
+    local function applyConfig(data)
+        if type(data) ~= "table" or type(data.__elements) ~= "table" then
+            return false, "Config file is corrupted"
+        end
+        if data.__script ~= CFG.Script then
+            return false, "Config belongs to another script"
+        end
+        if type(data.__version) ~= "number" or data.__version > CFG.Version then
+            return false, "Config version is not supported"
+        end
+
+        -- Идём по РЕЕСТРУ, а не по файлу: контрол, которого в конфиге нет
+        -- (старый файл, новая фича) или чей тип не совпал, возвращается к
+        -- своему дефолту — иначе после смены конфига на экране оставались бы
+        -- настройки предыдущего
+        local queue = {}
+        for flag, element in pairs(GUI.GetElements()) do
+            local parser = Parser[element.__type]
+            if parser then
+                local entry = data.__elements[flag]
+                local value
+                if type(entry) == "table" and entry.__type == element.__type then
+                    value = entry.value
+                else
+                    value = element.Default
+                end
+                if value ~= nil then
+                    table.insert(queue, {
+                        element = element,
+                        parser  = parser,
+                        value   = value,
+                        order   = LOAD_ORDER[element.__type] or 1,
+                    })
+                end
+            end
+        end
+        table.sort(queue, function(a, b) return a.order < b.order end)
+
+        for _, item in ipairs(queue) do
+            -- совпавшее значение не трогаем: повторный вызов тяжёлых
+            -- хендлеров (автофарм и т.п.) перезапускал бы их потоки
+            if currentValue(item.element) ~= item.value then
+                pcall(item.parser.Load, item.element, item.value)
+            end
+        end
+        return true
+    end
+
+    ------------------------------------------------------------------
+    -- ПУБЛИЧНЫЙ КОНТРАКТ
+    ------------------------------------------------------------------
 
     local ConfigManager = {
         List = function()
-            return readIndex()
+            return listConfigs()
         end,
 
         GetAutoload = function()
-            local name
-            pcall(function()
-                if isfile and isfile(CFG.AutoloadFile) then
-                    name = readfile(CFG.AutoloadFile)
-                end
-            end)
-            if type(name) == "string" then
-                name = name:gsub("^%s+", ""):gsub("%s+$", "")
-                if #name > 0 then return name end
+            if autoloadCache == nil then
+                autoloadCache = computeAutoload()
             end
-            return nil
+            return autoloadCache or nil
         end,
 
         SetAutoload = function(name)
             if not canUseFiles() then return false, "Executor has no file API" end
-            local ok = pcall(function()
-                if name then
-                    Files.EnsureFoldersFor(CFG.AutoloadFile)
-                    writefile(CFG.AutoloadFile, name)
-                elseif delfile and isfile(CFG.AutoloadFile) then
-                    delfile(CFG.AutoloadFile)
-                else
-                    -- без delfile пустой маркер = «автозагрузки нет»
-                    writefile(CFG.AutoloadFile, "")
+            -- автозагрузочный конфиг ровно один: у остальных флаг снимаем
+            for _, cfgName in ipairs(listConfigs()) do
+                local data = readConfig(cfgName)
+                if data then
+                    local want = (cfgName == name)
+                    if (data.__autoload and true or false) ~= want then
+                        data.__autoload = want
+                        writeConfig(cfgName, data)
+                    end
                 end
-            end)
-            if ok then
-                cfgNotify(name and ("Autoload: " .. name) or "Autoload disabled")
             end
-            return ok
+            autoloadCache = name or false
+            cfgNotify(name and ("Autoload: " .. name) or "Autoload disabled")
+            return true
         end,
 
         Save = function(name)
             if not canUseFiles() then return false, "Executor has no file API" end
             name = sanitizeName(name)
             if name == "" then return false, "Bad config name" end
-            local ok, err = writeConfig(name, serialize(GUI.GetFlagSnapshot()))
+            -- флаг автозагрузки принадлежит конфигу, а не сохранению
+            local existing = readConfig(name)
+            local ok, err = writeConfig(name,
+                buildPayload(false, existing and existing.__autoload))
             if ok then cfgNotify("Saved: " .. name) end
             return ok, err
         end,
@@ -9307,14 +9420,13 @@ local ConfigManager = (function()
             return ok, applyErr
         end,
 
-        -- «Пустой» конфиг: дефолтные значения контролов, бинды сброшены
+        -- «Пустой» конфиг: дефолтные значения всех контролов
         Create = function(name)
             if not canUseFiles() then return false, "Executor has no file API" end
             name = sanitizeName(name)
             if name == "" then return false, "Bad config name" end
-            local index = readIndex()
-            if indexFind(index, name) then return false, "Config already exists" end
-            local ok, err = writeConfig(name, serialize(GUI.GetDefaultSnapshot(), true))
+            if indexFind(listConfigs(), name) then return false, "Config already exists" end
+            local ok, err = writeConfig(name, buildPayload(true, false))
             if ok then cfgNotify("Created: " .. name) end
             return ok, err
         end,
@@ -9332,9 +9444,7 @@ local ConfigManager = (function()
                     delfile(configPath(name))
                 end
             end)
-            if ConfigManager.GetAutoload() == name then
-                ConfigManager.SetAutoload(nil)
-            end
+            if autoloadCache == name then autoloadCache = nil end
             cfgNotify("Deleted: " .. name)
             return true
         end,
@@ -9343,8 +9453,8 @@ local ConfigManager = (function()
             if not canUseFiles() then return false, "Executor has no file API" end
             newName = sanitizeName(newName)
             if newName == "" then return false, "Bad config name" end
-            local index = readIndex()
-            if indexFind(index, newName) then return false, "Name already taken" end
+            if indexFind(listConfigs(), newName) then return false, "Name already taken" end
+            -- переносим файл целиком: флаг автозагрузки едет вместе с данными
             local data, err = readConfig(oldName)
             if not data then return false, err end
             local ok = pcall(function()
@@ -9355,12 +9465,11 @@ local ConfigManager = (function()
                 end
             end)
             if not ok then return false, "Failed to write config file" end
+            local index = readIndex()
             local pos = indexFind(index, oldName)
             if pos then index[pos] = newName else table.insert(index, newName) end
             writeIndex(index)
-            if ConfigManager.GetAutoload() == oldName then
-                ConfigManager.SetAutoload(newName)
-            end
+            if autoloadCache == oldName then autoloadCache = newName end
             cfgNotify("Renamed: " .. oldName .. " → " .. newName)
             return true
         end,
