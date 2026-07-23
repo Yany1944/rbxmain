@@ -36,12 +36,19 @@ return function(env)
     }
 
     -- Шрифты — только набор из Scripts/Emotes.lua (GothamMedium выпилен: он
-    -- отсутствует там и рендерится нестабильно)
+    -- отсутствует там и рендерится нестабильно).
+    -- Единая шкала размеров, без исключений:
+    --   названия строк      FONT.Bold 13
+    --   описания            FONT.Body 11
+    --   заголовки секций    FONT.Bold 11
+    --   значения / чипы     FONT.Mono 11
+    --   кнопки              FONT.Bold 12
+    --   статусбар           FONT.Mono 11
+    --   заголовок вкладки   FONT.Bold 15
     local FONT = {
         Bold = Enum.Font.GothamBold,     -- заголовки, названия фич, кнопки
         Body = Enum.Font.Gotham,         -- описания, второстепенный текст
         Mono = Enum.Font.Code,           -- значения, чипы, статусбар
-        Alt  = Enum.Font.SourceSansBold, -- одиночные глифы (✕, ↘)
     }
 
     -- Единственное место с прозрачностью — корневой фрейм окна
@@ -87,6 +94,97 @@ return function(env)
         props.BackgroundTransparency = T.HairTrans
         props.BorderSizePixel = 0
         return Create("Frame", props)
+    end
+
+    ----------------------------------------------------------------
+    -- ГЛИФ-ФАБРИКИ: рисованные значки вместо текстовых символов.
+    -- ✕, ▾, ↘ отсутствуют в Gotham/Code и рендерятся «тофу»-квадратами,
+    -- поэтому все такие глифы собираются из Frame/UIStroke.
+    ----------------------------------------------------------------
+
+    -- Заполненная линия/точка (штрих глифа)
+    local function glyphLine(parent, x, y, w, h, rot, corner)
+        local f = Create("Frame", {
+            BackgroundColor3 = T.TextDark,
+            BorderSizePixel = 0,
+            Position = UDim2.new(0, x, 0, y),
+            Size = UDim2.new(0, w, 0, h),
+            Rotation = rot or 0,
+            ZIndex = parent.ZIndex or 1,
+            Parent = parent
+        })
+        if corner then AddCorner(f, corner) end
+        return f
+    end
+
+    -- Контур (кольцо/рамка) — возвращает фрейм и его UIStroke
+    local function glyphRing(parent, x, y, w, h, corner, thickness)
+        local f = Create("Frame", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, x, 0, y),
+            Size = UDim2.new(0, w, 0, h),
+            ZIndex = parent.ZIndex or 1,
+            Parent = parent
+        })
+        AddCorner(f, corner)
+        local s = Create("UIStroke", {
+            Thickness = thickness or 1.2,
+            Color = T.TextDark,
+            Transparency = 0,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Parent = f
+        })
+        return f, s
+    end
+
+    -- Крест «✕» по центру родителя: два штриха 1.4x12 под ±45°.
+    -- Возвращает список штрихов, чтобы их можно было перекрасить на hover.
+    local function glyphCross(parent)
+        local strokes = {}
+        for _, rot in ipairs({45, -45}) do
+            local f = Create("Frame", {
+                BackgroundColor3 = T.TextDark,
+                BorderSizePixel = 0,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, 1.4, 0, 12),
+                Rotation = rot,
+                ZIndex = (parent.ZIndex or 1) + 1,
+                Parent = parent
+            })
+            table.insert(strokes, f)
+        end
+        return strokes
+    end
+
+    -- Шеврон-уголок вниз «▾» у правого края родителя: два штриха 1.4x6 под ±45°.
+    -- padRight компенсирует UIPadding родителя: дети живут в уже сжатой
+    -- области, поэтому холдер надо вернуть обратно к реальному краю кнопки.
+    local function glyphChevron(parent, padRight)
+        local z = (parent.ZIndex or 1) + 1
+        local holder = Create("Frame", {
+            Name = "Chevron",
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, (padRight or 0) - 10, 0.5, 0),
+            Size = UDim2.new(0, 10, 0, 10),
+            ZIndex = z,
+            Parent = parent
+        })
+        -- центры штрихов — (2.88, 5) и (7.12, 5), сходятся внизу по центру
+        local a = glyphLine(holder, 2.18, 2, 1.4, 6, -45)
+        local b = glyphLine(holder, 6.42, 2, 1.4, 6, 45)
+        a.ZIndex, b.ZIndex = z, z
+        return holder, a, b
+    end
+
+    -- Уголок ресайза «↘»: две параллельные диагонали в правом нижнем углу
+    local function glyphResizeCorner(parent)
+        local z = (parent.ZIndex or 1)
+        local a = glyphLine(parent, 10.5, 6.5, 1, 9, 45)
+        local b = glyphLine(parent, 13.5, 11.5, 1, 5, 45)
+        a.ZIndex, b.ZIndex = z, z
+        return a, b
     end
 
     ----------------------------------------------------------------
@@ -193,7 +291,7 @@ return function(env)
             Name = "LogoSub",
             Text = "mm2",
             Font = FONT.Body,
-            TextSize = 10,
+            TextSize = 11,
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
@@ -227,9 +325,9 @@ return function(env)
             Name = "Dedication",
             Text = "for my кошичка жена",
             Font = FONT.Body,
-            TextSize = 10,
-            TextColor3 = Color3.fromRGB(240, 150, 200),
-            TextTransparency = 0.25,
+            TextSize = 11,
+            TextColor3 = Color3.fromRGB(220, 145, 230),
+            TextTransparency = 0.35,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
             Position = UDim2.new(0, 18, 1, -26),
@@ -272,7 +370,7 @@ return function(env)
             TextColor3 = T.Text,
             PlaceholderColor3 = T.TextDark,
             BackgroundColor3 = T.Surface2,
-            Position = UDim2.new(1, -286, 0.5, -14),
+            Position = UDim2.new(1, -278, 0.5, -14),
             Size = UDim2.new(0, 220, 0, 28),
             ClearTextOnFocus = false,
             Parent = header,
@@ -281,10 +379,7 @@ return function(env)
         AddStroke(searchBox, 1, T.HairCol, T.HairTrans)
 
         local closeButton = Create("TextButton", {
-            Text = "✕",
-            Font = FONT.Alt,
-            TextSize = 16,
-            TextColor3 = T.TextDark,
+            Text = "",
             BackgroundColor3 = T.Danger,
             BackgroundTransparency = 1,
             Position = UDim2.new(1, -42, 0.5, -14),
@@ -293,6 +388,7 @@ return function(env)
             Parent = header
         })
         AddCorner(closeButton, 6)
+        local closeStrokes = glyphCross(closeButton)
 
         Hairline({
             Name = "HeaderSep",
@@ -375,7 +471,8 @@ return function(env)
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Right,
             BackgroundTransparency = 1,
-            Position = UDim2.new(1, -174, 0, 0),
+            -- правая граница -36, чтобы не залезать под уголок ресайза
+            Position = UDim2.new(1, -196, 0, 0),
             Size = UDim2.new(0, 160, 1, 0),
             Parent = footer
         })
@@ -535,41 +632,35 @@ return function(env)
                 Parent = parent
             })
 
-            local fills, strokes = {}, {}
+            local fills, strokes, labels = {}, {}, {}
 
-            -- Заполненная линия/точка
+            -- Обёртки над общими глиф-фабриками: складывают созданное
+            -- в списки, чтобы setColor мог перекрасить иконку целиком
             local function line(x, y, w, h, rot, corner)
-                local f = Create("Frame", {
-                    BackgroundColor3 = T.TextDark,
-                    BorderSizePixel = 0,
-                    Position = UDim2.new(0, x, 0, y),
-                    Size = UDim2.new(0, w, 0, h),
-                    Rotation = rot or 0,
-                    Parent = holder
-                })
-                if corner then AddCorner(f, corner) end
+                local f = glyphLine(holder, x, y, w, h, rot, corner)
                 table.insert(fills, f)
                 return f
             end
 
-            -- Контур (кольцо/рамка)
             local function ring(x, y, w, h, corner)
-                local f = Create("Frame", {
-                    BackgroundTransparency = 1,
-                    Position = UDim2.new(0, x, 0, y),
-                    Size = UDim2.new(0, w, 0, h),
-                    Parent = holder
-                })
-                AddCorner(f, corner)
-                local s = Create("UIStroke", {
-                    Thickness = 1.2,
-                    Color = T.TextDark,
-                    Transparency = 0,
-                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                    Parent = f
-                })
+                local f, s = glyphRing(holder, x, y, w, h, corner)
                 table.insert(strokes, s)
                 return f
+            end
+
+            -- Текстовый глиф внутри иконки (например «$» на монете)
+            local function label(text, size)
+                local l = Create("TextLabel", {
+                    Text = text,
+                    Font = FONT.Mono,
+                    TextSize = size or 9,
+                    TextColor3 = T.TextDark,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 1, 0),
+                    Parent = holder
+                })
+                table.insert(labels, l)
+                return l
             end
 
             local n = tabName:lower()
@@ -596,10 +687,10 @@ return function(env)
                 ring(0, 4, 16, 8, 4)
                 line(6, 6, 3, 3, 0, 2)
             elseif n == "farming" or n == "farm" then
-                -- монета: кольцо + прорези
-                ring(2, 1, 12, 12, 6)
-                line(6, 4, 1, 6)
-                line(9, 4, 1, 6)
+                -- монета: кольцо + «$» по центру (прежние две прорези
+                -- читались как значок «пауза»)
+                ring(2, 2, 12, 12, 6)
+                label("$", 9)
             elseif n == "fun" then
                 -- искра: 4 луча из центра
                 line(7, 1, 1, 14)
@@ -628,6 +719,7 @@ return function(env)
             local function setColor(col)
                 for _, f in ipairs(fills) do f.BackgroundColor3 = col end
                 for _, s in ipairs(strokes) do s.Color = col end
+                for _, l in ipairs(labels) do l.TextColor3 = col end
             end
 
             return setColor
@@ -823,11 +915,11 @@ return function(env)
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 30),
+                        Size = UDim2.new(1, 0, 0, 32),
                         LayoutOrder = 1,
                         Parent = sec
                     })
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, 14), PaddingTop = UDim.new(0, 4), Parent = head})
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, 14), PaddingTop = UDim.new(0, 6), Parent = head})
                 end
 
                 local data = {frame = sec, layout = layout, rows = {}, order = 1}
@@ -878,8 +970,11 @@ return function(env)
                 return row
             end
 
-            -- Заголовок и описание внутри строки
-            local function addRowText(row, title, desc)
+            -- Заголовок и описание внутри строки.
+            -- reserved — ширина правого блока контролов вместе с отступами:
+            -- текст обрезается ровно по его границе и не налезает на контрол
+            local function addRowText(row, title, desc, reserved)
+                reserved = reserved or 200
                 if desc and desc ~= "" then
                     Create("TextLabel", {
                         Text = title,
@@ -890,7 +985,7 @@ return function(env)
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
                         Position = UDim2.new(0, 14, 0, 9),
-                        Size = UDim2.new(1, -200, 0, 20),
+                        Size = UDim2.new(1, -reserved, 0, 20),
                         Parent = row
                     })
                     Create("TextLabel", {
@@ -902,7 +997,7 @@ return function(env)
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
                         Position = UDim2.new(0, 14, 0, 30),
-                        Size = UDim2.new(1, -200, 0, 16),
+                        Size = UDim2.new(1, -reserved, 0, 16),
                         Parent = row
                     })
                 else
@@ -915,7 +1010,7 @@ return function(env)
                         TextTruncate = Enum.TextTruncate.AtEnd,
                         BackgroundTransparency = 1,
                         Position = UDim2.new(0, 14, 0, 0),
-                        Size = UDim2.new(1, -200, 1, 0),
+                        Size = UDim2.new(1, -reserved, 1, 0),
                         Parent = row
                     })
                 end
@@ -927,7 +1022,7 @@ return function(env)
                 local chip = Create("TextButton", {
                     Name = keybindKey .. "_Button",
                     Text = (bound and bound ~= Enum.KeyCode.Unknown) and bound.Name or "—",
-                    Font = FONT.Bold,
+                    Font = FONT.Mono,
                     TextSize = 11,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
@@ -1057,7 +1152,8 @@ return function(env)
                 default = default or false
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and 56 or 44, title, desc or "")
-                addRowText(row, title, desc)
+                -- с чипом бинда правый блок шире: 56(чип)+8+40(пилюля)+14+26
+                addRowText(row, title, desc, keybindKey and 144 or 80)
 
                 -- Пилюля 40x22, позиция/цвет зависят от состояния
                 local toggleBg = Create("TextButton", {
@@ -1069,6 +1165,9 @@ return function(env)
                     Parent = row
                 })
                 AddCorner(toggleBg, 11)
+                -- В выключенном состоянии пилюля почти сливается со строкой —
+                -- держим на ней hairline и прячем его при включении
+                local toggleStroke = AddStroke(toggleBg, 1, T.HairCol, default and 1 or 0.88)
 
                 local toggleCircle = Create("Frame", {
                     BackgroundColor3 = T.Text,
@@ -1100,6 +1199,7 @@ return function(env)
                     local targetPos = state and UDim2.new(0, 21, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
 
                     TweenService:Create(toggleBg, TweenInfo.new(0.15), {BackgroundColor3 = targetColor}):Play()
+                    TweenService:Create(toggleStroke, TweenInfo.new(0.15), {Transparency = state and 1 or 0.88}):Play()
                     TweenService:Create(toggleCircle, TweenInfo.new(0.15), {Position = targetPos}):Play()
 
                     callHandler(handlerKey, state)
@@ -1111,14 +1211,16 @@ return function(env)
             function TabFunctions:CreateDropdown(title, desc, options, default, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and 56 or 44, title, desc or "")
-                addRowText(row, title, desc)
+                addRowText(row, title, desc, 150)
 
                 local DD_W = 110
                 local dropdown = Create("TextButton", {
-                    Text = default .. "  ▾",
+                    Text = default,
                     Font = FONT.Bold,
                     TextSize = 12,
                     TextColor3 = T.Text,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     BackgroundColor3 = T.Surface2,
                     Position = UDim2.new(1, -(DD_W + 14), 0.5, -14),
                     Size = UDim2.new(0, DD_W, 0, 28),
@@ -1128,6 +1230,13 @@ return function(env)
                 })
                 AddCorner(dropdown, 6)
                 AddStroke(dropdown, 1, T.HairCol, T.HairTrans)
+                -- правый паддинг 22 — место под рисованный шеврон
+                Create("UIPadding", {
+                    PaddingLeft = UDim.new(0, 10),
+                    PaddingRight = UDim.new(0, 22),
+                    Parent = dropdown
+                })
+                glyphChevron(dropdown, 22)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
 
@@ -1146,7 +1255,7 @@ return function(env)
                     AddCorner(optionBtn, 4)
 
                     optionBtn.MouseButton1Click:Connect(function()
-                        dropdown.Text = option .. "  ▾"
+                        dropdown.Text = option
                         callHandler(handlerKey, option)
                         close()
                     end)
@@ -1180,12 +1289,12 @@ return function(env)
             function TabFunctions:CreateInputField(title, desc, defaultValue, handlerKey)
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and 56 or 44, title, desc or "")
-                addRowText(row, title, desc)
+                addRowText(row, title, desc, 104)
 
                 local inputBox = Create("TextBox", {
                     Text = tostring(defaultValue),
                     Font = FONT.Mono,
-                    TextSize = 12,
+                    TextSize = 11,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
                     Position = UDim2.new(1, -78, 0.5, -12),
@@ -1212,7 +1321,7 @@ return function(env)
                 step = step or 1
                 local hasDesc = description ~= nil and description ~= ""
                 local row = addRow(hasDesc and 56 or 44, title, description or "")
-                addRowText(row, title, description)
+                addRowText(row, title, description, 204)
 
                 local function fmt(v)
                     return step >= 1 and string.format("%d", v) or string.format("%.2f", v)
@@ -1315,7 +1424,7 @@ return function(env)
 
             function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
                 local row = addRow(44, title, "")
-                addRowText(row, title, nil)
+                addRowText(row, title, nil, 135)
 
                 local bound = State.Keybinds and State.Keybinds[keybindKey]
                 local bindButton = Create("TextButton", {
@@ -1349,14 +1458,16 @@ return function(env)
                 stateKey = stateKey or "SelectedPlayerForFling"
                 local hasDesc = desc ~= nil and desc ~= ""
                 local row = addRow(hasDesc and 56 or 44, title, desc or "")
-                addRowText(row, title, desc)
+                addRowText(row, title, desc, 205)
 
                 local DD_W = 165
                 local dropdown = Create("TextButton", {
-                    Text = "Select player  ▾",
+                    Text = "Select player",
                     Font = FONT.Bold,
                     TextSize = 12,
                     TextColor3 = T.Text,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     BackgroundColor3 = T.Surface2,
                     Position = UDim2.new(1, -(DD_W + 14), 0.5, -14),
                     Size = UDim2.new(0, DD_W, 0, 28),
@@ -1366,6 +1477,13 @@ return function(env)
                 })
                 AddCorner(dropdown, 6)
                 AddStroke(dropdown, 1, T.HairCol, T.HairTrans)
+                -- правый паддинг 22 — место под рисованный шеврон
+                Create("UIPadding", {
+                    PaddingLeft = UDim.new(0, 10),
+                    PaddingRight = UDim.new(0, 22),
+                    Parent = dropdown
+                })
+                glyphChevron(dropdown, 22)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
 
@@ -1416,7 +1534,8 @@ return function(env)
 
                         pb.MouseButton1Click:Connect(function()
                             State[stateKey] = playerName
-                            dropdown.Text = (#playerName > 14 and playerName:sub(1, 14) .. "…" or playerName) .. "  ▾"
+                            -- длинные ники режет TextTruncate, вручную не обрезаем
+                            dropdown.Text = playerName
                             close()
                         end)
 
@@ -1541,13 +1660,19 @@ return function(env)
 
         closeButton.MouseEnter:Connect(function()
             TweenService:Create(closeButton, TweenInfo.new(0.15), {
-                TextColor3 = T.Danger, BackgroundTransparency = 0.85
+                BackgroundTransparency = 0.85
             }):Play()
+            for _, s in ipairs(closeStrokes) do
+                TweenService:Create(s, TweenInfo.new(0.15), {BackgroundColor3 = T.Danger}):Play()
+            end
         end)
         closeButton.MouseLeave:Connect(function()
             TweenService:Create(closeButton, TweenInfo.new(0.15), {
-                TextColor3 = T.TextDark, BackgroundTransparency = 1
+                BackgroundTransparency = 1
             }):Play()
+            for _, s in ipairs(closeStrokes) do
+                TweenService:Create(s, TweenInfo.new(0.15), {BackgroundColor3 = T.TextDark}):Play()
+            end
         end)
 
         -- Поиск: фильтрация строк и скрытие пустых секций
@@ -1627,10 +1752,7 @@ return function(env)
         -- ResizeGrip: изменение размера окна мышью
         local resizeGrip = Create("TextButton", {
             Name = "ResizeGrip",
-            Text = "↘",
-            Font = FONT.Alt,
-            TextSize = 14,
-            TextColor3 = T.TextDark,
+            Text = "",
             BackgroundTransparency = 1,
             Position = UDim2.new(1, -20, 1, -20),
             Size = UDim2.new(0, 18, 0, 18),
@@ -1639,6 +1761,7 @@ return function(env)
             ZIndex = 10,
             Parent = mainFrame,
         })
+        glyphResizeCorner(resizeGrip)
 
         local resizing = false
         local resizeStart = nil
