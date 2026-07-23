@@ -20,18 +20,28 @@ return function(env)
     ----------------------------------------------------------------
     -- ТОКЕНЫ ДИЗАЙНА (поверх CONFIG.Colors)
     ----------------------------------------------------------------
+    -- Нейтральная цинковая шкала — строгий монохром, акцент только на состояниях
     local T = {
-        Canvas    = Color3.fromRGB(16, 16, 23),
-        Surface1  = Color3.fromRGB(22, 22, 30),
-        Surface2  = Color3.fromRGB(29, 29, 39),
+        Canvas    = Color3.fromRGB(9, 9, 11),
+        Surface1  = Color3.fromRGB(19, 19, 22),
+        Surface2  = Color3.fromRGB(31, 31, 35),
         HairCol   = Color3.fromRGB(255, 255, 255),
-        HairTrans = 0.92,
-        Text      = Color3.fromRGB(232, 230, 238),
-        TextDark  = Color3.fromRGB(141, 136, 152),
+        HairTrans = 0.90,
+        Text      = Color3.fromRGB(237, 237, 240),
+        TextDark  = Color3.fromRGB(140, 140, 148),
         Accent    = CONFIG.Colors.Accent,
-        AccentInk = Color3.fromRGB(20, 20, 27),   -- тёмный текст на акцентной заливке
+        AccentInk = Color3.fromRGB(15, 15, 17),   -- тёмный текст на акцентной заливке
         Danger    = CONFIG.Colors.Red,
-        TrackBg   = Color3.fromRGB(51, 51, 63),   -- фон трека слайдера / выкл. тогла
+        TrackBg   = Color3.fromRGB(45, 45, 50),   -- фон трека слайдера / выкл. тогла
+    }
+
+    -- Шрифты — только набор из Scripts/Emotes.lua (GothamMedium выпилен: он
+    -- отсутствует там и рендерится нестабильно)
+    local FONT = {
+        Bold = Enum.Font.GothamBold,     -- заголовки, названия фич, кнопки
+        Body = Enum.Font.Gotham,         -- описания, второстепенный текст
+        Mono = Enum.Font.Code,           -- значения, чипы, статусбар
+        Alt  = Enum.Font.SourceSansBold, -- одиночные глифы (✕, ↘)
     }
 
     -- Единственное место с прозрачностью — корневой фрейм окна
@@ -40,7 +50,6 @@ return function(env)
     local SIDEBAR_W  = 188
     local HEADER_H   = 48
     local FOOTER_H   = 28
-    local MONO_FONT  = Enum.Font.Code
 
     ----------------------------------------------------------------
     -- ХЕЛПЕРЫ UI (БЛОК 19)
@@ -145,7 +154,7 @@ return function(env)
             Active = true,
             Parent = gui
         })
-        AddCorner(mainFrame, 14)
+        AddCorner(mainFrame, 10)
         AddStroke(mainFrame, 1, T.HairCol, 0.88)
 
         ----------------------------------------------------------------
@@ -170,7 +179,7 @@ return function(env)
         Create("TextLabel", {
             Name = "LogoName",
             Text = "Violite",
-            Font = Enum.Font.GothamBold,
+            Font = FONT.Bold,
             TextSize = 16,
             TextColor3 = T.Accent,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -183,7 +192,7 @@ return function(env)
         Create("TextLabel", {
             Name = "LogoSub",
             Text = "mm2",
-            Font = Enum.Font.Gotham,
+            Font = FONT.Body,
             TextSize = 10,
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -217,7 +226,7 @@ return function(env)
         Create("TextLabel", {
             Name = "Dedication",
             Text = "for my кошичка жена",
-            Font = Enum.Font.Gotham,
+            Font = FONT.Body,
             TextSize = 10,
             TextColor3 = Color3.fromRGB(240, 150, 200),
             TextTransparency = 0.25,
@@ -244,7 +253,7 @@ return function(env)
         local tabTitle = Create("TextLabel", {
             Name = "TabTitle",
             Text = "",
-            Font = Enum.Font.GothamBold,
+            Font = FONT.Bold,
             TextSize = 15,
             TextColor3 = T.Text,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -256,9 +265,9 @@ return function(env)
 
         local searchBox = Create("TextBox", {
             Name = "SearchBox",
-            PlaceholderText = "Поиск...",
+            PlaceholderText = "Search...",
             Text = "",
-            Font = Enum.Font.Gotham,
+            Font = FONT.Body,
             TextSize = 12,
             TextColor3 = T.Text,
             PlaceholderColor3 = T.TextDark,
@@ -268,13 +277,13 @@ return function(env)
             ClearTextOnFocus = false,
             Parent = header,
         })
-        AddCorner(searchBox, 7)
+        AddCorner(searchBox, 6)
         AddStroke(searchBox, 1, T.HairCol, T.HairTrans)
 
         local closeButton = Create("TextButton", {
             Text = "✕",
-            Font = Enum.Font.GothamMedium,
-            TextSize = 15,
+            Font = FONT.Alt,
+            TextSize = 16,
             TextColor3 = T.TextDark,
             BackgroundColor3 = T.Danger,
             BackgroundTransparency = 1,
@@ -283,7 +292,7 @@ return function(env)
             AutoButtonColor = false,
             Parent = header
         })
-        AddCorner(closeButton, 7)
+        AddCorner(closeButton, 6)
 
         Hairline({
             Name = "HeaderSep",
@@ -338,7 +347,7 @@ return function(env)
         AddCorner(roleDot, 3)
         local roleText = Create("TextLabel", {
             Text = "",
-            Font = MONO_FONT,
+            Font = FONT.Mono,
             TextSize = 11,
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -350,7 +359,7 @@ return function(env)
 
         local pingLabel = Create("TextLabel", {
             Text = "Ping: -- ms",
-            Font = MONO_FONT,
+            Font = FONT.Mono,
             TextSize = 11,
             TextColor3 = T.TextDark,
             BackgroundTransparency = 1,
@@ -361,7 +370,7 @@ return function(env)
 
         Create("TextLabel", {
             Text = "Toggle: " .. CONFIG.HideKey.Name,
-            Font = MONO_FONT,
+            Font = FONT.Mono,
             TextSize = 11,
             TextColor3 = T.TextDark,
             TextXAlignment = Enum.TextXAlignment.Right,
@@ -513,24 +522,145 @@ return function(env)
         end
 
         ----------------------------------------------------------------
+        -- ЛИНЕЙНЫЕ ИКОНКИ ВКЛАДОК (16x16, собраны из Frame/UIStroke —
+        -- без внешних ассетов, 1px-контуры в стиле lucide)
+        ----------------------------------------------------------------
+
+        local function makeTabIcon(tabName, parent)
+            local holder = Create("Frame", {
+                Name = "Icon",
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 10, 0.5, -8),
+                Size = UDim2.new(0, 16, 0, 16),
+                Parent = parent
+            })
+
+            local fills, strokes = {}, {}
+
+            -- Заполненная линия/точка
+            local function line(x, y, w, h, rot, corner)
+                local f = Create("Frame", {
+                    BackgroundColor3 = T.TextDark,
+                    BorderSizePixel = 0,
+                    Position = UDim2.new(0, x, 0, y),
+                    Size = UDim2.new(0, w, 0, h),
+                    Rotation = rot or 0,
+                    Parent = holder
+                })
+                if corner then AddCorner(f, corner) end
+                table.insert(fills, f)
+                return f
+            end
+
+            -- Контур (кольцо/рамка)
+            local function ring(x, y, w, h, corner)
+                local f = Create("Frame", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, x, 0, y),
+                    Size = UDim2.new(0, w, 0, h),
+                    Parent = holder
+                })
+                AddCorner(f, corner)
+                local s = Create("UIStroke", {
+                    Thickness = 1.2,
+                    Color = T.TextDark,
+                    Transparency = 0,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                    Parent = f
+                })
+                table.insert(strokes, s)
+                return f
+            end
+
+            local n = tabName:lower()
+            if n == "main" then
+                -- сетка 2x2 (dashboard)
+                ring(1, 1, 6, 6, 2)
+                ring(9, 1, 6, 6, 2)
+                ring(1, 9, 6, 6, 2)
+                ring(9, 9, 6, 6, 2)
+            elseif n == "aim" then
+                -- мишень: два кольца и точка
+                ring(1, 1, 14, 14, 7)
+                ring(5, 5, 6, 6, 3)
+                line(7, 7, 2, 2, 0, 1)
+            elseif n == "combat" then
+                -- прицел: кольцо + 4 риски
+                ring(2, 2, 12, 12, 6)
+                line(7, 0, 1, 3)
+                line(7, 13, 1, 3)
+                line(0, 7, 3, 1)
+                line(13, 7, 3, 1)
+            elseif n == "visuals" then
+                -- глаз: пилюля-контур + зрачок
+                ring(0, 4, 16, 8, 4)
+                line(6, 6, 3, 3, 0, 2)
+            elseif n == "farming" or n == "farm" then
+                -- монета: кольцо + прорези
+                ring(2, 1, 12, 12, 6)
+                line(6, 4, 1, 6)
+                line(9, 4, 1, 6)
+            elseif n == "fun" then
+                -- искра: 4 луча из центра
+                line(7, 1, 1, 14)
+                line(1, 7, 14, 1)
+                line(7, 2, 1, 12, 45)
+                line(7, 2, 1, 12, -45)
+            elseif n == "troll" then
+                -- смайл: кольцо + глаза + рот
+                ring(2, 2, 12, 12, 6)
+                line(5, 6, 2, 2, 0, 1)
+                line(9, 6, 2, 2, 0, 1)
+                line(5, 10, 6, 1, 0, 1)
+            elseif n == "settings" then
+                -- слайдеры: 3 линии с бегунками
+                line(2, 3, 12, 1)
+                line(4, 1, 3, 4, 0, 1)
+                line(2, 7, 12, 1)
+                line(9, 5, 3, 4, 0, 1)
+                line(2, 12, 12, 1)
+                line(6, 10, 3, 4, 0, 1)
+            else
+                -- дефолт: рамка
+                ring(2, 2, 12, 12, 3)
+            end
+
+            local function setColor(col)
+                for _, f in ipairs(fills) do f.BackgroundColor3 = col end
+                for _, s in ipairs(strokes) do s.Color = col end
+            end
+
+            return setColor
+        end
+
+        ----------------------------------------------------------------
         -- ВНУТРЕННИЙ КОНСТРУКТОР ТАБА + TabFunctions
         ----------------------------------------------------------------
 
         local function CreateTab(name)
             local tabBtn = Create("TextButton", {
-                Text = name,
-                Font = Enum.Font.GothamMedium,
-                TextSize = 13,
-                TextColor3 = T.TextDark,
-                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = "",
                 BackgroundColor3 = T.Surface1,
                 BackgroundTransparency = 1,
                 Size = UDim2.new(1, 0, 0, 34),
                 AutoButtonColor = false,
                 Parent = navScroll
             })
-            AddCorner(tabBtn, 8)
-            Create("UIPadding", {PaddingLeft = UDim.new(0, 12), Parent = tabBtn})
+            AddCorner(tabBtn, 6)
+
+            local setIconColor = makeTabIcon(name, tabBtn)
+
+            local tabLabel = Create("TextLabel", {
+                Text = name,
+                Font = FONT.Bold,
+                TextSize = 13,
+                TextColor3 = T.TextDark,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 34, 0, 0),
+                Size = UDim2.new(1, -38, 1, 0),
+                Parent = tabBtn
+            })
 
             local accentBar = Create("Frame", {
                 Name = "AccentBar",
@@ -608,19 +738,26 @@ return function(env)
                 if currentTab then
                     TweenService:Create(
                         currentTab.Btn,
-                        TweenInfo.new(0.15, Enum.EasingStyle.Quad),
-                        {BackgroundTransparency = 1, TextColor3 = T.TextDark}
+                        TweenInfo.new(0.12, Enum.EasingStyle.Quad),
+                        {BackgroundTransparency = 1}
                     ):Play()
+                    currentTab.Label.TextColor3 = T.TextDark
+                    currentTab.SetIcon(T.TextDark)
                     currentTab.Bar.Visible = false
                     currentTab.Holder.Visible = false
                 end
-                currentTab = {Btn = tabBtn, Holder = pageHolder, Bar = accentBar}
+                currentTab = {
+                    Btn = tabBtn, Holder = pageHolder, Bar = accentBar,
+                    Label = tabLabel, SetIcon = setIconColor
+                }
                 tabBtn.BackgroundColor3 = T.Surface2
                 TweenService:Create(
                     tabBtn,
-                    TweenInfo.new(0.15, Enum.EasingStyle.Quad),
-                    {BackgroundTransparency = 0, TextColor3 = T.Text}
+                    TweenInfo.new(0.12, Enum.EasingStyle.Quad),
+                    {BackgroundTransparency = 0}
                 ):Play()
+                tabLabel.TextColor3 = T.Text
+                setIconColor(T.Text)
                 accentBar.Visible = true
                 pageHolder.Visible = true
                 tabTitle.Text = name
@@ -631,16 +768,20 @@ return function(env)
             tabBtn.MouseEnter:Connect(function()
                 if not isActive() then
                     tabBtn.BackgroundColor3 = T.Surface1
-                    TweenService:Create(tabBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
-                        BackgroundTransparency = 0, TextColor3 = T.Text
+                    TweenService:Create(tabBtn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+                        BackgroundTransparency = 0
                     }):Play()
+                    tabLabel.TextColor3 = T.Text
+                    setIconColor(T.Text)
                 end
             end)
             tabBtn.MouseLeave:Connect(function()
                 if not isActive() then
-                    TweenService:Create(tabBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
-                        BackgroundTransparency = 1, TextColor3 = T.TextDark
+                    TweenService:Create(tabBtn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+                        BackgroundTransparency = 1
                     }):Play()
+                    tabLabel.TextColor3 = T.TextDark
+                    setIconColor(T.TextDark)
                 end
             end)
 
@@ -662,7 +803,7 @@ return function(env)
                     BorderSizePixel = 0,
                     Parent = currentPage
                 })
-                AddCorner(sec, 10)
+                AddCorner(sec, 8)
                 AddStroke(sec, 1, T.HairCol, 0.9)
 
                 local layout = Create("UIListLayout", {
@@ -677,7 +818,7 @@ return function(env)
                 if title and title ~= "" then
                     local head = Create("TextLabel", {
                         Text = title:upper(),
-                        Font = Enum.Font.GothamBold,
+                        Font = FONT.Bold,
                         TextSize = 11,
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
@@ -742,7 +883,7 @@ return function(env)
                 if desc and desc ~= "" then
                     Create("TextLabel", {
                         Text = title,
-                        Font = Enum.Font.GothamMedium,
+                        Font = FONT.Bold,
                         TextSize = 13,
                         TextColor3 = T.Text,
                         TextXAlignment = Enum.TextXAlignment.Left,
@@ -754,7 +895,7 @@ return function(env)
                     })
                     Create("TextLabel", {
                         Text = desc,
-                        Font = Enum.Font.Gotham,
+                        Font = FONT.Body,
                         TextSize = 11,
                         TextColor3 = T.TextDark,
                         TextXAlignment = Enum.TextXAlignment.Left,
@@ -767,7 +908,7 @@ return function(env)
                 else
                     Create("TextLabel", {
                         Text = title,
-                        Font = Enum.Font.GothamMedium,
+                        Font = FONT.Bold,
                         TextSize = 13,
                         TextColor3 = T.Text,
                         TextXAlignment = Enum.TextXAlignment.Left,
@@ -786,7 +927,7 @@ return function(env)
                 local chip = Create("TextButton", {
                     Name = keybindKey .. "_Button",
                     Text = (bound and bound ~= Enum.KeyCode.Unknown) and bound.Name or "—",
-                    Font = Enum.Font.GothamMedium,
+                    Font = FONT.Bold,
                     TextSize = 11,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
@@ -829,7 +970,7 @@ return function(env)
                     ZIndex = 1000,
                     Parent = mainFrame
                 })
-                AddCorner(overlay, 7)
+                AddCorner(overlay, 6)
                 AddStroke(overlay, 1, T.HairCol, 0.8)
 
                 Create("UIListLayout", {
@@ -975,7 +1116,7 @@ return function(env)
                 local DD_W = 110
                 local dropdown = Create("TextButton", {
                     Text = default .. "  ▾",
-                    Font = Enum.Font.GothamMedium,
+                    Font = FONT.Bold,
                     TextSize = 12,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
@@ -985,7 +1126,7 @@ return function(env)
                     ZIndex = 5,
                     Parent = row
                 })
-                AddCorner(dropdown, 7)
+                AddCorner(dropdown, 6)
                 AddStroke(dropdown, 1, T.HairCol, T.HairTrans)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
@@ -993,7 +1134,7 @@ return function(env)
                 for _, option in ipairs(options) do
                     local optionBtn = Create("TextButton", {
                         Text = option,
-                        Font = Enum.Font.Gotham,
+                        Font = FONT.Body,
                         TextSize = 11,
                         TextColor3 = T.Text,
                         BackgroundColor3 = T.Surface2,
@@ -1043,7 +1184,7 @@ return function(env)
 
                 local inputBox = Create("TextBox", {
                     Text = tostring(defaultValue),
-                    Font = MONO_FONT,
+                    Font = FONT.Mono,
                     TextSize = 12,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
@@ -1109,7 +1250,7 @@ return function(env)
 
                 local valueBox = Create("TextBox", {
                     Text = fmt(default),
-                    Font = MONO_FONT,
+                    Font = FONT.Mono,
                     TextSize = 11,
                     TextColor3 = T.Accent,
                     BackgroundColor3 = T.Surface2,
@@ -1180,7 +1321,7 @@ return function(env)
                 local bindButton = Create("TextButton", {
                     Name = keybindKey .. "_Button",
                     Text = (bound and bound ~= Enum.KeyCode.Unknown) and bound.Name or "Not Bound",
-                    Font = Enum.Font.GothamMedium,
+                    Font = FONT.Bold,
                     TextSize = 12,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
@@ -1213,7 +1354,7 @@ return function(env)
                 local DD_W = 165
                 local dropdown = Create("TextButton", {
                     Text = "Select player  ▾",
-                    Font = Enum.Font.GothamMedium,
+                    Font = FONT.Bold,
                     TextSize = 12,
                     TextColor3 = T.Text,
                     BackgroundColor3 = T.Surface2,
@@ -1223,7 +1364,7 @@ return function(env)
                     ZIndex = 5,
                     Parent = row
                 })
-                AddCorner(dropdown, 7)
+                AddCorner(dropdown, 6)
                 AddStroke(dropdown, 1, T.HairCol, T.HairTrans)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
@@ -1239,7 +1380,7 @@ return function(env)
                     if #players == 0 then
                         Create("TextLabel", {
                             Text = "No players",
-                            Font = Enum.Font.Gotham,
+                            Font = FONT.Body,
                             TextSize = 11,
                             TextColor3 = T.TextDark,
                             BackgroundTransparency = 1,
@@ -1258,7 +1399,7 @@ return function(env)
                     for _, playerName in ipairs(players) do
                         local pb = Create("TextButton", {
                             Text = playerName,
-                            Font = Enum.Font.Gotham,
+                            Font = FONT.Body,
                             TextSize = 11,
                             TextColor3 = T.Text,
                             BackgroundColor3 = T.Surface2,
@@ -1326,7 +1467,7 @@ return function(env)
                 if hasTitle then
                     Create("TextLabel", {
                         Text = title,
-                        Font = Enum.Font.GothamMedium,
+                        Font = FONT.Bold,
                         TextSize = 13,
                         TextColor3 = T.Text,
                         TextXAlignment = Enum.TextXAlignment.Left,
@@ -1343,7 +1484,7 @@ return function(env)
 
                 local button = Create("TextButton", {
                     Text = buttonText,
-                    Font = Enum.Font.GothamMedium,
+                    Font = FONT.Bold,
                     TextSize = 12,
                     TextColor3 = isDanger and T.Danger or T.AccentInk,
                     BackgroundColor3 = useColor,
@@ -1353,7 +1494,7 @@ return function(env)
                     AutoButtonColor = false,
                     Parent = row
                 })
-                AddCorner(button, 7)
+                AddCorner(button, 6)
                 if isDanger then
                     AddStroke(button, 1, T.Danger, 0.6)
                 end
@@ -1487,7 +1628,7 @@ return function(env)
         local resizeGrip = Create("TextButton", {
             Name = "ResizeGrip",
             Text = "↘",
-            Font = Enum.Font.GothamBold,
+            Font = FONT.Alt,
             TextSize = 14,
             TextColor3 = T.TextDark,
             BackgroundTransparency = 1,
