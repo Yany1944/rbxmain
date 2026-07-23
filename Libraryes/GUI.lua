@@ -811,11 +811,17 @@ return function(env)
         -- КОНТЕНТ (страницы вкладок) + ФУТЕР-СТАТУСБАР
         ----------------------------------------------------------------
 
+        -- Вертикальные поля контента — вдвое меньше боковых: по бокам EDGE,
+        -- сверху и снизу EDGE/2. Так область не «висит» в пустоте между
+        -- хедером и футером
         local pagesContainer = Create("Frame", {
             Name = "PagesContainer",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, SIDEBAR_W + 1 + EDGE, 0, HEADER_H + EDGE),
-            Size = UDim2.new(1, -(SIDEBAR_W + 1 + EDGE * 2), 1, -(HEADER_H + EDGE + FOOTER_H + EDGE)),
+            Position = UDim2.new(0, SIDEBAR_W + 1 + EDGE, 0, HEADER_H + EDGE / 2),
+            Size = UDim2.new(
+                1, -(SIDEBAR_W + 1 + EDGE * 2),
+                1, -(HEADER_H + EDGE / 2 + FOOTER_H + EDGE / 2)
+            ),
             Parent = mainFrame
         })
 
@@ -835,42 +841,16 @@ return function(env)
             Parent = mainFrame
         })
 
-        -- Чип роли: скрыт, пока MainScript не отдаст Handlers.GetRole
-        local roleChip = Create("Frame", {
-            Name = "RoleChip",
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, EDGE, 0, 0),
-            Size = UDim2.new(0, 140, 1, 0),
-            Visible = false,
-            Parent = footer
-        })
-        local roleDot = Create("Frame", {
-            BackgroundColor3 = T.TextDark,
-            Position = UDim2.new(0, 0, 0.5, -3),
-            Size = UDim2.new(0, 6, 0, 6),
-            BorderSizePixel = 0,
-            Parent = roleChip
-        })
-        AddCorner(roleDot, 3)
-        local roleText = Create("TextLabel", {
-            Text = "",
-            Font = FONT.Mono,
-            TextSize = TS.Status,
-            TextColor3 = T.TextDark,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 12, 0, 0),
-            Size = UDim2.new(0, 120, 1, 0),
-            Parent = roleChip
-        })
-
+        -- Чипа роли в футере больше нет: роль показывает инфо-блок сайдбара,
+        -- дублировать её внизу незачем. Пинг переехал влево на его место.
         local pingLabel = Create("TextLabel", {
             Text = "Ping: -- ms",
             Font = FONT.Mono,
             TextSize = TS.Status,
             TextColor3 = T.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0.5, -110, 0, 0),
+            Position = UDim2.new(0, EDGE, 0, 0),
             Size = UDim2.new(0, 220, 1, 0),
             Parent = footer
         })
@@ -888,34 +868,12 @@ return function(env)
             Parent = footer
         })
 
-        -- Раз в секунду обновляем пинг и роль; цикл умирает вместе с gui
-        local roleColorMap = {
-            Murderer = CONFIG.Colors.Murder,
-            Murder   = CONFIG.Colors.Murder,
-            Sheriff  = CONFIG.Colors.Sheriff,
-            Innocent = CONFIG.Colors.Innocent,
-        }
+        -- Раз в секунду обновляем пинг и сводку; цикл умирает вместе с gui
         task.spawn(function()
             while gui and gui.Parent do
                 pcall(function()
                     local ms = probePingMs()
                     pingLabel.Text = ms and string.format("Ping: %d ms", ms) or "Ping: -- ms"
-
-                    local getRole = Handlers.GetRole
-                    if getRole then
-                        local ok, role = pcall(getRole)
-                        if ok and type(role) == "string" and role ~= "" then
-                            local col = roleColorMap[role] or T.TextDark
-                            roleChip.Visible = true
-                            roleDot.BackgroundColor3 = col
-                            roleText.Text = role:upper()
-                            roleText.TextColor3 = col
-                        else
-                            roleChip.Visible = false
-                        end
-                    else
-                        roleChip.Visible = false
-                    end
 
                     -- Сводка в сайдбаре. Handlers необязательны: чего нет —
                     -- остаётся прочерк, ставить можно и через GUI.SetStat
@@ -2180,16 +2138,19 @@ return function(env)
                     })
                 end
 
-                -- Варианты кнопки Geist:
-                --   primary  (color = nil)  — заливка gray-1000, тёмный текст
-                --   error    (color = Red)  — заливка red-800, белый текст
-                --   custom   (свой цвет)    — заливка переданным цветом
+                -- Текст на кнопках всегда белый, поэтому и заливка везде
+                -- достаточно тёмная/насыщенная. Прежний primary был светло-серым
+                -- (gray-1000) с тёмным шрифтом — из-за него подписи и различались
+                -- по цвету; теперь это тёмная кнопка с рамкой (Geist secondary).
+                --   default (color = nil)  — тёмная заливка + рамка
+                --   error   (color = Red)  — заливка red-800
+                --   custom  (свой цвет)    — заливка переданным цветом
                 local isDanger = color == CONFIG.Colors.Red
-                local isPrimary = color == nil
-                local baseColor = isDanger and T.DangerBg or (isPrimary and T.Text or color)
+                local isDefault = color == nil
+                local baseColor = isDanger and T.DangerBg or (isDefault and T.Surface1 or color)
                 local hoverColor
-                if isPrimary then
-                    hoverColor = Color3.fromRGB(255, 255, 255)          -- primary hover: белее
+                if isDefault then
+                    hoverColor = G.Gray200
                 elseif isDanger then
                     hoverColor = Color3.fromRGB(233, 68, 74)
                 else
@@ -2204,7 +2165,7 @@ return function(env)
                     Text = buttonText,
                     Font = FONT.Bold,
                     TextSize = TS.Button,
-                    TextColor3 = isDanger and Color3.fromRGB(255, 255, 255) or T.AccentInk,
+                    TextColor3 = Color3.fromRGB(255, 255, 255),
                     BackgroundColor3 = baseColor,
                     -- 12 + 20 + 6 + 32 + 12 = 82 при заголовке; иначе строго по центру
                     Position = hasTitle and UDim2.new(0, EDGE, 0, 38) or UDim2.new(0, EDGE, 0.5, -CTRL_H / 2),
@@ -2213,6 +2174,9 @@ return function(env)
                     Parent = row
                 })
                 AddCorner(button, R_CTRL)
+                if isDefault then
+                    AddStroke(button, STROKE_W, T.Border)
+                end
 
                 button.MouseButton1Click:Connect(function()
                     callHandler(handlerKey)
