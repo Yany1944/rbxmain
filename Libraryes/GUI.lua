@@ -123,7 +123,8 @@ return function(env)
     local EDGE         = 14   -- горизонтальный отступ внутри карточки
     local COL_GAP      = 14   -- зазор между колонками
     local CARD_GAP     = 12   -- зазор между карточками
-    local CARD_PAD_B   = 6    -- нижний воздух карточки
+    local ROW_INSET_X  = 4    -- отступ подсветки строки от боков карточки
+    local ROW_INSET_Y  = 2    -- то же по вертикали
     local NAV_H        = 36   -- высота пункта сайдбара
     local TITLE_GAP    = 6    -- зазор между заголовком группы и её карточкой
     local PAGE_PAD     = 2    -- запас в колонке, чтобы не срезалась обводка карточек
@@ -1426,9 +1427,10 @@ return function(env)
                     SortOrder = Enum.SortOrder.LayoutOrder,
                     Parent = sec
                 })
+                -- Высота ровно по содержимому: пустая полоса под последней
+                -- строкой не нужна, воздух уже заложен внутрь самих строк
                 layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                    sec.Size = UDim2.new(1, 0, 0,
-                        layout.AbsoluteContentSize.Y + CARD_PAD_B * 2)
+                    sec.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y)
                 end)
 
                 local data = {frame = sec, holder = holder, layout = layout, rows = {}, order = 1}
@@ -1451,18 +1453,33 @@ return function(env)
                 local sep = nil
                 data.order = data.order + 1
                 local row = Create("Frame", {
-                    -- hover-подложка строки = gray-100 (Geist «default background»)
-                    BackgroundColor3 = G.Gray100,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, height),
                     LayoutOrder = data.order,
                     Parent = data.frame
                 })
+
+                -- Подсветку рисует не сама строка, а вложенная скруглённая
+                -- подложка с отступом от краёв. Прямоугольник во всю ширину
+                -- перекрывал скругления карточки — верхняя и нижняя строки
+                -- «квадратили» ей углы. Создаётся первой, поэтому лежит под
+                -- текстом и контролами.
+                local fill = Create("Frame", {
+                    Name = "Fill",
+                    BackgroundColor3 = G.Gray100,
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, ROW_INSET_X, 0, ROW_INSET_Y),
+                    Size = UDim2.new(1, -ROW_INSET_X * 2, 1, -ROW_INSET_Y * 2),
+                    BorderSizePixel = 0,
+                    Parent = row
+                })
+                AddCorner(fill, R_CTRL)
+
                 row.MouseEnter:Connect(function()
-                    TweenService:Create(row, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
+                    TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
                 end)
                 row.MouseLeave:Connect(function()
-                    TweenService:Create(row, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+                    TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
                 end)
                 table.insert(data.rows, {
                     row = row,
