@@ -7103,7 +7103,7 @@ do
         MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
         MainTab:CreateSection("TELEPORT & OTHER", "right")
-        MainTab:CreateKeybindButton("Click TP (Hold Key)", "clicktp", "ClickTP")
+        MainTab:CreateKeybindButton("Click TP (Hold Key + LMB)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
         MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
         ----------------------------------------------------------------------------
@@ -7115,16 +7115,16 @@ do
 
         VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
-        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
-        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",true)
         VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 
         VisualsTab:CreateSection("Misc", "right")
-        VisualsTab:CreateToggle("Enable Notifications", "Show role and gun notifications", "NotificationsEnabled",false)
-        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
-        VisualsTab:CreateToggle("UI Only", "Hide all UI except script GUI", "UIOnly", true)
+        VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", true)
+        VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly", true)
 end
 
 do
@@ -7133,12 +7133,12 @@ do
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
         --CombatTab:CreateToggle("Murderer Kill Aura", "Auto kill nearby players", "KillAura")
-        CombatTab:CreateKeybindButton("Instant Kill All (Murderer)", "instantkillall", "InstantKillAll")
+        CombatTab:CreateKeybindButton("Instant Kill All", "instantkillall", "InstantKillAll")
 
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
-        CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
-        CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
+        CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer")
+        CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
 end
 
@@ -7147,14 +7147,14 @@ do
 
         FarmTab:CreateSection("AUTO FARM")
         FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", _G.AUTOEXEC_ENABLED)
-        FarmTab:CreateToggle("XP Farm", "Auto win rounds: Kill as Murderer, Shoot as Sheriff, Fling as Innocent", "XPFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("XP Farm", "Auto win rounds", "XPFarm", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", true)
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
 
         FarmTab:CreateSection("FARM TUNING", "right")
-        FarmTab:CreateSlider("Fly Speed", "Flying speed (10-30)", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 0.5)
-        FarmTab:CreateSlider("TP Delay", "Delay between TPs (0.5-5.0)", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("No Render", "Disable rendering to reduce GPU usage", "AFKMode", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateSlider("Fly Speed", "Flying speed", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+        FarmTab:CreateSlider("TP Delay", "Delay between first TP", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
+        FarmTab:CreateToggle("No Render", "Disable rendering", "AFKMode", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 60 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 60 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
@@ -7176,15 +7176,15 @@ do
 
         FunTab:CreateSection("FLING SETTINGS")
         FunTab:CreateDropdown("Fling Method", "Vio: contact, stronger. NaN: precise aim, weaker", Fling.MethodChoices, Fling.MethodLabel(State.FlingMethod), "FlingMethod")
-        FunTab:CreateSlider("Prediction Range", "Lead time in seconds", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
+        FunTab:CreateSlider("Prediction Range", "Lead time", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
 
         FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", false)
 
         FunTab:CreateSection("FLING PLAYER", "right")
-        FunTab:CreatePlayerDropdown("Select Target", "Choose player to fling", "SelectedPlayerForFling")
-        FunTab:CreateKeybindButton("Fling Selected Player", "fling", "FlingPlayer")
+        FunTab:CreatePlayerDropdown("Select Target", "Choose target to fling", "SelectedPlayerForFling")
+        FunTab:CreateKeybindButton("Fling Selected Target", "fling", "FlingPlayer")
 
         FunTab:CreateSection("FLING ROLE", "right")
         FunTab:CreateButton("", "Fling Murderer", Color3.fromRGB(255, 85, 85), "FlingMurderer")
