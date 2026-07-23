@@ -6840,15 +6840,10 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- СВОДКА СЕССИИ (инфо-блок в левом нижнем углу сайдбара нового GUI)
 -- ══════════════════════════════════════════════════════════════════════════════
--- Монеты — баланс аккаунта из витрины шопа (тот же путь, что раньше отдавал
--- удалённый счётчик в хедере). Coins/h — прирост баланса от старта сессии.
--- Роль — из State.PlayerData (ремоут PlayerDataChanged), с фолбэком по предмету
--- в руках, ровно как её определяет getMurder/findRoleHolder.
--- Всё полями в State: у Luau лимит 200 локальных на область, лишние не заводим.
 
 State.Session = {
-    Version    = "6.0",
-    StartedAt  = tick(),
+    Version    = "2.2",
+    StartedAt  = nil,
     StartCoins = nil,
 }
 
@@ -6865,12 +6860,15 @@ function State.Session.ReadCoins()
         return tonumber((tostring(label.Text):gsub(",", "")))
     end)
     if ok and type(value) == "number" then
-        if not State.Session.StartCoins then
-            State.Session.StartCoins = value
-        end
         return value
     end
     return nil
+end
+
+-- Точка отсчёта Coins/h — вызывается при включении автофарма
+function State.Session.MarkFarmStart()
+    State.Session.StartedAt = tick()
+    State.Session.StartCoins = State.Session.ReadCoins() or 0
 end
 
 function State.Session.GetCoinsText()
@@ -6880,8 +6878,10 @@ function State.Session.GetCoinsText()
 end
 
 function State.Session.GetRateText()
+    -- нет базовой точки — фарм ещё не запускали
+    if not State.Session.StartedAt or not State.Session.StartCoins then return "—" end
     local coins = State.Session.ReadCoins()
-    if not coins or not State.Session.StartCoins then return nil end
+    if not coins then return nil end
     local hours = (tick() - State.Session.StartedAt) / 3600
     if hours < (1 / 60) then return "—" end
     local gained = coins - State.Session.StartCoins
@@ -6978,6 +6978,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             if on then
                 State.CoinBlacklist = {}
                 State.StartSessionCoins = GetCollectedCoinsCount()
+                State.Session.MarkFarmStart()   -- точка отсчёта Coins/h
                 ShowNotification("Auto Farm: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
                 StartAutoFarm()
             else
