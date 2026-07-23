@@ -743,8 +743,9 @@ local function StartAimbot()
     AimbotState.FovCircleOutline.Visible = State.AimbotConfig.FovCheck
     AimbotState.FovCircleOutline.Radius = State.AimbotConfig.Fov
     AimbotState.FovCircleOutline.Color = colRgb(0, 0, 0)
-    -- Тёмная обводка чуть плотнее самого круга — так у него читается край
-    AimbotState.FovCircleOutline.Transparency = math.clamp(State.AimbotConfig.FovTransparency + 0.1, 0, 1)
+    -- Обводка живёт на том же значении, что и сам круг: ползунок гасит их
+    -- вместе, иначе на нуле оставался бы висеть тёмный контур
+    AimbotState.FovCircleOutline.Transparency = State.AimbotConfig.FovTransparency
     AimbotState.FovCircleOutline.ZIndex = 1
 
     local function isValidTarget(root, hum)
@@ -9038,7 +9039,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
                 _G.AimbotState.FovCircle.Transparency = value
             end
             if _G.AimbotState and _G.AimbotState.FovCircleOutline then
-                _G.AimbotState.FovCircleOutline.Transparency = math.clamp(value + 0.1, 0, 1)
+                _G.AimbotState.FovCircleOutline.Transparency = value
             end
         end,
 
