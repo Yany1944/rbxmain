@@ -99,7 +99,7 @@ return function(env)
         Logo      = 20,   -- heading-md
         LogoSub   = 13,
         TabTitle  = 22,   -- заголовок вкладки — самый крупный текст окна
-        Nav       = 15,
+        Nav       = 16,
         Section   = 15,
         Title     = 16,   -- label
         Desc      = 14,   -- body-md
@@ -109,8 +109,8 @@ return function(env)
         Status    = 13,
         Option    = 15,
         Search    = 15,
-        StatLabel = 12,   -- подписи инфо-блока в сайдбаре
-        StatValue = 13,
+        StatLabel = 13,   -- подписи инфо-блока в сайдбаре
+        StatValue = 14,
     }
 
     -- Геометрия Geist: --ds-size-medium 36 под увеличенный кегль,
@@ -124,6 +124,8 @@ return function(env)
     local COL_GAP      = 14   -- зазор между колонками
     local CARD_GAP     = 12   -- зазор между карточками
     local CARD_PAD_B   = 6    -- нижний воздух карточки
+    local NAV_H        = 36   -- высота пункта сайдбара
+    local TITLE_GAP    = 6    -- зазор между заголовком группы и её карточкой
     local PAGE_PAD     = 2    -- запас в колонке, чтобы не срезалась обводка карточек
     local R_CTRL       = 6    -- --geist-radius
     local R_CARD       = 12   -- карточка секции, окно, поповер
@@ -484,6 +486,16 @@ return function(env)
             Parent = mainFrame
         })
 
+        -- Полоса под логотипом ровно на высоте HEADER_H — вместе с линией под
+        -- хедером даёт одну сплошную горизонталь через всё окно
+        Hairline({
+            Name = "SidebarHeaderSep",
+            BackgroundColor3 = T.Border,
+            Position = UDim2.new(0, 0, 0, HEADER_H),
+            Size = UDim2.new(0, SIDEBAR_W, 0, 1),
+            Parent = mainFrame
+        })
+
         -- Логотип бренда. Исходник 1920x1080, светящийся глиф «V» занимает
         -- по центру всего ~304px высоты — при обычном кропе всего кадра знак
         -- утонул бы в пустом поле. Резать пиксельным ImageRect нельзя:
@@ -558,14 +570,16 @@ return function(env)
 
         -- Инфо-блок внизу сайдбара: COINS / NAME / COINS PER HOUR / ROLE /
         -- VERSION. Высота = 5 строк + подпись + отступы
-        local STAT_ROW_H = 18
+        local STAT_ROW_H = 22
         local STAT_KEYS = {"Name", "Role", "Coins", "CoinsPerHour", "Version"}
         local STAT_TITLES = {
             Name = "NAME", Role = "ROLE", Coins = "COINS",
             CoinsPerHour = "COINS/H", Version = "VER",
         }
-        local STATS_H = #STAT_KEYS * STAT_ROW_H + 14
-        local SIDEBAR_BOTTOM = STATS_H + 32   -- блок + строка подписи
+        local STATS_TOGGLE_H = 16          -- полоска сворачивания снизу блока
+        local STATS_ROWS_H = #STAT_KEYS * STAT_ROW_H + 12
+        local STATS_H = STATS_ROWS_H + STATS_TOGGLE_H
+        local SIDEBAR_BOTTOM = STATS_H + 30   -- блок + строка подписи
 
         local navScroll = Create("ScrollingFrame", {
             Name = "NavScroll",
@@ -607,36 +621,43 @@ return function(env)
             Parent = statsFrame
         })
 
-        -- Кнопка сворачивания блока: шеврон у правого края линии-разделителя
         local statsRows = Create("Frame", {
             Name = "Rows",
             BackgroundTransparency = 1,
             Position = UDim2.new(0, 0, 0, 0),
-            Size = UDim2.new(1, 0, 1, 0),
+            Size = UDim2.new(1, 0, 0, STATS_ROWS_H),
             Parent = statsFrame
         })
 
+        -- Сворачивание — полосой под блоком, во всю его ширину
         local statsToggle = Create("TextButton", {
             Name = "StatsToggle",
             Text = "",
             BackgroundColor3 = G.Gray200,
             BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(1, 0),
-            Position = UDim2.new(1, 0, 0, 2),
-            Size = UDim2.new(0, 18, 0, 14),
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.new(0, 0, 1, 0),
+            Size = UDim2.new(1, 0, 0, STATS_TOGGLE_H),
             AutoButtonColor = false,
             ZIndex = 3,
             Parent = statsFrame
         })
         AddCorner(statsToggle, R_SM)
-        local _, statsChevA, statsChevB = glyphChevron(statsToggle)
+        local statsChev, statsChevA, statsChevB = glyphChevron(statsToggle)
+        -- шеврон по центру полосы, а не у правого края
+        statsChev.AnchorPoint = Vector2.new(0.5, 0.5)
+        statsChev.Position = UDim2.new(0.5, 0, 0.5, 0)
 
         local statsHidden = getgenv().Violite_StatsHidden == true
         local function applyStatsHidden()
             statsRows.Visible = not statsHidden
-            -- свёрнутый блок: шеврон смотрит вверх
+            -- свёрнутый блок: шеврон смотрит вверх, полоса прижимается к низу
             statsChevA.Rotation = statsHidden and 45 or -45
             statsChevB.Rotation = statsHidden and -45 or 45
+            statsFrame.Size = UDim2.new(0, SIDEBAR_W - EDGE * 2, 0,
+                statsHidden and STATS_TOGGLE_H or STATS_H)
+            statsFrame.Position = UDim2.new(0, EDGE, 1,
+                -((statsHidden and STATS_TOGGLE_H or STATS_H) + 30))
         end
 
         statsToggle.MouseButton1Click:Connect(function()
@@ -1020,7 +1041,7 @@ return function(env)
                         firstShown = false
                     end
                 end
-                sec.frame.Visible = anyVisible
+                (sec.holder or sec.frame).Visible = anyVisible
             end
         end
 
@@ -1029,7 +1050,7 @@ return function(env)
         -- геометрия из Frame/UIStroke, без внешних ассетов
         ----------------------------------------------------------------
         local ICON_STROKE = 1.5
-        local ICON_SIZE = 18
+        local ICON_SIZE = 20
 
         -- Имя вкладки → имя иконки в паке geist (WindUI)
         local TAB_ICON_NAMES = {
@@ -1195,7 +1216,7 @@ return function(env)
                 Text = "",
                 BackgroundColor3 = G.Gray200,
                 BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, CTRL_H),
+                Size = UDim2.new(1, 0, 0, NAV_H),
                 AutoButtonColor = false,
                 Parent = navScroll
             })
@@ -1354,6 +1375,39 @@ return function(env)
             --------------------------------------------
 
             local function newSection(title)
+                -- Группа = заголовок НАД карточкой + сама карточка. Раньше
+                -- заголовок лежал внутри рамки и читался как первая строка
+                -- списка; вынесенный наружу он работает как подпись к блоку
+                local holder = Create("Frame", {
+                    Name = (title or "Section") .. "Group",
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    Parent = currentPage
+                })
+                Create("UIListLayout", {
+                    Padding = UDim.new(0, TITLE_GAP),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                    Parent = holder
+                })
+
+                if title and title ~= "" then
+                    local head = Create("TextLabel", {
+                        Name = "GroupTitle",
+                        Text = title,
+                        Font = FONT.Bold,
+                        TextSize = TS.Section,
+                        TextColor3 = T.TextDark,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextYAlignment = Enum.TextYAlignment.Bottom,
+                        BackgroundTransparency = 1,
+                        Size = UDim2.new(1, 0, 0, 20),
+                        LayoutOrder = 1,
+                        Parent = holder
+                    })
+                    Create("UIPadding", {PaddingLeft = UDim.new(0, 2), Parent = head})
+                end
+
                 local sec = Create("Frame", {
                     Name = (title or "Section") .. "Card",
                     BackgroundColor3 = T.Surface1,
@@ -1361,7 +1415,8 @@ return function(env)
                     Size = UDim2.new(1, 0, 0, 0),
                     ClipsDescendants = true,
                     BorderSizePixel = 0,
-                    Parent = currentPage
+                    LayoutOrder = 2,
+                    Parent = holder
                 })
                 AddCorner(sec, R_CARD)
                 AddStroke(sec, STROKE_W, T.Border)
@@ -1372,26 +1427,11 @@ return function(env)
                     Parent = sec
                 })
                 layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                    sec.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y + CARD_PAD_B)
+                    sec.Size = UDim2.new(1, 0, 0,
+                        layout.AbsoluteContentSize.Y + CARD_PAD_B * 2)
                 end)
 
-                -- Шапка карточки: компактная строка 32px, gray-700
-                if title and title ~= "" then
-                    local head = Create("TextLabel", {
-                        Text = title,
-                        Font = FONT.Bold,
-                        TextSize = TS.Section,
-                        TextColor3 = T.TextDark,
-                        TextXAlignment = Enum.TextXAlignment.Left,
-                        BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 32),
-                        LayoutOrder = 1,
-                        Parent = sec
-                    })
-                    Create("UIPadding", {PaddingLeft = UDim.new(0, EDGE), PaddingTop = UDim.new(0, 8), Parent = head})
-                end
-
-                local data = {frame = sec, layout = layout, rows = {}, order = 1}
+                local data = {frame = sec, holder = holder, layout = layout, rows = {}, order = 1}
                 table.insert(sections, data)
                 return data
             end
