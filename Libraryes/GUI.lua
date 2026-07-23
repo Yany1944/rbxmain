@@ -539,14 +539,32 @@ return function(env)
         return snap
     end
 
-    -- Применение снимка: неизвестные ключи пропускаются, каждый Set в pcall
+    -- Применение снимка. Идём по РЕЕСТРУ, а не по файлу: контрол, которого
+    -- в конфиге нет (старый файл, новая фича), возвращается к своему дефолту —
+    -- иначе после смены конфига на экране оставались настройки предыдущего.
+    -- Значения (слайдеры/поля/списки) применяются до тоглов: фича, которую
+    -- тогл включает, должна стартовать уже с нужными параметрами.
+    -- Совпавшие значения не трогаем: повторный вызов тяжёлых хендлеров
+    -- (автофарм и т.п.) перезапускал бы их потоки на ровном месте.
     function GUI.ApplyFlagSnapshot(snap)
         if type(snap) ~= "table" then return end
-        for key, value in pairs(snap) do
-            local flag = GUI.Flags[key]
-            if flag then
-                pcall(flag.Set, value, true)
-            end
+
+        local function applyOne(key, flag)
+            local value = snap[key]
+            if value == nil then value = flag.Default end
+            if value == nil then return end
+
+            local okGet, current = pcall(flag.Get)
+            if okGet and current == value then return end
+
+            pcall(flag.Set, value, true)
+        end
+
+        for key, flag in pairs(GUI.Flags) do
+            if flag.Kind ~= "toggle" then applyOne(key, flag) end
+        end
+        for key, flag in pairs(GUI.Flags) do
+            if flag.Kind == "toggle" then applyOne(key, flag) end
         end
     end
 
@@ -1542,6 +1560,9 @@ return function(env)
             opts = opts or {}
             local headerH = opts.headerH or 0
 
+            -- Active = true у всех подложек списка: без этого клик по пустому
+            -- месту поповера проваливался на контрол под ним (поповер висит
+            -- поверх строк вкладки и часто перекрывает поля ввода)
             local root, headerFrame, overlay
             if headerH > 0 then
                 root = Create("Frame", {
@@ -1551,6 +1572,7 @@ return function(env)
                     Visible = false,
                     ClipsDescendants = true,
                     BorderSizePixel = 0,
+                    Active = true,
                     ZIndex = 1000,
                     Parent = mainFrame
                 })
@@ -1561,6 +1583,7 @@ return function(env)
                     Name = "PanelHeader",
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, headerH),
+                    Active = true,
                     ZIndex = 1001,
                     Parent = root
                 })
@@ -1574,6 +1597,7 @@ return function(env)
                     ScrollBarImageColor3 = G.Gray500,
                     ClipsDescendants = true,
                     BorderSizePixel = 0,
+                    Active = true,
                     ZIndex = 1000,
                     Parent = root
                 })
@@ -1590,6 +1614,7 @@ return function(env)
                     ScrollBarImageColor3 = G.Gray500,
                     ClipsDescendants = true,
                     BorderSizePixel = 0,
+                    Active = true,
                     ZIndex = 1000,
                     Parent = mainFrame
                 })

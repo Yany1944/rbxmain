@@ -7470,16 +7470,16 @@ do
 
         VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
-        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
-        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",true)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
         VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
-        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", true)
-        VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly", true)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
+        VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly", false)
 end
 
 do
@@ -7503,7 +7503,7 @@ do
         FarmTab:CreateSection("AUTO FARM")
         FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", false)
         FarmTab:CreateToggle("XP Farm", "Auto win rounds", "XPFarm", false)
-        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", true)
+        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", false)
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
 
         FarmTab:CreateSection("FARM TUNING", "right")
@@ -7515,7 +7515,7 @@ do
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
         FarmTab:CreateSection("VOTE SPAM", "right")
-        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
+        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", false)
         FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, "VoteGoal")
 end
 
@@ -7534,7 +7534,7 @@ do
         FunTab:CreateSlider("Prediction Range", "Lead time", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
 
         FunTab:CreateSection("ANTI-FLING", "right")
-        FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
+        FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",false)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", false)
 
         FunTab:CreateSection("FLING PLAYER", "right")
@@ -7552,7 +7552,7 @@ do
         UtilityTab:CreateSection("SERVER MANAGEMENT")
         UtilityTab:CreateButton("", "Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
         UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
-        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
+        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",false)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
         UtilityTab:CreateSection("DANGER ZONE", "right")
