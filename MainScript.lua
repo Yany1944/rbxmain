@@ -9690,7 +9690,7 @@ do
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
 
         FarmTab:CreateSection("FARM TUNING", "right")
-        FarmTab:CreateSlider("Fly Speed", "Flying speed", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
+        FarmTab:CreateSlider("Fly Speed", "Flying speed", 15, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 0.5)
         FarmTab:CreateSlider("TP Delay", "Delay between first TP", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("No Render", "Disable rendering", "AFKMode")
         FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 25 min", "HandleAutoReconnect", false)
