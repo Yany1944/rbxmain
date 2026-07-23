@@ -6672,6 +6672,80 @@ local function HandleAutoReconnect(enabled)
         end
     end)
 end
+-- ══════════════════════════════════════════════════════════════════════════════
+-- СВОДКА СЕССИИ (инфо-блок в левом нижнем углу сайдбара нового GUI)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Монеты — баланс аккаунта из витрины шопа (тот же путь, что раньше отдавал
+-- удалённый счётчик в хедере). Coins/h — прирост баланса от старта сессии.
+-- Роль — из State.PlayerData (ремоут PlayerDataChanged), с фолбэком по предмету
+-- в руках, ровно как её определяет getMurder/findRoleHolder.
+-- Всё полями в State: у Luau лимит 200 локальных на область, лишние не заводим.
+
+State.Session = {
+    Version    = "6.0",
+    StartedAt  = tick(),
+    StartCoins = nil,
+}
+
+function State.Session.FormatThousands(n)
+    local s = tostring(math.floor(n))
+    local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    return (out:gsub("^,", ""))
+end
+
+function State.Session.ReadCoins()
+    local ok, value = pcall(function()
+        local label = LocalPlayer.PlayerGui
+            .CrossPlatform.Shop.Medium.Title.Coins.Container.Amount
+        return tonumber((tostring(label.Text):gsub(",", "")))
+    end)
+    if ok and type(value) == "number" then
+        if not State.Session.StartCoins then
+            State.Session.StartCoins = value
+        end
+        return value
+    end
+    return nil
+end
+
+function State.Session.GetCoinsText()
+    local coins = State.Session.ReadCoins()
+    if not coins then return nil end
+    return State.Session.FormatThousands(coins)
+end
+
+function State.Session.GetRateText()
+    local coins = State.Session.ReadCoins()
+    if not coins or not State.Session.StartCoins then return nil end
+    local hours = (tick() - State.Session.StartedAt) / 3600
+    if hours < (1 / 60) then return "—" end
+    local gained = coins - State.Session.StartCoins
+    return State.Session.FormatThousands(gained / hours)
+end
+
+function State.Session.GetRole()
+    local name = LocalPlayer and LocalPlayer.Name
+    if name and State.PlayerData then
+        local data = State.PlayerData[name]
+        if data and type(data.Role) == "string" and data.Role ~= "" then
+            return data.Role
+        end
+    end
+    local ok, role = pcall(function()
+        local char = LocalPlayer.Character
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        local function has(item)
+            return (char and char:FindFirstChild(item) ~= nil)
+                or (bp and bp:FindFirstChild(item) ~= nil)
+        end
+        if has("Knife") then return "Murderer" end
+        if has("Gun") then return "Sheriff" end
+        return "Innocent"
+    end)
+    if ok then return role end
+    return nil
+end
+
 -- А ТЕПЕРЬ создаём GUI с Handlers
 local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
@@ -6804,76 +6878,20 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         AutoLoadOnTeleport = function(on)
             State.AutoLoadOnTeleport = on
         end,
+
+        -- ── Сводка для инфо-блока в сайдбаре ─────────────────────────────
+        GetCoins        = function() return State.Session.GetCoinsText() end,
+        GetCoinsPerHour = function() return State.Session.GetRateText() end,
+        GetVersion      = function() return State.Session.Version end,
+        GetRole         = function() return State.Session.GetRole() end,
     }
 })
 
 GUI.Init()
 
--- СИСТЕМА МОНЕТ (только текущий баланс)
-task.spawn(function()
-    task.wait(0.5)
-
-    local header = State.UIElements.MainGui and State.UIElements.MainGui:FindFirstChild("MainFrame")
-    if header then header = header:FindFirstChild("Header") end
-    if not header then return end
-
-    local function parseNumber(text)
-        if not text then return 0 end
-        local cleaned = tostring(text):gsub(",", "")
-        return tonumber(cleaned) or 0
-    end
-
-    local function formatWithCommas(n)
-        return tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-    end
-
-    local coinsLabel = Instance.new("TextLabel")
-    coinsLabel.Name = "CoinsDisplay"
-    coinsLabel.Text = ""
-    coinsLabel.RichText = true
-    coinsLabel.Font = Enum.Font.GothamBold
-    coinsLabel.TextSize = 14
-    coinsLabel.TextColor3 = CONFIG.Colors.Text
-    coinsLabel.TextXAlignment = Enum.TextXAlignment.Right
-    coinsLabel.BackgroundTransparency = 1
-    coinsLabel.TextScaled = false
-    coinsLabel.Parent = header
-
-    local function updateCoins(coins)
-        local formatted = formatWithCommas(coins)
-        coinsLabel.Text = string.format("Coins: <font color=\"rgb(255, 215, 110)\">%s</font>", formatted)
-
-        local displayLength = #formatted
-        local width = math.clamp(60 + (displayLength * 8), 85, 150)
-        coinsLabel.Size = UDim2.new(0, width, 1, 0)
-        coinsLabel.Position = UDim2.new(1, -(45 + width), 0, 0)
-    end
-
-    task.wait(1.5)
-
-    local success, coinsElement = pcall(function()
-        return LocalPlayer.PlayerGui:WaitForChild("CrossPlatform", 10)
-            :WaitForChild("Shop", 10)
-            :WaitForChild("Medium", 10)
-            :WaitForChild("Title", 10)
-            :WaitForChild("Coins", 10)
-            :WaitForChild("Container", 10)
-            :WaitForChild("Amount", 10)
-    end)
-
-    if success and coinsElement then
-        updateCoins(parseNumber(coinsElement.Text))
-
-        local connection = coinsElement:GetPropertyChangedSignal("Text"):Connect(function()
-            updateCoins(parseNumber(coinsElement.Text))
-        end)
-        table.insert(State.Connections, connection)
-    else
-        coinsLabel.Text = "Coins: <font color=\"rgb(255, 0, 0)\">N/A</font>"
-        coinsLabel.Size = UDim2.new(0, 100, 1, 0)
-        coinsLabel.Position = UDim2.new(1, -145, 0, 0)
-    end
-end)
+-- Отдельного счётчика монет в хедере больше нет: баланс, роль и Coins/h
+-- показывает инфо-блок в левом нижнем углу сайдбара (State.Session ниже,
+-- значения отдаются через Handlers.GetCoins / GetRole / GetCoinsPerHour).
 
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
@@ -6987,13 +7005,13 @@ do
     local UtilityTab = GUI.CreateTab("Server")
 
         UtilityTab:CreateSection("SERVER MANAGEMENT")
-        UtilityTab:CreateButton("", "🔄 Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
-        UtilityTab:CreateButton("", "🌐 Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+        UtilityTab:CreateButton("", "Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
+        UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
         UtilityTab:CreateSection("DANGER ZONE", "right")
-        UtilityTab:CreateButton("", "💣 SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
+        UtilityTab:CreateButton("", "SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
 ---------
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
