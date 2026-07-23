@@ -170,6 +170,10 @@ local State = {
     CanShootMurderer = true,
     ShootCooldown = 3,
     ShootMurdererMode = "Magic",
+    -- Доп. лид предикта стрельбы (секунды) ПОВЕРХ пинга. Покрывает буфер
+    -- интерполяции чужих персонажей (~0.08-0.11с) + запас. Аналог SkidLead у
+    -- флинга — крутится под свой пинг/executor. Итог: t = ping + ShootLead.
+    ShootLead = 0.09,
     
     -- Auto Farm
     AutoFarmEnabled = false,
@@ -7118,17 +7122,23 @@ shootMurderer = function(forceMagic)
         return
     end
     
+    -- Персонаж может быть nil (респавн/смерть) — без него стрелять нечем
+    local shooterChar = LocalPlayer.Character
+    if not shooterChar then return end
+    local shooterBackpack = LocalPlayer:FindFirstChild("Backpack")
+
     -- МГНОВЕННАЯ ЭКИПИРОВКА ПИСТОЛЕТА (С фиксом репликации)
-    local gun = LocalPlayer.Character:FindFirstChild("Gun")
-    
+    local gun = shooterChar:FindFirstChild("Gun")
+
     if not gun then
-        if LocalPlayer.Backpack:FindFirstChild("Gun") then
-            local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        local backpackGun = shooterBackpack and shooterBackpack:FindFirstChild("Gun")
+        if backpackGun then
+            local hum = shooterChar:FindFirstChild("Humanoid")
             if hum then
-                hum:EquipTool(LocalPlayer.Backpack:FindFirstChild("Gun"))
+                hum:EquipTool(backpackGun)
                 -- ВАЖНО: Микро-задержка, чтобы сервер успел понять, что оружие в руках
                 task.wait(0.03)
-                gun = LocalPlayer.Character:FindFirstChild("Gun")
+                gun = shooterChar:FindFirstChild("Gun")
             end
         end
         
@@ -7181,7 +7191,7 @@ shootMurderer = function(forceMagic)
         -- === MAGIC MODE: Телепортация пули (текущая логика) ===
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + 0.05
+        local predictionTime = (pingValue / 1000) + (State.ShootLead or 0.09)
         
         local enemyVelocity = murdererHRP.AssemblyLinearVelocity
         -- Интент-предикт: горизонталь по MoveDirection, вертикаль парабола + пол
@@ -7230,35 +7240,16 @@ shootMurderer = function(forceMagic)
         -- 2. ПРЕДИКЦИЯ: горизонталь по интенту, вертикаль парабола + пол
         local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
         local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + 0.05
+        local predictionTime = (pingValue / 1000) + (State.ShootLead or 0.09)
 
         local predictedPos = predictAimPoint(murdererHRP, murdererHum, predictionTime)
 
-        -- 3. LOS-ГЕЙТ: сервер origin не валидирует, но луч origin→target идёт от
-        --    дула и его может перекрыть стена/другой игрок → выстрел уходит «в
-        --    воздух». Проверяем прямую видимость дуло→точка; если перекрыто —
-        --    разово двигаем origin вплотную к цели (гарантированно чистый короткий
-        --    луч сквозь тело). Пока LOS чист, стреляем от дула — Silent выглядит
-        --    легитимно; magic-origin включается только когда иначе точно промах.
-        local originPos = muzzlePosition
-        local losParams = RaycastParams.new()
-        losParams.FilterType = Enum.RaycastFilterType.Exclude
-        losParams.FilterDescendantsInstances = { LocalPlayer.Character }
-        local dirToTarget = predictedPos - muzzlePosition
-        local losHit = dirToTarget.Magnitude > 0.05
-            and Workspace:Raycast(muzzlePosition, dirToTarget, losParams)
-            or nil
-        local losClear = (not losHit) or losHit.Instance:IsDescendantOf(murderer.Character)
-        if not losClear then
-            local dirUnit = dirToTarget.Magnitude > 0 and dirToTarget.Unit
-                or murdererHRP.CFrame.LookVector
-            -- 2.5 студа перед целью со стороны стрелка: внутри/у самого тела,
-            -- между этой точкой и центром стены быть уже не может
-            originPos = predictedPos - dirUnit * 2.5
-        end
-
+        -- 3. Чистый Silent: origin ВСЕГДА дуло, target — предсказанная точка на теле.
+        --    Луч origin→target идёт от пистолета; стена между вами ловит пулю — это
+        --    и есть честный сайлент. Никакого magic-origin/пробива стен: вся ставка
+        --    на точность предикта (predictAimPoint), а не на подмену источника.
         argsShootRemote = {
-            [1] = CFrame.lookAt(originPos, predictedPos),
+            [1] = CFrame.lookAt(muzzlePosition, predictedPos),
             [2] = CFrame.new(predictedPos)
         }
     end
@@ -7401,8 +7392,10 @@ local function EnableInstantPickup()
                     continue
                 end
                 
-                if LocalPlayer.Character:FindFirstChild("Gun") or 
-                   LocalPlayer.Backpack:FindFirstChild("Gun") then
+                local myChar = LocalPlayer.Character
+                local myBackpack = LocalPlayer:FindFirstChild("Backpack")
+                if (myChar and myChar:FindFirstChild("Gun")) or
+                   (myBackpack and myBackpack:FindFirstChild("Gun")) then
                     lastAttemptedGun = gun
                     continue
                 end
@@ -7418,8 +7411,10 @@ local function EnableInstantPickup()
                     pickupGun(true)
                     task.wait(0.15)
                     
-                    if LocalPlayer.Character:FindFirstChild("Gun") or 
-                       LocalPlayer.Backpack:FindFirstChild("Gun") then
+                    local curChar = LocalPlayer.Character
+                    local curBackpack = LocalPlayer:FindFirstChild("Backpack")
+                    if (curChar and curChar:FindFirstChild("Gun")) or
+                       (curBackpack and curBackpack:FindFirstChild("Gun")) then
                         pickupSuccess = true
                         
                         if State.NotificationsEnabled then
@@ -8909,6 +8904,8 @@ local GUI = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Yany1944/rbxmai
             State.ShootMurdererMode = value
         end,
 
+        ShootLead = function(v) State.ShootLead = math.clamp(v, 0, 0.2) end,
+
         FlySpeed = function(value)
             State.FlySpeed = value
         end,
@@ -9099,6 +9096,7 @@ do
 
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
+        CombatTab:CreateSlider("Shoot Lead", "Prediction lead over ping (sec). Tune to your ping", 0, 0.2, State.ShootLead, "ShootLead", 0.01)
         CombatTab:CreateKeybindButton("Shoot Murderer (Instakill)", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun (TP)", "pickupgun", "PickupGun")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
