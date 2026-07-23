@@ -13,10 +13,14 @@ if getgenv().MM2_Script then
 end
 getgenv().MM2_Script = true
 
--- Автовключение фарма через _G.AUTOEXEC_ENABLED вырезано: его заменила
--- система конфигов. ⚠ Миграция: раньше автофарм стартовал сам у всех —
--- теперь для этого нужен конфиг с включённым фармом, помеченный на
--- автозагрузку (точка в списке конфигов → «...» → Autoload).
+local AUTOFARM_ENABLED = true
+--SK2ND = 982594515
+--slonsagg2 = 6163487250
+--0Jl9lra = 2058109987
+--serejenkaluv = 10341870648
+local WHITELIST_IDS = {}
+
+_G.AUTOEXEC_ENABLED = AUTOFARM_ENABLED --and table.find(WHITELIST_IDS, game:GetService("Players").LocalPlayer.UserId) ~= nil
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 2: CONFIG & SERVICES (СТРОКИ 65-115)
@@ -44,17 +48,7 @@ local CONFIG = {
     Notification = {
         Duration = 3,
         FadeTime = 0.4
-        },
-    -- Система конфигов (профили настроек). Общая корневая папка обоих
-    -- скриптов — VioCFG, у каждого скрипта свой неймспейс внутри.
-    Configs = {
-        Dir          = "VioCFG/Leaderboard",              -- папка этого скрипта
-        Extension    = ".vio",                            -- содержимое — JSON
-        IndexFile    = "VioCFG/Leaderboard/index.json",   -- список имён (listfiles есть не везде)
-        AutoloadFile = "VioCFG/Leaderboard/autoload.txt", -- маркер: имя конфига автозагрузки
-        Script       = "leaderboard",                     -- метка принадлежности в файле
-        Version      = 1,                                 -- версия схемы файла
-    },
+        }
 	}
 
 local Players = game:GetService("Players")
@@ -84,17 +78,12 @@ local State = {
     NotificationsEnabled = false,
     AvatarDisplayEnabled = false,
 
-    -- Character settings — ванильные значения Roblox (те же, что ставит
-    -- cleanup). Пока пользователь их не менял и конфиг не загружен, игра
-    -- ведёт себя как без скрипта; см. флаг SettingsDirty ниже
-    WalkSpeed = 16,
+    -- Character settings
+    WalkSpeed = 18,
     JumpPower = 50,
-    MaxCameraZoom = 128,
-    CameraFOV = 70,
-    -- Взводится любым Apply* — только после этого CharacterAdded
-    -- перенакатывает настройки персонажа при респавне
-    SettingsDirty = false,
-
+    MaxCameraZoom = 100,
+    CameraFOV = 90,
+    
     -- Camera 
     ViewClipEnabled = false,
     CanShootMurderer = true,
@@ -287,46 +276,6 @@ local function TrackConnection(conn)
         table.insert(State.Connections, conn)
     end
     return conn
-end
-
--- ── Общие хелперы файлового хранилища (executor-функций может не быть).
--- Используются системой конфигов. Собраны в одну таблицу: верхний скоуп
--- файла близок к лимиту 200 локалов Luau
-local Files = {}
-
--- Создаёт все папки из пути файла (сегменты до имени файла)
-function Files.EnsureFoldersFor(path)
-    pcall(function()
-        if not (isfolder and makefolder) then return end
-        local acc = nil
-        local segs = {}
-        for seg in string.gmatch(path, "[^/]+") do
-            table.insert(segs, seg)
-        end
-        for i = 1, #segs - 1 do
-            acc = acc and (acc .. "/" .. segs[i]) or segs[i]
-            if not isfolder(acc) then makefolder(acc) end
-        end
-    end)
-end
-
-function Files.LoadJSON(path, default)
-    local ok, data = pcall(function()
-        if isfile and isfile(path) then
-            return HttpService:JSONDecode(readfile(path))
-        end
-        return nil
-    end)
-    if ok and type(data) == "table" then return data end
-    return default
-end
-
-function Files.SaveJSON(path, data)
-    pcall(function()
-        if not writefile then return end
-        Files.EnsureFoldersFor(path)
-        writefile(path, HttpService:JSONEncode(data))
-    end)
 end
 
 -- ============= COIN TRACER SYSTEM (С АНИМАЦИЕЙ) =============
@@ -1237,7 +1186,6 @@ end
 
 -- ApplyWalkSpeed() - Установка скорости
 local function ApplyWalkSpeed(speed)
-    State.SettingsDirty = true
     local character = LocalPlayer.Character
     if not character then return end
     local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -1249,7 +1197,6 @@ end
 
 -- ApplyJumpPower() - Установка прыжка
 local function ApplyJumpPower(power)
-    State.SettingsDirty = true
     local character = LocalPlayer.Character
     if not character then return end
     local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -1261,7 +1208,6 @@ end
 
 -- ApplyMaxCameraZoom() - Установка зума
 local function ApplyMaxCameraZoom(distance)
-    State.SettingsDirty = true
     LocalPlayer.CameraMaxZoomDistance = distance
     State.MaxCameraZoom = distance
 end
@@ -1275,7 +1221,6 @@ end
 
 -- ApplyFOV() - Плавное изменение FOV
 local function ApplyFOV(fov)
-    State.SettingsDirty = true
     local camera = Workspace.CurrentCamera
     if camera then
         TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
@@ -7120,12 +7065,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         VoteSpammer = ToggleVoteSpammer,
 
-        -- Раньше Vote Goal передавал функцию вместо handlerKey — callHandler
-        -- такую не вызывал, поле было мёртвым. Теперь нормальный хендлер
-        VoteGoal = function(value)
-            State.VoteGoal = tonumber(value) or 8
-        end,
-
         AutoLoadOnTeleport = function(on)
             State.AutoLoadOnTeleport = on
         end,
@@ -7139,300 +7078,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 })
 
 GUI.Init()
-
--- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК: CONFIG MANAGER — профили настроек (.vio в VioCFG/Leaderboard)
--- ══════════════════════════════════════════════════════════════════════════════
--- Разделение ролей: GUI владеет реестром контролов и снапшотами
--- (GetFlagSnapshot/GetDefaultSnapshot/ApplyFlagSnapshot), менеджер — файлами,
--- индексом, маркером автозагрузки и сериализацией кейбиндов из State.Keybinds.
--- Контракт для GUI.AttachConfigSystem: List, Save, Load, Create, Delete,
--- Rename, Share, SetAutoload, GetAutoload.
-
--- IIFE вместо do-блока: внутренние локалы живут в своём скоупе регистров
--- и не давят на лимит 200 локалов верхнего уровня файла
-local ConfigManager = (function()
-    local CFG = CONFIG.Configs
-
-    local function canUseFiles()
-        return writefile ~= nil and readfile ~= nil and isfile ~= nil
-    end
-
-    -- Фидбек конфиг-операций показываем всегда: ShowNotification гейтится
-    -- State.NotificationsEnabled, на время вызова форсируем флаг
-    local function cfgNotify(text)
-        pcall(function()
-            local was = State.NotificationsEnabled
-            State.NotificationsEnabled = true
-            ShowNotification(
-                string.format(
-                    "<font color=\"rgb(220,145,230)\">Configs: </font><font color=\"rgb(220,220,220)\">%s</font>",
-                    text
-                ),
-                CONFIG.Colors.Text
-            )
-            State.NotificationsEnabled = was
-        end)
-    end
-
-    local function sanitizeName(name)
-        name = tostring(name or "")
-        name = name:gsub("[^%w_%-% ]", "")
-        name = name:gsub("^%s+", ""):gsub("%s+$", "")
-        if #name > 32 then name = name:sub(1, 32) end
-        return name
-    end
-
-    local function configPath(name)
-        return CFG.Dir .. "/" .. name .. CFG.Extension
-    end
-
-    -- Индекс имён — источник истины вместо listfiles (его нет в части executor'ов)
-    local function readIndex()
-        local list = Files.LoadJSON(CFG.IndexFile, {})
-        local out = {}
-        for _, n in ipairs(list) do
-            if type(n) == "string" then table.insert(out, n) end
-        end
-        return out
-    end
-
-    local function writeIndex(list)
-        Files.SaveJSON(CFG.IndexFile, list)
-    end
-
-    local function indexFind(list, name)
-        for i, n in ipairs(list) do
-            if n == name then return i end
-        end
-        return nil
-    end
-
-    -- Снапшот флагов + кейбинды → таблица файла конфига.
-    -- defaultKeybinds=true пишет все бинды как Unknown (для «пустого» конфига)
-    local function serialize(flags, defaultKeybinds)
-        local keybinds = {}
-        for bindName, keyCode in pairs(State.Keybinds) do
-            if defaultKeybinds then
-                keybinds[bindName] = "Unknown"
-            else
-                local okName, codeName = pcall(function() return keyCode.Name end)
-                keybinds[bindName] = okName and codeName or "Unknown"
-            end
-        end
-        return {
-            version = CFG.Version,
-            script = CFG.Script,
-            savedAt = os.time(),
-            flags = flags,
-            keybinds = keybinds,
-        }
-    end
-
-    -- Таблица конфига → GUI и State. Кейбинды рехидрируются из .Name
-    -- с фолбэком на Unknown; текст чипов обновляется как в SetKeybind
-    local function applyConfig(data)
-        if type(data) ~= "table" or type(data.flags) ~= "table" then
-            return false, "Config file is corrupted"
-        end
-        if data.script ~= CFG.Script then
-            return false, "Config belongs to another script"
-        end
-        if type(data.version) ~= "number" or data.version > CFG.Version then
-            return false, "Config version is not supported"
-        end
-
-        GUI.ApplyFlagSnapshot(data.flags)
-
-        if type(data.keybinds) == "table" then
-            for bindName, codeName in pairs(data.keybinds) do
-                if State.Keybinds[bindName] ~= nil and type(codeName) == "string" then
-                    local keyCode = Enum.KeyCode.Unknown
-                    pcall(function()
-                        if Enum.KeyCode[codeName] then
-                            keyCode = Enum.KeyCode[codeName]
-                        end
-                    end)
-                    State.Keybinds[bindName] = keyCode
-                    local chip = State.UIElements[bindName .. "_Button"]
-                    if chip then
-                        pcall(function()
-                            chip.Text = keyCode ~= Enum.KeyCode.Unknown
-                                and keyCode.Name or "Not Bound"
-                        end)
-                    end
-                end
-            end
-        end
-        return true
-    end
-
-    local function writeConfig(name, data)
-        local ok = pcall(function()
-            Files.EnsureFoldersFor(configPath(name))
-            writefile(configPath(name), HttpService:JSONEncode(data))
-        end)
-        if not ok then return false, "Failed to write config file" end
-        local index = readIndex()
-        if not indexFind(index, name) then
-            table.insert(index, name)
-            writeIndex(index)
-        end
-        return true
-    end
-
-    local function readConfig(name)
-        local raw
-        local ok = pcall(function()
-            if isfile(configPath(name)) then
-                raw = readfile(configPath(name))
-            end
-        end)
-        if not ok or type(raw) ~= "string" then
-            return nil, "Config file not found"
-        end
-        local okDecode, data = pcall(function()
-            return HttpService:JSONDecode(raw)
-        end)
-        if not okDecode or type(data) ~= "table" then
-            return nil, "Config file is corrupted"
-        end
-        return data
-    end
-
-    local ConfigManager = {
-        List = function()
-            return readIndex()
-        end,
-
-        GetAutoload = function()
-            local name
-            pcall(function()
-                if isfile and isfile(CFG.AutoloadFile) then
-                    name = readfile(CFG.AutoloadFile)
-                end
-            end)
-            if type(name) == "string" then
-                name = name:gsub("^%s+", ""):gsub("%s+$", "")
-                if #name > 0 then return name end
-            end
-            return nil
-        end,
-
-        SetAutoload = function(name)
-            if not canUseFiles() then return false, "Executor has no file API" end
-            local ok = pcall(function()
-                if name then
-                    Files.EnsureFoldersFor(CFG.AutoloadFile)
-                    writefile(CFG.AutoloadFile, name)
-                elseif delfile and isfile(CFG.AutoloadFile) then
-                    delfile(CFG.AutoloadFile)
-                else
-                    -- без delfile пустой маркер = «автозагрузки нет»
-                    writefile(CFG.AutoloadFile, "")
-                end
-            end)
-            if ok then
-                cfgNotify(name and ("Autoload: " .. name) or "Autoload disabled")
-            end
-            return ok
-        end,
-
-        Save = function(name)
-            if not canUseFiles() then return false, "Executor has no file API" end
-            name = sanitizeName(name)
-            if name == "" then return false, "Bad config name" end
-            local ok, err = writeConfig(name, serialize(GUI.GetFlagSnapshot()))
-            if ok then cfgNotify("Saved: " .. name) end
-            return ok, err
-        end,
-
-        Load = function(name)
-            if not canUseFiles() then return false, "Executor has no file API" end
-            local data, err = readConfig(name)
-            if not data then return false, err end
-            local ok, applyErr = applyConfig(data)
-            if ok then cfgNotify("Loaded: " .. name) end
-            return ok, applyErr
-        end,
-
-        -- «Пустой» конфиг: дефолтные значения контролов, бинды сброшены
-        Create = function(name)
-            if not canUseFiles() then return false, "Executor has no file API" end
-            name = sanitizeName(name)
-            if name == "" then return false, "Bad config name" end
-            local index = readIndex()
-            if indexFind(index, name) then return false, "Config already exists" end
-            local ok, err = writeConfig(name, serialize(GUI.GetDefaultSnapshot(), true))
-            if ok then cfgNotify("Created: " .. name) end
-            return ok, err
-        end,
-
-        Delete = function(name)
-            if not canUseFiles() then return false, "Executor has no file API" end
-            local index = readIndex()
-            local pos = indexFind(index, name)
-            if pos then
-                table.remove(index, pos)
-                writeIndex(index)
-            end
-            pcall(function()
-                if delfile and isfile(configPath(name)) then
-                    delfile(configPath(name))
-                end
-            end)
-            if ConfigManager.GetAutoload() == name then
-                ConfigManager.SetAutoload(nil)
-            end
-            cfgNotify("Deleted: " .. name)
-            return true
-        end,
-
-        Rename = function(oldName, newName)
-            if not canUseFiles() then return false, "Executor has no file API" end
-            newName = sanitizeName(newName)
-            if newName == "" then return false, "Bad config name" end
-            local index = readIndex()
-            if indexFind(index, newName) then return false, "Name already taken" end
-            local data, err = readConfig(oldName)
-            if not data then return false, err end
-            local ok = pcall(function()
-                Files.EnsureFoldersFor(configPath(newName))
-                writefile(configPath(newName), HttpService:JSONEncode(data))
-                if delfile and isfile(configPath(oldName)) then
-                    delfile(configPath(oldName))
-                end
-            end)
-            if not ok then return false, "Failed to write config file" end
-            local pos = indexFind(index, oldName)
-            if pos then index[pos] = newName else table.insert(index, newName) end
-            writeIndex(index)
-            if ConfigManager.GetAutoload() == oldName then
-                ConfigManager.SetAutoload(newName)
-            end
-            cfgNotify("Renamed: " .. oldName .. " → " .. newName)
-            return true
-        end,
-
-        Share = function(name)
-            if not setclipboard then return false, "Executor has no clipboard API" end
-            local raw
-            local ok = pcall(function()
-                if isfile and isfile(configPath(name)) then
-                    raw = readfile(configPath(name))
-                end
-            end)
-            if not ok or type(raw) ~= "string" then
-                return false, "Config file not found"
-            end
-            pcall(setclipboard, raw)
-            cfgNotify("Copied to clipboard: " .. name)
-            return true
-        end,
-    }
-
-    return ConfigManager
-end)()
 
 -- Отдельного счётчика монет в хедере больше нет: баланс, роль и Coins/h
 -- показывает инфо-блок в левом нижнем углу сайдбара (State.Session ниже,
@@ -7470,15 +7115,15 @@ do
 
         VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
-        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
-        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",true)
         VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
-        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", true)
         VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly", false)
 end
 
@@ -7494,29 +7139,29 @@ do
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
         CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun")
-        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", false)
+        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
 end
 
 do
     local FarmTab = GUI.CreateTab("Farming")
 
         FarmTab:CreateSection("AUTO FARM")
-        FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", false)
-        FarmTab:CreateToggle("XP Farm", "Auto win rounds", "XPFarm", false)
-        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", false)
+        FarmTab:CreateToggle("Auto Farm", "Automatic coin farm", "AutoFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("XP Farm", "Auto win rounds", "XPFarm", _G.AUTOEXEC_ENABLED)
+        FarmTab:CreateToggle("Auto Prestige", "Auto-prestige at level 100", "AutoPrestige", true)
         FarmTab:CreateToggle("Underground Mode", "Fly under the map (safer)", "UndergroundMode",true)
 
         FarmTab:CreateSection("FARM TUNING", "right")
         FarmTab:CreateSlider("Fly Speed", "Flying speed", 10, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 1)
         FarmTab:CreateSlider("TP Delay", "Delay between first TP", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
         FarmTab:CreateToggle("No Render", "Disable rendering", "AFKMode", false)
-        FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 60 min during autofarm to avoid AFK kick", "HandleAutoReconnect", false)
+        FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 60 min during autofarm to avoid AFK kick", "HandleAutoReconnect", _G.AUTOEXEC_ENABLED)
         FarmTab:CreateInputField("Reconnect interval","Default: 60 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
         FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 
         FarmTab:CreateSection("VOTE SPAM", "right")
-        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", false)
-        FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, "VoteGoal")
+        FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
+        FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.VoteGoal, function(value) State.VoteGoal = tonumber(value) or 8 end)
 end
 
 do
@@ -7534,7 +7179,7 @@ do
         FunTab:CreateSlider("Prediction Range", "Lead time", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
 
         FunTab:CreateSection("ANTI-FLING", "right")
-        FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",false)
+        FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",true)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", false)
 
         FunTab:CreateSection("FLING PLAYER", "right")
@@ -7552,41 +7197,17 @@ do
         UtilityTab:CreateSection("SERVER MANAGEMENT")
         UtilityTab:CreateButton("", "Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
         UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
-        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",false)
+        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 
         UtilityTab:CreateSection("DANGER ZONE", "right")
         UtilityTab:CreateButton("", "SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
 end
-
--- ── Подключение системы конфигов: все вкладки построены, реестр флагов полон.
--- pcall на случай закэшированной старой версии GUI.lua без конфиг-API
-pcall(function()
-    if GUI.AttachConfigSystem then
-        GUI.AttachConfigSystem(ConfigManager)
-    end
-end)
-
--- Автозагрузка: заменяет прежний _G.AUTOEXEC_ENABLED. Ждём, пока тоглы
--- с default=true отработают свой авто-fire, и накатываем конфиг поверх
-task.spawn(function()
-    local auto = ConfigManager.GetAutoload()
-    if not auto then return end
-    task.wait(1)
-    local okCall, okLoad = pcall(ConfigManager.Load, auto)
-    if okCall and okLoad and GUI.SetActiveConfigName then
-        pcall(GUI.SetActiveConfigName, auto)
-    end
-end)
 ---------
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     CleanupMemory()
     task.wait(1)
-    -- Пока настройки не тронуты (нет ни ручных правок, ни конфига) —
-    -- респавн не трогаем: игра как без скрипта
-    if State.SettingsDirty then
-        ApplyCharacterSettings()
-    end
+    ApplyCharacterSettings()
 
     State.prevMurd = nil
     State.prevSher = nil
@@ -7602,13 +7223,24 @@ end))
 CreateNotificationUI()
 CreateAvatarUI()
 SetAvatarDisplayVisibility(State.AvatarDisplayEnabled)
--- ApplyCharacterSettings()/ApplyFOV при старте убраны намеренно: без
--- автозагрузочного конфига скорость/прыжок/зум/FOV остаются ванильными
+ApplyCharacterSettings()
 SetupGunTracking()
 StartTrapTracking   ()
 SetupPlayerNicknamesTracking()
+pcall(function()
+    ApplyFOV(State.CameraFOV)
+end)
 SetupAntiAFK()
 StartRoleChecking()
+if _G.AUTOEXEC_ENABLED then
+    task.spawn(function()
+        task.wait(2)
+        pcall(function()
+            task.wait(0.1)
+            EnableFPSBoost()
+        end)
+    end)
+end
 --print("╔════════════════════════════════════════════╗")
 --print("║   MM2 ESP v6.0 - Successfully Loaded!     ║")
 --print("║   Press [" .. CONFIG.HideKey.Name .. "] to toggle GUI               ║")

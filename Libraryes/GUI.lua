@@ -490,82 +490,75 @@ return function(env)
     end
 
     ----------------------------------------------------------------
-    -- РЕЕСТР ФЛАГОВ: сериализуемые контролы для системы конфигов.
-    -- Каждый контрол с строковым handlerKey регистрирует геттер и сеттер;
-    -- Set(value, fire=true) обновляет и визуал, и State (через handler) —
-    -- один путь для клика пользователя и для загрузки конфига.
-    -- PlayerDropdown и кейбинды сюда не попадают: у первых нет handlerKey,
-    -- вторые сериализует хост из State.Keybinds.
+    -- РЕЕСТР ЭЛЕМЕНТОВ (модель WindUI): каждый сохраняемый контрол —
+    -- объект с типом, текущим значением и методом Set.
+    --
+    --   { __type = "Toggle", Flag = "MurderESP", Value = ..., Default = ...,
+    --     Set = function(self, value, fire) ... end }
+    --
+    -- __type нужен конфиг-менеджеру: он подбирает по нему парсер и не даёт
+    -- подсунуть, например, число в тогл. Set(value, fire) — единственный
+    -- путь изменения: и клик пользователя, и загрузка конфига идут через
+    -- него, поэтому визуал и State не расходятся.
+    -- PlayerDropdown в реестр не попадает: выбранный игрок сессионный.
     ----------------------------------------------------------------
 
     GUI.Flags = {}
 
-    local function registerFlag(handlerKey, kind, get, set)
+    local function registerElement(flag, element)
         -- функция вместо ключа (легаси-вызовы) — молча не регистрируем
-        if type(handlerKey) ~= "string" or handlerKey == "" then return end
-        -- значение на момент создания контрола; через if, а не and/or —
-        -- иначе default=false у тогла превращался бы в nil
-        local okDef, def = pcall(get)
-        if not okDef then def = nil end
-        GUI.Flags[handlerKey] = {
-            Kind = kind,
-            Get = get,
-            Set = set,
-            Default = def,
+        if type(flag) ~= "string" or flag == "" then return element end
+        element.Flag = flag
+        element.Default = element.Value
+        GUI.Flags[flag] = element
+        return element
+    end
+
+    -- Элементы отдаются конфиг-менеджеру хоста: сериализацию и типовые
+    -- парсеры держит он, библиотека только ведёт реестр
+    function GUI.GetElements()
+        return GUI.Flags
+    end
+
+    -- Кейбинд — такой же элемент реестра, как тогл или слайдер (модель WindUI):
+    -- значение хранится СТРОКОЙ ("F" / "Unknown"), Enum собирается только при
+    -- записи в State.Keybinds. Источник истины для обработчиков ввода — сам
+    -- State.Keybinds, поэтому Get читает его напрямую: бинд, назначенный через
+    -- захват клавиши (хендлер SetKeybind хоста), всё равно попадёт в конфиг.
+    -- Префикс во флаге — чтобы имена биндов (Fly, GodMode, KillAura) не
+    -- столкнулись с ключами хендлеров.
+    local function registerKeybind(keybindKey, button, emptyText)
+        local element = {
+            __type = "Keybind",
+            Instance = button,
+            KeybindKey = keybindKey,
         }
-    end
 
-    -- Снимок текущих значений всех зарегистрированных контролов
-    function GUI.GetFlagSnapshot()
-        local snap = {}
-        for key, flag in pairs(GUI.Flags) do
-            local ok, v = pcall(flag.Get)
-            if ok and (type(v) == "boolean" or type(v) == "number" or type(v) == "string") then
-                snap[key] = v
+        function element:Get()
+            local bound = State.Keybinds and State.Keybinds[keybindKey]
+            return (bound and bound ~= Enum.KeyCode.Unknown) and bound.Name or "Unknown"
+        end
+
+        function element:Set(value, fire)
+            local keyCode = Enum.KeyCode.Unknown
+            if typeof(value) == "EnumItem" then
+                keyCode = value
+            elseif type(value) == "string" and value ~= "" then
+                pcall(function()
+                    if Enum.KeyCode[value] then keyCode = Enum.KeyCode[value] end
+                end)
             end
-        end
-        return snap
-    end
-
-    -- Снимок дефолтов — из него собирается «пустой» конфиг
-    function GUI.GetDefaultSnapshot()
-        local snap = {}
-        for key, flag in pairs(GUI.Flags) do
-            local v = flag.Default
-            if type(v) == "boolean" or type(v) == "number" or type(v) == "string" then
-                snap[key] = v
+            self.Value = keyCode.Name
+            if State.Keybinds then
+                State.Keybinds[keybindKey] = keyCode
             end
-        end
-        return snap
-    end
-
-    -- Применение снимка. Идём по РЕЕСТРУ, а не по файлу: контрол, которого
-    -- в конфиге нет (старый файл, новая фича), возвращается к своему дефолту —
-    -- иначе после смены конфига на экране оставались настройки предыдущего.
-    -- Значения (слайдеры/поля/списки) применяются до тоглов: фича, которую
-    -- тогл включает, должна стартовать уже с нужными параметрами.
-    -- Совпавшие значения не трогаем: повторный вызов тяжёлых хендлеров
-    -- (автофарм и т.п.) перезапускал бы их потоки на ровном месте.
-    function GUI.ApplyFlagSnapshot(snap)
-        if type(snap) ~= "table" then return end
-
-        local function applyOne(key, flag)
-            local value = snap[key]
-            if value == nil then value = flag.Default end
-            if value == nil then return end
-
-            local okGet, current = pcall(flag.Get)
-            if okGet and current == value then return end
-
-            pcall(flag.Set, value, true)
+            button.Text = (keyCode ~= Enum.KeyCode.Unknown) and keyCode.Name or emptyText
+            -- fire не используется: бинд не имеет колбэка, скрипт читает
+            -- State.Keybinds напрямую в обработчиках ввода
         end
 
-        for key, flag in pairs(GUI.Flags) do
-            if flag.Kind ~= "toggle" then applyOne(key, flag) end
-        end
-        for key, flag in pairs(GUI.Flags) do
-            if flag.Kind == "toggle" then applyOne(key, flag) end
-        end
+        element.Value = element:Get()
+        return registerElement("Keybind:" .. keybindKey, element)
     end
 
     local function getAllPlayers()
@@ -2450,6 +2443,7 @@ return function(env)
                 local chipStroke = AddStroke(chip, STROKE_W, T.Border)
 
                 State.UIElements[keybindKey .. "_Button"] = chip
+                registerKeybind(keybindKey, chip, "—")
 
                 chip.MouseButton1Click:Connect(function()
                     chip.Text = "..."
@@ -2519,24 +2513,28 @@ return function(env)
                     makeKeybindChip(row, keybindKey, 60, CTRL_H, UDim2.new(1, -(TOG_W + EDGE + 8 + 60), 0.5, -CTRL_H / 2))
                 end
 
-                local state = default
+                -- Элемент-объект: Value всегда актуален, Set — единственный
+                -- путь изменения (клик, загрузка конфига)
+                local element = {
+                    __type = "Toggle",
+                    Value = default and true or false,
+                    Instance = toggleBg,
+                }
 
-                -- Единый сеттер: и клик пользователя, и загрузка конфига
-                -- обновляют визуал и State одним путём
-                local function setState(v, fire)
-                    state = v and true or false
-                    local targetColor = state and T.Accent or T.TrackBg
-                    local targetPos = UDim2.new(0, state and KNOB_ON or KNOB_OFF, 0.5, -KNOB / 2)
+                function element:Set(value, fire)
+                    self.Value = value and true or false
+                    local targetColor = self.Value and T.Accent or T.TrackBg
+                    local targetPos = UDim2.new(0, self.Value and KNOB_ON or KNOB_OFF, 0.5, -KNOB / 2)
 
                     TweenService:Create(toggleBg, TweenInfo.new(0.15), {BackgroundColor3 = targetColor}):Play()
                     TweenService:Create(toggleCircle, TweenInfo.new(0.15), {Position = targetPos}):Play()
 
                     if fire then
-                        callHandler(handlerKey, state)
+                        callHandler(handlerKey, self.Value)
                     end
                 end
 
-                registerFlag(handlerKey, "toggle", function() return state end, setState)
+                registerElement(handlerKey, element)
 
                 -- Сразу вызываем handler с начальным значением, чтобы State
                 -- был синхронизирован с GUI
@@ -2547,10 +2545,10 @@ return function(env)
                 end
 
                 TrackConnection(toggleBg.MouseButton1Click:Connect(function()
-                    setState(not state, true)
+                    element:Set(not element.Value, true)
                 end))
 
-                return toggleBg
+                return element
             end
 
             function TabFunctions:CreateDropdown(title, desc, options, default, handlerKey)
@@ -2591,22 +2589,30 @@ return function(env)
 
                 local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
 
-                -- Единый сеттер: значение вне options просто ставится текстом
-                local function setOption(option, fire)
-                    dropdown.Text = tostring(option)
+                -- Элемент-объект. Значение вне options просто ставится текстом:
+                -- конфиг из другой версии не должен ронять загрузку
+                local element = {
+                    __type = "Dropdown",
+                    Value = default,
+                    Options = options,
+                    Instance = dropdown,
+                }
+
+                function element:Set(option, fire)
+                    self.Value = tostring(option)
+                    dropdown.Text = self.Value
                     if fire then
-                        callHandler(handlerKey, option)
+                        callHandler(handlerKey, self.Value)
                     end
                 end
 
-                registerFlag(handlerKey, "dropdown",
-                    function() return dropdown.Text end, setOption)
+                registerElement(handlerKey, element)
 
                 -- строки поповера — единая фабрика popoverRow
                 for _, option in ipairs(options) do
                     local optionBtn = popoverRow(overlay, option)
                     optionBtn.MouseButton1Click:Connect(function()
-                        setOption(option, true)
+                        element:Set(option, true)
                         close()
                     end)
                 end
@@ -2625,7 +2631,7 @@ return function(env)
                     end
                 end)
 
-                return dropdown
+                return element
             end
 
             function TabFunctions:CreateInputField(title, desc, defaultValue, handlerKey)
@@ -2653,29 +2659,36 @@ return function(env)
                     TweenService:Create(inputStroke, TweenInfo.new(0.15), {Color = G.Gray600}):Play()
                 end)
 
-                -- Единый сеттер: нечисловое значение игнорируется
-                local function setValue(v, fire)
+                -- Элемент-объект. Нечисловое значение игнорируется
+                local element = {
+                    __type = "Input",
+                    Value = tonumber(defaultValue),
+                    Instance = inputBox,
+                }
+
+                function element:Set(v, fire)
                     local num = tonumber(v)
                     if not num then return end
+                    self.Value = num
                     inputBox.Text = tostring(num)
                     if fire then
                         callHandler(handlerKey, num)
                     end
                 end
 
-                registerFlag(handlerKey, "input",
-                    function() return tonumber(inputBox.Text) or tonumber(defaultValue) end,
-                    setValue)
+                registerElement(handlerKey, element)
 
                 inputBox.FocusLost:Connect(function()
                     TweenService:Create(inputStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
                     local value = tonumber(inputBox.Text)
                     if value then
-                        setValue(value, true)
+                        element:Set(value, true)
                     else
-                        inputBox.Text = tostring(defaultValue)
+                        inputBox.Text = tostring(element.Value)
                     end
                 end)
+
+                return element
             end
 
             function TabFunctions:CreateSlider(title, description, min, max, default, handlerKey, step)
@@ -2735,10 +2748,22 @@ return function(env)
                 AddCorner(valueBox, R_CTRL)
                 AddStroke(valueBox, STROKE_W, T.Border)
 
-                local function applyValue(value, fire)
+                local element = {
+                    __type = "Slider",
+                    Value = default,
+                    Min = min,
+                    Max = max,
+                    Step = step,
+                    Instance = sliderBg,
+                }
+
+                function element:Set(value, fire)
+                    value = tonumber(value)
+                    if not value then return end
                     value = math.floor(value / step + 0.5) * step
                     value = math.clamp(value, min, max)
                     currentValue = value
+                    self.Value = value
 
                     local normalizedValue = (value - min) / (max - min)
                     sliderFill.Size = UDim2.new(normalizedValue, 0, 1, 0)
@@ -2750,8 +2775,12 @@ return function(env)
                     end
                 end
 
-                registerFlag(handlerKey, "slider",
-                    function() return currentValue end, applyValue)
+                -- локальный алиас для внутренних обработчиков ниже
+                local function applyValue(value, fire)
+                    element:Set(value, fire)
+                end
+
+                registerElement(handlerKey, element)
 
                 local dragging = false
                 local function updateSlider(input)
@@ -2787,6 +2816,8 @@ return function(env)
                         valueBox.Text = fmt(currentValue)
                     end
                 end)
+
+                return element
             end
 
             function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
@@ -2812,6 +2843,7 @@ return function(env)
                 local bindStroke = AddStroke(bindButton, STROKE_W, T.Border)
 
                 State.UIElements[keybindKey .. "_Button"] = bindButton
+                local element = registerKeybind(keybindKey, bindButton, "Not Bound")
 
                 bindButton.MouseButton1Click:Connect(function()
                     bindButton.Text = "Press Key..."
@@ -2826,7 +2858,7 @@ return function(env)
                     TweenService:Create(bindButton, TweenInfo.new(0.15), {BackgroundColor3 = T.Surface1}):Play()
                 end)
 
-                return bindButton
+                return element
             end
 
             -- stateKey - в какое поле State писать выбор. Разные вкладки передают
