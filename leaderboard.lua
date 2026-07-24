@@ -7115,15 +7115,15 @@ do
 
         VisualsTab:CreateSection("ESP")
         VisualsTab:CreateToggle("Murder ESP", "Highlight murderer", "MurderESP",false)
-        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",true)
+        VisualsTab:CreateToggle("Sheriff ESP", "Highlight sheriff", "SheriffESP",false)
         VisualsTab:CreateToggle("Innocent ESP", "Highlight innocent players", "InnocentESP",false)
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
-        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",true)
+        VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
         VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers", false)
 
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
-        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", true)
+        VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
         VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly", false)
 end
 
