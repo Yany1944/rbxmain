@@ -116,6 +116,13 @@ local State = {
     ReconnectInterval = 60 * 60, -- 60 минут в секундах
     ReconnectThread = nil,
 
+    -- Farm Sync — координация серверов между аккаунтами на одном ПК.
+    -- Каждый инстанс пишет свой jobId в общий стор (папка 7yd7/FarmSync);
+    -- если два аккаунта оказались на одном сервере — «лишний» делает ServerHop.
+    FarmSyncEnabled = false,
+    FarmSyncThread = nil,
+    FarmSyncLastHop = 0,     -- os.time() последнего хопа по синку (кулдаун против циклов)
+
     -- Vote Spammer
     VoteSpammerEnabled = false,
     VoteSpammerActive = false,
@@ -6595,6 +6602,242 @@ local function ServerHop()
     return TeleportToJob(selectedServer.id)
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 18.5: FARM SYNC — координация серверов между аккаунтами (один ПК)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Задача: в реальном времени знать, какой аккаунт на каком сервере сидит, и не
+-- давать двум своим аккаунтам фармить на одном инстансе. Канал обмена — файлы в
+-- папке executor'а 7yd7/FarmSync (все инстансы на одном ПК видят одну ФС).
+--
+-- Модель без гонок записи: каждый аккаунт пишет ТОЛЬКО свой файл <userId>.json и
+-- читает чужие. Если у executor'а нет listfiles — мягкая деградация на единый
+-- файл farmsync.json (read-modify-write с прунингом протухших записей).
+--
+-- Разрешение конфликта: если на моём game.JobId есть другой свежий аккаунт — из
+-- всей группы уходит ровно один, «глобально худший» (пришёл на сервер позже;
+-- тай-брейк — больший userId). Так за тик хопает строго один, без разбегания.
+
+local FarmSync = {}
+do
+    local FOLDER    = "7yd7"
+    local SYNC_DIR  = "7yd7/FarmSync"
+    local ONE_FILE  = "7yd7/farmsync.json"   -- фолбэк без listfiles
+
+    local HEARTBEAT_INTERVAL = 4    -- как часто пишем свой статус (сек)
+    local STALE_TTL          = 15   -- запись старше — аккаунт считается ушедшим
+    local HOP_COOLDOWN        = 25  -- не хопать по синку чаще, чем раз в N сек
+
+    -- Фиче-детект executor-функций (набор отличается между исполнителями)
+    local hasList = type(listfiles) == "function"
+    local hasDel  = type(delfile) == "function"
+
+    local myUserId = LocalPlayer.UserId
+    local myName   = LocalPlayer.Name
+    local myFile   = SYNC_DIR .. "/" .. tostring(myUserId) .. ".json"
+
+    -- Момент, когда мы впервые оказались на текущем сервере (для тай-брейка).
+    local currentJobId = nil
+    local sinceOnJob   = os.time()
+
+    -- Гарантируем наличие папок хранилища
+    pcall(function()
+        if type(makefolder) == "function" then
+            if type(isfolder) ~= "function" or not isfolder(FOLDER) then makefolder(FOLDER) end
+            if hasList and (type(isfolder) ~= "function" or not isfolder(SYNC_DIR)) then
+                makefolder(SYNC_DIR)
+            end
+        end
+    end)
+
+    local function encode(t)
+        local ok, s = pcall(function() return HttpService:JSONEncode(t) end)
+        return ok and s or nil
+    end
+
+    local function decode(s)
+        local ok, t = pcall(function() return HttpService:JSONDecode(s) end)
+        return ok and t or nil
+    end
+
+    -- Прочитать все записи из стора в виде массива {userId,name,placeId,jobId,since,heartbeat}
+    local function readAll()
+        local out = {}
+        if hasList then
+            local ok, files = pcall(listfiles, SYNC_DIR)
+            if ok and type(files) == "table" then
+                for _, path in ipairs(files) do
+                    if type(path) == "string" and path:sub(-5) == ".json" then
+                        local okr, content = pcall(readfile, path)
+                        if okr and type(content) == "string" then
+                            local rec = decode(content)
+                            if type(rec) == "table" and rec.userId then
+                                out[#out + 1] = rec
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            local okr, content = pcall(function()
+                return (type(isfile) == "function" and isfile(ONE_FILE)) and readfile(ONE_FILE) or nil
+            end)
+            if okr and type(content) == "string" then
+                local map = decode(content)
+                if type(map) == "table" then
+                    for _, rec in pairs(map) do
+                        if type(rec) == "table" and rec.userId then
+                            out[#out + 1] = rec
+                        end
+                    end
+                end
+            end
+        end
+        return out
+    end
+
+    -- Записать/обновить свою запись. В режиме listfiles — атомарно свой файл.
+    -- В фолбэке — read-modify-write общего файла с прунингом протухших.
+    local function writeRecord(rec)
+        local now = os.time()
+        if hasList then
+            local s = encode(rec)
+            if s then pcall(writefile, myFile, s) end
+        else
+            local map = {}
+            local okr, content = pcall(function()
+                return (type(isfile) == "function" and isfile(ONE_FILE)) and readfile(ONE_FILE) or nil
+            end)
+            if okr and type(content) == "string" then map = decode(content) or {} end
+            if type(map) ~= "table" then map = {} end
+            for k, r in pairs(map) do
+                if type(r) ~= "table" or (now - (r.heartbeat or 0)) > STALE_TTL then
+                    map[k] = nil
+                end
+            end
+            map[tostring(rec.userId)] = rec
+            local s = encode(map)
+            if s then pcall(writefile, ONE_FILE, s) end
+        end
+    end
+
+    -- Удалить свою запись (при выключении синка или перед уходом с сервера)
+    local function removeSelf()
+        pcall(function()
+            if hasList then
+                if hasDel and type(isfile) == "function" and isfile(myFile) then
+                    delfile(myFile)
+                end
+            else
+                local content = (type(isfile) == "function" and isfile(ONE_FILE)) and readfile(ONE_FILE) or nil
+                if type(content) == "string" then
+                    local map = decode(content)
+                    if type(map) == "table" then
+                        map[tostring(myUserId)] = nil
+                        local s = encode(map)
+                        if s then writefile(ONE_FILE, s) end
+                    end
+                end
+            end
+        end)
+    end
+
+    -- true, если запись r должна «остаться» приоритетнее нас (т.е. мы хуже неё).
+    -- Хуже = пришли на сервер позже (больше since); тай-брейк — больший userId.
+    local function iAmWorseThan(r)
+        local rSince = r.since or 0
+        if sinceOnJob ~= rSince then
+            return sinceOnJob > rSince
+        end
+        return myUserId > (r.userId or 0)
+    end
+
+    -- Одна итерация: обновить свой статус, проверить коллизию, при нужде — хопнуть.
+    local function step()
+        local now   = os.time()
+        local jobId = game.JobId
+
+        -- Сменился сервер (после хопа/телепорта) — обновляем «время прихода»
+        if jobId ~= currentJobId then
+            currentJobId = jobId
+            sinceOnJob   = now
+        end
+
+        writeRecord({
+            userId    = myUserId,
+            name      = myName,
+            placeId   = game.PlaceId,
+            jobId     = jobId,
+            since     = sinceOnJob,
+            heartbeat = now,
+        })
+
+        -- Ищем свежие чужие аккаунты на моём сервере. Уходим только если мы
+        -- проигрываем ВСЕМ из группы — тогда за тик хопает ровно «худший».
+        local othersOnJob = 0
+        local loseToAll   = true
+
+        for _, r in ipairs(readAll()) do
+            if r.userId ~= myUserId
+                and r.placeId == game.PlaceId
+                and r.jobId == jobId
+                and (now - (r.heartbeat or 0)) <= STALE_TTL then
+
+                othersOnJob = othersOnJob + 1
+                if not iAmWorseThan(r) then
+                    loseToAll = false
+                end
+            end
+        end
+
+        if othersOnJob > 0 and loseToAll then
+            if (now - (State.FarmSyncLastHop or 0)) >= HOP_COOLDOWN then
+                State.FarmSyncLastHop = now
+                if State.NotificationsEnabled then
+                    ShowNotification(
+                        "Farm Sync: <font color=\"rgb(255,170,50)\">сервер занят другим аккаунтом → hop</font>",
+                        CONFIG.Colors.Text
+                    )
+                end
+                removeSelf()      -- мы уходим — не мешаем остальным своей записью
+                ServerHop()       -- при телепорте текущий поток всё равно оборвётся
+                return
+            end
+        end
+    end
+
+    function FarmSync.Start()
+        if State.FarmSyncThread then return end
+        State.FarmSyncEnabled = true
+        currentJobId = game.JobId
+        sinceOnJob   = os.time()
+
+        State.FarmSyncThread = task.spawn(function()
+            while State.FarmSyncEnabled do
+                pcall(step)
+                -- Джиттер разносит записи инстансов по времени (меньше гонок в
+                -- фолбэк-режиме единого файла).
+                task.wait(HEARTBEAT_INTERVAL + math.random() * 2)
+            end
+        end)
+
+        if State.NotificationsEnabled then
+            ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
+        end
+    end
+
+    function FarmSync.Stop()
+        State.FarmSyncEnabled = false
+        if State.FarmSyncThread then
+            pcall(task.cancel, State.FarmSyncThread)
+            State.FarmSyncThread = nil
+        end
+        removeSelf()
+        if State.NotificationsEnabled then
+            ShowNotification("Farm Sync: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
+        end
+    end
+end
+
 
 local function ServerLagger()
     if State.NotificationsEnabled then
@@ -6904,6 +7147,17 @@ function State.Session.GetRateText()
     if not coins then return nil end           -- монеты ещё не загрузились
     State.Session.EnsureBaseline(coins)
     if not State.Session.StartCoins then return "—" end   -- база стабилизируется
+    -- Защита от ложной базы. Витрина шопа при загрузке отдаёт placeholder-баланс
+    -- (напр. ~43k), который держится пару чтений подряд и попадает в базу. Когда
+    -- подгружается реальный (меньший) баланс, gained уходит в минус и Coins/h
+    -- скатывается в -2kk/ч. Любое падение баланса ниже базы = база была ложной
+    -- (либо игрок реально потратил монеты) — пересобираем базу от текущего
+    -- значения и начинаем отсчёт заново.
+    if coins < State.Session.StartCoins then
+        State.Session.StartCoins = coins
+        State.Session.StartedAt = tick()
+        return State.Session.FormatThousands(0)
+    end
     -- Считаем сразу: до первой монеты gained = 0 → показываем 0, с первой
     -- монетой пошёл счёт. Знаменатель зажат снизу до 1с, чтобы не делить на ~0.
     local hours = (tick() - State.Session.StartedAt) / 3600
@@ -7036,6 +7290,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         Rejoin = Rejoin,
         ExecInf = ExecuteInf,
         ServerHop = ServerHop,
+        FarmSync = function(on) if on then FarmSync.Start() else FarmSync.Stop() end end,
         SpeedGlitchTool = SpeedGlitch,
         ServerLagger = ServerLagger,
         HandleAutoRejoin = HandleAutoRejoin,
@@ -7197,6 +7452,7 @@ do
         UtilityTab:CreateSection("SERVER MANAGEMENT")
         UtilityTab:CreateButton("", "Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
         UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
+        UtilityTab:CreateToggle("Farm Sync","Auto server-hop if another of your accounts is on the same server","FarmSync", _G.AUTOEXEC_ENABLED)
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",true)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
 

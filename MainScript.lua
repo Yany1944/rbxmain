@@ -8790,6 +8790,17 @@ function State.Session.GetRateText()
     if not coins then return nil end           -- монеты ещё не загрузились
     State.Session.EnsureBaseline(coins)
     if not State.Session.StartCoins then return "—" end   -- база стабилизируется
+    -- Защита от ложной базы. Витрина шопа при загрузке отдаёт placeholder-баланс
+    -- (напр. ~43k), который держится пару чтений подряд и попадает в базу. Когда
+    -- подгружается реальный (меньший) баланс, gained уходит в минус и Coins/h
+    -- скатывается в -2kk/ч. Любое падение баланса ниже базы = база была ложной
+    -- (либо игрок реально потратил монеты) — пересобираем базу от текущего
+    -- значения и начинаем отсчёт заново.
+    if coins < State.Session.StartCoins then
+        State.Session.StartCoins = coins
+        State.Session.StartedAt = tick()
+        return State.Session.FormatThousands(0)
+    end
     -- Считаем сразу: до первой монеты gained = 0 → показываем 0, с первой
     -- монетой пошёл счёт. Знаменатель зажат снизу до 1с, чтобы не делить на ~0.
     local hours = (tick() - State.Session.StartedAt) / 3600
