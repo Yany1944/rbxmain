@@ -4272,7 +4272,7 @@ local function StartAutoFarm()
         
         if State.GodModeWithAutoFarm and not State.GodModeEnabled then
             pcall(function()
-                ToggleGodMode()
+                --ToggleGodMode()
             end)
         end
 
@@ -4473,7 +4473,7 @@ local function StartAutoFarm()
                         
                         if State.GodModeWithAutoFarm and State.GodModeEnabled then
                             pcall(function()
-                                ToggleGodMode()
+                                --ToggleGodMode()
                             end)
                         end
                         
@@ -4493,7 +4493,7 @@ local function StartAutoFarm()
                                 
                                 if not State.GodModeEnabled then
                                     pcall(function()
-                                        ToggleGodMode()
+                                        --ToggleGodMode()
                                     end)
                                 end
                                 task.wait(0.3)
@@ -4751,7 +4751,7 @@ local function StartAutoFarm()
                     
                     if State.GodModeWithAutoFarm and State.GodModeEnabled then
                         pcall(function()
-                            ToggleGodMode()
+                            --ToggleGodMode()
                         end)
                     end
 
@@ -4770,7 +4770,7 @@ local function StartAutoFarm()
                             
                             if not State.GodModeEnabled then
                                 pcall(function()
-                                    ToggleGodMode()
+                                    --ToggleGodMode()
                                 end)
                             end
                         end
@@ -4803,7 +4803,7 @@ local function StartAutoFarm()
                     -- ✅ Выключаем годмод перед ресетом
                     if State.GodModeWithAutoFarm and State.GodModeEnabled then
                         pcall(function()
-                            ToggleGodMode()  -- Выключаем только если был включен автофармом
+                            --ToggleGodMode()  -- Выключаем только если был включен автофармом
                         end)
                         --print("[Auto Farm] 🛡️ GodMode автоматически выключен")
                     end
@@ -4826,7 +4826,7 @@ local function StartAutoFarm()
 
                             if not State.GodModeEnabled then
                                 pcall(function()
-                                    ToggleGodMode()
+                                    --ToggleGodMode()
                                 end)
                                 --print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
                             end
@@ -6389,7 +6389,7 @@ function VoteSpammer:StartAutoSpam()
                             
                             if not State.GodModeEnabled then
                                 pcall(function()
-                                    ToggleGodMode()
+                                    --ToggleGodMode()
                                 end)
                             end
                         end
@@ -6417,7 +6417,7 @@ function VoteSpammer:StartAutoSpam()
                 -- ✅ Выключаем GodMode перед началом голосования
                 if State.GodModeWithAutoFarm and State.GodModeEnabled then
                     pcall(function()
-                        ToggleGodMode()
+                        --ToggleGodMode()
                     end)
                     self.GodModeWasDisabled = true
                     task.wait(0.3)
@@ -6461,7 +6461,7 @@ function VoteSpammer:StartAutoSpam()
                             
                             if not State.GodModeEnabled then
                                 pcall(function()
-                                    ToggleGodMode()
+                                    --ToggleGodMode()
                                 end)
                             end
                         end
@@ -6518,7 +6518,7 @@ function VoteSpammer:StopAutoSpam()
             
             if not State.GodModeEnabled then
                 pcall(function()
-                    ToggleGodMode()
+                    --ToggleGodMode()
                 end)
             end
         end
