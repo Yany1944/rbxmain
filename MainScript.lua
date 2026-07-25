@@ -219,7 +219,21 @@ local State = {
     -- Instant Pickup
     InstantPickupEnabled = false,
     InstantPickupThread = nil,
-    
+    -- Single-flight: две попытки подбора одновременно дают двойной firetouchinterest
+    GunPickupBusy = false,
+    -- По какому именно GunDrop уже отработали, чтобы не долбить один и тот же
+    GunPickupTried = nil,
+
+    -- Gun tracking (общий для Gun ESP и Instant Pickup).
+    -- Модель событийная: DescendantAdded/DescendantRemoving + редкий reconcile,
+    -- вместо прежнего поиска по карте каждый кадр на Heartbeat
+    GunTrackConns = {},
+    GunReconcileThread = nil,
+    -- ⚠️ Свой флаг, а НЕ глобальный ScriptAlive: тот нигде не ставится в true
+    -- (только в false при выключении), поэтому `while ScriptAlive do` не
+    -- выполняется ни разу — на этом уже молча умер watchdog WalkFling
+    GunTrackingActive = false,
+
     -- Anti-Fling
     AntiFlingEnabled = false,
     IsFlingInProgress = false,
@@ -3275,11 +3289,33 @@ local function getMap()
     return nil
 end
 
-local function getGun()
-    local map = getMap()
-    if not map then return nil end
-    return map:FindFirstChild("GunDrop")
+-- ── Dropped Gun: единый источник истины ──────────────────────────────────────
+-- Раньше ган искался как getMap() → map:FindFirstChild("GunDrop"), то есть
+-- НЕрекурсивно и с обязательной привязкой к карте: если getMap() не нашёл карту
+-- (или взял не ту при смене раунда, когда в Workspace на пару кадров лежат две),
+-- либо GunDrop оказался не прямым ребёнком карты — возвращался nil.
+-- Бинд же всегда искал рекурсивно по всему Workspace и поэтому подбирал ган
+-- ровно тогда, когда ESP и Instant Pickup молчали. Это и есть причина
+-- расхождения «бинд работает, а есп/автопикап нет».
+-- Теперь резолвер ОДИН на все три потребителя.
+-- ⚠️ Поле State, а не top-level local: главный чанк упирается в лимит Luau
+-- «200 local registers» (проверяется только компиляцией в Roblox). Тот же приём
+-- уже применён для State.FlingCleanup.
+State.ResolveGunDrop = function()
+    local ok, gun = pcall(function()
+        return Workspace:FindFirstChild("GunDrop", true)
+    end)
+    if not ok or not gun then return nil end
+    if gun:IsA("BasePart") and gun.Parent then return gun end
+    return nil
 end
+
+-- ⚠️ Forward-declaration обязательна: CreateGunESP ниже вызывает RemoveGunESP,
+-- а `local function RemoveGunESP` объявлен ПОСЛЕ него. Без этой строки имя
+-- внутри CreateGunESP компилировалось как ГЛОБАЛЬНОЕ (nil) и вызов падал
+-- «attempt to call a nil value», а падение молча съедал внешний pcall трекинга.
+-- Для ловушек такая строка есть (`local RemoveTrapESP`), для гана её забыли.
+local RemoveGunESP
 
 local function CreateGunESP(gunPart)
     if not gunPart or not gunPart:IsA("BasePart") then return end
@@ -3330,7 +3366,9 @@ local function CreateGunESP(gunPart)
     }
 end
 
-local function RemoveGunESP(gunPart)
+-- Присваиваем в forward-объявленный локал выше (без `local`!), иначе создался бы
+-- второй локал и CreateGunESP снова смотрел бы в пустоту.
+function RemoveGunESP(gunPart)
     if not gunPart or not State.GunCache[gunPart] then return end
 
     local espData = State.GunCache[gunPart]
@@ -3521,61 +3559,131 @@ local function StartTrapTracking()
     table.insert(State.Connections, connection)
 end
 
-local function SetupGunTracking()
-    if State.currentMapConnection then
-        State.currentMapConnection:Disconnect()
-        State.currentMapConnection = nil
+-- Единая точка реакции: «текущий ган — вот этот» либо «гана нет».
+-- Зовётся и из событий, и из reconcile, поэтому обязана быть идемпотентной.
+-- Поле State по той же причине, что ResolveGunDrop — лимит локалей чанка.
+State.ApplyGunDropState = function(gun)
+    if gun and not gun.Parent then gun = nil end
+
+    if gun ~= State.CurrentGunDrop then
+        -- Снимаем ESP со всего, что перестало быть текущим ганом
+        for cachedGun in pairs(State.GunCache) do
+            if cachedGun ~= gun then
+                RemoveGunESP(cachedGun)
+            end
+        end
+
+        State.CurrentGunDrop = gun
+        State.previousGun = gun -- поле оставлено для совместимости
+
+        if gun then
+            -- Новый дроп — сбрасываем отметку «по этому уже отработали»
+            State.GunPickupTried = nil
+
+            if State.NotificationsEnabled then
+                task.spawn(function()
+                    ShowNotification(
+                        "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
+                        CONFIG.Colors.Gun
+                    )
+                end)
+            end
+            -- ⚠️ Вне гейта уведомлений: аватар шерифа надо гасить всегда.
+            -- Раньше clearSheriffAvatar висел ВНУТРИ if NotificationsEnabled,
+            -- и с выключенными уведомлениями аватар оставался висеть
+            task.spawn(function()
+                pcall(clearSheriffAvatar)
+            end)
+
+            -- Автопикап дёргаем событием, а не опросом каждые 0.05 с.
+            -- Хук на State, потому что сама функция объявлена ниже по файлу —
+            -- тот же приём, что у State.FlingCleanup
+            if State.InstantPickupEnabled and State.TryInstantPickup then
+                task.spawn(function()
+                    pcall(State.TryInstantPickup, gun)
+                end)
+            end
+        end
     end
 
-    State.currentMapConnection = RunService.Heartbeat:Connect(function()
+    -- ESP на текущий ган — идемпотентно
+    if gun then
+        if State.GunESP then
+            if not State.GunCache[gun] then
+                CreateGunESP(gun)
+            else
+                local espData = State.GunCache[gun]
+                if espData.highlight then espData.highlight.Enabled = true end
+                if espData.billboard then espData.billboard.Enabled = true end
+            end
+        elseif State.GunCache[gun] then
+            -- Тогл выключили: ESP снимаем, но сам ган продолжаем отслеживать,
+            -- иначе Instant Pickup перестал бы работать с выключенным ESP
+            RemoveGunESP(gun)
+        end
+    end
+end
+
+-- ── Трекинг выпавшего гана: событийная модель ────────────────────────────────
+-- Было: Heartbeat каждый кадр → getMap() → FindFirstChild. Дорого, давало до
+-- кадра задержки и полностью молчало при промахе getMap().
+-- Стало: DescendantAdded/DescendantRemoving + reconcile раз в секунду как
+-- самолечение (скрипт мог подняться, когда ган уже лежал; событие могло не
+-- прийти при стриминге или после перезапуска трекинга).
+local function SetupGunTracking()
+    -- Снимаем прежние коннекты: функция может вызываться повторно
+    if State.currentMapConnection then
+        pcall(function() State.currentMapConnection:Disconnect() end)
+        State.currentMapConnection = nil
+    end
+    for _, c in ipairs(State.GunTrackConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    State.GunTrackConns = {}
+
+    -- Фильтр по имени первым делом: строковое сравнение несопоставимо дешевле
+    -- обхода дерева, а DescendantAdded в MM2 дёргается часто
+    local addedConn = Workspace.DescendantAdded:Connect(function(d)
+        if d.Name ~= "GunDrop" then return end
+        if not d:IsA("BasePart") then return end
+        pcall(State.ApplyGunDropState, d)
+    end)
+
+    -- Реагируем, только если уходит ИМЕННО текущий ган
+    local removingConn = Workspace.DescendantRemoving:Connect(function(d)
+        if d ~= State.CurrentGunDrop then return end
         pcall(function()
-            local gun = getGun()
-
-            if gun and gun ~= State.previousGun then
-                State.CurrentGunDrop = gun
-
-                if State.NotificationsEnabled then
-                    task.spawn(function()
-                        ShowNotification(
-                            "<font color=\"rgb(255, 200, 50)\">Gun dropped!</font>",
-                            CONFIG.Colors.Gun
-                        )
-                    end)
-                    task.spawn(function()
-                        clearSheriffAvatar()
-                    end)
-                end               
-
-                State.previousGun = gun
-            end
-
-            if not gun and State.previousGun then
-                State.previousGun = nil
-            end
-
-            if gun and State.GunESP then
-                if not State.GunCache[gun] then
-                    CreateGunESP(gun)
-                else
-                    local espData = State.GunCache[gun]
-                    if espData.highlight then
-                        espData.highlight.Enabled = State.GunESP
-                    end
-                end
-            end
-
-            for cachedGun, _ in pairs(State.GunCache) do
-                if cachedGun ~= gun or not gun then
-                    RemoveGunESP(cachedGun)
-                end
-            end
-            -- if State.GunESP then
-            --     ScanForTraps()
-            -- end
+            RemoveGunESP(d)
+            State.GunCache[d] = nil
+            State.CurrentGunDrop = nil
+            State.previousGun = nil
+            State.GunPickupTried = nil
         end)
     end)
 
-    table.insert(State.Connections, State.currentMapConnection)
+    table.insert(State.GunTrackConns, addedConn)
+    table.insert(State.GunTrackConns, removingConn)
+    table.insert(State.Connections, addedConn)
+    table.insert(State.Connections, removingConn)
+
+    if State.GunReconcileThread then
+        pcall(task.cancel, State.GunReconcileThread)
+        State.GunReconcileThread = nil
+    end
+    State.GunTrackingActive = true
+    State.GunReconcileThread = task.spawn(function()
+        while State.GunTrackingActive do
+            pcall(function()
+                State.ApplyGunDropState(State.ResolveGunDrop())
+            end)
+            task.wait(1)
+        end
+    end)
+
+    -- Немедленная синхронизация: не ждём первого тика reconcile
+    pcall(function()
+        State.ApplyGunDropState(State.ResolveGunDrop())
+    end)
 end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 7: FLING / ANTI-FLING
@@ -4836,8 +4944,15 @@ ToggleWalkFling = function()
 end
 
 -- FlingSheriff() - Флинг шерифа
+-- ⚠️ Раньше здесь стоял getSheriffForAutoFarm() = findRoleHolder("Gun", false, nil):
+-- поиск ТОЛЬКО по предмету, без фолбэка на серверные роли. Пока шериф не держал
+-- Gun (начало раунда, ган выпал и лежит на карте), функция возвращала nil и
+-- выдавала «Sheriff not found» — отсюда «флингается только когда получит ствол».
+-- FlingMurderer таким не страдал, потому что зовёт getMurder() с фолбэком.
+-- Берём getSheriff() = findRoleHolder("Gun", true, "Sheriff") — та же пара, что
+-- getMurder() у убийцы: сперва по предмету, затем по роли из State.PlayerData.
 local function FlingSheriff()
-    local sheriff = getSheriffForAutoFarm()
+    local sheriff = getSheriff()
     if not sheriff then
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">Sheriff not found</font>", CONFIG.Colors.Text)
@@ -7426,161 +7541,143 @@ shootMurderer = function(forceMagic)
     end
 end
 
--- pickupGun() - Подбор пистолета
+-- pickupGun() - Подбор пистолета (ручной бинд/кнопка)
+-- Ган берём из общего трекинга, при промахе добираем прямым резолвером —
+-- так бинд остаётся ровно настолько же надёжным, каким был
 local function pickupGun(silent)
-    local gun = Workspace:FindFirstChild("GunDrop", true)
-    
+    local gun = State.CurrentGunDrop
+    if not gun or not gun.Parent then
+        gun = State.ResolveGunDrop()
+    end
+
     if not gun then
         if not silent and State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">No gun on map</font>", CONFIG.Colors.Text)
         end
         return false
     end
-    
+
     local character = LocalPlayer.Character
     if not character then return false end
-    
+
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
-    
-    -- ✅ ЗАЩИТА: проверяем что gun существует и имеет Parent
-    if not gun or not gun.Parent then return false end
-    
-    -- Используем firetouchinterest
+
+    if not gun.Parent then return false end
+
+    -- Фиче-детект: без firetouchinterest подбор невозможен, но падать нельзя
+    if not firetouchinterest then
+        if not silent and State.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error: </font><font color=\"rgb(220,220,220)\">firetouchinterest not supported</font>", CONFIG.Colors.Text)
+        end
+        return false
+    end
+
+    -- Последовательность 0 → пауза → 1 оставлена как была: она рабочая
     pcall(function()
         firetouchinterest(hrp, gun, 0)
         task.wait(0.1)
         firetouchinterest(hrp, gun, 1)
     end)
-    
+
     if not silent and State.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220, 220, 220)\">Gun: Picked up</font>", CONFIG.Colors.Text)
     end
-    
+
     return true
 end
 
-local function EnableInstantPickup()
-    if State.InstantPickupThread then
-        task.cancel(State.InstantPickupThread)
-        State.InstantPickupThread = nil
+-- ── Instant Pickup: событийный, без опроса ───────────────────────────────────
+-- Прежняя версия крутила поток с task.wait(0.05), а при неудачной попытке
+-- уходила в `repeat ... until false`, выход из которого был только по СМЕНЕ
+-- State.CurrentGunDrop. Но CurrentGunDrop при исчезновении гана никогда не
+-- обнулялся — поле держало уничтоженный инстанс, и поток вставал до конца
+-- раунда. Теперь функция дёргается событием появления гана, отрабатывает и
+-- выходит; повторный вход защищён GunPickupBusy.
+-- Поле State (не local): лимит Luau «200 local registers» в главном чанке.
+-- Заодно снимает нужду в отдельном хуке — ApplyGunDropState зовёт State.TryInstantPickup
+State.TryInstantPickup = function(gun)
+    if not State.InstantPickupEnabled then return end
+
+    -- Вложена сюда намеренно: снаружи не нужна, а лишний top-level local
+    -- переполняет регистры чанка
+    local function hasGunInInventory()
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChild("Gun") then return true end
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if backpack and backpack:FindFirstChild("Gun") then return true end
+        return false
     end
-    
-    State.InstantPickupEnabled = true
-    
-    -- ✅ ЗАЩИТА: проверяем SetupGunTracking перед вызовом
-    if not State.currentMapConnection then
-        pcall(function()
-            SetupGunTracking()
+
+    gun = gun or State.CurrentGunDrop
+    if not gun or not gun.Parent then return end
+
+    if State.GunPickupBusy then return end
+    if State.GunPickupTried == gun then return end
+
+    -- Условия раунда — те же, что были в прежней реализации
+    local murderer = getMurder()
+    if not murderer or murderer == LocalPlayer then return end
+    if getSheriff() == LocalPlayer then return end
+    if hasGunInInventory() then return end
+
+    State.GunPickupBusy = true
+    State.GunPickupTried = gun
+
+    local success = false
+    for _ = 1, 5 do
+        if not State.InstantPickupEnabled then break end
+        if not gun.Parent or State.CurrentGunDrop ~= gun then break end
+
+        pickupGun(true)
+        task.wait(0.15)
+
+        if hasGunInInventory() then
+            success = true
+            break
+        end
+    end
+
+    State.GunPickupBusy = false
+
+    if success and State.NotificationsEnabled then
+        task.spawn(function()
+            ShowNotification(
+                "<font color=\"rgb(168,228,160)\">Gun: Instant Pickup ✓</font>",
+                CONFIG.Colors.Text
+            )
         end)
     end
-    
-    local lastAttemptedGun = nil
-    
-    State.InstantPickupThread = task.spawn(function()
-        while State.InstantPickupEnabled do
-            local murderer = getMurder()
-            
-            if not murderer then
-                task.wait(0.5)
-                lastAttemptedGun = nil
-                continue
-            end
-            
-            if murderer == LocalPlayer then
-                task.wait(1)
-                continue
-            end
-            
-            local gun = State.CurrentGunDrop
-            
-            -- ✅ ЗАЩИТА: проверяем существование gun и его Parent
-            if gun and gun.Parent and gun ~= lastAttemptedGun then
-    
-                local sheriff = getSheriff()
-                if sheriff == LocalPlayer then
-                    lastAttemptedGun = gun
-                    continue
-                end
-                
-                local myChar = LocalPlayer.Character
-                local myBackpack = LocalPlayer:FindFirstChild("Backpack")
-                if (myChar and myChar:FindFirstChild("Gun")) or
-                   (myBackpack and myBackpack:FindFirstChild("Gun")) then
-                    lastAttemptedGun = gun
-                    continue
-                end
-                
-                local pickupSuccess = false
-                
-                for attempt = 1, 5 do
-                    -- ✅ ЗАЩИТА: проверяем gun перед каждой попыткой
-                    if not gun or not gun.Parent then
-                        break
-                    end
-                    
-                    pickupGun(true)
-                    task.wait(0.15)
-                    
-                    local curChar = LocalPlayer.Character
-                    local curBackpack = LocalPlayer:FindFirstChild("Backpack")
-                    if (curChar and curChar:FindFirstChild("Gun")) or
-                       (curBackpack and curBackpack:FindFirstChild("Gun")) then
-                        pickupSuccess = true
-                        
-                        if State.NotificationsEnabled then
-                            task.spawn(function()
-                                ShowNotification(
-                                    "<font color=\"rgb(168,228,160)\">Gun: Instant Pickup ✓</font>",
-                                    CONFIG.Colors.Text
-                                )
-                            end)
-                            task.spawn(function()
-                                updateRoleAvatars()
-                            end)
-                        end
-                        break
-                    end
-                    
-                    if State.CurrentGunDrop ~= gun or not State.CurrentGunDrop then
-                        task.spawn(function()
-                            updateRoleAvatars()
-                        end)
-                        break
-                    end
-                end
-                
-                lastAttemptedGun = gun
-                
-                if not pickupSuccess then
-                    repeat
-                        task.wait(0.1)
-                        if not State.InstantPickupEnabled then
-                            return
-                        end
-                        
-                        if State.CurrentGunDrop and State.CurrentGunDrop ~= lastAttemptedGun then
-                            break
-                        end
-                        
-                        if not State.CurrentGunDrop then
-                            break
-                        end
-                        
-                    until false
-                end
-            end
-            
-            task.wait(0.05)
-        end
+
+    task.spawn(function()
+        pcall(updateRoleAvatars)
+    end)
+end
+
+local function EnableInstantPickup()
+    State.InstantPickupEnabled = true
+    State.GunPickupTried = nil
+
+    -- Трекинг мог быть ещё не поднят: автозагрузка конфига дёргает тогл раньше,
+    -- чем отрабатывает блок запуска в конце файла
+    if #State.GunTrackConns == 0 then
+        pcall(SetupGunTracking)
+    end
+
+    -- Ган мог уже лежать на карте — не ждём следующего события
+    task.spawn(function()
+        pcall(State.TryInstantPickup, State.CurrentGunDrop or State.ResolveGunDrop())
     end)
 end
 
 local function DisableInstantPickup()
     State.InstantPickupEnabled = false
-    
+    State.GunPickupTried = nil
+    State.GunPickupBusy = false
+
+    -- Поток от прежней реализации: гасим, если он ещё жив
     if State.InstantPickupThread then
-        task.cancel(State.InstantPickupThread)
+        pcall(task.cancel, State.InstantPickupThread)
         State.InstantPickupThread = nil
     end
 end
