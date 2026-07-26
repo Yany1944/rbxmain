@@ -8030,7 +8030,7 @@ ToggleInvisibility = function()
             local Humanoid = Character:FindFirstChild('Humanoid')
             if not RootPart or not Humanoid then return end
 
-            setCharacterTransparency(Character, 0) -- ИНВИЗ БЫЛ 0.5
+            setCharacterTransparency(Character, 0.5) -- ИНВИЗ БЫЛ 0.5
 
             local OriginalCFrame       = RootPart.CFrame
             local OriginalCameraOffset = Humanoid.CameraOffset
