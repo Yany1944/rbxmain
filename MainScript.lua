@@ -13,9 +13,6 @@ if getgenv().MM2_Script then
 end
 getgenv().MM2_Script = true
 
--- Автовключение фарма через _G.AUTOEXEC_ENABLED вырезано: его заменила
--- система конфигов — конфиг, помеченный на автозагрузку, применяется сам
--- после построения GUI (см. БЛОК CONFIG MANAGER).
 --[
 pcall(function()
     local url = "https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Emotes.lua"
@@ -31,6 +28,7 @@ pcall(function()
 end)
 --]]
 -- ШАГ 5: COREGUI TOGGLE FIX
+--[[
 pcall(function()
     local StarterGui = game:GetService("StarterGui")
     -- Отключаем CoreGui
@@ -47,7 +45,7 @@ pcall(function()
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
 end)
-
+--]]
 local oldWarn = warn
 warn = function(...)
     local args = {...}
