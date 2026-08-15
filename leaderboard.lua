@@ -51,6 +51,20 @@ local CONFIG = {
         }
 	}
 
+-- Сервисы объявляются один раз здесь; ниже по файлу используются как локали
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local GuiService = game:GetService("GuiService")
+local Lighting = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
+
 pcall(function()
     local StarterGui = game:GetService("StarterGui")
     -- Отключаем CoreGui
