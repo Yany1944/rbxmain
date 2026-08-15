@@ -50,7 +50,7 @@ local CONFIG = {
         FadeTime = 0.4
         }
 	}
---[[
+
 pcall(function()
     local StarterGui = game:GetService("StarterGui")
     -- Отключаем CoreGui
@@ -67,7 +67,7 @@ pcall(function()
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
     StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
 end)
---]]
+
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 3: STATE MANAGEMENT (СТРОКИ 116-252)
 -- ══════════════════════════════════════════════════════════════════════════════
