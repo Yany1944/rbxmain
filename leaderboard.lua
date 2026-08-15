@@ -7194,15 +7194,40 @@ end
 -- СВОДКА СЕССИИ (инфо-блок в левом нижнем углу сайдбара нового GUI)
 -- ══════════════════════════════════════════════════════════════════════════════
 
+-- Источник баланса — лейбл шопа PlayerGui.CrossPlatform.Shop...Coins.Amount.
+-- Корень бага с «43k»: в шаблоне StarterGui у этого лейбла зашита дизайн-тайм
+-- заглушка "43,000" (проверено на живом клиенте). Сразу после инжекта копия в
+-- PlayerGui ещё держит её, и старая логика фиксировала 43000 как базу; когда
+-- приходил реальный баланс, разница улетала в Coins/h. Симметрично ломалось при
+-- телепорте/серверхопе — GUI пересоздаётся и заглушка возвращается.
+--
+-- Поэтому база (StartCoins + StartedAt) НЕ ставится при загрузке. Значение
+-- считается настоящим, только если выполнено хоть одно:
+--   * игра при нас записала Text в лейбл (ловим GetPropertyChangedSignal);
+--   * текст отличается от заглушки шаблона;
+--   * истёк TrustTimeout — сдаёмся и верим тому, что видим.
+-- Плюс любой неправдоподобный скачок баланса (в любую сторону) не идёт в
+-- статистику, а сдвигает базу — см. GetRateText.
 State.Session = {
     Version    = "2.2",
-    -- База (StartCoins + StartedAt) НЕ ставится при загрузке: счётчик монет в
-    -- шопе догружается/дощёлкивает с нуля, и раннее чтение дало бы ложную базу,
-    -- из-за которой Coins/h подскакивал. База фиксируется в EnsureBaseline, когда
-    -- баланс стабилизировался. Включение автофарма делает сброс (MarkFarmStart).
     StartedAt  = nil,
     StartCoins = nil,
-    _pending   = nil,   -- кандидат в базу, ждём стабилизации
+
+    -- Тайминги/пороги счётчика
+    BaselineStableFor = 2,    -- сек: столько баланс должен не меняться, чтобы стать базой
+    TrustTimeout      = 20,   -- сек: после этого верим лейблу без доказательств
+    RateWarmup        = 30,   -- сек: короче этого окна Coins/h не показываем — цифра бессмысленна
+    MaxGainPerSec     = 30,   -- потолок правдоподобного прироста монет в секунду
+    JumpSlack         = 300,  -- разовая надбавка к потолку (награда за раунд, лаг опроса)
+
+    _label       = nil,       -- закэшированный TextLabel баланса
+    _labelAt     = nil,       -- когда этот инстанс лейбла был подхвачен
+    _labelDirty  = false,     -- игра уже писала в Text => значению можно верить
+    _placeholder = nil,       -- дизайн-тайм заглушка из StarterGui ("43,000"), false если не прочли
+    _pending     = nil,       -- кандидат в базу
+    _pendingAt   = nil,
+    _lastCoins   = nil,       -- предыдущее доверенное чтение (для отсева скачков)
+    _lastAt      = nil,
 }
 
 function State.Session.FormatThousands(n)
@@ -7211,39 +7236,123 @@ function State.Session.FormatThousands(n)
     return (out:gsub("^,", ""))
 end
 
--- Только читает баланс, базу не трогает.
-function State.Session.ReadCoins()
-    local ok, value = pcall(function()
-        local label = LocalPlayer.PlayerGui
+-- Подхват лейбла баланса + разовое чтение заглушки из шаблона StarterGui.
+-- Лейбл пересоздаётся при телепорте/перезагрузке GUI, поэтому кэш инвалидируем
+-- по .Parent и при смене инстанса сбрасываем «доверие» к нему.
+function State.Session.GetLabel()
+    local S = State.Session
+    if S._label and S._label.Parent then return S._label end
+
+    local ok, label = pcall(function()
+        return LocalPlayer.PlayerGui
             .CrossPlatform.Shop.Medium.Title.Coins.Container.Amount
-        return tonumber((tostring(label.Text):gsub(",", "")))
     end)
-    if ok and type(value) == "number" then
-        return value
+    if not ok or typeof(label) ~= "Instance" then return nil end
+
+    -- Заглушка шаблона читается один раз: она одна и та же на весь сеанс
+    if S._placeholder == nil then
+        local ok2, def = pcall(function()
+            return tostring(game:GetService("StarterGui")
+                .CrossPlatform.Shop.Medium.Title.Coins.Container.Amount.Text)
+        end)
+        S._placeholder = (ok2 and type(def) == "string" and def ~= "") and def or false
     end
-    return nil
+
+    S._label      = label
+    S._labelAt    = tick()
+    S._labelDirty = false
+    -- Первая же запись Text игрой = в лейбле настоящий баланс, а не заглушка
+    pcall(function()
+        TrackConnection(label:GetPropertyChangedSignal("Text"):Connect(function()
+            S._labelDirty = true
+        end))
+    end)
+    return label
 end
 
--- База фиксируется, только когда баланс совпал в двух чтениях подряд — то есть
--- данные догрузились и счётчик перестал дощёлкивать. Так загрузка/анимация не
--- засчитывается в фарм. StartedAt стартует тем же моментом, что и StartCoins.
-function State.Session.EnsureBaseline(coins)
-    if State.Session.StartCoins then return end
-    if State.Session._pending == coins then
-        State.Session.StartCoins = coins
-        State.Session.StartedAt = tick()
-        State.Session._pending = nil
-    else
-        State.Session._pending = coins
+-- Читает баланс. Возвращает nil, пока значению нельзя верить (заглушка шаблона),
+-- чтобы ни COINS, ни COINS/H не показали фиктивные 43k. Базу не трогает.
+function State.Session.ReadCoins()
+    local S = State.Session
+    local label = S.GetLabel()
+    if not label then return nil end
+
+    local ok, text = pcall(function() return tostring(label.Text) end)
+    if not ok or type(text) ~= "string" then return nil end
+
+    -- Пока игра ни разу не писала в лейбл, а текст совпадает с заглушкой —
+    -- баланс ещё не пришёл. Через TrustTimeout перестаём упрямиться: у игрока
+    -- может быть ровно столько монет, и события Text мы могли не застать.
+    if not S._labelDirty and S._placeholder and text == S._placeholder
+        and (tick() - (S._labelAt or 0)) < S.TrustTimeout then
+        return nil
     end
+
+    return S.ParseAmount(text)
+end
+
+-- "8,781" → 8781, "1.2M" → 1200000. Шоп при больших балансах сокращает число,
+-- поэтому просто вырезать не-цифры нельзя: "1.2M" превратилось бы в 12.
+function State.Session.ParseAmount(text)
+    local digits, suffix = text:match("([%d%.,%s]+)%s*([KkMmBb]?)")
+    if not digits then return nil end
+    -- Разделитель тысяч убираем, десятичную точку оставляем (её даёт только
+    -- сокращённая запись вида 1.2M — в полной записи точек не бывает)
+    digits = digits:gsub("[,%s]", "")
+    local value = tonumber(digits)
+    if type(value) ~= "number" then return nil end
+    local mult = ({ k = 1e3, m = 1e6, b = 1e9 })[suffix:lower()]
+    if mult then value = value * mult end
+    return math.floor(value)
+end
+
+-- База фиксируется, когда выполнено любое из условий:
+--   a) игра при нас записала Text — значение гарантированно настоящее;
+--   b) баланс не менялся BaselineStableFor секунд (инжект в простое);
+--   c) истёк TrustTimeout — берём что есть, чтобы счётчик не завис на «—»
+--      при инжекте прямо посреди фарма, когда баланс тикает каждую секунду.
+-- StartedAt стартует тем же моментом, что и StartCoins.
+function State.Session.EnsureBaseline(coins)
+    local S = State.Session
+    if S.StartCoins then return end
+    local now = tick()
+
+    local settled = S._labelDirty
+    if not settled then
+        if S._pending ~= coins then
+            S._pending, S._pendingAt = coins, now
+        elseif (now - (S._pendingAt or now)) >= S.BaselineStableFor then
+            settled = true
+        end
+        if (now - (S._labelAt or now)) >= S.TrustTimeout then
+            settled = true
+        end
+    end
+    if not settled then return end
+
+    S.StartCoins = coins
+    S.StartedAt  = now
+    S._lastCoins = coins
+    S._lastAt    = now
+    S._pending, S._pendingAt = nil, nil
 end
 
 -- Сброс сессии: точка отсчёта Coins/h переезжает на текущий момент.
--- Вызывается при включении автофарма (монеты к этому времени уже загружены)
+-- Вызывается при включении автофарма (монеты к этому времени уже загружены).
+-- Если баланс ещё не доверенный — базу не выдумываем, её поставит EnsureBaseline.
 function State.Session.MarkFarmStart()
-    State.Session.StartedAt = tick()
-    State.Session.StartCoins = State.Session.ReadCoins() or 0
-    State.Session._pending = nil
+    local S = State.Session
+    local coins = S.ReadCoins()
+    S._pending, S._pendingAt = nil, nil
+    if not coins then
+        S.StartCoins, S.StartedAt = nil, nil
+        S._lastCoins, S._lastAt = nil, nil
+        return
+    end
+    S.StartedAt  = tick()
+    S.StartCoins = coins
+    S._lastCoins = coins
+    S._lastAt    = S.StartedAt
 end
 
 function State.Session.GetCoinsText()
@@ -7253,27 +7362,34 @@ function State.Session.GetCoinsText()
 end
 
 function State.Session.GetRateText()
-    local coins = State.Session.ReadCoins()
-    if not coins then return nil end           -- монеты ещё не загрузились
-    State.Session.EnsureBaseline(coins)
-    if not State.Session.StartCoins then return "—" end   -- база стабилизируется
-    -- Защита от ложной базы. Витрина шопа при загрузке отдаёт placeholder-баланс
-    -- (напр. ~43k), который держится пару чтений подряд и попадает в базу. Когда
-    -- подгружается реальный (меньший) баланс, gained уходит в минус и Coins/h
-    -- скатывается в -2kk/ч. Любое падение баланса ниже базы = база была ложной
-    -- (либо игрок реально потратил монеты) — пересобираем базу от текущего
-    -- значения и начинаем отсчёт заново.
-    if coins < State.Session.StartCoins then
-        State.Session.StartCoins = coins
-        State.Session.StartedAt = tick()
-        return State.Session.FormatThousands(0)
+    local S = State.Session
+    local coins = S.ReadCoins()
+    if not coins then return nil end            -- баланс ещё не доверенный
+    S.EnsureBaseline(coins)
+    if not S.StartCoins then return "—" end     -- база ещё устаканивается
+
+    local now = tick()
+
+    -- Отсев артефактов данных. Любой скачок, который физически нельзя нафармить
+    -- за прошедшее время (догрузка баланса, возврат заглушки после телепорта),
+    -- и любое падение баланса (покупка в шопе) не идут в статистику: базу
+    -- сдвигаем на ту же дельту, поэтому уже накопленный gained и время сессии
+    -- сохраняются, а сам скачок в Coins/h не попадает.
+    local dt    = math.max(now - (S._lastAt or now), 0.001)
+    local delta = coins - (S._lastCoins or coins)
+    if delta < 0 or delta > (S.MaxGainPerSec * dt + S.JumpSlack) then
+        S.StartCoins = S.StartCoins + delta
     end
-    -- Считаем сразу: до первой монеты gained = 0 → показываем 0, с первой
-    -- монетой пошёл счёт. Знаменатель зажат снизу до 1с, чтобы не делить на ~0.
-    local hours = (tick() - State.Session.StartedAt) / 3600
-    if hours < (1 / 3600) then hours = 1 / 3600 end
-    local gained = coins - State.Session.StartCoins
-    return State.Session.FormatThousands(gained / hours)
+    S._lastCoins, S._lastAt = coins, now
+
+    -- Пока окно измерения короче RateWarmup, экстраполяция в час даёт мусор
+    -- (одна монета на второй секунде = 1800/ч). Честнее показать прочерк.
+    local elapsed = now - S.StartedAt
+    if elapsed < S.RateWarmup then return "—" end
+
+    local gained = coins - S.StartCoins
+    if gained < 0 then gained = 0 end
+    return S.FormatThousands(gained / (elapsed / 3600))
 end
 
 function State.Session.GetRole()
