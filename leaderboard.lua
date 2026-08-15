@@ -50,19 +50,24 @@ local CONFIG = {
         FadeTime = 0.4
         }
 	}
-
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
-local TweenService = game:GetService("TweenService")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local GuiService = game:GetService("GuiService")
-local LocalPlayer = Players.LocalPlayer
-
+--[[
+pcall(function()
+    local StarterGui = game:GetService("StarterGui")
+    -- Отключаем CoreGui
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, false)
+    task.wait(0.5)
+    -- Включаем обратно
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, true)
+    StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.EmotesMenu, true)
+end)
+--]]
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 3: STATE MANAGEMENT (СТРОКИ 116-252)
 -- ══════════════════════════════════════════════════════════════════════════════
