@@ -13,7 +13,7 @@ if getgenv().MM2_Script then
 end
 getgenv().MM2_Script = true
 
---[
+--[[
 pcall(function()
     local url = "https://cdn.jsdelivr.net/gh/Yany1944/rbxmain@main/Scripts/Emotes.lua"
     local ok, result = pcall(function()
@@ -489,7 +489,6 @@ local colRgb = Color3.fromRGB
 -- ========================================
 local clientChar = LocalPlayer.Character
 local clientMouse = LocalPlayer:GetMouse()
-local clientRoot, clientHumanoid
 local clientCamera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass('Camera')
 local clientTeam = LocalPlayer.Team
 
@@ -553,11 +552,17 @@ end
 
 local function updateCharacter()
     clientChar = LocalPlayer.Character
-    if clientChar then
-        task.wait(0.5)
-        clientRoot = GetRootPart(clientChar)
-        clientHumanoid = clientChar:FindFirstChildOfClass('Humanoid')
+
+    if not clientChar then
+        return
     end
+
+    task.wait(0.5)
+
+    local root = GetRootPart(clientChar)
+    local humanoid = clientChar:FindFirstChildOfClass("Humanoid")
+
+    return root, humanoid
 end
 
 TrackConnection(LocalPlayer.CharacterAdded:Connect(updateCharacter))
