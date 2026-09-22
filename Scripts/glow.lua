@@ -3806,54 +3806,176 @@ local function buildSleekUI()
     end)
 
     local lightSec = createSection(visualsTab, "Lighting")
-    createToggle(lightSec, "Enable Lighting Override", settings.lighting.enabled, function(v)
-        settings.lighting.enabled = v
-        if v then applyLighting() end
-    end)
-    createSlider(lightSec, "Brightness", settings.lighting.brightness, 0, 10, 0.1, function(v)
-        settings.lighting.brightness = v
+
+-- Save the actual Lighting state before the override changes anything
+local lightingOriginal = nil
+
+local function saveOriginalLighting()
+    if lightingOriginal then
+        return
+    end
+
+    local L = game:GetService("Lighting")
+
+    lightingOriginal = {
+        Brightness = L.Brightness,
+        ExposureCompensation = L.ExposureCompensation,
+        FogEnd = L.FogEnd,
+        FogStart = L.FogStart,
+        ClockTime = L.ClockTime,
+        OutdoorAmbient = L.OutdoorAmbient,
+        Ambient = L.Ambient,
+        ColorShift_Top = L.ColorShift_Top,
+        ColorShift_Bottom = L.ColorShift_Bottom,
+        ShadowSoftness = L.ShadowSoftness,
+        GlobalShadows = L.GlobalShadows
+    }
+end
+
+local function restoreOriginalLighting()
+    if not lightingOriginal then
+        return
+    end
+
+    local L = game:GetService("Lighting")
+
+    L.Brightness = lightingOriginal.Brightness
+    L.ExposureCompensation = lightingOriginal.ExposureCompensation
+    L.FogEnd = lightingOriginal.FogEnd
+    L.FogStart = lightingOriginal.FogStart
+    L.ClockTime = lightingOriginal.ClockTime
+    L.OutdoorAmbient = lightingOriginal.OutdoorAmbient
+    L.Ambient = lightingOriginal.Ambient
+    L.ColorShift_Top = lightingOriginal.ColorShift_Top
+    L.ColorShift_Bottom = lightingOriginal.ColorShift_Bottom
+    L.ShadowSoftness = lightingOriginal.ShadowSoftness
+    L.GlobalShadows = lightingOriginal.GlobalShadows
+
+    lightingOriginal = nil
+end
+
+local function resetLightingSettings()
+    settings.lighting.brightness = 2
+    settings.lighting.exposure = 0
+    settings.lighting.fogEnd = 100000
+    settings.lighting.fogStart = 0
+    settings.lighting.clockTime = 12
+    settings.lighting.outdoorAmbient = Color3.fromRGB(128, 128, 128)
+    settings.lighting.ambient = Color3.fromRGB(0, 0, 0)
+    settings.lighting.colorShift_Top = Color3.fromRGB(0, 0, 0)
+    settings.lighting.colorShift_Bottom = Color3.fromRGB(0, 0, 0)
+    settings.lighting.shadowSoftness = 0.5
+    settings.lighting.globalShadows = true
+end
+
+createToggle(lightSec, "Enable Lighting Override", settings.lighting.enabled, function(v)
+    if v then
+        -- Remember the real game Lighting before overriding it
+        saveOriginalLighting()
+
+        settings.lighting.enabled = true
         applyLighting()
-    end)
-    createSlider(lightSec, "Exposure", settings.lighting.exposure, -5, 5, 0.1, function(v)
-        settings.lighting.exposure = v
-        applyLighting()
-    end)
-    createSlider(lightSec, "Fog Start", settings.lighting.fogStart, 0, 10000, 10, function(v)
-        settings.lighting.fogStart = v
-        applyLighting()
-    end)
-    createSlider(lightSec, "Fog End", settings.lighting.fogEnd, 0, 100000, 100, function(v)
-        settings.lighting.fogEnd = v
-        applyLighting()
-    end)
-    createSlider(lightSec, "Clock Time", settings.lighting.clockTime, 0, 24, 0.1, function(v)
-        settings.lighting.clockTime = v
-        applyLighting()
-    end)
-    createSlider(lightSec, "Shadow Softness", settings.lighting.shadowSoftness, 0, 1, 0.05, function(v)
-        settings.lighting.shadowSoftness = v
-        applyLighting()
-    end)
-    createToggle(lightSec, "Global Shadows", settings.lighting.globalShadows, function(v)
-        settings.lighting.globalShadows = v
-        applyLighting()
-    end)
-    createColorPicker(lightSec, "Outdoor Ambient", settings.lighting.outdoorAmbient, function(c, t)
-         settings.lighting.outdoorAmbient = c
-         applyLighting()
-     end)
-    createColorPicker(lightSec, "Ambient", settings.lighting.ambient, function(c, t)
-         settings.lighting.ambient = c
-         applyLighting()
-    end)
-    createColorPicker(lightSec, "ColorShift Top", settings.lighting.colorShift_Top, function(c, t)
-        settings.lighting.colorShift_Top = c
-        applyLighting()
-    end)
-    createColorPicker(lightSec, "ColorShift Bottom", settings.lighting.colorShift_Bottom, function(c, t)
-        settings.lighting.colorShift_Bottom = c
-        applyLighting()
-    end)
+    else
+        settings.lighting.enabled = false
+
+        -- Restore exactly what Lighting looked like before the override
+        restoreOriginalLighting()
+    end
+end)
+
+createSlider(lightSec, "Brightness", settings.lighting.brightness, 0, 10, 0.1, function(v)
+    settings.lighting.brightness = v
+    applyLighting()
+end)
+
+createSlider(lightSec, "Exposure", settings.lighting.exposure, -5, 5, 0.1, function(v)
+    settings.lighting.exposure = v
+    applyLighting()
+end)
+
+createSlider(lightSec, "Fog Start", settings.lighting.fogStart, 0, 10000, 10, function(v)
+    settings.lighting.fogStart = v
+    applyLighting()
+end)
+
+createSlider(lightSec, "Fog End", settings.lighting.fogEnd, 0, 100000, 100, function(v)
+    settings.lighting.fogEnd = v
+    applyLighting()
+end)
+
+createSlider(lightSec, "Clock Time", settings.lighting.clockTime, 0, 24, 0.1, function(v)
+    settings.lighting.clockTime = v
+    applyLighting()
+end)
+
+createSlider(lightSec, "Shadow Softness", settings.lighting.shadowSoftness, 0, 1, 0.05, function(v)
+    settings.lighting.shadowSoftness = v
+    applyLighting()
+end)
+
+createToggle(lightSec, "Global Shadows", settings.lighting.globalShadows, function(v)
+    settings.lighting.globalShadows = v
+    applyLighting()
+end)
+
+createColorPicker(lightSec, "Outdoor Ambient", settings.lighting.outdoorAmbient, function(c, t)
+    settings.lighting.outdoorAmbient = c
+    applyLighting()
+end)
+
+createColorPicker(lightSec, "Ambient", settings.lighting.ambient, function(c, t)
+    settings.lighting.ambient = c
+    applyLighting()
+end)
+
+createColorPicker(lightSec, "ColorShift Top", settings.lighting.colorShift_Top, function(c, t)
+    settings.lighting.colorShift_Top = c
+    applyLighting()
+end)
+
+createColorPicker(lightSec, "ColorShift Bottom", settings.lighting.colorShift_Bottom, function(c, t)
+    settings.lighting.colorShift_Bottom = c
+    applyLighting()
+end)
+
+-- Reset to Default button
+local resetLightingBtn = Instance.new("TextButton")
+resetLightingBtn.Size = UDim2.new(1, 0, 0, 36)
+resetLightingBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+resetLightingBtn.BorderSizePixel = 0
+resetLightingBtn.Text = "Reset to Default"
+resetLightingBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+resetLightingBtn.Font = Enum.Font.GothamMedium
+resetLightingBtn.TextSize = 12
+resetLightingBtn.AutoButtonColor = false
+resetLightingBtn.Parent = lightSec
+
+local resetCorner = Instance.new("UICorner")
+resetCorner.CornerRadius = UDim.new(0, 6)
+resetCorner.Parent = resetLightingBtn
+
+resetLightingBtn.MouseEnter:Connect(function()
+    createTween(resetLightingBtn, {
+        BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+    }, 0.15)
+end)
+
+resetLightingBtn.MouseLeave:Connect(function()
+    createTween(resetLightingBtn, {
+        BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    }, 0.15)
+end)
+
+resetLightingBtn.MouseButton1Click:Connect(function()
+    -- Restore the real Lighting first
+    settings.lighting.enabled = false
+    restoreOriginalLighting()
+
+    -- Reset the script's Lighting values
+    resetLightingSettings()
+
+    notify("Lighting", "Lighting has been reset to default.", 3)
+end)
 
     -- Settings Tab
     local menuSec = createSection(settingsTab, "Configuration")

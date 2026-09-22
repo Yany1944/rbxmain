@@ -65,7 +65,7 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 
 local CONFIG = {
-        HideKey = Enum.KeyCode.Q,
+        HideKey = Enum.KeyCode.Insert,
         Colors = {
         Background = Color3.fromRGB(25, 25, 30),
         Section = Color3.fromRGB(35, 35, 40),
