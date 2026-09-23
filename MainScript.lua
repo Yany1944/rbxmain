@@ -173,6 +173,12 @@ local State = {
     KillAuraRange = 7,
     KillAuraEnabled = false,
     KillAuraStatic = false,
+    FakePositionEnabled = false,
+    FakePositionMode = "Jitter",
+    FakePositionRadius = 3,
+    FakePositionSpeed = 5,
+    FakePositionFaceThreat = true,
+    FakePositionOffset = Vector3.zero,
     spawnAtPlayer = false,
     CanShootMurderer = true,
     ShootCooldown = 3,
@@ -2114,6 +2120,9 @@ end
 
 local function FullShutdown()
     --print("[FullShutdown] Starting complete cleanup...")
+
+    -- Восстанавливаем настоящую позицию до остановки остальных систем.
+    if State.SetFakePosition then pcall(State.SetFakePosition, false) end
 
     pcall(function()
         if State.AimbotConfig.Enabled then StopAimbot() end
@@ -7929,6 +7938,135 @@ local function ToggleKillAura(state)
     end
 end
 
+-- Fake Position: подмена на отправку физики с восстановлением перед камерой.
+do
+    local runtime = {
+        BindName = "MM2_FakePositionRestore",
+        Angle = 0, Flip = false, NextRandom = 0, NextTarget = 0,
+        Frame = 0, LastFrame = -1,
+        Radius = 3, Speed = 5,
+        Side = Vector3.xAxis, Vertical = -Vector3.yAxis,
+    }
+    State.FakePositionRuntime = runtime
+
+    local function restorePosition()
+        local root, original, sent = runtime.Root, runtime.Original, runtime.Sent
+        runtime.Root, runtime.Original, runtime.Sent = nil, nil, nil
+        State.FakePositionOffset = Vector3.zero
+        if root and root.Parent and original and sent then
+            -- Убираем только нашу добавку, сохраняя движение между фазами.
+            root.CFrame = root.CFrame - (sent.Position - original.Position)
+        end
+    end
+
+    local function updateAxes(root)
+        local direction = root.CFrame.LookVector
+        if State.FakePositionFaceThreat then
+            local threat = getMurder()
+            if threat == LocalPlayer then threat = getSheriff() end
+            local targetRoot = threat and threat.Character and threat.Character:FindFirstChild("HumanoidRootPart")
+            if not targetRoot then
+                local closest = math.huge
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer then
+                        local character = player.Character
+                        local candidate = character and character:FindFirstChild("HumanoidRootPart")
+                        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                        if candidate and humanoid and humanoid.Health > 0 then
+                            local distance = (candidate.Position - root.Position).Magnitude
+                            if distance < closest then closest, targetRoot = distance, candidate end
+                        end
+                    end
+                end
+            end
+            if targetRoot then direction = targetRoot.Position - root.Position end
+        end
+        if direction.Magnitude < 0.001 then direction = Vector3.zAxis end
+        direction = direction.Unit
+        local side = direction:Cross(Vector3.yAxis)
+        if side.Magnitude < 0.001 then side = Vector3.xAxis end
+        runtime.Side = side.Unit
+        runtime.Vertical = direction:Cross(runtime.Side).Unit
+    end
+
+    local function disableOnError(err)
+        State.SetFakePosition(false)
+        if State.FakePositionToggle then State.FakePositionToggle:Set(false, false) end
+        warn("[Fake Position] " .. tostring(err))
+        ShowNotification("Fake Position stopped: " .. tostring(err), CONFIG.Colors.Red)
+    end
+
+    State.SetFakePosition = function(enabled)
+        State.FakePositionEnabled = false
+        if runtime.Connection then runtime.Connection:Disconnect(); runtime.Connection = nil end
+        if runtime.Removing then runtime.Removing:Disconnect(); runtime.Removing = nil end
+        if runtime.Bound then
+            pcall(function() RunService:UnbindFromRenderStep(runtime.BindName) end)
+            runtime.Bound = false
+        end
+        pcall(restorePosition)
+        if not enabled then return end
+
+        runtime.Angle, runtime.Flip, runtime.NextRandom, runtime.NextTarget = 0, false, 0, 0
+        runtime.Frame, runtime.LastFrame = 0, -1
+        local ok, err = pcall(function()
+            RunService:BindToRenderStep(runtime.BindName, Enum.RenderPriority.First.Value, function()
+                runtime.Frame += 1
+                local restored, restoreError = pcall(restorePosition)
+                if not restored then disableOnError(restoreError) end
+            end)
+        end)
+        if not ok then disableOnError(err); return end
+        runtime.Bound = true
+        State.FakePositionEnabled = true
+        runtime.Removing = LocalPlayer.CharacterRemoving:Connect(function()
+            pcall(restorePosition)
+            runtime.NextTarget = 0
+        end)
+        runtime.Connection = RunService.Heartbeat:Connect(function(dt)
+            local success, failure = pcall(function()
+                -- Страховка на случай пропущенной отрисовки: смещения не суммируются.
+                restorePosition()
+                if not State.FakePositionEnabled or Fling.SessionActive or State.WalkFlingActive
+                    or State.FlyEnabled or State.AutoFarmEnabled then return end
+                -- Heartbeat может сработать несколько раз между отрисовками.
+                if runtime.LastFrame == runtime.Frame then return end
+                local character = LocalPlayer.Character
+                local root = character and character:FindFirstChild("HumanoidRootPart")
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                if not root or not humanoid or humanoid.Health <= 0 or humanoid.Sit or root.Anchored then return end
+                local now = os.clock()
+                if now >= runtime.NextTarget then
+                    runtime.NextTarget = now + 0.25
+                    updateAxes(root)
+                end
+                if now >= runtime.NextRandom then
+                    runtime.NextRandom = now + 0.16 + math.random() * 0.24
+                    runtime.Speed = math.clamp(tonumber(State.FakePositionSpeed) or 5, 0.5, 12) * (0.7 + math.random() * 0.6)
+                    runtime.Radius = math.clamp(tonumber(State.FakePositionRadius) or 3, 0.5, 10) * (0.8 + math.random() * 0.2)
+                end
+                local offset
+                if State.FakePositionMode == "Static" then
+                    offset = runtime.Side * math.clamp(tonumber(State.FakePositionRadius) or 3, 0.5, 10)
+                elseif State.FakePositionMode == "Jitter" then
+                    runtime.Flip = not runtime.Flip
+                    offset = runtime.Side * (runtime.Flip and runtime.Radius or -runtime.Radius)
+                else
+                    runtime.Angle = (runtime.Angle + runtime.Speed * 2 * math.pi * dt) % (2 * math.pi)
+                    offset = runtime.Side * (runtime.Radius * math.cos(runtime.Angle))
+                        + runtime.Vertical * (runtime.Radius * math.sin(runtime.Angle))
+                end
+                runtime.Root, runtime.Original = root, root.CFrame
+                runtime.LastFrame = runtime.Frame
+                runtime.Sent = runtime.Original + offset
+                State.FakePositionOffset = offset
+                root.CFrame = runtime.Sent
+            end)
+            if not success then disableOnError(failure) end
+        end)
+    end
+end
+
 InstantKillAll = function()
     local murderer = getMurder()
     if murderer ~= LocalPlayer then
@@ -9123,6 +9261,13 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         CoinMuter = function(on) if on then StartCoinMuter() else StopCoinMuter() end end,
 
         -- Combat
+        FakePosition = function(on) State.SetFakePosition(on) end,
+        FakePositionMode = function(v)
+            if v == "Orbit" or v == "Jitter" or v == "Static" then State.FakePositionMode = v end
+        end,
+        FakePositionRadius = function(v) State.FakePositionRadius = math.clamp(tonumber(v) or 3, 0.5, 10) end,
+        FakePositionSpeed = function(v) State.FakePositionSpeed = math.clamp(tonumber(v) or 5, 0.5, 12) end,
+        FakePositionFaceThreat = function(on) State.FakePositionFaceThreat = on end,
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
         ExtendedHitboxSize = function(v) State.ExtendedHitboxSize = v if State.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end,
         SpawnAtPlayer = function(on) State.spawnAtPlayer = on end,
@@ -9923,6 +10068,13 @@ do
         CombatTab:CreateSlider("Kill Aura Range", "Kill distance in studs", 1, 20, State.KillAuraRange, "KillAuraRange", 0.5)
         CombatTab:CreateToggle("Static Zone", "Disable circle animation", "KillAuraStatic", false)
         CombatTab:CreateKeybindButton("Instant Kill All", "instantkillall", "InstantKillAll")
+
+        CombatTab:CreateSection("FAKE POSITION")
+        State.FakePositionToggle = CombatTab:CreateToggle("Fake Position", "Offset your position for other players", "FakePosition", false)
+        CombatTab:CreateDropdown("Desync Mode", "Pattern of the replicated offset", {"Orbit", "Jitter", "Static"}, State.FakePositionMode, "FakePositionMode")
+        CombatTab:CreateSlider("Desync Radius", "Offset distance in studs", 0.5, 10, State.FakePositionRadius, "FakePositionRadius", 0.1)
+        CombatTab:CreateSlider("Desync Speed", "Orbit rotations per second", 0.5, 12, State.FakePositionSpeed, "FakePositionSpeed", 0.5)
+        CombatTab:CreateToggle("Face Threat", "Orient the offset toward the threat or nearest player", "FakePositionFaceThreat", State.FakePositionFaceThreat)
 
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
