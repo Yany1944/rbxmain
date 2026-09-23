@@ -363,6 +363,10 @@ local State = {
     BlockPathSpeed = 0.2,
     BlockPathDirection = 1,
 
+    -- Cosmetics
+    FakeHeadless = false,
+    FakeKorblox = false,
+
     -- Keybinds
     Keybinds = {
         Sit = Enum.KeyCode.Unknown,
@@ -2124,6 +2128,8 @@ local function FullShutdown()
         if State.GodModeEnabled then ToggleGodMode() end
         if State.InstantPickupEnabled then DisableInstantPickup() end
         if killAuraThread or State.KillAuraEnabled then ToggleKillAura(false) end
+        if State.FakeHeadless and State.ApplyFakeHeadless then State.ApplyFakeHeadless(false) end
+        if State.FakeKorblox and State.ApplyFakeKorblox then State.ApplyFakeKorblox(false) end
     end)
 
     pcall(function()
@@ -8933,6 +8939,118 @@ function State.Session.GetRole()
     return nil
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК: FAKE COSMETICS (HEADLESS & KORBLOX)
+-- ══════════════════════════════════════════════════════════════════════════════
+
+do
+    local KORBLOX_MESH_ID = "rbxassetid://9598310133"
+    local KORBLOX_TEXTURE_ID = "rbxassetid://902843398"
+
+    local FakeCosmetics = {
+        hl = nil,
+        hlChar = nil,
+        kb = nil,
+        kbChar = nil,
+    }
+
+    local function ApplyFakeHeadless(enabled, character)
+        character = character or LocalPlayer.Character
+        if not enabled then
+            if FakeCosmetics.hl then
+                for _, item in ipairs(FakeCosmetics.hl) do
+                    local inst, origTrans = item[1], item[2]
+                    if inst and inst.Parent then
+                        pcall(function() inst.Transparency = origTrans end)
+                    end
+                end
+                FakeCosmetics.hl = nil
+                FakeCosmetics.hlChar = nil
+            end
+            return
+        end
+
+        if not character then return end
+        local head = character:FindFirstChild("Head") or character:WaitForChild("Head", 2)
+        if not head then return end
+
+        if FakeCosmetics.hl and FakeCosmetics.hlChar == character then
+            return
+        end
+
+        FakeCosmetics.hlChar = character
+        FakeCosmetics.hl = { { head, head.Transparency } }
+        pcall(function() head.Transparency = 1 end)
+
+        for _, desc in ipairs(character:GetDescendants()) do
+            if desc:IsA("Decal") and desc.Name == "face" then
+                table.insert(FakeCosmetics.hl, { desc, desc.Transparency })
+                pcall(function() desc.Transparency = 1 end)
+            end
+        end
+    end
+
+    local function ApplyFakeKorblox(enabled, character)
+        character = character or LocalPlayer.Character
+        if not enabled then
+            if FakeCosmetics.kb then
+                local kb = FakeCosmetics.kb
+                if kb.up and kb.up[1] and kb.up[1].Parent then
+                    pcall(function()
+                        kb.up[1].MeshId = kb.up[2]
+                        kb.up[1].TextureID = kb.up[3]
+                    end)
+                end
+                if kb.low and kb.low[1] and kb.low[1].Parent then
+                    pcall(function() kb.low[1].Transparency = kb.low[2] end)
+                end
+                if kb.foot and kb.foot[1] and kb.foot[1].Parent then
+                    pcall(function() kb.foot[1].Transparency = kb.foot[2] end)
+                end
+                FakeCosmetics.kb = nil
+                FakeCosmetics.kbChar = nil
+            end
+            return
+        end
+
+        if not character then return end
+        local rightUpperLeg = character:FindFirstChild("RightUpperLeg") or character:WaitForChild("RightUpperLeg", 2)
+        local rightLowerLeg = character:FindFirstChild("RightLowerLeg") or character:WaitForChild("RightLowerLeg", 2)
+        local rightFoot = character:FindFirstChild("RightFoot") or character:WaitForChild("RightFoot", 2)
+
+        if not (rightUpperLeg and rightUpperLeg:IsA("MeshPart")) then
+            return
+        end
+
+        if FakeCosmetics.kb and FakeCosmetics.kbChar == character then
+            return
+        end
+
+        FakeCosmetics.kbChar = character
+        FakeCosmetics.kb = {
+            up = { rightUpperLeg, rightUpperLeg.MeshId, rightUpperLeg.TextureID },
+            low = rightLowerLeg and { rightLowerLeg, rightLowerLeg.Transparency } or nil,
+            foot = rightFoot and { rightFoot, rightFoot.Transparency } or nil,
+        }
+
+        pcall(function()
+            rightUpperLeg.MeshId = KORBLOX_MESH_ID
+            rightUpperLeg.TextureID = KORBLOX_TEXTURE_ID
+        end)
+
+        if rightLowerLeg then
+            pcall(function() rightLowerLeg.Transparency = 1 end)
+        end
+
+        if rightFoot then
+            pcall(function() rightFoot.Transparency = 1 end)
+        end
+    end
+
+    State.ApplyFakeHeadless = ApplyFakeHeadless
+    State.ApplyFakeKorblox = ApplyFakeKorblox
+end
+
 local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
@@ -8953,6 +9071,16 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         ApplyMaxCameraZoom = ApplyMaxCameraZoom,
         ApplyFOV = function(v) pcall(function() ApplyFOV(v) end) end,
         ViewClip = function(on) if on then EnableViewClip() else DisableViewClip() end end,
+
+        -- Cosmetics
+        FakeHeadless = function(on)
+            State.FakeHeadless = on
+            if State.ApplyFakeHeadless then State.ApplyFakeHeadless(on) end
+        end,
+        FakeKorblox = function(on)
+            State.FakeKorblox = on
+            if State.ApplyFakeKorblox then State.ApplyFakeKorblox(on) end
+        end,
 
         -- Notifications toggle
         NotificationsEnabled = function(on) State.NotificationsEnabled = on end,
@@ -9835,6 +9963,10 @@ do
         FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
         FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
+        FunTab:CreateSection("AVATAR")
+        FunTab:CreateToggle("Fake Headless", "Hide head and face locally", "FakeHeadless", false)
+        FunTab:CreateToggle("Fake Korblox", "Replace right leg with Korblox", "FakeKorblox", false)
+
         FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",false)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", false)
@@ -9918,13 +10050,20 @@ task.spawn(function()
     end
 end)
 ---------
-LocalPlayer.CharacterAdded:Connect(function()
+LocalPlayer.CharacterAdded:Connect(function(newCharacter)
     CleanupMemory()
     task.wait(1)
     -- Пока настройки не тронуты (нет ни ручных правок, ни конфига) —
     -- респавн не трогаем: игра как без скрипта
     if State.SettingsDirty then
         ApplyCharacterSettings()
+    end
+
+    if State.FakeHeadless and State.ApplyFakeHeadless then
+        State.ApplyFakeHeadless(true, newCharacter)
+    end
+    if State.FakeKorblox and State.ApplyFakeKorblox then
+        State.ApplyFakeKorblox(true, newCharacter)
     end
 
     State.prevMurd = nil
