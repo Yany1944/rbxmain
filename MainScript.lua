@@ -303,7 +303,13 @@ local State = {
 
     -- Ping chams
     PingChamsEnabled = false,
+    PingChamsShowLabel = true,
     PingChamsBuffer = {},
+    PingChamsSampleChar = nil,
+    PingChamsSampleDesync = false,
+    PingChamsDesyncSampleInterval = 1 / 15,
+    PingChamsDesyncInterpolation = 0.05,
+    PingChamsNextDesyncSample = nil,
     PingChamsRTT = 0.2,
     PingChamsLastPingUpdate = 0,
     PingChamsPingBuf = {},
@@ -1214,8 +1220,8 @@ do
     function PingChams.collectRigParts(char)
         local parts = {}
         if not char then return parts end
-        for _, d in ipairs(char:GetDescendants()) do
-            if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
+        for _, d in ipairs(char:QueryDescendants("BasePart")) do
+            if d.Name ~= "HumanoidRootPart" then
                 table.insert(parts, d)
             end
         end
@@ -1317,10 +1323,11 @@ do
         if not State.PingChamsGUI then
             local gui = Instance.new("BillboardGui")
             gui.Name        = "PingInfo"
-            gui.Size        = UDim2.new(0, 180, 0, 30)
+            gui.Size        = UDim2.new(0, 300, 0, 30)
             gui.Adornee     = State.PingChamsGuiAnchor
             gui.StudsOffset = Vector3.new(0, 0.7, 0)
             gui.AlwaysOnTop = true
+            gui.Enabled     = State.PingChamsShowLabel
             gui.Parent      = State.PingChamsGhostModel
             local lbl = Instance.new("TextLabel")
             lbl.Name                  = "Label"
@@ -1341,8 +1348,8 @@ do
     function PingChams.captureOffsets(char, root)
         local map = {}
         if not char or not root then return map end
-        for _, d in ipairs(char:GetDescendants()) do
-            if d:IsA("BasePart") and d ~= root then
+        for _, d in ipairs(char:QueryDescendants("BasePart")) do
+            if d ~= root then
                 pcall(function()
                     map[d] = root.CFrame:ToObjectSpace(d.CFrame)
                 end)
@@ -1351,17 +1358,46 @@ do
         return map
     end
 
-    function PingChams.pushSample(tClient, char)
+    function PingChams.resetHistory()
+        State.PingChamsBuffer = {}
+        State.PingChamsNextDesyncSample = nil
+        State.PingChamsSmoothFrame, State.PingChamsSmoothTime = nil, nil
+        State.PingChamsTransparency, State.PingChamsTransparencyTime = nil, nil
+        State.PingChamsTextTransparency, State.PingChamsTextTime = nil, nil
+    end
+
+    function PingChams.setSource(char, desync)
+        if State.PingChamsSampleChar ~= char or State.PingChamsSampleDesync ~= desync then
+            PingChams.resetHistory()
+            State.PingChamsSampleChar = char
+            State.PingChamsSampleDesync = desync
+        end
+    end
+
+    function PingChams.pushSample(tClient, char, replicatedFrame, desync)
         local root = PingChams.getRootPart(char)
         if not root then return end
+        PingChams.setSource(char, desync == true)
 
+        -- Локальный Jitter меняется каждый кадр, но наблюдатель получает лишь
+        -- часть позиций. Частота оценена по второму клиенту, это не перехват пакетов.
+        if desync then
+            local nextSample = State.PingChamsNextDesyncSample
+            if nextSample and tClient < nextSample then return end
+            local interval = State.PingChamsDesyncSampleInterval
+            nextSample = nextSample or tClient
+            State.PingChamsNextDesyncSample = nextSample
+                + (math.floor((tClient - nextSample) / interval) + 1) * interval
+        end
+
+        -- Снимаем позу до подмены HRP; в историю кладём оценку репликации.
         local offsets = PingChams.captureOffsets(char, root)
         local vel     = Vector3.new()
         local ok1, v  = pcall(function() return root.AssemblyLinearVelocity end)
         if ok1 and typeof(v) == "Vector3" then vel = v end
 
         table.insert(State.PingChamsBuffer, {
-            t = tClient, cf = root.CFrame, offsets = offsets, vel = vel
+            t = tClient, cf = replicatedFrame or root.CFrame, offsets = offsets, vel = vel
         })
 
         local cutoff = tClient - BUFFER_MAX_SECONDS
@@ -1380,7 +1416,7 @@ do
         return CFrame.new(pos) * CFrame.fromOrientation(rx, ry, rz)
     end
 
-    function PingChams.sampleAtTime(target)
+    function PingChams.sampleAtTime(target, desync)
         if #State.PingChamsBuffer == 0 then return nil end
 
         for i = 1, #State.PingChamsBuffer do
@@ -1392,6 +1428,12 @@ do
                     return {root = p.cf, offsets = p.offsets}
                 end
                 local alpha   = math.clamp((target - p.t) / (n.t - p.t), 0, 1)
+                -- Интерполируем редкие снимки, а не чередующиеся кадры Jitter.
+                -- В начале интервала держим предыдущую позу, затем летим к новой.
+                if desync then
+                    local duration = math.min(n.t - p.t, State.PingChamsDesyncInterpolation)
+                    alpha = math.clamp(1 - (n.t - target) / duration, 0, 1)
+                end
                 local cf      = PingChams.lerpCFrame(p.cf, n.cf, alpha)
                 local offsets = {}
                 for part, aOff in pairs(p.offsets or {}) do
@@ -1424,6 +1466,8 @@ local function StartPingChams()
             PingChams.ensureGhost()
 
             local char = LocalPlayer.Character
+            local desync = State.FakePositionEnabled == true
+            PingChams.setSource(char, desync)
             if char then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
@@ -1436,7 +1480,9 @@ local function StartPingChams()
                     if needRebuild then
                         PingChams.rebuildGhostClone(char, CONFIG.Colors.Accent, 0.6)
                     end
-                    PingChams.pushSample(tick(), char)
+                    -- Десинк пишет историю сам, до восстановления настоящей
+                    -- позиции. RenderStepped уже видит обычный CFrame игрока.
+                    if not desync then PingChams.pushSample(tick(), char) end
                 end
                 if State.PingChamsGhostPart then
                     State.PingChamsGhostPart.Size = PingChams.sizeFromChar(char)
@@ -1450,7 +1496,7 @@ local function StartPingChams()
             local sampleDelay        = math.clamp(totalDelay, 0.06, 0.9)
 
             local now        = tick()
-            local samplePast = PingChams.sampleAtTime(now - sampleDelay)
+            local samplePast = PingChams.sampleAtTime(now - sampleDelay, desync)
 
             if not State.PingChamsGhostClone and LocalPlayer.Character then
                 PingChams.rebuildGhostClone(LocalPlayer.Character, CONFIG.Colors.Accent, 0.6)
@@ -1459,17 +1505,18 @@ local function StartPingChams()
             if samplePast and samplePast.root then
                 local rootPast   = samplePast.root
                 local nowT       = tick()
-                local dtSmooth   = math.max(0.0001, nowT - (_G.GhostPastSmoothT or nowT))
+                local dtSmooth   = math.max(0.0001, nowT - (State.PingChamsSmoothTime or nowT))
                 local smoothAlpha = math.clamp(dtSmooth * 10, 0.12, 0.55)
-                _G.GhostPastSmooth  = PingChams.lerpCFrame(_G.GhostPastSmooth or rootPast, rootPast, smoothAlpha)
-                _G.GhostPastSmoothT = nowT
+                State.PingChamsSmoothFrame = desync and rootPast
+                    or PingChams.lerpCFrame(State.PingChamsSmoothFrame or rootPast, rootPast, smoothAlpha)
+                State.PingChamsSmoothTime = nowT
 
                 if State.PingChamsGhostPart then
-                    State.PingChamsGhostPart.CFrame = _G.GhostPastSmooth
+                    State.PingChamsGhostPart.CFrame = State.PingChamsSmoothFrame
                 end
                 if State.PingChamsGuiAnchor then
                     local yOffset = State.PingChamsGhostPart and (State.PingChamsGhostPart.Size.Y / 2 + 0.5) or 3.5
-                    State.PingChamsGuiAnchor.CFrame = CFrame.new(_G.GhostPastSmooth.Position + Vector3.new(0, yOffset, 0))
+                    State.PingChamsGuiAnchor.CFrame = CFrame.new(State.PingChamsSmoothFrame.Position + Vector3.new(0, yOffset, 0))
                 end
 
                 local lpRoot     = PingChams.getRootPart(LocalPlayer.Character)
@@ -1481,19 +1528,19 @@ local function StartPingChams()
                 end
                 local speed = math.max(speedMeas, speedIntent)
 
-                local transPast  = math.clamp(0.9 - math.min(speed / 16, 1) * 0.65, 0.2, 1)
+                local transPast  = desync and 0.55 or math.clamp(0.9 - math.min(speed / 16, 1) * 0.65, 0.2, 1)
                 local nowFadeT   = tick()
-                local dt         = math.max(0.0001, nowFadeT - (_G.GhostPastTransT or nowFadeT))
-                _G.GhostPastTransSm  = (_G.GhostPastTransSm or transPast) + (transPast - (_G.GhostPastTransSm or transPast)) * math.clamp(dt * 5.0, 0.05, 0.5)
-                _G.GhostPastTransT   = nowFadeT
+                local dt         = math.max(0.0001, nowFadeT - (State.PingChamsTransparencyTime or nowFadeT))
+                State.PingChamsTransparency = (State.PingChamsTransparency or transPast) + (transPast - (State.PingChamsTransparency or transPast)) * math.clamp(dt * 5.0, 0.05, 0.5)
+                State.PingChamsTransparencyTime = nowFadeT
 
                 for src, gp in pairs(State.PingChamsGhostMap) do
                     local off = samplePast.offsets and samplePast.offsets[src]
                     if off then
                         gp.Color        = CONFIG.Colors.Accent
-                        gp.Transparency = _G.GhostPastTransSm
+                        gp.Transparency = State.PingChamsTransparency
                         gp.Material     = Enum.Material.ForceField
-                        gp.CFrame       = _G.GhostPastSmooth * off
+                        gp.CFrame       = State.PingChamsSmoothFrame * off
                     else
                         -- Нет офсета в сэмпле (парт появился только что либо
                         -- буфер ещё со старым персонажем) — прячем, а не морозим
@@ -1503,19 +1550,20 @@ local function StartPingChams()
 
                 if State.PingChamsGUI and State.PingChamsGUI:FindFirstChild("Label") then
                     local lbl = State.PingChamsGUI.Label
-                    lbl.Text       = string.format("Backtrack: %.0f ms | Ping: %.0f ms", totalDelay * 1000, State.PingChamsRTT * 1000)
+                    lbl.Text = string.format(desync and "Desync ~%.0f ms | Ping: %.0f ms" or "Backtrack: %.0f ms | Ping: %.0f ms", sampleDelay * 1000, State.PingChamsRTT * 1000)
                     lbl.TextColor3 = CONFIG.Colors.Accent
 
                     local nowTT   = tick()
-                    local dtTT    = math.max(0.0001, nowTT - (_G.GhostTextTransT or nowTT))
-                    local targetTT = 1 - math.clamp((speed - 14) / 1, 0, 1)
-                    _G.GhostTextTransSm  = (_G.GhostTextTransSm or targetTT) + (targetTT - (_G.GhostTextTransSm or targetTT)) * math.clamp(dtTT * 3, 0.03, 0.25)
-                    _G.GhostTextTransT   = nowTT
-                    lbl.TextTransparency      = _G.GhostTextTransSm
-                    lbl.TextStrokeTransparency = _G.GhostTextTransSm
-                    State.PingChamsGUI.Enabled = _G.GhostTextTransSm < 0.995
+                    local dtTT    = math.max(0.0001, nowTT - (State.PingChamsTextTime or nowTT))
+                    local targetTT = desync and 0 or 1 - math.clamp((speed - 14) / 1, 0, 1)
+                    State.PingChamsTextTransparency = (State.PingChamsTextTransparency or targetTT) + (targetTT - (State.PingChamsTextTransparency or targetTT)) * math.clamp(dtTT * 3, 0.03, 0.25)
+                    State.PingChamsTextTime = nowTT
+                    lbl.TextTransparency      = State.PingChamsTextTransparency
+                    lbl.TextStrokeTransparency = State.PingChamsTextTransparency
+                    State.PingChamsGUI.Enabled = State.PingChamsShowLabel and State.PingChamsTextTransparency < 0.995
                 end
             else
+                if State.PingChamsGUI then State.PingChamsGUI.Enabled = false end
                 for _, gp in pairs(State.PingChamsGhostMap) do
                     gp.Transparency = 1
                 end
@@ -1534,6 +1582,7 @@ local function StartPingChams()
 end
 
 local function StopPingChams()
+    State.PingChamsEnabled = false
     if State.PingChamsRenderConn then
         State.PingChamsRenderConn:Disconnect()
         State.PingChamsRenderConn = nil
@@ -1552,6 +1601,11 @@ local function StopPingChams()
         State.PingChamsGhostClone = nil
     end
     State.PingChamsGhostMap = {}
+    State.PingChamsGhostPart = nil
+    State.PingChamsGhostChar = nil
+    State.PingChamsGhostPartCount = 0
+    State.PingChamsSampleChar = nil
+    PingChams.resetHistory()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -2123,6 +2177,7 @@ local function FullShutdown()
 
     -- Восстанавливаем настоящую позицию до остановки остальных систем.
     if State.SetFakePosition then pcall(State.SetFakePosition, false) end
+    pcall(StopPingChams)
 
     pcall(function()
         if State.AimbotConfig.Enabled then StopAimbot() end
@@ -7946,6 +8001,8 @@ do
         Frame = 0, LastFrame = -1,
         Radius = 3, Speed = 5,
         Side = Vector3.xAxis, Vertical = -Vector3.yAxis,
+        MotionDistance = 0.01, MotionAngle = math.rad(0.5),
+        MotionSpeed = 0.1, MotionAngularSpeed = 0.05,
     }
     State.FakePositionRuntime = runtime
 
@@ -7989,6 +8046,30 @@ do
         runtime.Vertical = direction:Cross(runtime.Side).Unit
     end
 
+    local function estimateReplicatedFrame(root, realFrame, candidateFrame, paused)
+        if runtime.EstimateRoot ~= root or not runtime.LastRealFrame then
+            runtime.EstimateRoot = root
+            runtime.LastRealFrame = realFrame
+            runtime.EstimatedFrame = realFrame
+        end
+        local delta = runtime.LastRealFrame:ToObjectSpace(realFrame)
+        local _, angle = delta:ToAxisAngle()
+        local moving = delta.Position.Magnitude >= runtime.MotionDistance
+            or math.abs(angle) >= runtime.MotionAngle
+            or root.AssemblyLinearVelocity.Magnitude >= runtime.MotionSpeed
+            or root.AssemblyAngularVelocity.Magnitude >= runtime.MotionAngularSpeed
+        runtime.EstimateMoving = moving
+
+        -- Локальная подмена CFrame сама по себе не означает отправку физики.
+        -- На покое удерживаем последнюю оценку; движение проверяем по настоящему
+        -- корню, иначе собственный Jitter бесконечно считался бы движением.
+        if moving or paused then
+            runtime.LastRealFrame = realFrame
+            runtime.EstimatedFrame = candidateFrame
+        end
+        return runtime.EstimatedFrame
+    end
+
     local function disableOnError(err)
         State.SetFakePosition(false)
         if State.FakePositionToggle then State.FakePositionToggle:Set(false, false) end
@@ -8005,6 +8086,8 @@ do
             runtime.Bound = false
         end
         pcall(restorePosition)
+        runtime.EstimateRoot, runtime.LastRealFrame, runtime.EstimatedFrame = nil, nil, nil
+        runtime.EstimateMoving = false
         if not enabled then return end
 
         runtime.Angle, runtime.Flip, runtime.NextRandom, runtime.NextTarget = 0, false, 0, 0
@@ -8022,19 +8105,26 @@ do
         runtime.Removing = LocalPlayer.CharacterRemoving:Connect(function()
             pcall(restorePosition)
             runtime.NextTarget = 0
+            runtime.EstimateRoot, runtime.LastRealFrame, runtime.EstimatedFrame = nil, nil, nil
         end)
         runtime.Connection = RunService.Heartbeat:Connect(function(dt)
             local success, failure = pcall(function()
                 -- Страховка на случай пропущенной отрисовки: смещения не суммируются.
                 restorePosition()
-                if not State.FakePositionEnabled or Fling.SessionActive or State.WalkFlingActive
-                    or State.FlyEnabled or State.AutoFarmEnabled then return end
+                if not State.FakePositionEnabled then return end
                 -- Heartbeat может сработать несколько раз между отрисовками.
                 if runtime.LastFrame == runtime.Frame then return end
+                runtime.LastFrame = runtime.Frame
                 local character = LocalPlayer.Character
                 local root = character and character:FindFirstChild("HumanoidRootPart")
                 local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-                if not root or not humanoid or humanoid.Health <= 0 or humanoid.Sit or root.Anchored then return end
+                if not root or not humanoid or humanoid.Health <= 0 then return end
+                if Fling.SessionActive or State.WalkFlingActive or State.FlyEnabled
+                    or State.AutoFarmEnabled or humanoid.Sit or root.Anchored then
+                    local estimate = estimateReplicatedFrame(root, root.CFrame, root.CFrame, true)
+                    if State.PingChamsEnabled then pcall(PingChams.pushSample, tick(), character, estimate, true) end
+                    return
+                end
                 local now = os.clock()
                 if now >= runtime.NextTarget then
                     runtime.NextTarget = now + 0.25
@@ -8057,9 +8147,12 @@ do
                         + runtime.Vertical * (runtime.Radius * math.sin(runtime.Angle))
                 end
                 runtime.Root, runtime.Original = root, root.CFrame
-                runtime.LastFrame = runtime.Frame
                 runtime.Sent = runtime.Original + offset
                 State.FakePositionOffset = offset
+                local estimate = estimateReplicatedFrame(root, runtime.Original, runtime.Sent, false)
+                if State.PingChamsEnabled then
+                    pcall(PingChams.pushSample, tick(), character, estimate, true)
+                end
                 root.CFrame = runtime.Sent
             end)
             if not success then disableOnError(failure) end
@@ -9255,12 +9348,18 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
 
         -- Visuals
         UIOnly = function(on) State.UIOnlyEnabled = on if on then EnableUIOnly() else DisableUIOnly() end end,
-        PingChams = function(on) State.PingChamsEnabled = on if on then StartPingChams() else StopPingChams() end end,
         BulletTracers = ToggleBulletTracers,
         FriendViewer = function(on) if on then StartFriendViewer() else StopFriendViewer() end end,
         CoinMuter = function(on) if on then StartCoinMuter() else StopCoinMuter() end end,
 
         -- Combat
+        PingChams = function(on) State.PingChamsEnabled = on if on then StartPingChams() else StopPingChams() end end,
+        PingChamsShowLabel = function(on)
+            State.PingChamsShowLabel = on
+            if State.PingChamsGUI then
+                State.PingChamsGUI.Enabled = on and (State.PingChamsTextTransparency or 1) < 0.995
+            end
+        end,
         FakePosition = function(on) State.SetFakePosition(on) end,
         FakePositionMode = function(v)
             if v == "Orbit" or v == "Jitter" or v == "Static" then State.FakePositionMode = v end
@@ -10050,7 +10149,6 @@ do
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
         VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
-        VisualsTab:CreateToggle("Ping Chams", "Show server-side position", "PingChams")
         VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
         VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
@@ -10069,12 +10167,14 @@ do
         CombatTab:CreateToggle("Static Zone", "Disable circle animation", "KillAuraStatic", false)
         CombatTab:CreateKeybindButton("Instant Kill All", "instantkillall", "InstantKillAll")
 
-        CombatTab:CreateSection("FAKE POSITION")
+        CombatTab:CreateSection("ANTI-AIM")
         State.FakePositionToggle = CombatTab:CreateToggle("Fake Position", "Offset your position for other players", "FakePosition", false)
         CombatTab:CreateDropdown("Desync Mode", "Pattern of the replicated offset", {"Orbit", "Jitter", "Static"}, State.FakePositionMode, "FakePositionMode")
         CombatTab:CreateSlider("Desync Radius", "Offset distance in studs", 0.5, 10, State.FakePositionRadius, "FakePositionRadius", 0.1)
         CombatTab:CreateSlider("Desync Speed", "Orbit rotations per second", 0.5, 12, State.FakePositionSpeed, "FakePositionSpeed", 0.5)
         CombatTab:CreateToggle("Face Threat", "Orient the offset toward the threat or nearest player", "FakePositionFaceThreat", State.FakePositionFaceThreat)
+        CombatTab:CreateToggle("Ping / Desync Chams", "Show estimated fake position during desync; ping ghost otherwise", "PingChams")
+        CombatTab:CreateToggle("Chams Label", "Show text above Ping / Desync Chams", "PingChamsShowLabel", State.PingChamsShowLabel)
 
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.ShootMurdererMode or "Magic", "ShootMurdererMode")
