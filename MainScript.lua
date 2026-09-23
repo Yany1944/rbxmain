@@ -9835,13 +9835,13 @@ do
         FunTab:CreateKeybindButton("Ninja Animation", "ninja", "Ninja")
         FunTab:CreateKeybindButton("Floss Animation", "floss", "Floss")
 
-        FunTab:CreateSection("FLING SETTINGS")
-        FunTab:CreateDropdown("Fling Method", "Vio: contact, stronger. NaN: precise aim, weaker", Fling.MethodChoices, Fling.MethodLabel(State.FlingMethod), "FlingMethod")
-        FunTab:CreateSlider("Prediction Range", "Lead time", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
-
         FunTab:CreateSection("ANTI-FLING", "right")
         FunTab:CreateToggle("Enable Anti-Fling", "Protect yourself from flingers", "AntiFling",false)
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", false)
+        
+        FunTab:CreateSection("FLING SETTINGS", "right")
+        FunTab:CreateDropdown("Fling Method", "Vio: contact, stronger. NaN: precise aim, weaker", Fling.MethodChoices, Fling.MethodLabel(State.FlingMethod), "FlingMethod")
+        FunTab:CreateSlider("Prediction Range", "Lead time", 0.6, 1.2, State.SkidLead, "SkidLead", 0.05)
 
         FunTab:CreateSection("FLING PLAYER", "right")
         FunTab:CreatePlayerDropdown("Select Target", "Choose target to fling", "SelectedPlayerForFling")

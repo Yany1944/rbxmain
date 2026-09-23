@@ -751,7 +751,7 @@ return function(env)
             BackgroundColor3 = T.Canvas,
             BackgroundTransparency = ROOT_TRANSPARENCY,
             Position = UDim2.new(0.5, -500, 0.5, -340),
-            Size = UDim2.new(0, 1000, 0, 680),
+            Size = UDim2.new(0, 1000, 0, 690),
             ClipsDescendants = false,
             Active = true,
             Parent = gui

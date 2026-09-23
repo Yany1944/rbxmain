@@ -1,3 +1,8 @@
 /.claude
 /Debuggers
 /.vscode
+*.md
+skinchanger.lua
+serverhop.lua
+mm2_skins.json
+MainScript.lua.bak
