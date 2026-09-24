@@ -9175,8 +9175,7 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 
 do
-    local KORBLOX_MESH_ID = "rbxassetid://9598310133"
-    local KORBLOX_TEXTURE_ID = "rbxassetid://902843398"
+    local KORBLOX_RIGHT_LEG_ID = 139607718
 
     local FakeCosmetics = {
         hl = nil,
@@ -9222,60 +9221,147 @@ do
     end
 
     local function ApplyFakeKorblox(enabled, character)
-        character = character or LocalPlayer.Character
+        local previous = FakeCosmetics.kb
         if not enabled then
-            if FakeCosmetics.kb then
-                local kb = FakeCosmetics.kb
-                if kb.up and kb.up[1] and kb.up[1].Parent then
-                    pcall(function()
-                        kb.up[1].MeshId = kb.up[2]
-                        kb.up[1].TextureID = kb.up[3]
-                    end)
-                end
-                if kb.low and kb.low[1] and kb.low[1].Parent then
-                    pcall(function() kb.low[1].Transparency = kb.low[2] end)
-                end
-                if kb.foot and kb.foot[1] and kb.foot[1].Parent then
-                    pcall(function() kb.foot[1].Transparency = kb.foot[2] end)
-                end
-                FakeCosmetics.kb = nil
-                FakeCosmetics.kbChar = nil
-            end
+            if previous then previous.Cleanup() end
             return
         end
-
+        character = character or LocalPlayer.Character
         if not character then return end
-        local rightUpperLeg = character:FindFirstChild("RightUpperLeg") or character:WaitForChild("RightUpperLeg", 2)
-        local rightLowerLeg = character:FindFirstChild("RightLowerLeg") or character:WaitForChild("RightLowerLeg", 2)
-        local rightFoot = character:FindFirstChild("RightFoot") or character:WaitForChild("RightFoot", 2)
+        if previous and FakeCosmetics.kbChar == character then return end
+        if previous then previous.Cleanup() end
 
-        if not (rightUpperLeg and rightUpperLeg:IsA("MeshPart")) then
-            return
+        local kb = { Connections = {}, Hidden = {}, Revision = 0, Alive = true }
+        FakeCosmetics.kb, FakeCosmetics.kbChar = kb, character
+        local function restoreParts()
+            for part, transparency in pairs(kb.Hidden) do
+                if part.Parent then pcall(function() part.Transparency = transparency end) end
+            end
+            table.clear(kb.Hidden)
         end
-
-        if FakeCosmetics.kb and FakeCosmetics.kbChar == character then
-            return
+        function kb.Cleanup()
+            kb.Alive = false
+            kb.Revision += 1
+            for _, connection in ipairs(kb.Connections) do connection:Disconnect() end
+            table.clear(kb.Connections)
+            if kb.Visual then kb.Visual:Destroy(); kb.Visual = nil end
+            restoreParts()
+            if FakeCosmetics.kb == kb then
+                FakeCosmetics.kb, FakeCosmetics.kbChar = nil, nil
+            end
         end
+        local function connect(signal, callback)
+            table.insert(kb.Connections, signal:Connect(callback))
+        end
+        local function build(revision)
+            local donor, description, source, visual
+            local ok, err = pcall(function()
+                local humanoid = character:FindFirstChildOfClass("Humanoid")
+                local upper = character:FindFirstChild("RightUpperLeg")
+                if not humanoid or humanoid.RigType ~= Enum.HumanoidRigType.R15 or not upper then return end
+                local hip = upper:FindFirstChild("RightHipRigAttachment")
+                if not hip then return end
 
-        FakeCosmetics.kbChar = character
-        FakeCosmetics.kb = {
-            up = { rightUpperLeg, rightUpperLeg.MeshId, rightUpperLeg.TextureID },
-            low = rightLowerLeg and { rightLowerLeg, rightLowerLeg.Transparency } or nil,
-            foot = rightFoot and { rightFoot, rightFoot.Transparency } or nil,
-        }
+                -- Roblox рассчитывает геометрию и крепление для конкретного тела и его масштабов.
+                source = humanoid:GetAppliedDescription()
+                description = Instance.new("HumanoidDescription")
+                for _, name in ipairs({"Head", "Torso", "LeftArm", "RightArm", "LeftLeg",
+                    "HeightScale", "WidthScale", "DepthScale", "HeadScale", "BodyTypeScale", "ProportionScale"}) do
+                    description[name] = source[name]
+                end
+                for valueName, field in pairs({BodyHeightScale = "HeightScale", BodyWidthScale = "WidthScale",
+                    BodyDepthScale = "DepthScale", HeadScale = "HeadScale", BodyTypeScale = "BodyTypeScale",
+                    BodyProportionScale = "ProportionScale"}) do
+                    local value = humanoid:FindFirstChild(valueName)
+                    if value and value:IsA("NumberValue") then description[field] = value.Value end
+                end
+                description.RightLeg = KORBLOX_RIGHT_LEG_ID
+                description.RightLegColor = source.RightLegColor
+                donor = Players:CreateHumanoidModelFromDescriptionAsync(description, Enum.HumanoidRigType.R15)
+                if not kb.Alive or kb.Revision ~= revision or upper.Parent ~= character then return end
+                local leg = donor:FindFirstChild("RightUpperLeg")
+                local donorHip = leg and leg:FindFirstChild("RightHipRigAttachment")
+                if not leg or not donorHip then error("Korblox model has no right hip attachment") end
 
-        pcall(function()
-            rightUpperLeg.MeshId = KORBLOX_MESH_ID
-            rightUpperLeg.TextureID = KORBLOX_TEXTURE_ID
+                -- Отдельная визуальная нога сохраняет исходный риг, анимации и физику персонажа.
+                visual = leg:Clone()
+                visual.Name = "FakeKorbloxVisual"
+                for _, child in ipairs(visual:QueryDescendants("JointInstance,WeldConstraint,LuaSourceContainer")) do child:Destroy() end
+                visual.Anchored = false
+                visual.Massless = true
+                visual.CanCollide, visual.CanTouch, visual.CanQuery = false, false, false
+                local offset = hip.CFrame * donorHip.CFrame:Inverse()
+                visual.CFrame = upper.CFrame * offset
+                local weld = Instance.new("Weld")
+                weld.Name = "FakeKorbloxWeld"
+                weld.Part0, weld.Part1, weld.C0 = upper, visual, offset
+                weld.Parent = visual
+                if kb.Visual then kb.Visual:Destroy() end
+                restoreParts()
+                kb.Visual = visual
+                visual.Parent = character
+                for _, name in ipairs({"RightUpperLeg", "RightLowerLeg", "RightFoot"}) do
+                    local part = character:FindFirstChild(name)
+                    if part and part:IsA("BasePart") then
+                        kb.Hidden[part] = part.Transparency
+                        part.Transparency = 1
+                    end
+                end
+                visual = nil
+            end)
+            if visual then visual:Destroy() end
+            if donor then donor:Destroy() end
+            if description then description:Destroy() end
+            if source then source:Destroy() end
+            if not ok and kb.Alive and kb.Revision == revision then
+                warn("[Fake Korblox] " .. tostring(err))
+            end
+        end
+        local function schedule()
+            if not kb.Alive then return end
+            kb.Revision += 1
+            if kb.Pending then return end
+            kb.Pending = true
+            task.spawn(function()
+                -- Объединяем изменения частей и масштабов при применении образа в одну сборку.
+                repeat
+                    local revision = kb.Revision
+                    task.wait(0.2)
+                    if not kb.Alive then break end
+                    if revision == kb.Revision then build(revision) end
+                until not kb.Alive or revision == kb.Revision
+                kb.Pending = false
+            end)
+        end
+        local watched = setmetatable({}, { __mode = "k" })
+        local function watch(item)
+            if watched[item] then return end
+            watched[item] = true
+            if item:IsA("Humanoid") then
+                connect(item.ApplyDescriptionFinished, schedule)
+            elseif item:IsA("NumberValue") and item.Parent and item.Parent:IsA("Humanoid") then
+                connect(item.Changed, schedule)
+            elseif item:IsA("BasePart") and (item.Name == "RightUpperLeg" or item.Name == "LowerTorso") then
+                connect(item:GetPropertyChangedSignal("Size"), schedule)
+            elseif item:IsA("Attachment") and item.Name == "RightHipRigAttachment" and item.Parent.Name == "RightUpperLeg" then
+                connect(item:GetPropertyChangedSignal("CFrame"), schedule)
+            end
+        end
+        for _, item in ipairs(character:QueryDescendants("Humanoid,NumberValue,BasePart,Attachment")) do watch(item) end
+        connect(character.DescendantAdded, function(item)
+            if item.Name == "FakeKorbloxVisual" or (kb.Visual and item:IsDescendantOf(kb.Visual)) then return end
+            watch(item)
+            if item.Name == "RightUpperLeg" or item.Name == "RightHipRigAttachment" or item:IsA("Humanoid") then schedule() end
         end)
-
-        if rightLowerLeg then
-            pcall(function() rightLowerLeg.Transparency = 1 end)
-        end
-
-        if rightFoot then
-            pcall(function() rightFoot.Transparency = 1 end)
-        end
+        connect(character.ChildRemoved, function(item)
+            if item.Name == "RightUpperLeg" then
+                if kb.Visual then kb.Visual:Destroy(); kb.Visual = nil end
+                restoreParts()
+                schedule()
+            end
+        end)
+        connect(character.Destroying, kb.Cleanup)
+        schedule()
     end
 
     State.ApplyFakeHeadless = ApplyFakeHeadless
