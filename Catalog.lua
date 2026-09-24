@@ -1,5 +1,5 @@
--- LocalCatalog v8. Client-only. Personalized browsing, makeup and resizable UI.
--- RightShift toggles the window. No place remotes, purchases or bundles.
+-- LocalCatalog v9. Client-only. Personalized browsing, makeup and resizable UI.
+-- RightControl toggles the window. No place remotes, purchases or bundles.
 if not game:IsLoaded() then game.Loaded:Wait() end
 local env=getgenv and getgenv() or _G
 local carry,carryVisible
@@ -23,7 +23,7 @@ local OUTFITS='LocalCatalog-outfits.json'
 local FAVORITES='LocalCatalog-favorites.json'
 local SETTINGS='LocalCatalog-settings.json'
 local app={Alive=true,Items={},Desired={},Hidden={},Cache={},Connections={},Busy=false,
-    Version=8,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,HeadOriginal=nil,
+    Version=9,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,HeadOriginal=nil,
     Window={Width=1100,Height=736,Scale=1}}
 env.LocalCatalog=app
 -- These gates survive reloads so an old in-flight request cannot overlap a new instance.
@@ -35,14 +35,14 @@ local function limited(err)
 end
 local function apiCall(lane,fn,active,gap)
     local function waitUntil(deadline)
-        while os.clock()<deadline do if not active() then error('Операция отменена',0) end; task.wait(math.min(0.1,deadline-os.clock())) end
+        while os.clock()<deadline do if not active() then error('Operation cancelled',0) end; task.wait(math.min(0.1,deadline-os.clock())) end
     end
     while lane.Busy do waitUntil(os.clock()+0.1) end
-    assert(active(),'Операция отменена'); lane.Busy=true
+    assert(active(),'Operation cancelled'); lane.Busy=true
     local ok,result=pcall(function()
         for attempt=1,4 do
             waitUntil(lane.Next or 0)
-            assert(active(),'Операция отменена')
+            assert(active(),'Operation cancelled')
             app.ApiCalls=(app.ApiCalls or 0)+1
             local success,value=pcall(fn)
             lane.Next=os.clock()+(gap or 1.2)
@@ -66,9 +66,9 @@ local function safeText(value)
             elseif c==10 or c==9 then table.insert(result,' ') end
         end
     end)
-    if not ok then return 'Предмет' end
+    if not ok then return 'Item' end
     local s=table.concat(result):gsub('%s+',' '):match('^%s*(.-)%s*$')
-    return s~='' and s or 'Без названия'
+    return s~='' and s or 'Untitled'
 end
 local function message(s,isError)
     app.LastMessage=safeText(s)
@@ -81,6 +81,7 @@ local function refresh()
     if not app.Alive then return end
     if redraw then redraw() end
     if updateControls then updateControls() end
+    if app.RequestPreview then app.RequestPreview() end
 end
 local function connect(signal,fn)
     local c=signal:Connect(fn); table.insert(app.Connections,c); return c
@@ -95,9 +96,9 @@ local function valid(rev,ch)
     return app.Alive and rev==app.Revision and ch==player.Character
 end
 local function current()
-    assert(app.Alive,'Каталог закрыт')
+    assert(app.Alive,'Catalog is closed')
     local ch=player.Character
-    assert(ch and ch.Parent and ch:FindFirstChildOfClass('Humanoid'),'Персонаж ещё загружается')
+    assert(ch and ch.Parent and ch:FindFirstChildOfClass('Humanoid'),'Character is still loading')
     return ch
 end
 local clothing={[2]='ShirtGraphic',[11]='Shirt',[12]='Pants',[18]='Decal'}
@@ -206,11 +207,11 @@ end
 function app.Reset()
     app.Revision+=1
     app.Desired={}; app.HideOriginal=false; app.Restoring=false; app.Busy=false
-    clearVisuals(); refresh(); message('Исходная внешность восстановлена')
+    clearVisuals(); refresh(); message('Original appearance restored')
 end
 local function attach(acc,ch,fit)
     local handle=acc:FindFirstChild('Handle')
-    assert(handle and handle:IsA('BasePart'),'У аксессуара нет Handle')
+    assert(handle and handle:IsA('BasePart'),'Accessory has no Handle')
     for _,w in ipairs(handle:QueryDescendants('JointInstance, WeldConstraint, RigidConstraint')) do
         if w.Name=='AccessoryWeld' or w.Name=='AccessoryRigidConstraint' then w:Destroy() end
     end
@@ -228,7 +229,7 @@ local function attach(acc,ch,fit)
         end
     end
     local part=fit and ch:FindFirstChild(fit.Part) or (target and target.Parent or ch:FindFirstChild('Head'))
-    assert(part,'Не найдено крепление на персонаже')
+    assert(part,'No matching character attachment')
     local c0=fit and fit.C0 or (own and target and own.CFrame or acc.AttachmentPoint)
     local c1=fit and fit.C1 or (target and target.CFrame or CFrame.new(0,0.5,0))
     handle.CFrame=part.CFrame*c1*c0:Inverse()
@@ -250,7 +251,7 @@ local function normalizedTransform(data)
         local source=data and data[key]
         for axis=1,3 do
             local v=source and tonumber(source[axis]) or values[axis]
-            assert(v and v==v and math.abs(v)<math.huge,'Введите конечное число')
+            assert(v and v==v and math.abs(v)<math.huge,'Enter a finite number')
             values[axis]=math.clamp(v,key=='Scale' and 0.05 or (key=='Rotation' and -360 or -10),key=='Scale' and 5 or (key=='Rotation' and 360 or 10))
         end
     end
@@ -258,8 +259,8 @@ local function normalizedTransform(data)
 end
 function app.SetTransform(id,data)
     local it=app.Items[id]
-    assert(it and it.Weld,'Выберите надетый аксессуар')
-    assert(not it.Layered,'Многослойная одежда не поддерживает Transform Item')
+    assert(it and it.Weld,'Select an equipped accessory')
+    assert(not it.Layered,'Transform Item is not available for layered clothing')
     local t=normalizedTransform(data)
     local h=it.Object.Handle
     local s=Vector3.new(unpack(t.Scale))
@@ -274,6 +275,7 @@ function app.SetTransform(id,data)
     it.Transform=t
     if app.Desired[id] then app.Desired[id].Transform=t end
     if app.UpdateTransformFields then app.UpdateTransformFields(id) end
+    if app.RequestPreview then app.RequestPreview() end
     return t
 end
 local assetTypesByName={}
@@ -326,13 +328,13 @@ local function loadFittedWearable(id,kind,description,rig,active)
         end end
         if chosen then chosen.Parent=nil end
         model:Destroy()
-        assert(chosen,'Roblox не вернул текстуру Makeup')
+        assert(chosen,'Roblox did not return a makeup texture')
         return chosen
     end
     if accessory[kind] then
         local assetType
         for name,value in pairs(assetTypesByName) do if value==kind then assetType=Enum.AvatarAssetType[name]; break end end
-        assert(assetType,'Неизвестный тип аксессуара')
+        assert(assetType,'Unknown accessory type')
         local record={AssetId=id,AccessoryType=AES:GetAccessoryType(assetType),IsLayered=(kind>=64 and kind<=72) or kind==76 or kind==77}
         -- Order on a rigid accessory makes SetAccessories silently discard the record.
         if record.IsLayered then record.Order=1 end
@@ -352,14 +354,14 @@ local function loadFittedWearable(id,kind,description,rig,active)
             local advanced=#model:QueryDescendants('AnimationConstraint')>0
             local deadline=os.clock()+1.5
             repeat
-                assert(active(),'Операция отменена')
+                assert(active(),'Operation cancelled')
                 task.wait(0.05)
             until not advanced or #model:QueryDescendants('RigidConstraint')>0 or os.clock()>=deadline
             task.wait(0.1)
             for _,o in ipairs(model:GetChildren()) do
                 if o:IsA('Accessory') then chosen=o; break end
             end
-            assert(chosen,'Сборка аватара не вернула аксессуар')
+            assert(chosen,'Avatar assembly did not return an accessory')
             local h=chosen:FindFirstChild('Handle')
             local w=h and h:FindFirstChild('AccessoryWeld')
             if w and w:IsA('JointInstance') and w.Part1 then fit={Part=w.Part1.Name,C0=w.C0,C1=w.C1} end
@@ -378,7 +380,7 @@ local function loadFittedWearable(id,kind,description,rig,active)
         local model=apiCall(network.Avatar,function() return Players:CreateHumanoidModelFromDescriptionAsync(description,rig) end,active,0.35)
         local head=model:FindFirstChild('Head')
         if head then head.Parent=nil end; model:Destroy()
-        assert(head and head:IsA('MeshPart'),'Roblox не вернул Dynamic Head')
+        assert(head and head:IsA('MeshPart'),'Roblox did not return a Dynamic Head')
         return head
     end
     local objects=game:GetObjects('rbxassetid://'..string.format('%.0f',id))
@@ -389,14 +391,14 @@ local function loadFittedWearable(id,kind,description,rig,active)
         if candidates[1] then chosen=candidates[1]; chosen.Parent=nil; break end
     end
     for _,root in ipairs(objects) do if root~=chosen then root:Destroy() end end
-    assert(chosen,'Roblox не вернул одежду для этого ID')
+    assert(chosen,'Roblox did not return clothing for this ID')
     return chosen
 end
 
 local function attachDynamicHead(head,ch)
-    assert(head and head:IsA('MeshPart'),'Некорректный Dynamic Head')
+    assert(head and head:IsA('MeshPart'),'Invalid Dynamic Head')
     local currentHead=ch:FindFirstChild('Head')
-    assert(currentHead and currentHead:IsA('BasePart'),'У персонажа нет головы')
+    assert(currentHead and currentHead:IsA('BasePart'),'Character has no head')
     if not app.HeadOriginal then
         app.HeadOriginal=currentHead
         app.HeadCharacter=ch
@@ -413,10 +415,10 @@ end
 
 function app.WearAsync(rawId,expectedRevision,hint)
     local id=type(rawId)=='number' and rawId or tonumber(tostring(rawId):match('^%s*(%d+)%s*$') or tostring(rawId):match('/catalog/(%d+)'))
-    assert(id and id>0 and id%1==0,'Введите ID предмета или ссылку на каталог')
+    assert(id and id>0 and id%1==0,'Enter an asset ID or a catalog link')
     local ch=current(); local rev=expectedRevision or app.Revision
-    assert(valid(rev,ch),'Операция отменена')
-    if app.Items[id] and app.Items[id].Object.Parent then return 'Предмет уже надет' end
+    assert(valid(rev,ch),'Operation cancelled')
+    if app.Items[id] and app.Items[id].Object.Parent then return 'Item is already equipped' end
 
     local description,bodyKey,rig=bodyContext(ch)
     local cached=app.Cache[id]
@@ -427,10 +429,10 @@ function app.WearAsync(rawId,expectedRevision,hint)
         local chosen,fit,info
         local ok,err=pcall(function()
             info=itemMetadata(id,hint,function() return valid(rev,ch) end)
-            assert(info.Kind==79 or accessory[info.Kind] or clothing[info.Kind] or makeup[info.Kind],'Этот тип не поддерживается. Части тела и бандлы отключены')
+            assert(info.Kind==79 or accessory[info.Kind] or clothing[info.Kind] or makeup[info.Kind],'Unsupported item type. Body parts and bundles are excluded')
             chosen,fit=loadFittedWearable(id,info.Kind,description,rig,function() return valid(rev,ch) end)
             for _,scriptObject in ipairs(chosen:QueryDescendants('LuaSourceContainer')) do scriptObject:Destroy() end
-            assert(valid(rev,ch),'Операция отменена')
+            assert(valid(rev,ch),'Operation cancelled')
         end)
         description:Destroy()
         if not ok then if chosen then chosen:Destroy() end; error(err,0) end
@@ -442,7 +444,7 @@ function app.WearAsync(rawId,expectedRevision,hint)
     local kind=cached.Kind
     local humanoid=ch:FindFirstChildOfClass('Humanoid')
     if cached.Layered then
-        assert(humanoid.RigType==Enum.HumanoidRigType.R15,'Многослойная одежда требует R15')
+        assert(humanoid.RigType==Enum.HumanoidRigType.R15,'Layered clothing requires R15')
     end
 
     local chosen=cached.Template:Clone()
@@ -455,14 +457,14 @@ function app.WearAsync(rawId,expectedRevision,hint)
             attachDynamicHead(chosen,ch)
         elseif makeup[kind] then
             local head=ch:FindFirstChild('Head')
-            assert(head and head:IsA('MeshPart') and head:FindFirstChildOfClass('WrapTarget'),'Makeup требует совместимую MeshPart-голову с WrapTarget')
+            assert(head and head:IsA('MeshPart') and head:FindFirstChildOfClass('WrapTarget'),'Makeup requires a compatible MeshPart head with WrapTarget')
             chosen:SetAttribute('LocalCatalogMakeup',true)
             chosen.Parent=head
         elseif accessory[kind] then
             weld,base=attach(chosen,ch,cached.Fit)
         else
             local parent=kind==18 and ch:FindFirstChild('Head') or ch
-            assert(parent,'Голова ещё не загружена')
+            assert(parent,'Head is still loading')
             local remove={}
             for key,item in pairs(app.Desired) do if item.Kind==kind then table.insert(remove,key) end end
             for _,key in ipairs(remove) do destroyItem(key); app.Desired[key]=nil end
@@ -497,7 +499,7 @@ function app.WearAsync(rawId,expectedRevision,hint)
         if it.Mesh then it.BaseMeshScale=it.Mesh.Scale; it.BaseMeshOffset=it.Mesh.Offset end
         app.SetTransform(id,previous or defaultTransform())
     end
-    refresh(); return 'Надето: '..cached.Name
+    refresh(); return 'Equipped: '..cached.Name
 end
 function app.Remove(id)
     if app.EditingId==id and app.CloseTransform then app.CloseTransform(false) end
@@ -506,7 +508,7 @@ function app.Remove(id)
     if clothing[item.Kind] and not (app.HideOriginal and item.Kind~=18) then
         restoreHidden(function(o) return o:IsA(clothing[item.Kind]) end)
     end
-    refresh(); message('Снято: '..item.Name)
+    refresh(); message('Removed: '..item.Name)
 end
 function app.MoveMakeupLayer(id,direction)
     local ordered={}
@@ -541,8 +543,8 @@ local function readDocument(path)
     return nil,true
 end
 local function writeDocument(path,data)
-    assert(type(writefile)=='function','Executor не поддерживает сохранение файлов')
-    assert(not storageProblems[path],'Файл '..path..' повреждён; он сохранён без перезаписи')
+    assert(type(writefile)=='function','Your executor does not support saving files')
+    assert(not storageProblems[path],'File '..path..' is corrupted and has not been overwritten')
     local encoded=Http:JSONEncode(data)
     local previous
     if type(readfile)=='function' then
@@ -554,7 +556,7 @@ local function writeDocument(path,data)
     end
     local ok,err=pcall(function()
         writefile(path,encoded)
-        if type(readfile)=='function' then assert(readfile(path)==encoded,'Не удалось проверить запись файла') end
+        if type(readfile)=='function' then assert(readfile(path)==encoded,'Could not verify the saved file') end
     end)
     if not ok then if previous then pcall(writefile,path,previous) end; error(err,0) end
 end
@@ -570,7 +572,7 @@ if type(readfile)=='function' then
         local s=readDocument(SETTINGS)
         if s and type(s.KeepOnRespawn)=='boolean' then app.KeepOnRespawn=s.KeepOnRespawn end
         if s and type(s.Window)=='table' then
-            for field,bounds in pairs({Width={1000,1800},Height={680,1100},Scale={0.6,1.6}}) do
+            for field,bounds in pairs({Width={1000,1900},Height={680,1100},Scale={0.6,1.6}}) do
                 local n=tonumber(s.Window[field])
                 if n and n==n then app.Window[field]=math.clamp(n,bounds[1],bounds[2]) end
             end
@@ -580,11 +582,11 @@ end
 local SavedOutfits={}
 local SavedItems={}
 local function saveOutfitLibrary()
-    assert(type(writefile)=='function','Executor не поддерживает сохранение файлов')
+    assert(type(writefile)=='function','Your executor does not support saving files')
     writeDocument(OUTFITS,{Version=1,Outfits=SavedOutfits})
 end
 local function saveFavoriteLibrary()
-    assert(type(writefile)=='function','Executor не поддерживает сохранение файлов')
+    assert(type(writefile)=='function','Your executor does not support saving files')
     local items={}
     for _,entry in pairs(SavedItems) do table.insert(items,entry) end
     table.sort(items,function(a,b) return (a.Name or '')<(b.Name or '') end)
@@ -597,10 +599,12 @@ local function normalizeFavorite(entry)
     local assetType=entry.AssetType
     if typeof and typeof(assetType)=='EnumItem' then assetType=assetType.Name end
     if type(assetType)~='string' or assetType=='' then assetType=nil end
-    local group=safeText(entry.Group or '')
-    if group=='' or group=='Без названия' then return nil end
+    -- Translate legacy storage keys without renaming user outfits or asset titles.
+    local legacyGroups={['Аксессуары']='Accessories',['Волосы']='Hair',['Одежда']='Clothing'}
+    local group=legacyGroups[entry.Group] or safeText(entry.Group or '')
+    if group=='' or group=='Untitled' then return nil end
     local subName=entry.Sub and safeText(entry.Sub) or nil
-    if subName=='Без названия' then subName=nil end
+    if subName=='Untitled' then subName=nil end
     return {Id=id,Name=safeText(entry.Name or ('ID '..string.format('%.0f',id))),AssetType=assetType,Group=group,Sub=subName}
 end
 local function loadFavoriteLibrary()
@@ -629,7 +633,7 @@ local function normalizeSavedOutfit(entry,index)
     end
     return {
         Id=tostring(entry.Id or ('outfit-'..tostring(index))),
-        Name=safeText(entry.Name or ('Образ '..tostring(index))),
+        Name=safeText(entry.Name or ('Outfit '..tostring(index))),
         Data=data
     }
 end
@@ -649,7 +653,7 @@ local function loadOutfitLibrary()
         pcall(function()
             local data=Http:JSONDecode(readfile(LEGACY_SAVE))
             if type(data)=='table' and type(data.AssetIds)=='table' then
-                table.insert(SavedOutfits,{Id=Http:GenerateGUID(false),Name='Старый сохранённый образ',Data=data})
+                table.insert(SavedOutfits,{Id=Http:GenerateGUID(false),Name='Imported outfit',Data=data})
                 if type(writefile)=='function' then pcall(saveOutfitLibrary) end
             end
         end)
@@ -661,13 +665,13 @@ app.SavedItems=SavedItems
 app.SavedOutfits=SavedOutfits
 local function outfitName(name)
     local value=safeText(name)
-    assert(value~='Без названия','Введите название образа')
+    assert(value~='Untitled','Enter an outfit name')
     local stop=utf8.offset(value,49)
     return stop and value:sub(1,stop-1) or value
 end
 function app.SaveOutfit(name,data)
     local entry={Id=Http:GenerateGUID(false),Name=outfitName(name),Data=data or app.ExportOutfit()}
-    assert(normalizeSavedOutfit(entry,1),'Некорректный образ')
+    assert(normalizeSavedOutfit(entry,1),'Invalid outfit')
     entry.Data=Http:JSONDecode(Http:JSONEncode(entry.Data))
     table.insert(SavedOutfits,entry)
     local ok,err=pcall(saveOutfitLibrary)
@@ -681,18 +685,18 @@ function app.RenameOutfit(id,name)
         if not ok then entry.Name=old; error(err,0) end
         return entry
     end end
-    error('Образ не найден')
+    error('Outfit not found')
 end
 function app.OverwriteOutfit(id,data)
     for _,entry in ipairs(SavedOutfits) do if entry.Id==id then
         local replacement=Http:JSONDecode(Http:JSONEncode(data or app.ExportOutfit()))
-        assert(normalizeSavedOutfit({Id=entry.Id,Name=entry.Name,Data=replacement},1),'Некорректный образ')
+        assert(normalizeSavedOutfit({Id=entry.Id,Name=entry.Name,Data=replacement},1),'Invalid outfit')
         local previous=entry.Data; entry.Data=replacement
         local ok,err=pcall(saveOutfitLibrary)
         if not ok then entry.Data=previous; error(err,0) end
         return entry
     end end
-    error('Образ не найден')
+    error('Outfit not found')
 end
 function app.DeleteOutfit(id)
     for index,entry in ipairs(SavedOutfits) do if entry.Id==id then
@@ -708,8 +712,8 @@ function app.SetKeepOnRespawn(value)
     if not app.KeepOnRespawn and app.Restoring then app.Reset() end
     local persisted=saveSettings()
     refresh()
-    message((app.KeepOnRespawn and 'После респавна выбранный образ будет восстановлен' or 'После респавна останется исходная внешность')..
-        (persisted and '' or ' (настройка действует в этой сессии)'))
+    message((app.KeepOnRespawn and 'Your outfit will be restored after respawn' or 'Respawn will use the original appearance')..
+        (persisted and '' or ' (this session only)'))
 end
 local function applyOutfit(data,rev)
     local failed,hints={},{}
@@ -741,16 +745,16 @@ function app.HandleCharacterAdded(ch)
     clearVisuals(); app.Busy=false
     if not app.KeepOnRespawn then
         app.Desired={}; app.HideOriginal=false; app.Restoring=false
-        refresh(); message('Респавн: оставлена исходная внешность'); return
+        refresh(); message('Respawn: original appearance kept'); return
     end
     local outfit=app.ExportOutfit()
     if #outfit.AssetIds==0 and not outfit.HideOriginal then app.Restoring=false; refresh(); return end
-    app.Restoring=true; refresh(); message('Респавн: ждём загрузки внешности...')
+    app.Restoring=true; refresh(); message('Respawn: waiting for appearance...')
     task.spawn(function()
         local started=os.clock()
         while valid(rev,ch) and (not ch.Parent or not ch:FindFirstChildOfClass('Humanoid') or not ch:FindFirstChild('Head')) do
             if os.clock()-started>15 then
-                app.Restoring=false; refresh(); message('Персонаж не загрузился. Нажмите «Повторить»',true); return
+                app.Restoring=false; refresh(); message('Character did not load. Click Retry',true); return
             end
             task.wait(0.1)
         end
@@ -762,9 +766,9 @@ function app.HandleCharacterAdded(ch)
         local ok,failed=pcall(applyOutfit,outfit,rev)
         if not valid(rev,ch) then return end
         app.Restoring=false; refresh()
-        if not ok then message('Не удалось восстановить образ. Нажмите «Повторить»',true)
-        elseif failed and #failed>0 then message('Не удалось надеть: '..table.concat(failed,', ')..'. Нажмите «Повторить»',true)
-        else message('Образ восстановлен после респавна') end
+        if not ok then message('Could not restore outfit. Click Retry',true)
+        elseif failed and #failed>0 then message('Could not equip: '..table.concat(failed,', ')..'. Click Retry',true)
+        else message('Outfit restored after respawn') end
     end)
 end
 local C={Bg=Color3.fromRGB(28,29,32),Surface=Color3.fromRGB(36,38,41),Card=Color3.fromRGB(47,49,53),
@@ -815,21 +819,21 @@ local function input(placeholder,x,y,w,h)
     corner(b); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,10)},b); return b
 end
 local function run(fn)
-    if app.Busy or app.Restoring then message('Подождите: примеряем вещи...'); return end
-    app.Busy=true; local rev=app.Revision; if updateControls then updateControls() end; message('Загрузка предмета...')
+    if app.Busy or app.Restoring then message('Please wait while items are equipped...'); return end
+    app.Busy=true; local rev=app.Revision; if updateControls then updateControls() end; message('Loading item...')
     task.spawn(function()
         local ok,result=pcall(fn,rev)
         if not app.Alive or rev~=app.Revision then return end
         app.Busy=false; refresh()
-        message(ok and (result or 'Готово') or ('Не удалось выполнить: '..tostring(result)),not ok)
+        message(ok and (result or 'Done') or ('Failed: '..tostring(result)),not ok)
     end)
 end
-local title=label('Каталог',22,10,140,36,nil,28)
+local title=label('Catalog',22,10,140,36,nil,28)
 title.Font=Enum.Font.SourceSansBold; title.Active=true
-label('Локальная примерка',170,15,220,26,nil,16).TextColor3=C.Muted
-button('Свернуть',890,14,102,34,function() if app.CloseDialogs then app.CloseDialogs() end; panel.Visible=false end)
-button('Закрыть',1000,14,78,34,function() app.Unload() end)
-local toggle=button('Каталог',14,130,116,40,function() if app.ToggleWindow then app.ToggleWindow() else panel.Visible=not panel.Visible end end,gui,true)
+label('Local avatar editor',170,15,220,26,nil,16).TextColor3=C.Muted
+button('Minimize',890,14,102,34,function() if app.CloseDialogs then app.CloseDialogs() end; panel.Visible=false end)
+button('Close',1000,14,78,34,function() app.Unload() end)
+local toggle=button('Catalog',14,130,116,40,function() if app.ToggleWindow then app.ToggleWindow() else panel.Visible=not panel.Visible end end,gui,true)
 local dragStart,dragPosition,dragTouch
 local dragHeader=make('Frame',{Name='DragHeader',Size=UDim2.new(1,0,0,54),BackgroundTransparency=1,Active=true,ZIndex=3},panel)
 connect(dragHeader.InputBegan,function(i)
@@ -849,9 +853,9 @@ end)
 connect(UIS.InputEnded,function(i)
     if i==dragTouch or i.UserInputType==Enum.UserInputType.MouseButton1 then dragStart=nil; dragTouch=nil end
 end)
-local query=input('Поиск по каталогу',20,106,452,40)
+local query=input('Search catalog',20,106,452,40)
 query.Name='SearchInput'
-local searchButton=button('Найти',480,106,90,40,nil,nil,true)
+local searchButton=button('Search',480,106,90,40,nil,nil,true)
 searchButton.Name='SearchButton'
 local optionsButton=button('Search Options',578,106,198,40,nil)
 optionsButton.Name='SearchOptions'
@@ -869,51 +873,51 @@ local handheld=table.clone(layered); table.insert(handheld,'ShoulderAccessory')
 local function sub(name,types,keyword,free) return {Name=name,Types=types,Keyword=keyword,Free=free} end
 -- Catalog Avatar Creator's wearable hierarchy, with body/bundle categories excluded.
 local categories={
-    {Name='Аксессуары',Sub={
-        sub('Все',rigid),sub('Бесплатные',rigid,nil,true),sub('Головные уборы',{'Hat'}),sub('На лицо',{'FaceAccessory'}),
-        sub('На шею',{'NeckAccessory'}),sub('На плечи',{'ShoulderAccessory'}),sub('Спереди',{'FrontAccessory'}),
-        sub('На спину',{'BackAccessory'}),sub('На пояс',{'WaistAccessory'}),sub('В руках',handheld,',Handheld,Holdable'),
-        sub('Эффекты',rigid,',Filter,Aura,Confetti,Sparkles')}},
-    {Name='Волосы',Sub={sub('Все волосы',{'HairAccessory'}),sub('Бесплатные',{'HairAccessory'},nil,true),
-        sub('Чёлки',{'FaceAccessory'},'Hair Bangs'),sub('Пряди',rigid,',Extensions')}},
-    {Name='Одежда',Sub={
-        sub('Класс. футболки',{'TShirt'}),sub('Класс. рубашки',{'Shirt'}),sub('Класс. брюки',{'Pants'}),sub('Классическая',classic),
-        sub('Вся одежда',allClothes),sub('Бесплатная',allClothes,nil,true),sub('Многослойная',layered),
-        sub('Футболки',{'TShirtAccessory'}),sub('Брюки',{'PantsAccessory'}),sub('Куртки',{'JacketAccessory'}),
-        sub('Рубашки',{'ShirtAccessory'}),sub('Свитеры',{'SweaterAccessory'}),sub('Шорты',{'ShortsAccessory'}),
-        sub('Платья / юбки',{'DressSkirtAccessory'}),sub('Обувь',{'LeftShoeAccessory','RightShoeAccessory'})}},
+    {Name='Accessories',Sub={
+        sub('All',rigid),sub('Free',rigid,nil,true),sub('Hats',{'Hat'}),sub('Face',{'FaceAccessory'}),
+        sub('Neck',{'NeckAccessory'}),sub('Shoulders',{'ShoulderAccessory'}),sub('Front',{'FrontAccessory'}),
+        sub('Back',{'BackAccessory'}),sub('Waist',{'WaistAccessory'}),sub('Handheld',handheld,',Handheld,Holdable'),
+        sub('Effects',rigid,',Filter,Aura,Confetti,Sparkles')}},
+    {Name='Hair',Sub={sub('All hair',{'HairAccessory'}),sub('Free',{'HairAccessory'},nil,true),
+        sub('Bangs',{'FaceAccessory'},'Hair Bangs'),sub('Extensions',rigid,',Extensions')}},
+    {Name='Clothing',Sub={
+        sub('Classic T-shirts',{'TShirt'}),sub('Classic shirts',{'Shirt'}),sub('Classic pants',{'Pants'}),sub('Classic',classic),
+        sub('All clothing',allClothes),sub('Free',allClothes,nil,true),sub('Layered',layered),
+        sub('T-shirts',{'TShirtAccessory'}),sub('Pants',{'PantsAccessory'}),sub('Jackets',{'JacketAccessory'}),
+        sub('Shirts',{'ShirtAccessory'}),sub('Sweaters',{'SweaterAccessory'}),sub('Shorts',{'ShortsAccessory'}),
+        sub('Dresses / skirts',{'DressSkirtAccessory'}),sub('Shoes',{'LeftShoeAccessory','RightShoeAccessory'})}},
     {Name='Makeup',Sub={sub('All',makeupTypes),sub('Eyes',{'EyeMakeup'}),sub('Lips',{'LipMakeup'}),
         sub('Face',{'FaceMakeup'}),sub('Eyelashes',{'EyelashAccessory'}),sub('Eyebrows',{'EyebrowAccessory'})}},
-    {Name='Collectibles',Sub={sub('All',wearableTypes),sub('Accessories',collectibleAccessories),sub('Faces',{'Face'})}},
-    {Name='Сохранённое',SavedRoot=true},
+    {Name='Collectibles',Sub={sub('All',wearableTypes),sub('Accessories',collectibleAccessories)}},
+    {Name='Saved',SavedRoot=true},
 }
 for _,entry in ipairs(categories[5].Sub) do entry.SalesTypeFilter='Collectibles' end
 app.Categories=categories
 local category,subcategory=1,1
-local savedSection='Образы'
-local savedGroup='Все'
+local savedSection='Outfits'
+local savedGroup='All'
 local function avatarTypeName(value)
     if typeof and typeof(value)=='EnumItem' then return value.Name end
     if type(value)=='string' then return value end
     return nil
 end
-local accessoryFavoriteSub={Hat='Головные уборы',FaceAccessory='На лицо',NeckAccessory='На шею',ShoulderAccessory='На плечи',FrontAccessory='Спереди',BackAccessory='На спину',WaistAccessory='На пояс'}
-local clothingFavoriteSub={TShirt='Класс. футболки',Shirt='Класс. рубашки',Pants='Класс. брюки',TShirtAccessory='Футболки',PantsAccessory='Брюки',JacketAccessory='Куртки',ShirtAccessory='Рубашки',SweaterAccessory='Свитеры',ShortsAccessory='Шорты',DressSkirtAccessory='Платья / юбки',LeftShoeAccessory='Обувь',RightShoeAccessory='Обувь'}
+local accessoryFavoriteSub={Hat='Hats',FaceAccessory='Face',NeckAccessory='Neck',ShoulderAccessory='Shoulders',FrontAccessory='Front',BackAccessory='Back',WaistAccessory='Waist'}
+local clothingFavoriteSub={TShirt='Classic T-shirts',Shirt='Classic shirts',Pants='Classic pants',TShirtAccessory='T-shirts',PantsAccessory='Pants',JacketAccessory='Jackets',ShirtAccessory='Shirts',SweaterAccessory='Sweaters',ShortsAccessory='Shorts',DressSkirtAccessory='Dresses / skirts',LeftShoeAccessory='Shoes',RightShoeAccessory='Shoes'}
 local function favoritePlacement(item)
     local cat=categories[category]
     local selected=cat and cat.Sub and cat.Sub[subcategory]
-    local group=cat and cat.Name or 'Аксессуары'
+    local group=cat and cat.Name or 'Accessories'
     local subName=selected and selected.Name or nil
     local assetName=avatarTypeName(item.AssetType)
     if table.find(makeupTypes,assetName) then return 'Makeup',assetName end
     if group=='Collectibles' then
-        if table.find(allClothes,assetName) then return 'Одежда',clothingFavoriteSub[assetName] end
-        if assetName=='HairAccessory' then return 'Волосы',nil end
-        return 'Аксессуары',accessoryFavoriteSub[assetName] or 'Лица'
+        if table.find(allClothes,assetName) then return 'Clothing',clothingFavoriteSub[assetName] end
+        if assetName=='HairAccessory' then return 'Hair',nil end
+        return 'Accessories',accessoryFavoriteSub[assetName] or 'Faces'
     end
-    if group=='Аксессуары' and (subName=='Все' or subName=='Бесплатные') then subName=accessoryFavoriteSub[assetName]
-    elseif group=='Волосы' and (subName=='Все волосы' or subName=='Бесплатные') then subName=nil
-    elseif group=='Одежда' and (subName=='Вся одежда' or subName=='Бесплатная' or subName=='Многослойная' or subName=='Классическая') then subName=clothingFavoriteSub[assetName]
+    if group=='Accessories' and (subName=='All' or subName=='Free') then subName=accessoryFavoriteSub[assetName]
+    elseif group=='Hair' and (subName=='All hair' or subName=='Free') then subName=nil
+    elseif group=='Clothing' and (subName=='All clothing' or subName=='Free' or subName=='Layered' or subName=='Classic') then subName=clothingFavoriteSub[assetName]
     end
     return group,subName
 end
@@ -940,11 +944,11 @@ do
 end
 local results=make('ScrollingFrame',{Name='Results',Position=UDim2.fromOffset(20,204),Size=UDim2.fromOffset(756,384),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y},panel)
 corner(results)
-make('UIGridLayout',{CellSize=UDim2.fromOffset(180,211),CellPadding=UDim2.fromOffset(8,10),SortOrder=Enum.SortOrder.LayoutOrder},results)
+make('UIGridLayout',{CellSize=UDim2.fromOffset(180,211),CellPadding=UDim2.fromOffset(8,10),FillDirectionMaxCells=8,HorizontalAlignment=Enum.HorizontalAlignment.Center,SortOrder=Enum.SortOrder.LayoutOrder},results)
 make('UIPadding',{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,2),PaddingBottom=UDim.new(0,8)},results)
-local empty=label('Загрузка каталога...',120,320,556,90,nil,22)
+local empty=label('Loading catalog...',120,320,556,90,nil,22)
 empty.Name='EmptyResults'; empty.TextXAlignment=Enum.TextXAlignment.Center; empty.TextColor3=C.Muted
-local moreButton=button('Загрузить ещё',20,598,756,36)
+local moreButton=button('Load more',20,598,756,36)
 moreButton.Name='MoreButton'
 local pages,resultCount,searchSerial=nil,0,0
 local cardButtons={}
@@ -972,19 +976,19 @@ local function openNameDialog(titleText,initialText,onDone)
     make('UIScale',{Scale=scale.Scale},boxFrame)
     corner(boxFrame,14); make('UIStroke',{Color=C.Border,Thickness=1},boxFrame)
     local t=modalLabel(boxFrame,titleText,20,16,430,32,24); t.Font=Enum.Font.SourceSansBold
-    local nameBox=make('TextBox',{Text=initialText or '',PlaceholderText='Название образа',Position=UDim2.fromOffset(20,67),Size=UDim2.fromOffset(430,42),BackgroundColor3=C.Surface,TextColor3=C.Text,PlaceholderColor3=C.Muted,Font=Enum.Font.SourceSans,TextSize=19,ClearTextOnFocus=false,TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},boxFrame)
+    local nameBox=make('TextBox',{Text=initialText or '',PlaceholderText='Outfit name',Position=UDim2.fromOffset(20,67),Size=UDim2.fromOffset(430,42),BackgroundColor3=C.Surface,TextColor3=C.Text,PlaceholderColor3=C.Muted,Font=Enum.Font.SourceSans,TextSize=19,ClearTextOnFocus=false,TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},boxFrame)
     corner(nameBox); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,10)},nameBox)
     local notice=modalLabel(boxFrame,'',20,112,430,25,15); notice.TextColor3=Color3.fromRGB(255,156,157)
-    modalButton(boxFrame,'Отмена',20,151,205,40,clearModal,false)
+    modalButton(boxFrame,'Cancel',20,151,205,40,clearModal,false)
     local submitted=false
     local function submit()
         if submitted then return end
         local name=safeText(nameBox.Text)
         local stop=utf8.offset(name,49); if stop then name=name:sub(1,stop-1) end
-        if name=='' or name=='Без названия' then notice.Text='Введите название образа'; return end
+        if name=='' or name=='Untitled' then notice.Text='Enter an outfit name'; return end
         submitted=true; clearModal(); onDone(name)
     end
-    modalButton(boxFrame,'Сохранить',245,151,205,40,submit,true)
+    modalButton(boxFrame,'Save',245,151,205,40,submit,true)
     nameBox.FocusLost:Connect(function(enter) if enter then submit() end end)
     task.defer(function() pcall(function() nameBox:CaptureFocus() end) end)
 end
@@ -996,7 +1000,7 @@ local function openConfirmDialog(titleText,bodyText,confirmText,onConfirm)
     local t=modalLabel(f,titleText,20,16,430,32,24); t.Font=Enum.Font.SourceSansBold
     modalLabel(f,bodyText,20,62,430,72,17).TextColor3=C.Muted
     f.Name='Confirmation'
-    modalButton(f,'Отмена',20,161,205,40,clearModal,false).Name='Cancel'
+    modalButton(f,'Cancel',20,161,205,40,clearModal,false).Name='Cancel'
     modalButton(f,confirmText,245,161,205,40,function() clearModal(); onConfirm() end,true).Name='Confirm'
 end
 local defaultSearchOptions={SortType='Relevance',SortAggregation='AllTime',CreatorType='All',CreatorName='',IncludeOffSale=true,PersonalizedResults=true}
@@ -1007,7 +1011,7 @@ function app.NormalizeSearchOptions(value)
         local enum=Enum[field=='SortType' and 'CatalogSortType' or (field=='SortAggregation' and 'CatalogSortAggregation' or 'CreatorTypeFilter')]
         local candidate=value[field] or result[field]
         local ok,item=pcall(function() return enum[candidate] end)
-        assert(ok and item,'Неизвестное значение: '..field)
+        assert(ok and item,'Unknown value: '..field)
         result[field]=candidate
     end
     result.CreatorName=tostring(value.CreatorName or ''):match('^%s*(.-)%s*$')
@@ -1017,11 +1021,11 @@ function app.NormalizeSearchOptions(value)
         local raw=value[field]
         if raw~=nil and tostring(raw):match('%S') then
             local n=tonumber(raw)
-            assert(n and n==n and n>=0 and n<=2147483647 and n%1==0,'Цена должна быть целым числом от 0 до 2147483647')
+            assert(n and n==n and n>=0 and n<=2147483647 and n%1==0,'Price must be a whole number from 0 to 2147483647')
             result[field]=n
         end
     end
-    assert(not result.MinPrice or not result.MaxPrice or result.MinPrice<=result.MaxPrice,'Минимальная цена больше максимальной')
+    assert(not result.MinPrice or not result.MaxPrice or result.MinPrice<=result.MaxPrice,'Minimum price exceeds maximum price')
     return result
 end
 function app.SetSearchOptions(value)
@@ -1033,8 +1037,8 @@ end
 do
     local sortChoices={{'Relevance','Relevance'},{'Bestselling','Bestselling'},{'MostFavorited','Most Favorited'},
         {'RecentlyCreated','Recently Published'},{'PriceLowToHigh','Price: Low to High'},{'PriceHighToLow','Price: High to Low'}}
-    local periods={{'AllTime','За всё время'},{'Past12Hours','За 12 часов'},{'PastDay','За сутки'},{'Past3Days','За 3 дня'},{'PastWeek','За неделю'},{'PastMonth','За месяц'}}
-    local creatorTypes={{'All','Все авторы'},{'User','Пользователь'},{'Group','Группа'}}
+    local periods={{'AllTime','All time'},{'Past12Hours','Past 12 hours'},{'PastDay','Past day'},{'Past3Days','Past 3 days'},{'PastWeek','Past week'},{'PastMonth','Past month'}}
+    local creatorTypes={{'All','All creators'},{'User','User'},{'Group','Group'}}
     local function openSearchOptions()
         clearModal(); modalShade.Visible=true
         local draft=table.clone(app.SearchOptions)
@@ -1042,7 +1046,7 @@ do
         make('UIScale',{Scale=scale.Scale},f); corner(f,14); make('UIStroke',{Color=C.Border,Thickness=1},f)
         modalLabel(f,'Search Options',24,16,430,36,26).Font=Enum.Font.SourceSansBold
         modalButton(f,'X',548,18,38,34,clearModal)
-        modalLabel(f,'Настройте поиск, затем нажмите «Применить».',24,57,560,24,17).TextColor3=C.Muted
+        modalLabel(f,'Choose your filters, then click Apply.',24,57,560,24,17).TextColor3=C.Muted
         local dropdown
         local function closeDropdown() if dropdown then dropdown:Destroy(); dropdown=nil end end
         local function selectField(field,choices,x,y,w,changed)
@@ -1070,8 +1074,8 @@ do
             corner(b); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,12)},b)
             b.Focused:Connect(closeDropdown); return b
         end
-        modalLabel(f,'Сортировка',24,91,270,24,17).TextColor3=C.Muted
-        local periodLabel=modalLabel(f,'Период',312,91,270,24,17)
+        modalLabel(f,'Sort type',24,91,270,24,17).TextColor3=C.Muted
+        local periodLabel=modalLabel(f,'Time period',312,91,270,24,17)
         local period,updatePeriod
         local function updatePeriodState()
             local active=draft.SortType=='Bestselling' or draft.SortType=='MostFavorited'
@@ -1080,16 +1084,16 @@ do
         local _,updateSort=selectField('SortType',sortChoices,24,119,270,updatePeriodState)
         period,updatePeriod=selectField('SortAggregation',periods,312,119,274)
         updatePeriodState()
-        modalLabel(f,'Цена в Robux',24,171,562,24,17).TextColor3=C.Muted
-        local min=field('MinPrice','От',24,199,270,draft.MinPrice and tostring(draft.MinPrice))
-        local max=field('MaxPrice','До',312,199,274,draft.MaxPrice and tostring(draft.MaxPrice))
-        modalLabel(f,'Автор',24,251,562,24,17).TextColor3=C.Muted
-        local creator=field('CreatorName','Имя пользователя или группы',24,279,348,draft.CreatorName)
+        modalLabel(f,'Price in Robux',24,171,562,24,17).TextColor3=C.Muted
+        local min=field('MinPrice','Min',24,199,270,draft.MinPrice and tostring(draft.MinPrice))
+        local max=field('MaxPrice','Max',312,199,274,draft.MaxPrice and tostring(draft.MaxPrice))
+        modalLabel(f,'Creator',24,251,562,24,17).TextColor3=C.Muted
+        local creator=field('CreatorName','Username or group name',24,279,348,draft.CreatorName)
         local _,updateCreator=selectField('CreatorType',creatorTypes,384,279,202)
         local offSale=modalButton(f,'',24,337,562,38,function() end)
         offSale.Name='IncludeOffSale'
         local function updateOffSale()
-            offSale.Text=(draft.IncludeOffSale and 'ВКЛ' or 'ВЫКЛ')..'  ·  Показывать вещи не в продаже'
+            offSale.Text=(draft.IncludeOffSale and 'ON' or 'OFF')..'  ·  Include off-sale items'
             offSale.BackgroundColor3=draft.IncludeOffSale and C.Green or C.Card
         end
         offSale.Activated:Connect(function() closeDropdown(); draft.IncludeOffSale=not draft.IncludeOffSale; updateOffSale() end)
@@ -1097,20 +1101,20 @@ do
         local personalized=modalButton(f,'',24,384,562,38,nil)
         personalized.Name='PersonalizedResults'
         local function updatePersonalized()
-            personalized.Text=(draft.PersonalizedResults and 'ВКЛ' or 'ВЫКЛ')..'  ·  Personalized Results'
+            personalized.Text=(draft.PersonalizedResults and 'ON' or 'OFF')..'  ·  Personalized Results'
             personalized.BackgroundColor3=draft.PersonalizedResults and C.Green or C.Card
         end
         personalized.Activated:Connect(function() closeDropdown(); draft.PersonalizedResults=not draft.PersonalizedResults; updatePersonalized() end)
         updatePersonalized()
-        modalLabel(f,'Для рекомендаций: пустой запрос, Relevance и вещи в продаже.',24,425,562,30,15).TextColor3=C.Muted
+        modalLabel(f,'Recommendations use an empty query, Relevance and on-sale items.',24,425,562,30,15).TextColor3=C.Muted
         local notice=modalLabel(f,'',24,458,562,26,16); notice.TextColor3=Color3.fromRGB(255,160,150)
-        modalButton(f,'Сбросить',24,493,156,40,function()
+        modalButton(f,'Reset',24,493,156,40,function()
             closeDropdown(); draft=table.clone(defaultSearchOptions)
             min.Text=''; max.Text=''; creator.Text=''; notice.Text=''
             updateSort(); updatePeriod(); updateCreator(); updatePeriodState(); updateOffSale(); updatePersonalized()
         end).Name='ResetOptions'
-        modalButton(f,'Отмена',292,493,136,40,clearModal).Name='CancelOptions'
-        modalButton(f,'Применить',440,493,146,40,function()
+        modalButton(f,'Cancel',292,493,136,40,clearModal).Name='CancelOptions'
+        modalButton(f,'Apply',440,493,146,40,function()
             closeDropdown(); draft.MinPrice=min.Text; draft.MaxPrice=max.Text; draft.CreatorName=creator.Text
             local ok,err=pcall(app.SetSearchOptions,draft)
             if not ok then notice.Text=tostring(err):gsub('^.-:%d+: ',''); return end
@@ -1133,7 +1137,7 @@ local function equipSavedOutfit(entry)
     run(function(rev)
         clearVisuals(); app.Desired={}; app.HideOriginal=false
         local failed=applyOutfit(entry.Data,rev)
-        return failed and #failed==0 and ('Надет образ: '..entry.Name) or ('Образ загружен не полностью: '..table.concat(failed or {},', '))
+        return failed and #failed==0 and ('Outfit equipped: '..entry.Name) or ('Some outfit items could not load: '..table.concat(failed or {},', '))
     end)
 end
 local function openOutfitPreview(entry)
@@ -1143,12 +1147,12 @@ local function openOutfitPreview(entry)
     corner(f,14); make('UIStroke',{Color=C.Border,Thickness=1},f)
     local t=modalLabel(f,entry.Name,22,14,500,34,26); t.Font=Enum.Font.SourceSansBold
     modalButton(f,'X',558,14,40,34,clearModal,false)
-    modalLabel(f,'Вы хотите экипировать данный образ?',22,53,560,28,18).TextColor3=C.Muted
+    modalLabel(f,'Equip this saved outfit?',22,53,560,28,18).TextColor3=C.Muted
     local list=make('ScrollingFrame',{Position=UDim2.fromOffset(22,92),Size=UDim2.fromOffset(576,404),BackgroundColor3=C.Surface,BorderSizePixel=0,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4},f)
     corner(list); make('UIListLayout',{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},list); make('UIPadding',{PaddingTop=UDim.new(0,8),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,8)},list)
     local items=outfitItems(entry.Data)
     if #items==0 then
-        local none=modalLabel(list,'В образе нет добавленных предметов.',8,8,530,52,18); none.Size=UDim2.new(1,-16,0,52); none.TextColor3=C.Muted
+        local none=modalLabel(list,'This outfit contains no added items.',8,8,530,52,18); none.Size=UDim2.new(1,-16,0,52); none.TextColor3=C.Muted
     else
         for i,item in ipairs(items) do
             local row=make('Frame',{Size=UDim2.new(1,-8,0,66),LayoutOrder=i,BackgroundColor3=C.Card,BorderSizePixel=0},list); corner(row)
@@ -1157,20 +1161,20 @@ local function openOutfitPreview(entry)
             local idLabel=modalLabel(row,'ID: '..string.format('%.0f',item.Id),70,35,460,22,15); idLabel.TextColor3=C.Muted
         end
     end
-    local originalText=entry.Data.HideOriginal and 'Исходные вещи будут скрыты.' or 'Исходные вещи останутся видимыми.'
+    local originalText=entry.Data.HideOriginal and 'Original items will be hidden.' or 'Original items will remain visible.'
     modalLabel(f,originalText,22,503,360,24,15).TextColor3=C.Muted
-    modalButton(f,'Отмена',391,510,95,48,clearModal,false)
-    modalButton(f,'Экипировать',497,510,101,48,function() clearModal(); equipSavedOutfit(entry) end,true)
+    modalButton(f,'Cancel',391,510,95,48,clearModal,false)
+    modalButton(f,'Equip',497,510,101,48,function() clearModal(); equipSavedOutfit(entry) end,true)
 end
 local function confirmOverwrite(entry,data)
-    if app.Busy or app.Restoring then message('Подождите окончания примерки'); return end
+    if app.Busy or app.Restoring then message('Please wait for the current item to finish loading'); return end
     local snapshot=data or app.ExportOutfit()
-    openConfirmDialog('Перезаписать образ?',
-        '«'..entry.Name..'» будет заменён текущим образом ('..#snapshot.AssetIds..' предм.). Имя сохранится.',
-        'Перезаписать',function()
+    openConfirmDialog('Overwrite outfit?',
+        ''..entry.Name..' will be replaced with your current outfit ('..#snapshot.AssetIds..' items). Its name will stay the same.',
+        'Overwrite',function()
             local ok,err=pcall(app.OverwriteOutfit,entry.Id,snapshot)
-            if ok then message('Образ обновлён: '..entry.Name) else message(err,true) end
-            if categories[category].SavedRoot and savedSection=='Образы' then renderSavedOutfits() end
+            if ok then message('Outfit updated: '..entry.Name) else message(err,true) end
+            if categories[category].SavedRoot and savedSection=='Outfits' then renderSavedOutfits() end
         end)
 end
 local function openOutfitActions(entry)
@@ -1179,16 +1183,16 @@ local function openOutfitActions(entry)
     make('UIScale',{Scale=scale.Scale},f); corner(f,14); make('UIStroke',{Color=C.Border,Thickness=1},f)
     modalLabel(f,entry.Name,20,16,368,36,24).TextTruncate=Enum.TextTruncate.AtEnd
     modalButton(f,'X',410,18,38,32,clearModal)
-    modalButton(f,'Перезаписать текущим образом',20,76,430,48,function() confirmOverwrite(entry) end,true).Name='OverwriteOutfit'
-    modalButton(f,'Переименовать',20,138,430,48,function()
-        openNameDialog('Переименовать образ',entry.Name,function(name)
+    modalButton(f,'Overwrite with current outfit',20,76,430,48,function() confirmOverwrite(entry) end,true).Name='OverwriteOutfit'
+    modalButton(f,'Rename',20,138,430,48,function()
+        openNameDialog('Rename outfit',entry.Name,function(name)
             local ok,err=pcall(app.RenameOutfit,entry.Id,name)
             if not ok then message(err,true) end
             renderSavedOutfits()
         end)
     end).Name='RenameOutfit'
-    modalButton(f,'Удалить образ',20,212,430,44,function()
-        openConfirmDialog('Удалить образ?','«'..entry.Name..'» будет удалён из сохранённого.','Удалить',function()
+    modalButton(f,'Delete outfit',20,212,430,44,function()
+        openConfirmDialog('Delete outfit?',''..entry.Name..' will be removed from your saved outfits.','Delete',function()
             local ok,err=pcall(app.DeleteOutfit,entry.Id)
             if not ok then message(err,true) end
             renderSavedOutfits()
@@ -1197,9 +1201,9 @@ local function openOutfitActions(entry)
 end
 renderSavedOutfits=function()
     clearResults(); pages=nil; app.SearchBusy=false
-    query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Поиск в сохранённом...'; searchButton.Text='Найти'
+    query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Search saved items...'; searchButton.Text='Search'
     empty.Visible=#SavedOutfits==0
-    empty.Text='Сохранённых образов пока нет.\nСоберите образ и нажмите «Сохранить».'
+    empty.Text='No saved outfits yet.\nCreate a look and click Save.'
     for index,entry in ipairs(SavedOutfits) do
         if filterMatch(entry.Name) then
         local card=make('Frame',{Name='SavedOutfit',LayoutOrder=index,BackgroundColor3=C.Card,BorderSizePixel=0},results); corner(card); resultCount+=1
@@ -1207,34 +1211,34 @@ renderSavedOutfits=function()
         for j=1,math.min(3,#items) do
             make('ImageLabel',{Image='rbxthumb://type=Asset&id='..string.format('%.0f',items[j].Id)..'&w=150&h=150',Size=UDim2.fromOffset(48,48),Position=UDim2.fromOffset(9+(j-1)*53,10),BackgroundTransparency=1},card)
         end
-        if #items==0 then modalLabel(card,'Пустой образ',12,18,156,34,16).TextColor3=C.Muted end
+        if #items==0 then modalLabel(card,'Empty outfit',12,18,156,34,16).TextColor3=C.Muted end
         local n=label(entry.Name,10,66,160,39,card,17); n.TextTruncate=Enum.TextTruncate.AtEnd; n.Font=Enum.Font.SourceSansSemibold
-        local count=label('Предметов: '..#items,10,107,160,22,card,15); count.TextColor3=C.Muted
+        local count=label('Items: '..#items,10,107,160,22,card,15); count.TextColor3=C.Muted
         card:SetAttribute('OutfitId',entry.Id)
-        button('Открыть',10,136,160,30,function() openOutfitPreview(entry) end,card,true).Name='PreviewOutfit'
-        button('Управление',10,173,160,28,function() openOutfitActions(entry) end,card).Name='ManageOutfit'
+        button('Open',10,136,160,30,function() openOutfitPreview(entry) end,card,true).Name='PreviewOutfit'
+        button('Manage',10,173,160,28,function() openOutfitActions(entry) end,card).Name='ManageOutfit'
     end
         end
     empty.Visible=resultCount==0
-    moreButton.Text='Сохранённые образы: '..resultCount; moreButton.Active=false; moreButton.AutoButtonColor=false
+    moreButton.Text='Saved outfits: '..resultCount; moreButton.Active=false; moreButton.AutoButtonColor=false
 end
 local function openSaveDialog(data)
     local function createNew()
-        openNameDialog('Сохранить образ','Образ '..tostring(#SavedOutfits+1),function(name)
+        openNameDialog('Save outfit','Outfit '..tostring(#SavedOutfits+1),function(name)
             local ok,err=pcall(app.SaveOutfit,name,data)
             if not ok then message(err,true); return end
-            message('Сохранено: '..name)
-            if categories[category].SavedRoot and savedSection=='Образы' then renderSavedOutfits() end
+            message('Saved: '..name)
+            if categories[category].SavedRoot and savedSection=='Outfits' then renderSavedOutfits() end
         end)
     end
     if #SavedOutfits==0 then createNew(); return end
     clearModal(); modalShade.Visible=true
     local f=make('Frame',{Name='SaveOutfitDialog',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(510,440),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
     make('UIScale',{Scale=scale.Scale},f); corner(f,14); make('UIStroke',{Color=C.Border,Thickness=1},f)
-    modalLabel(f,'Сохранить текущий образ',20,16,420,36,24)
+    modalLabel(f,'Save current outfit',20,16,420,36,24)
     modalButton(f,'X',452,18,38,32,clearModal)
-    modalButton(f,'Создать новый образ',20,72,470,44,createNew,true).Name='CreateNew'
-    modalLabel(f,'Или выберите образ для перезаписи:',20,133,470,28,18).TextColor3=C.Muted
+    modalButton(f,'Create a new outfit',20,72,470,44,createNew,true).Name='CreateNew'
+    modalLabel(f,'Or choose an outfit to overwrite:',20,133,470,28,18).TextColor3=C.Muted
     local list=make('ScrollingFrame',{Name='Outfits',Position=UDim2.fromOffset(20,172),Size=UDim2.fromOffset(470,246),CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4,BackgroundTransparency=1,BorderSizePixel=0},f)
     make('UIListLayout',{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},list)
     for i,entry in ipairs(SavedOutfits) do
@@ -1253,7 +1257,7 @@ local function removeFavorite(id)
 end
 local function addFavorite(item,group,subName)
     local id=tonumber(item.Id)
-    assert(id and id>0,'У предмета нет корректного ID')
+    assert(id and id>0,'Item has no valid ID')
     local old=SavedItems[id]
     SavedItems[id]={Id=id,Name=safeText(item.Name or ('ID '..string.format('%.0f',id))),AssetType=avatarTypeName(item.AssetType),Group=group,Sub=subName}
     local ok,err=pcall(saveFavoriteLibrary)
@@ -1263,15 +1267,15 @@ local function toggleFavorite(item,group,subName)
     local id=tonumber(item.Id)
     if isFavorite(id) then
         if not removeFavorite(id) then return end
-        message('Удалено из сохранённого: '..safeText(item.Name))
+        message('Removed from favorites: '..safeText(item.Name))
     else
         local ok,err=pcall(addFavorite,item,group,subName)
         if not ok then message(err,true); return end
-        message('Сохранено: '..safeText(item.Name))
+        message('Saved: '..safeText(item.Name))
     end
     if renderCategories then renderCategories() end
     local cat=categories[category]
-    if cat and cat.SavedRoot and savedSection~='Образы' and renderSavedItems then renderSavedItems(savedGroup)
+    if cat and cat.SavedRoot and savedSection~='Outfits' and renderSavedItems then renderSavedItems(savedGroup)
     else refresh() end
 end
 app.SetFavorite=function(item,group,subName,value)
@@ -1300,9 +1304,9 @@ local function renderItemCard(item,group,subName)
     fav.Name='Favorite'; favoriteButtons[id]=fav
     make('ImageLabel',{Name='Star',Image='rbxassetid://7537715511',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(23,23),BackgroundTransparency=1,ImageColor3=C.Muted,ScaleType=Enum.ScaleType.Fit},fav)
     local name=label(item.Name,10,125,160,41,card,17); name.TextTruncate=Enum.TextTruncate.AtEnd
-    local b=button('Примерить',10,171,160,32,function()
+    local b=button('Try on',10,171,160,32,function()
         run(function(rev)
-            if app.Items[id] then app.Remove(id); return 'Предмет снят' end
+            if app.Items[id] then app.Remove(id); return 'Item removed' end
             return app.WearAsync(id,rev,{Name=item.Name,AssetType=item.AssetType})
         end)
     end,card,true)
@@ -1310,25 +1314,25 @@ local function renderItemCard(item,group,subName)
 end
 renderSavedItems=function(group)
     clearResults(); pages=nil; app.SearchBusy=false
-    query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Поиск в сохранённом...'; searchButton.Text='Найти'
+    query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Search saved items...'; searchButton.Text='Search'
     local items={}
     for _,entry in pairs(SavedItems) do
-        if group=='Все' or entry.Group==group then table.insert(items,entry) end
+        if group=='All' or entry.Group==group then table.insert(items,entry) end
     end
     table.sort(items,function(a,b) return (a.Name or '')<(b.Name or '') end)
     empty.Visible=#items==0
-    empty.Text='Здесь пока нет избранных вещей.\nНажмите звёздочку на карточке в каталоге.'
+    empty.Text='No favorite items yet.\nClick a star on a catalog item.'
     for _,item in ipairs(items) do
         if filterMatch(item.Name,item.Id) then renderItemCard(item,item.Group,item.Sub) end
     end
     empty.Visible=resultCount==0
-    moreButton.Text='Найдено в избранном: '..resultCount; moreButton.Active=false; moreButton.AutoButtonColor=false
+    moreButton.Text='Favorite items: '..resultCount; moreButton.Active=false; moreButton.AutoButtonColor=false
     refresh()
 end
 local function refreshCards()
     for id,b in pairs(cardButtons) do
         local worn=app.Items[id]~=nil
-        b.Text=worn and 'Снять' or 'Примерить'
+        b.Text=worn and 'Remove' or 'Try on'
         b.BackgroundColor3=worn and C.Green or C.Accent
         b.Active=not app.Busy and not app.Restoring
         b.AutoButtonColor=b.Active
@@ -1351,8 +1355,8 @@ local function renderPage()
         end
     end
     empty.Visible=resultCount==0
-    empty.Text='Ничего не найдено.\nПопробуйте другое название или категорию.'
-    moreButton.Text=pages.IsFinished and ('Все результаты: '..resultCount) or ('Загрузить ещё  |  Показано: '..resultCount)
+    empty.Text='No results.\nTry a different keyword or category.'
+    moreButton.Text=pages.IsFinished and ('Total results: '..resultCount) or ('Load more  |  Shown: '..resultCount)
     moreButton.Active=not pages.IsFinished; moreButton.AutoButtonColor=not pages.IsFinished
     refreshCards()
 end
@@ -1420,23 +1424,23 @@ search=function()
     searchSerial+=1; local token=searchSerial
     local cat=categories[category]
     if cat and cat.SavedRoot then
-        if savedSection=='Образы' then renderSavedOutfits() else renderSavedItems(savedGroup) end
+        if savedSection=='Outfits' then renderSavedOutfits() else renderSavedItems(savedGroup) end
         return
     end
     local selected=cat.Sub[subcategory]; local keyword=query.Text; local options=table.clone(app.SearchOptions)
-    query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Поиск по каталогу'
-    app.SearchBusy=true; searchButton.Text='Поиск...'; pages=nil
-    clearResults(); empty.Visible=true; empty.Text='Ищем вещи...'
-    moreButton.Active=false; moreButton.Text='Подождите...'
+    query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Search catalog'
+    app.SearchBusy=true; searchButton.Text='Searching...'; pages=nil
+    clearResults(); empty.Visible=true; empty.Text='Searching for items...'
+    moreButton.Active=false; moreButton.Text='Please wait...'
     task.spawn(function()
         task.wait(0.35)
         local function active() return app.Alive and token==searchSerial end
         if not active() then return end
         local ok,result=pcall(catalogPages,selected,keyword,active,options)
         if not app.Alive or token~=searchSerial then return end
-        app.SearchBusy=false; searchButton.Text='Найти'
+        app.SearchBusy=false; searchButton.Text='Search'
         if ok then pages=result; renderPage()
-        else empty.Text='Каталог не ответил.\nНажмите «Найти», чтобы повторить.'; moreButton.Text='Нет результатов'; message(result,true) end
+        else empty.Text='Catalog did not respond.\nClick Search to try again.'; moreButton.Text='No results'; message(result,true) end
     end)
 end
 app.Search=search
@@ -1469,14 +1473,14 @@ renderCategories=function()
         return b
     end
     if isSaved then
-        chip('Outfits','Образы',104,savedSection=='Образы',function()
-            savedSection='Образы'; query.Text=''; renderCategories(); search()
+        chip('Outfits','Outfits',104,savedSection=='Outfits',function()
+            savedSection='Outfits'; query.Text=''; renderCategories(); search()
         end,1)
-        chip('Favorites','Избранное',122,savedSection=='Избранное',function()
-            savedSection='Избранное'; query.Text=''; renderCategories(); search()
+        chip('Favorites','Favorites',122,savedSection=='Favorites',function()
+            savedSection='Favorites'; query.Text=''; renderCategories(); search()
         end,2)
-        if savedSection=='Избранное' then
-            for i,group in ipairs({'Все','Аксессуары','Волосы','Одежда','Makeup'}) do
+        if savedSection=='Favorites' then
+            for i,group in ipairs({'All','Accessories','Hair','Clothing','Makeup'}) do
                 chip('FavoritesGroup_'..i,group,math.clamp(utf8.len(group)*8+24,70,124),savedGroup==group,function()
                     savedGroup=group; renderCategories(); search()
                 end,i+2)
@@ -1495,34 +1499,35 @@ searchButton.Activated:Connect(search)
 query.FocusLost:Connect(function(enter) if enter then search() end end)
 moreButton.Activated:Connect(function()
     if app.SearchBusy or not pages or pages.IsFinished then return end
-    app.SearchBusy=true; moreButton.Text='Загрузка...'
+    app.SearchBusy=true; moreButton.Text='Loading...'
     local token=searchSerial; local currentPages=pages
     task.spawn(function()
         local ok,err=pcall(function() currentPages:AdvanceToNextPageAsync() end)
         if not app.Alive or token~=searchSerial then return end
         app.SearchBusy=false
-        if ok then renderPage() else moreButton.Text='Повторить загрузку'; message(err,true) end
+        if ok then renderPage() else moreButton.Text='Retry loading'; message(err,true) end
     end)
 end)
-local wornTitle=label('Ваш образ',794,106,170,36,nil,23)
-local retry=button('Повторить',978,111,100,30,function()
+local wornTitle=label('Your avatar',794,106,170,36,nil,23)
+local retry=button('Retry',978,111,100,30,function()
     if not app.Busy and not app.Restoring then run(function(rev)
         local failed=applyOutfit(app.ExportOutfit(),rev)
-        return failed and #failed==0 and 'Все вещи надеты' or 'Некоторые вещи недоступны'
+        return failed and #failed==0 and 'All items equipped' or 'Some items are unavailable'
     end) end
 end)
 retry.TextSize=16
-local worn=make('ScrollingFrame',{Name='Worn',Position=UDim2.fromOffset(792,154),Size=UDim2.fromOffset(288,230),BackgroundColor3=C.Surface,BorderSizePixel=0,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4},panel)
+app.WornHeading=label('Wearing',794,354,284,24,nil,18)
+local worn=make('ScrollingFrame',{Name='Worn',Position=UDim2.fromOffset(792,384),Size=UDim2.fromOffset(288,110),BackgroundColor3=C.Surface,BorderSizePixel=0,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4},panel)
 corner(worn)
 make('UIListLayout',{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},worn)
 make('UIPadding',{PaddingTop=UDim.new(0,8),PaddingLeft=UDim.new(0,8),PaddingBottom=UDim.new(0,8)},worn)
-local wornEmpty=label('Пока ничего не добавлено.\nНажмите «Примерить» на карточке.',814,219,245,100,nil,18)
+local wornEmpty=label('No added items.\nClick Try on to get started.',814,399,245,74,nil,17)
 wornEmpty.TextColor3=C.Muted; wornEmpty.TextXAlignment=Enum.TextXAlignment.Center
 redraw=function()
     for _,o in ipairs(worn:GetChildren()) do if o:IsA('Frame') then o:Destroy() end end
     local items={}; for _,it in pairs(app.Desired) do table.insert(items,it) end
     table.sort(items,function(a,b) return a.Name<b.Name end)
-    wornTitle.Text='Ваш образ ('..#items..')'; wornEmpty.Visible=#items==0
+    app.WornHeading.Text='Wearing ('..#items..')'; wornEmpty.Visible=#items==0
     for i,it in ipairs(items) do
         local row=make('Frame',{Size=UDim2.fromOffset(267,92),LayoutOrder=i,BackgroundColor3=C.Card,BorderSizePixel=0},worn)
         corner(row)
@@ -1530,68 +1535,179 @@ redraw=function()
             Position=UDim2.fromOffset(3,5),Size=UDim2.fromOffset(50,50),BackgroundTransparency=1},row)
         local n=label(it.Name,60,5,201,41,row,16); n.TextTruncate=Enum.TextTruncate.AtEnd
         if not app.Items[it.Id] then n.TextColor3=C.Muted end
-        button('Снять',186,53,74,30,function()
+        button('Remove',186,53,74,30,function()
             if not app.Busy and not app.Restoring then app.Remove(it.Id) end
         end,row).TextSize=16
         local equipped=app.Items[it.Id]
         if equipped and equipped.Weld and not equipped.Layered then
             button('Transform Item',60,53,118,30,function() app.OpenTransform(it.Id) end,row).TextSize=16
         elseif equipped and makeup[equipped.Kind] then
-            button('Слой -',60,53,56,30,function() app.MoveMakeupLayer(it.Id,-1) end,row).TextSize=15
-            button('Слой +',121,53,56,30,function() app.MoveMakeupLayer(it.Id,1) end,row).TextSize=15
+            button('Layer -',60,53,56,30,function() app.MoveMakeupLayer(it.Id,-1) end,row).TextSize=15
+            button('Layer +',121,53,56,30,function() app.MoveMakeupLayer(it.Id,1) end,row).TextSize=15
         end
     end
     refreshCards()
 end
-local hideButton=button('Скрыть исходные вещи',792,445,288,38,function()
+local hideButton=button('Hide originals',792,546,140,32,function()
     if app.Busy or app.Restoring then return end
     local ok,err=pcall(app.SetHideOriginal,not app.HideOriginal)
-    if ok then message(app.HideOriginal and 'Исходные вещи скрыты' or 'Исходные вещи снова видны') else message(err,true) end
+    if ok then message(app.HideOriginal and 'Original items hidden' or 'Original items visible') else message(err,true) end
 end)
 hideButton.Name='HideOriginal'
-button('Вернуть исходный образ',792,493,288,38,function() app.Reset() end).Name='ResetOutfit'
-local saveButton=button('Сохранить образ',792,397,288,38,function()
-    if app.Busy or app.Restoring then message('Подождите окончания примерки'); return end
-    if type(writefile)~='function' then message('Executor не поддерживает сохранение файлов',true); return end
+button('Reset outfit',940,546,140,32,function() app.Reset() end).Name='ResetOutfit'
+local saveButton=button('Save outfit',792,504,288,34,function()
+    if app.Busy or app.Restoring then message('Please wait for the current item to finish loading'); return end
+    if type(writefile)~='function' then message('Your executor does not support saving files',true); return end
     local data=app.ExportOutfit()
-    if #data.AssetIds==0 and not data.HideOriginal then message('Сначала добавьте хотя бы один предмет',true); return end
+    if #data.AssetIds==0 and not data.HideOriginal then message('Add an item first',true); return end
     openSaveDialog(data)
 end,nil,true)
 saveButton.Name='SaveOutfit'
-local setting=make('Frame',{Name='RespawnSetting',Position=UDim2.fromOffset(792,548),Size=UDim2.fromOffset(288,128),BackgroundColor3=C.Surface,BorderSizePixel=0},panel)
+local setting=make('Frame',{Name='RespawnSetting',Position=UDim2.fromOffset(792,588),Size=UDim2.fromOffset(288,88),BackgroundColor3=C.Surface,BorderSizePixel=0},panel)
 corner(setting)
-label('Образ после респавна',12,9,257,26,setting,20).Font=Enum.Font.SourceSansSemibold
-local keepButton=button('ВКЛ',12,45,70,31,function() app.SetKeepOnRespawn(not app.KeepOnRespawn) end,setting)
+label('Keep outfit on respawn',12,8,257,24,setting,18).Font=Enum.Font.SourceSansSemibold
+local keepButton=button('ON',12,42,64,30,function() app.SetKeepOnRespawn(not app.KeepOnRespawn) end,setting)
 keepButton.Name='KeepOnRespawn'
-local keepLabel=label('Сохранять',94,45,180,31,setting,18)
-local keepHelp=label('Автоматически надеть выбранные вещи.',12,81,260,38,setting,16)
+local keepLabel=label('Keep',86,42,60,30,setting,17)
+local keepHelp=label('Restore your selected items automatically.',154,35,123,46,setting,14)
 keepHelp.TextColor3=C.Muted
 updateControls=function()
-    keepButton.Text=app.KeepOnRespawn and 'ВКЛ' or 'ВЫКЛ'
+    keepButton.Text=app.KeepOnRespawn and 'ON' or 'OFF'
     keepButton.BackgroundColor3=app.KeepOnRespawn and C.Green or C.Card
-    keepLabel.Text=app.KeepOnRespawn and 'Сохранять' or 'Сбрасывать'
-    keepHelp.Text=app.KeepOnRespawn and 'Вернуть вещи и скрытие оригинала.' or 'Оставить внешность, которую выдаёт плейс.'
-    hideButton.Text=app.HideOriginal and 'Показать исходные вещи' or 'Скрыть исходные вещи'
+    keepLabel.Text=app.KeepOnRespawn and 'Keep' or 'Reset'
+    keepHelp.Text=app.KeepOnRespawn and 'Restore items and hidden originals.' or 'Use the appearance supplied by the game.'
+    hideButton.Text=app.HideOriginal and 'Show originals' or 'Hide originals'
     hideButton.BackgroundColor3=app.HideOriginal and C.Green or C.Card
     refreshCards()
 end
-local assetId=input('ID предмета или ссылка roblox.com/catalog/...',20,650,596,38)
+local assetId=input('Asset ID or roblox.com/catalog/... link',20,650,596,38)
 assetId.Name='AssetIdInput'
-local wearId=button('Примерить ID',626,650,150,38,function() run(function(rev) return app.WearAsync(assetId.Text,rev) end) end,nil,true)
+local wearId=button('Try ID',626,650,150,38,function() run(function(rev) return app.WearAsync(assetId.Text,rev) end) end,nil,true)
 wearId.Name='WearId'
 assetId.FocusLost:Connect(function(enter)
     if enter then run(function(rev) return app.WearAsync(assetId.Text,rev) end) end
 end)
-label('RightShift',720,15,150,26,nil,16).TextColor3=C.Muted
-status=label('Выберите категорию или введите название вещи.',22,696,1056,26,nil,17)
+label('Right Ctrl',720,15,150,26,nil,16).TextColor3=C.Muted
+status=label('Choose a category or search for an item.',22,696,1056,26,nil,17)
 status.Name='Status'; status.TextTruncate=Enum.TextTruncate.AtEnd
+do
+    local frame=make('Frame',{Name='AvatarPreview',Position=UDim2.fromOffset(792,154),Size=UDim2.fromOffset(288,190),BackgroundColor3=C.Surface,BorderSizePixel=0,ClipsDescendants=true},panel)
+    corner(frame)
+    local viewport=make('ViewportFrame',{Name='Viewport',Size=UDim2.new(1,0,1,-30),BackgroundTransparency=1,Active=true,
+        Ambient=Color3.fromRGB(185,185,195),LightColor=Color3.fromRGB(255,247,235),LightDirection=Vector3.new(-1,-1,-2)},frame)
+    local world=make('WorldModel',{Name='AvatarWorld'},viewport)
+    local camera=make('Camera',{Name='PreviewCamera',FieldOfView=35},viewport)
+    viewport.CurrentCamera=camera
+    local sky=game:GetService('Lighting'):FindFirstChildOfClass('Sky')
+    if sky then sky:Clone().Parent=viewport end
+    local notice=label('Loading avatar...',12,44,264,62,frame,17)
+    notice.Name='PreviewNotice'; notice.TextXAlignment=Enum.TextXAlignment.Center
+    local state={Frame=frame,Viewport=viewport,World=world,Camera=camera,Yaw=0,Pitch=0,Zoom=1,Dirty=true,Builds=0}
+    app.Preview=state
+    local function updateCamera()
+        if not state.Center then return end
+        local aspect=math.max(.1,viewport.AbsoluteSize.X/math.max(1,viewport.AbsoluteSize.Y))
+        local tangent=math.tan(math.rad(camera.FieldOfView/2))
+        local direction=Vector3.new(math.sin(state.Yaw)*math.cos(state.Pitch),math.sin(state.Pitch),-math.cos(state.Yaw)*math.cos(state.Pitch))
+        local basis=CFrame.lookAt(Vector3.zero,-direction)
+        local distance=0
+        for _,x in ipairs({-1,1}) do for _,y in ipairs({-1,1}) do for _,z in ipairs({-1,1}) do
+            local p=state.Size*Vector3.new(x,y,z)/2
+            distance=math.max(distance,p:Dot(direction)+math.max(math.abs(p:Dot(basis.RightVector))/(tangent*aspect),math.abs(p:Dot(basis.UpVector))/tangent))
+        end end end
+        distance=math.max(.5,distance)*1.05*state.Zoom
+        camera.CFrame=CFrame.lookAt(state.Center+direction*distance,state.Center)
+    end
+    state.UpdateCamera=updateCamera
+    local function rebuild()
+        if not app.Alive or not panel.Visible or app.Busy or app.Restoring then return end
+        local character=player.Character
+        if not character or not character:FindFirstChild('HumanoidRootPart') then notice.Visible=true; notice.Text='Waiting for avatar...'; return end
+        local archivable=character.Archivable
+        character.Archivable=true
+        local ok,clone=pcall(function() return character:Clone() end)
+        character.Archivable=archivable
+        if not ok or not clone then notice.Visible=true; notice.Text='Avatar preview unavailable'; return end
+        local success,err=pcall(function()
+            clone.Name='PreviewAvatar'
+            for _,o in ipairs(clone:QueryDescendants('LuaSourceContainer,Sound,Tool,ForceField')) do o:Destroy() end
+            for _,part in ipairs(clone:QueryDescendants('BasePart')) do
+                part.Anchored=true; part.CanCollide=false; part.CanTouch=false; part.CanQuery=false
+            end
+            local h=clone:FindFirstChildOfClass('Humanoid')
+            if h then h.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None; h.BreakJointsOnDeath=false end
+            clone:PivotTo(CFrame.new())
+            local box,size=clone:GetBoundingBox()
+            state.Center=box.Position; state.Size=size
+            clone.Parent=world
+            if state.Model then state.Model:Destroy() end
+            state.Model=clone; state.Dirty=false; state.Builds+=1
+            state.LastError=nil; notice.Visible=false; updateCamera()
+        end)
+        if not success then clone:Destroy(); state.LastError=tostring(err); notice.Visible=true; notice.Text='Avatar preview unavailable' end
+    end
+    local scheduled=false
+    function app.RequestPreview()
+        state.Dirty=true
+        if scheduled or not panel.Visible then return end
+        scheduled=true
+        task.delay(.15,function()
+            scheduled=false
+            if app.Alive and state.Dirty then rebuild() end
+        end)
+    end
+    connect(panel:GetPropertyChangedSignal('Visible'),function() if panel.Visible and state.Dirty then app.RequestPreview() end end)
+    connect(viewport:GetPropertyChangedSignal('AbsoluteSize'),updateCamera)
+    local characterConnections={}
+    local function bindCharacter(ch)
+        for _,c in ipairs(characterConnections) do c:Disconnect() end
+        characterConnections={}
+        if ch then
+            local function changed(o)
+                if o:IsA('BasePart') or o:IsA('Accessory') or o:IsA('Decal') or o:IsA('SurfaceAppearance') or o:IsA('Clothing') or o:IsA('ShirtGraphic') then app.RequestPreview() end
+            end
+            table.insert(characterConnections,connect(ch.DescendantAdded,changed))
+            table.insert(characterConnections,connect(ch.DescendantRemoving,changed))
+        end
+        app.RequestPreview()
+    end
+    connect(player.CharacterAdded,bindCharacter); bindCharacter(player.Character)
+    local dragging
+    connect(viewport.InputBegan,function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dragging={Input=i,Start=i.Position,Yaw=state.Yaw,Pitch=state.Pitch}
+        end
+    end)
+    connect(UIS.InputChanged,function(i)
+        if dragging and (i==dragging.Input or i.UserInputType==Enum.UserInputType.MouseMovement) then
+            local d=(i.Position-dragging.Start)/scale.Scale
+            state.Yaw=dragging.Yaw-d.X*.012; state.Pitch=math.clamp(dragging.Pitch+d.Y*.008,-.6,.6); updateCamera()
+        end
+    end)
+    connect(UIS.InputEnded,function(i)
+        if dragging and (i==dragging.Input or i.UserInputType==Enum.UserInputType.MouseButton1) then dragging=nil end
+    end)
+    connect(viewport.InputChanged,function(i)
+        if i.UserInputType==Enum.UserInputType.MouseWheel then state.Zoom=math.clamp(state.Zoom-i.Position.Z*.1,.55,1.8); updateCamera() end
+    end)
+    local hint=label('Drag to rotate',10,0,124,24,frame,14)
+    hint.Position=UDim2.new(0,10,1,-27); hint.TextColor3=C.Muted
+    for i,definition in ipairs({{'-','ZoomOut',.1},{'+','ZoomIn',-.1},{'Reset view','ResetView',0}}) do
+        local b=button(definition[1],134+(i-1)*30,0,i==3 and 84 or 26,24,function()
+            if definition[3]==0 then state.Zoom=1; state.Yaw=0; state.Pitch=0
+            else state.Zoom=math.clamp(state.Zoom+definition[3],.55,1.8) end
+            updateCamera()
+        end,frame)
+        b.Name=definition[2]; b.Position=UDim2.new(0,134+(i-1)*30,1,-27); b.TextSize=14
+    end
+end
 do
     local sizeLabel=label('100%',433,15,62,26,nil,16)
     sizeLabel.TextXAlignment=Enum.TextXAlignment.Center
     local minus=button('-',396,14,32,32,function() app.SetInterfaceScale(app.Window.Scale-0.1) end)
     local plus=button('+',500,14,32,32,function() app.SetInterfaceScale(app.Window.Scale+0.1) end)
     minus.Name='ScaleDown'; plus.Name='ScaleUp'
-    local reset=button('Сброс UI',544,14,112,32,function()
+    local reset=button('Reset UI',544,14,112,32,function()
         app.Window={Width=1100,Height=736,Scale=1}; app.LayoutWindow(); fit(); saveSettings()
     end)
     reset.Name='ResetWindow'
@@ -1600,24 +1716,29 @@ do
         layouts[o]={X=o.Position.X.Offset,Y=o.Position.Y.Offset,W=o.Size.X.Offset,H=o.Size.Y.Offset}
         if o:IsA('GuiButton') and o.Position.Y.Offset<54 then o.ZIndex=4 end
     end end
-    local grip=button('◢',0,0,26,26,nil)
+    local grip=button('',0,0,26,26,nil)
     grip.Name='ResizeGrip'; grip.Text=''; grip.AnchorPoint=Vector2.new(1,1); grip.Position=UDim2.new(1,-5,1,-5); grip.ZIndex=5
-    for i=1,3 do make('Frame',{Position=UDim2.fromOffset(7+i*4,19-i*4),Size=UDim2.fromOffset(2,5+i*3),Rotation=45,BackgroundColor3=C.Muted,BorderSizePixel=0},grip) end
+    grip.BackgroundTransparency=1; grip.AutoButtonColor=false
+    for i=1,3 do make('Frame',{Name='GripLine',AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromOffset(24-i*3,24-i*3),Size=UDim2.fromOffset(5*i,2),Rotation=-45,BackgroundColor3=C.Muted,BorderSizePixel=0},grip) end
     function app.LayoutWindow()
         local dw,dh=app.Window.Width-1100,app.Window.Height-736
         panel.Size=UDim2.fromOffset(app.Window.Width,app.Window.Height)
         for o,b in pairs(layouts) do
             local x,y,w,h=b.X,b.Y,b.W,b.H
-            if b.X>=792 then
+            -- Place search controls from current content width, never from captured positions.
+            if o==query then w=(categories[category].SavedRoot and 658 or 452)+dw
+            elseif o==searchButton then x=(categories[category].SavedRoot and 686 or 480)+dw
+            elseif o==optionsButton then x=578+dw
+            elseif o==app.Preview.Frame then x=792+dw; h=190+dh*.45
+            elseif o==app.WornHeading then x=794+dw; y=354+dh*.45
+            elseif o==worn then x=792+dw; y=384+dh*.45; h=110+dh*.55
+            elseif o==wornEmpty then x=814+dw; y=399+dh*.45
+            elseif b.X>=792 then
                 x+=dw
-                if b.Y>=397 then y+=dh end
-                if o==worn then h+=dh end
-                if o==wornEmpty then y+=dh/2 end
+                if b.Y>=504 then y+=dh end
             elseif o==categoryPanel or o==subPanel then w+=dw
             elseif o==results then w+=dw; h+=dh
-            elseif o==query then w=(categories[category].SavedRoot and 658 or 452)+dw
-            elseif o==searchButton then x=(categories[category].SavedRoot and 686 or 480)+dw
-            elseif o==optionsButton or o.Name=='NextSubcategories' then x+=dw
+            elseif o.Name=='NextSubcategories' then x+=dw
             elseif o==empty then x+=dw/2; y+=dh/2
             elseif o==moreButton or o==assetId or o==status then w+=dw; y+=dh
             elseif o==wearId then x+=dw; y+=dh
@@ -1627,12 +1748,12 @@ do
         sizeLabel.Text=math.floor(app.Window.Scale*100+0.5)..'%'
     end
     function app.SetWindowSize(w,h,persist)
-        assert(type(w)=='number' and type(h)=='number' and w==w and h==h,'Некорректный размер окна')
-        app.Window.Width=math.clamp(w,1000,1800); app.Window.Height=math.clamp(h,680,1100)
+        assert(type(w)=='number' and type(h)=='number' and w==w and h==h,'Invalid window size')
+        app.Window.Width=math.clamp(w,1000,1900); app.Window.Height=math.clamp(h,680,1100)
         app.LayoutWindow(); fit(); if persist~=false then saveSettings() end
     end
     function app.SetInterfaceScale(value,persist)
-        assert(type(value)=='number' and value==value,'Некорректный масштаб')
+        assert(type(value)=='number' and value==value,'Invalid interface scale')
         app.Window.Scale=math.clamp(value,0.6,1.6)
         app.LayoutWindow(); fit(); if persist~=false then saveSettings() end
     end
@@ -1665,7 +1786,7 @@ connect(scale:GetPropertyChangedSignal('Scale'),function() editorScale.Scale=sca
 label('Transform Item',18,12,310,32,editor,25).Font=Enum.Font.SourceSansBold
 local editName=label('',18,49,308,44,editor,18)
 local mode='Position'
-local modeNames={Position='Сдвиг',Rotation='Поворот',Scale='Размер'}
+local modeNames={Position='Position',Rotation='Rotation',Scale='Scale'}
 local stepValues={Position=0.05,Rotation=5,Scale=0.05}
 local uniform=true
 local initialTransform,dragTransform,dragFrame,dragTarget,highlight
@@ -1677,14 +1798,14 @@ local function editInput(text,x,y,w,h)
     corner(box); return box
 end
 local modeHelp=label('',18,143,308,38,editor,17)
-local uniformButton=button('Равномерный масштаб: ВКЛ',18,321,308,34,function()
+local uniformButton=button('Uniform scale: ON',18,321,308,34,function()
     uniform=not uniform
     if app.UpdateTransformFields then app.UpdateTransformFields(app.EditingId) end
 end,editor)
-label('Шаг',18,369,60,32,editor,18)
+label('Step',18,369,60,32,editor,18)
 local stepInput=editInput('0.05',91,367,100,34)
 stepInput.Name='StepInput'
-local editorNotice=label('Меняйте числа или тяните 3D-ручки на аксессуаре.',18,410,308,53,editor,17)
+local editorNotice=label('Edit the values or drag the 3D handles.',18,410,308,53,editor,17)
 editorNotice.TextColor3=C.Muted
 local function updateGizmos()
     local it=app.EditingId and app.Items[app.EditingId]
@@ -1701,8 +1822,8 @@ function app.UpdateTransformFields(id)
     for axis,b in ipairs(fields) do if not b:IsFocused() then b.Text=string.format('%.3f',it.Transform[mode][axis]) end end
     for key,b in pairs(modeButtons) do b.BackgroundColor3=key==mode and C.Accent or C.Card end
     uniformButton.Visible=mode=='Scale'
-    uniformButton.Text=uniform and 'Равномерный масштаб: ВКЛ' or 'Равномерный масштаб: ВЫКЛ'
-    modeHelp.Text=mode=='Position' and 'Положение X / Y / Z в studs' or (mode=='Rotation' and 'Поворот X / Y / Z в градусах' or 'Масштаб X / Y / Z (1 = исходный)')
+    uniformButton.Text=uniform and 'Uniform scale: ON' or 'Uniform scale: OFF'
+    modeHelp.Text=mode=='Position' and 'X / Y / Z position in studs' or (mode=='Rotation' and 'X / Y / Z rotation in degrees' or 'X / Y / Z scale (1 = original)')
     updateGizmos()
 end
 local function step()
@@ -1756,13 +1877,13 @@ function app.CloseTransform(cancel,keepWindowState)
     updateGizmos(); if not keepWindowState then panel.Visible=true end
 end
 function app.OpenTransform(id)
-    if app.Busy or app.Restoring then message('Подождите окончания примерки'); return end
+    if app.Busy or app.Restoring then message('Please wait for the current item to finish loading'); return end
     local it=app.Items[id]
-    if not it or not it.Weld or it.Layered then message('Transform Item доступен для обычных аксессуаров',true); return end
+    if not it or not it.Weld or it.Layered then message('Transform Item is available for rigid accessories',true); return end
     if app.EditingId then app.CloseTransform(false) end
     app.EditingId=id; initialTransform=normalizedTransform(it.Transform)
     editName.Text=it.Name; panel.Visible=false; editor.Visible=true
-    editorNotice.Text='Меняйте числа или тяните 3D-ручки на аксессуаре.'; editorNotice.TextColor3=C.Muted
+    editorNotice.Text='Edit the values or drag the 3D handles.'; editorNotice.TextColor3=C.Muted
     highlight=make('Highlight',{Name='LocalCatalogSelection',Adornee=it.Object,FillTransparency=1,OutlineColor=Color3.fromRGB(105,184,255),DepthMode=Enum.HighlightDepthMode.AlwaysOnTop},it.Object)
     app.UpdateTransformFields(id)
 end
@@ -1770,9 +1891,9 @@ function app.ToggleWindow()
     clearModal()
     if app.EditingId then editor.Visible=not editor.Visible; updateGizmos() else panel.Visible=not panel.Visible end
 end
-button('Сбросить трансформацию',18,473,308,34,function() applyEdited(defaultTransform()) end,editor)
-button('Отмена',18,520,147,40,function() app.CloseTransform(true) end,editor)
-button('Готово',178,520,148,40,function() app.CloseTransform(false); message('Трансформация сохранена в текущем образе') end,editor,true)
+button('Reset transform',18,473,308,34,function() applyEdited(defaultTransform()) end,editor)
+button('Cancel',18,520,147,40,function() app.CloseTransform(true) end,editor)
+button('Done',178,520,148,40,function() app.CloseTransform(false); message('Transform saved in the current outfit') end,editor,true)
 local function beginDrag()
     local it=app.EditingId and app.Items[app.EditingId]; if not it then return end
     dragTransform=normalizedTransform(it.Transform)
@@ -1807,7 +1928,7 @@ connect(UIS.InputEnded,function(i)
 end)
 connect(UIS.InputBegan,function(i,processed)
     if i.KeyCode==Enum.KeyCode.Escape and modalShade.Visible then clearModal(); return end
-    if not processed and i.KeyCode==Enum.KeyCode.RightShift then app.ToggleWindow() end
+    if not processed and i.KeyCode==Enum.KeyCode.RightControl then app.ToggleWindow() end
 end)
 connect(player.CharacterAdded,app.HandleCharacterAdded)
 -- If appearance arrives after the bounded wait, rebuild once from the completed server appearance.
@@ -1828,6 +1949,6 @@ refresh(); search()
 if carry and (#carry.AssetIds>0 or carry.HideOriginal) then
     run(function(rev)
         local failed=applyOutfit(carry,rev)
-        return failed and #failed==0 and 'Ваш образ перенесён в обновлённый каталог' or 'Часть прежнего образа не удалось загрузить'
+        return failed and #failed==0 and 'Your outfit was carried into the updated catalog' or 'Some previous outfit items could not load'
     end)
 end
