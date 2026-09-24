@@ -2,6 +2,7 @@
 -- БЛОК 1: ВИЗУАЛЬНЫЙ МОДУЛЬ — отдельный chunk не расходует локалы MainScript
 -- ══════════════════════════════════════════════════════════════════════════════
 return function(env)
+    local task = env.Tasks or task
 if not game:IsLoaded() then game.Loaded:Wait() end
 local okEnv, shared = pcall(function() return getgenv() end)
 assert(okEnv and shared, "Visuals: executor environment unavailable")

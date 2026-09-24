@@ -2,6 +2,7 @@
 -- БЛОК 1: ИНИЦИАЛИЗАЦИЯ И СОСТОЯНИЕ
 -- ══════════════════════════════════════════════════════════════════════════════
 return function(env)
+    local task = env.Tasks or task
     if not game:IsLoaded() then game.Loaded:Wait() end
     local okEnv, shared = pcall(function() return getgenv() end)
     assert(okEnv and shared, "Optimization: executor environment unavailable")
@@ -27,7 +28,6 @@ return function(env)
             {Key = "StopAnimations", Label = "Stop Animations", Hint = "Freeze other players and coin rotation"},
             {Key = "NoShadows", Label = "No Shadows", Hint = "Disable global and part shadows"},
             {Key = "RemoveReflections", Label = "Remove Reflections", Hint = "Disable part, environment and water reflections"},
-            {Key = "LowQuality", Label = "Low Quality", Hint = "Use the lowest rendering quality"},
             {Key = "FPSUnlocker", Label = "FPS Unlocker", Hint = "Remove the framerate cap (9999)"},
             {Key = "PlasticMaterials", Label = "Plastic Materials", Hint = "Use smooth plastic for world geometry"},
         },
@@ -54,7 +54,7 @@ return function(env)
                 break
             end
         end
-        if key == "NoRender" then env.State.AFKModeEnabled = value end
+        if key == "NoRender" then (env.State.Settings or env.State).AFKModeEnabled = value end
     end
 
     -- ══════════════════════════════════════════════════════════════════════════
@@ -281,13 +281,6 @@ return function(env)
             local terrain = Workspace:FindFirstChildOfClass("Terrain")
             if terrain then forceProperty(key, terrain, "WaterReflectance", 0) end
             scan(key)
-        elseif key == "LowQuality" then
-            pcall(function() forceProperty(key, settings().Rendering, "QualityLevel", Enum.QualityLevel.Level01) end)
-            pcall(function() forceProperty(key, UserSettings():GetService("UserGameSettings"), "SavedQualityLevel", Enum.SavedQualitySetting.QualityLevel1) end)
-            if not State.Records[key] or not next(State.Records[key]) then
-                State.Enabled[key] = false
-                notify("Изменение качества недоступно")
-            end
         elseif key == "RemoveTextures" or key == "RemoveParticles" or key == "PlasticMaterials" then
             scan(key)
         end

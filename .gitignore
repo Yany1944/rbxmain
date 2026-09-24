@@ -6,3 +6,11 @@ skinchanger.lua
 serverhop.lua
 mm2_skins.json
 MainScript.lua.bak
+
+!/docs/refactor-audit.md
+!/docs/state-layout.md
+!/docs/refactor-validation.md
+docs/state-layout.md
+docs/refactor-audit.md
+docs/refactor-validation.md
+Assets/LICENSE.txt
