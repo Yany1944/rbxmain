@@ -1,5 +1,9 @@
 {
     "robloxLsp.diagnostics.globals": [
-        "getgenv"
+        "getgenv",
+        "getconnections",
+        "getfpscap",
+        "setfpscap",
+        "getfenv"
     ]
 }

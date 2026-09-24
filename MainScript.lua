@@ -65,6 +65,10 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 
 local CONFIG = {
+        Modules = {
+            Visuals = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Visuals.lua",
+            Optimization = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Optimization.lua",
+        },
         HideKey = Enum.KeyCode.Insert,
         Colors = {
         Background = Color3.fromRGB(25, 25, 30),
@@ -2173,6 +2177,9 @@ local function CleanupMemory()
 end
 
 local function FullShutdown()
+    -- Модули восстанавливают освещение, рендер и приостановленные соединения.
+    if State.OptimizationModule then pcall(State.OptimizationModule.Destroy) end
+    if State.VisualsModule then pcall(State.VisualsModule.Destroy) end
     --print("[FullShutdown] Starting complete cleanup...")
 
     -- Восстанавливаем настоящую позицию до остановки остальных систем.
@@ -2429,16 +2436,8 @@ end
 -- ==============================
 
 local OptimizationState = {
-    afkModeActive = false,
-    fpsBoostActive = false,
     uiOnlyActive = false,
-    savedUIState = {},
     savedUIOnlyState = {},
-    savedSettings = {
-        Lighting = {},
-        Camera = {}
-    },
-    fpsBoostDescendantConn = nil
 }
 
 -- ==============================
@@ -2469,7 +2468,7 @@ local function ApplyUIOptimization()
     end)
     
     pcall(function()
-        local targetTable = OptimizationState.afkModeActive and OptimizationState.savedUIState or OptimizationState.savedUIOnlyState
+        local targetTable = OptimizationState.savedUIOnlyState
         for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
             if gui:IsA("ScreenGui") and gui ~= MainGui then
                 if not targetTable[gui] then
@@ -2485,151 +2484,24 @@ end
 LocalPlayer.CharacterAdded:Connect(function(character)
     task.wait(0.5)
     
-    if OptimizationState.afkModeActive then
-        ApplyUIOptimization()
-        pcall(function()
-            RunService:Set3dRenderingEnabled(false)
-        end)
-    elseif OptimizationState.uiOnlyActive then
-        ApplyUIOptimization()
-    end
+    if OptimizationState.uiOnlyActive then ApplyUIOptimization() end
 end)
 
 -- ==============================
 -- AFK MODE FUNCTIONS
 -- ==============================
 
+-- No Render управляет только 3D: интерфейс и настройки World остаются доступны.
 EnableMaxOptimization = function()
-    if OptimizationState.afkModeActive then 
-        return 
-    end
-    
-    OptimizationState.afkModeActive = true
-    
-    -- 1. ОТКЛЮЧЕНИЕ 3D РЕНДЕРИНГА
-    pcall(function()
-        RunService:Set3dRenderingEnabled(false)
-    end)
-    
-    -- 2. ПОЛНОЕ ОТКЛЮЧЕНИЕ ВСЕХ GUI
-    ApplyUIOptimization()
-    
-    -- 3. ОТКЛЮЧЕНИЕ ОСВЕЩЕНИЯ
-    pcall(function()
-        OptimizationState.savedSettings.Lighting = {
-            GlobalShadows = Lighting.GlobalShadows,
-            Brightness = Lighting.Brightness,
-            Ambient = Lighting.Ambient,
-            OutdoorAmbient = Lighting.OutdoorAmbient,
-            FogEnd = Lighting.FogEnd,
-            Technology = Lighting.Technology
-        }
-        
-        Lighting.GlobalShadows = false
-        Lighting.Brightness = 0
-        Lighting.Ambient = Color3.new(0, 0, 0)
-        Lighting.OutdoorAmbient = Color3.new(0, 0, 0)
-        Lighting.FogEnd = 100
-        Lighting.Technology = Enum.Technology.Legacy
-        
-        for _, effect in pairs(Lighting:GetChildren()) do
-            if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
-                OptimizationState.savedSettings.Lighting[effect.Name] = effect
-                effect.Parent = nil
-            end
-        end
-    end)
-    
-    -- 4. CAMERA OPTIMIZATION
-    pcall(function()
-        local camera = Workspace.CurrentCamera
-        if camera then
-            OptimizationState.savedSettings.Camera.FieldOfView = camera.FieldOfView
-            camera.FieldOfView = 50
-        end
-    end)
-    
-    -- 5. RENDER DISTANCE
-    pcall(function()
-        if sethiddenproperty then
-            sethiddenproperty(Workspace, "StreamingMinRadius", 32)
-            sethiddenproperty(Workspace, "StreamingTargetRadius", 64)
-        end
-    end)
+    if State.OptimizationModule then return State.OptimizationModule.Set("NoRender", true) end
+    State.AFKModeEnabled = false
+    warn("[Violite] Optimization module unavailable")
 end
 
 DisableMaxOptimization = function()
-    if not OptimizationState.afkModeActive then 
-        return 
-    end
-    
-    OptimizationState.afkModeActive = false
-    
-    -- 1. ВКЛЮЧЕНИЕ 3D РЕНДЕРИНГА
-    pcall(function()
-        RunService:Set3dRenderingEnabled(true)
-    end)
-    
-    -- 2. ВОССТАНОВЛЕНИЕ GUI
-    pcall(function()
-        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
-        
-        task.wait(0.1)
-        
-        local coreGuiTypes = {
-            Enum.CoreGuiType.PlayerList,
-            Enum.CoreGuiType.Health,
-            Enum.CoreGuiType.Backpack,
-            Enum.CoreGuiType.Chat,
-            Enum.CoreGuiType.EmotesMenu,
-            Enum.CoreGuiType.SelfView
-        }
-        
-        for _, guiType in ipairs(coreGuiTypes) do
-            StarterGui:SetCoreGuiEnabled(guiType, true)
-        end
-    end)
-    
-    pcall(function()
-        StarterGui:SetCore("TopbarEnabled", true)
-    end)
-    
-    pcall(function()
-        for gui, wasEnabled in pairs(OptimizationState.savedUIState) do
-            if gui and gui.Parent then
-                gui.Enabled = wasEnabled
-            end
-        end
-        OptimizationState.savedUIState = {}
-    end)
-    
-    -- 3. ВОССТАНОВЛЕНИЕ ОСВЕЩЕНИЯ
-    pcall(function()
-        if OptimizationState.savedSettings.Lighting.GlobalShadows ~= nil then
-            Lighting.GlobalShadows = OptimizationState.savedSettings.Lighting.GlobalShadows
-            Lighting.Brightness = OptimizationState.savedSettings.Lighting.Brightness
-            Lighting.Ambient = OptimizationState.savedSettings.Lighting.Ambient
-            Lighting.OutdoorAmbient = OptimizationState.savedSettings.Lighting.OutdoorAmbient
-            Lighting.FogEnd = OptimizationState.savedSettings.Lighting.FogEnd
-            Lighting.Technology = OptimizationState.savedSettings.Lighting.Technology
-            
-            for name, effect in pairs(OptimizationState.savedSettings.Lighting) do
-                if typeof(effect) == "Instance" then
-                    effect.Parent = Lighting
-                end
-            end
-            
-            OptimizationState.savedSettings.Lighting = {}
-        end
-    end)
-    
-    -- 4. ВОССТАНОВЛЕНИЕ КАМЕРЫ
-    pcall(function()
-        local camera = Workspace.CurrentCamera
-        if camera and OptimizationState.savedSettings.Camera.FieldOfView then
-            camera.FieldOfView = OptimizationState.savedSettings.Camera.FieldOfView
-        end
-    end)
+    if State.OptimizationModule then return State.OptimizationModule.Set("NoRender", false) end
+    pcall(function() RunService:Set3dRenderingEnabled(true) end)
+    State.AFKModeEnabled = false
 end
 
 EnableUIOnly = function()
@@ -2683,82 +2555,8 @@ end
 -- ==============================
 
 EnableFPSBoost = function()
-    if OptimizationState.fpsBoostActive then
-        return
-    end
-    
-    OptimizationState.fpsBoostActive = true
-    
-    -- 1. TERRAIN OPTIMIZATION
-    pcall(function()
-        local Terrain = Workspace:FindFirstChildOfClass('Terrain')
-        if Terrain then
-            Terrain.WaterWaveSize = 0
-            Terrain.WaterWaveSpeed = 0
-            Terrain.WaterReflectance = 0
-            Terrain.WaterTransparency = 0
-        end
-    end)
-    
-    -- 2. LIGHTING OPTIMIZATION
-    pcall(function()
-        Lighting.GlobalShadows = false
-        Lighting.FogEnd = 9e9
-        
-        for _, effect in pairs(Lighting:GetChildren()) do
-            if effect:IsA("BlurEffect") 
-                or effect:IsA("SunRaysEffect") 
-                or effect:IsA("ColorCorrectionEffect") 
-                or effect:IsA("BloomEffect") 
-                or effect:IsA("DepthOfFieldEffect") 
-            then
-                effect.Enabled = false
-            end
-        end
-    end)
-    
-    -- 3. RENDER QUALITY
-    pcall(function()
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-    end)
-    
-    -- 4. MATERIALS & EFFECTS CLEANUP
-    pcall(function()
-        for _, v in pairs(Workspace:GetDescendants()) do
-            if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("UnionOperation") then
-                v.Material = Enum.Material.SmoothPlastic
-                v.Reflectance = 0
-            elseif v:IsA("Decal") or v:IsA("Texture") then
-                v.Transparency = 1
-            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
-                v.Enabled = false
-            elseif v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then
-                v.Enabled = false
-            end
-        end
-    end)
-    
-    -- 5. AUTO-CLEANUP NEW EFFECTS
-    OptimizationState.fpsBoostDescendantConn = Workspace.DescendantAdded:Connect(function(child)
-        if not OptimizationState.fpsBoostActive then return end
-        
-        task.spawn(function()
-            pcall(function()
-                if child:IsA('ForceField') 
-                    or child:IsA('Sparkles') 
-                    or child:IsA('Smoke') 
-                    or child:IsA('Fire') 
-                then
-                    task.wait()
-                    child:Destroy()
-                elseif child:IsA('ParticleEmitter') or child:IsA('Trail') then
-                    child.Enabled = false
-                end
-            end)
-        end)
-    end)
-    
-    TrackConnection(OptimizationState.fpsBoostDescendantConn)
+    if State.OptimizationModule then return State.OptimizationModule.Boost() end
+    warn("[Violite] Optimization module unavailable")
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -9381,7 +9179,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         return conn
     end,
     ShowNotification = ShowNotification,
-    Handlers = {
+    Handlers = setmetatable({
         -- Character
         ApplyWalkSpeed = ApplyWalkSpeed,
         ApplyJumpPower = ApplyJumpPower,
@@ -9669,10 +9467,47 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         GetCoinsPerHour = function() return State.Session.GetRateText() end,
         GetVersion      = function() return State.Session.Version end,
         GetRole         = function() return State.Session.GetRole() end,
-    }
+    }, {__index = function(_, key)
+        if State.VisualsModule and State.VisualsModule.Handlers[key] then
+            return State.VisualsModule.Handlers[key]
+        end
+        return State.OptimizationModule and State.OptimizationModule.Handlers[key]
+    end})
 })
 
 GUI.Init()
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 19: ВНЕШНИЕ МОДУЛИ WORLD / AURAS / OPTIMIZATION
+-- ══════════════════════════════════════════════════════════════════════════════
+do
+    -- Отдельная функция даёт загрузчику собственный бюджет регистров Luau.
+    (function()
+        local context = {GUI = GUI, CONFIG = CONFIG, State = State, ShowNotification = ShowNotification}
+        for _,entry in ipairs({{"Visuals", "VisualsModule"}, {"Optimization", "OptimizationModule"}}) do
+            local ok, result = pcall(function()
+                local source = game:HttpGet(CONFIG.Modules[entry[1]], true)
+                local chunk, compileError = loadstring(source)
+                assert(chunk, compileError)
+                local factory = chunk()
+                assert(type(factory) == "function", "Invalid module factory")
+                return factory(context)
+            end)
+            if ok then
+                State[entry[2]] = result
+            else
+                warn("[Violite] " .. entry[1] .. ": " .. tostring(result))
+                ShowNotification(entry[1] .. " module failed to load", CONFIG.Colors.Accent)
+            end
+        end
+        if State.UIElements.MainGui then
+            table.insert(State.Connections, State.UIElements.MainGui.Destroying:Connect(function()
+                if State.OptimizationModule then pcall(State.OptimizationModule.Destroy) end
+                if State.VisualsModule then pcall(State.VisualsModule.Destroy) end
+            end))
+        end
+    end)()
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК: CONFIG MANAGER — профили настроек (.vio в VioCFG/Violite)
@@ -10240,6 +10075,8 @@ do
         VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
 end
 
+if State.VisualsModule then State.VisualsModule.BuildTabs() end
+
 do
     local CombatTab = GUI.CreateTab("Combat")
 
@@ -10285,10 +10122,8 @@ do
         FarmTab:CreateSection("FARM TUNING", "right")
         FarmTab:CreateSlider("Fly Speed", "Flying speed", 15, 30, State.CoinFarmFlySpeed, "CoinFarmFlySpeed", 0.5)
         FarmTab:CreateSlider("TP Delay", "Delay between first TP", 0.5, 5.0, State.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("No Render", "Disable rendering", "AFKMode")
         FarmTab:CreateToggle("Auto Reconnect", "Reconnect every 25 min", "HandleAutoReconnect", false)
         FarmTab:CreateInputField("Reconnect interval","Default: 25 min", math.floor(State.ReconnectInterval / 60), "SetReconnectInterval")
-        FarmTab:CreateButton("", "FPS Boost", CONFIG.Colors.Accent, "FPSBoost")
 end
 
 do
@@ -10366,6 +10201,7 @@ do
 
         UtilityTab:CreateSection("DANGER ZONE", "right")
         UtilityTab:CreateButton("", "SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
+        if State.OptimizationModule then State.OptimizationModule.BuildSection(UtilityTab) end
 end
 
 -- ── Подключение системы конфигов: все вкладки построены, реестр флагов полон.
