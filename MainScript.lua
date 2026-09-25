@@ -290,6 +290,7 @@ local State = {
         FakePositionMode = "Jitter",
         FakePositionRadius = 3,
         FakePositionSpeed = 5,
+        FakeLagMaxDelay = 200,
         FakePositionFaceThreat = true,
         SpawnAtPlayer = false,
         CanShootMurderer = true,
@@ -7677,8 +7678,39 @@ do
         Side = Vector3.xAxis, Vertical = -Vector3.yAxis,
         MotionDistance = 0.01, MotionAngle = math.rad(0.5),
         MotionSpeed = 0.1, MotionAngularSpeed = 0.05,
+        Lag = {Root = nil, Position = nil, StartedAt = 0, Delay = 0, HeldFor = 0, Holding = false},
     }
     State.Runtime.FakePositionRuntime = runtime
+
+    local function resetFakeLag()
+        runtime.Lag.Root, runtime.Lag.Position = nil, nil
+        runtime.Lag.StartedAt, runtime.Lag.Delay, runtime.Lag.HeldFor = 0, 0, 0
+        runtime.Lag.Holding = false
+    end
+
+    -- Адаптивный бюджет distance / speed, ограниченный временем, а не FPS.
+    -- Удерживается только позиция; камера и реальное движение восстанавливаются
+    -- прежним механизмом. Это оценка отправляемой позы, не перехват пакетов.
+    local function fakeLagOffset(root, now, flush)
+        local lag = runtime.Lag
+        local position = root.Position
+        local radius = math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10)
+        local maximum = math.clamp(tonumber(State.Settings.FakeLagMaxDelay) or 200, 50, 500) / 1000
+        local speed = root.AssemblyLinearVelocity.Magnitude
+        local delay = math.min(maximum, radius / math.max(speed, runtime.MotionSpeed))
+        local elapsed = math.max(0, now - lag.StartedAt)
+        local distance = lag.Position and (position - lag.Position).Magnitude or 0
+        -- Не тянем старую точку через респавн, остановку, атаку или телепорт.
+        if lag.Root ~= root or not lag.Position or flush or elapsed >= delay
+            or distance >= radius or (speed < runtime.MotionSpeed and distance < runtime.MotionDistance) then
+            lag.Root, lag.Position, lag.StartedAt = root, position, now
+            lag.HeldFor, lag.Holding = 0, false
+        else
+            lag.HeldFor, lag.Holding = elapsed, true
+        end
+        lag.Delay = delay
+        return lag.Position - position
+    end
 
     local function restorePosition()
         local root, original, sent = runtime.Root, runtime.Original, runtime.Sent
@@ -7762,6 +7794,7 @@ do
         pcall(restorePosition)
         runtime.EstimateRoot, runtime.LastRealFrame, runtime.EstimatedFrame = nil, nil, nil
         runtime.EstimateMoving = false
+        resetFakeLag()
         if not enabled then return end
 
         runtime.Angle, runtime.Flip, runtime.NextRandom, runtime.NextTarget = 0, false, 0, 0
@@ -7778,6 +7811,7 @@ do
         State.Settings.FakePositionEnabled = true
         runtime.Removing = Core.Connect(LocalPlayer.CharacterRemoving, function()
             pcall(restorePosition)
+            resetFakeLag()
             runtime.NextTarget = 0
             runtime.EstimateRoot, runtime.LastRealFrame, runtime.EstimatedFrame = nil, nil, nil
         end)
@@ -7792,25 +7826,32 @@ do
                 local character = LocalPlayer.Character
                 local root = character and character:FindFirstChild("HumanoidRootPart")
                 local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-                if not root or not humanoid or humanoid.Health <= 0 then return end
+                if not root or not humanoid or humanoid.Health <= 0 then resetFakeLag(); return end
+                local adaptive = State.Settings.FakePositionMode == "Adaptive Fakelag"
                 if Fling.SessionActive or State.Runtime.WalkFlingActive or State.Settings.FlyEnabled
-                    or State.Settings.AutoFarmEnabled or humanoid.Sit or root.Anchored then
+                    or State.Settings.AutoFarmEnabled or humanoid.Sit or root.Anchored
+                    or (adaptive and State.Settings.IsInvisible) then
+                    resetFakeLag()
                     local estimate = estimateReplicatedFrame(root, root.CFrame, root.CFrame, true)
                     if State.Settings.PingChamsEnabled then pcall(PingChams.pushSample, tick(), character, estimate, true) end
                     return
                 end
                 local now = os.clock()
-                if now >= runtime.NextTarget then
+                if not adaptive and now >= runtime.NextTarget then
                     runtime.NextTarget = now + 0.25
                     updateAxes(root)
                 end
-                if now >= runtime.NextRandom then
+                if not adaptive and now >= runtime.NextRandom then
                     runtime.NextRandom = now + 0.16 + math.random() * 0.24
                     runtime.Speed = math.clamp(tonumber(State.Settings.FakePositionSpeed) or 5, 0.5, 12) * (0.7 + math.random() * 0.6)
                     runtime.Radius = math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10) * (0.8 + math.random() * 0.2)
                 end
                 local offset
-                if State.Settings.FakePositionMode == "Static" then
+                if adaptive then
+                    local attacking = character:FindFirstChildOfClass("Tool")
+                        and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+                    offset = fakeLagOffset(root, now, attacking)
+                elseif State.Settings.FakePositionMode == "Static" then
                     offset = runtime.Side * math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10)
                 elseif State.Settings.FakePositionMode == "Jitter" then
                     runtime.Flip = not runtime.Flip
@@ -7820,10 +7861,11 @@ do
                     offset = runtime.Side * (runtime.Radius * math.cos(runtime.Angle))
                         + runtime.Vertical * (runtime.Radius * math.sin(runtime.Angle))
                 end
+                if not adaptive then resetFakeLag() end
                 runtime.Root, runtime.Original = root, root.CFrame
                 runtime.Sent = runtime.Original + offset
                 State.Runtime.FakePositionOffset = offset
-                local estimate = estimateReplicatedFrame(root, runtime.Original, runtime.Sent, false)
+                local estimate = estimateReplicatedFrame(root, runtime.Original, runtime.Sent, adaptive)
                 if State.Settings.PingChamsEnabled then
                     pcall(PingChams.pushSample, tick(), character, estimate, true)
                 end
@@ -9155,10 +9197,16 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         end,
         FakePosition = function(on) State.Runtime.SetFakePosition(on) end,
         FakePositionMode = function(v)
-            if v == "Orbit" or v == "Jitter" or v == "Static" then State.Settings.FakePositionMode = v end
+            if v == "Orbit" or v == "Jitter" or v == "Static" or v == "Adaptive Fakelag" then
+                State.Settings.FakePositionMode = v
+                local lag = State.Runtime.FakePositionRuntime.Lag
+                lag.Root, lag.Position = nil, nil
+                lag.HeldFor, lag.Holding = 0, false
+            end
         end,
         FakePositionRadius = function(v) State.Settings.FakePositionRadius = math.clamp(tonumber(v) or 3, 0.5, 10) end,
         FakePositionSpeed = function(v) State.Settings.FakePositionSpeed = math.clamp(tonumber(v) or 5, 0.5, 12) end,
+        FakeLagMaxDelay = function(v) State.Settings.FakeLagMaxDelay = math.clamp(tonumber(v) or 200, 50, 500) end,
         FakePositionFaceThreat = function(on) State.Settings.FakePositionFaceThreat = on end,
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
         ExtendedHitboxSize = function(v) State.Settings.ExtendedHitboxSize = v if State.Settings.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end,
@@ -9949,9 +9997,10 @@ do
 
         CombatTab:CreateSection("ANTI-AIM")
         State.Runtime.FakePositionToggle = CombatTab:CreateToggle("Fake Position", "Offset your position for other players", "FakePosition", false)
-        CombatTab:CreateDropdown("Desync Mode", "Pattern of the replicated offset", {"Orbit", "Jitter", "Static"}, State.Settings.FakePositionMode, "FakePositionMode")
-        CombatTab:CreateSlider("Desync Radius", "Offset distance in studs", 0.5, 10, State.Settings.FakePositionRadius, "FakePositionRadius", 0.1)
+        CombatTab:CreateDropdown("Desync Mode", "Position pattern; Adaptive Fakelag holds recent positions", {"Orbit", "Jitter", "Static", "Adaptive Fakelag"}, State.Settings.FakePositionMode, "FakePositionMode")
+        CombatTab:CreateSlider("Desync Radius", "Offset / adaptive fakelag travel limit in studs", 0.5, 10, State.Settings.FakePositionRadius, "FakePositionRadius", 0.1)
         CombatTab:CreateSlider("Desync Speed", "Orbit rotations per second", 0.5, 12, State.Settings.FakePositionSpeed, "FakePositionSpeed", 0.5)
+        CombatTab:CreateSlider("Fakelag Max Delay", "Adaptive mode: maximum hold in milliseconds", 50, 500, State.Settings.FakeLagMaxDelay, "FakeLagMaxDelay", 10)
         CombatTab:CreateToggle("Face Threat", "Orient the offset toward the threat or nearest player", "FakePositionFaceThreat", State.Settings.FakePositionFaceThreat)
         CombatTab:CreateToggle("Ping / Desync Chams", "Show estimated fake position during desync; ping ghost otherwise", "PingChams")
         CombatTab:CreateToggle("Chams Label", "Show text above Ping / Desync Chams", "PingChamsShowLabel", State.Settings.PingChamsShowLabel)
