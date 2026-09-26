@@ -222,6 +222,9 @@ local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 Core.StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
+-- Стандартная скорость плейса (обычно 16) — ориентир для Velocity Spoofer Zero.
+CONFIG.DefaultWalkSpeed = 16
+pcall(function() CONFIG.DefaultWalkSpeed = game:GetService("StarterPlayer").CharacterWalkSpeed end)
 Core.Remember(LocalPlayer, "CameraMaxZoomDistance")
 Core.Remember(LocalPlayer, "DevCameraOcclusionMode")
 if Workspace.CurrentCamera then Core.Remember(Workspace.CurrentCamera, "FieldOfView") end
@@ -283,6 +286,11 @@ local State = {
         FlySpeed = 40,
         ExtendedHitboxSize = 15,
         ExtendedHitboxEnabled = false,
+        VelocitySpoofEnabled = false,
+        VelocitySpoofMode = "Anti-Aim",
+        VelocitySpoofMurdererOnly = true,
+        VelocitySpoofStrength = 150,
+        VelocitySpoofSpeed = CONFIG.DefaultWalkSpeed,
         KillAuraRange = 7,
         KillAuraEnabled = false,
         KillAuraStatic = false,
@@ -1549,7 +1557,8 @@ local function StartPingChams()
 
                 local lpRoot     = PingChams.getRootPart(LocalPlayer.Character)
                 local hum        = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                local speedMeas  = lpRoot and lpRoot.AssemblyLinearVelocity.Magnitude or 0
+                -- Настоящая скорость: Velocity Spoofer может держать на корне подменённую.
+                local speedMeas  = lpRoot and (State.Runtime.GetRealVelocity and State.Runtime.GetRealVelocity(lpRoot) or lpRoot.AssemblyLinearVelocity).Magnitude or 0
                 local speedIntent = 0
                 if hum and hum.MoveDirection.Magnitude > 0.01 then
                     speedIntent = hum.MoveDirection.Magnitude * (hum.WalkSpeed or 16)
@@ -2190,10 +2199,13 @@ local function cleanupSession()
 
 
     -- Восстанавливаем настоящую позицию до остановки остальных систем.
+    -- Паузу от флинга сбрасываем первой: иначе остановка флинга включит Fake Position обратно.
+    if State.Runtime.ForgetFakePositionPause then pcall(State.Runtime.ForgetFakePositionPause) end
     if State.Runtime.SetFakePosition then pcall(State.Runtime.SetFakePosition, false) end
     pcall(StopPingChams)
 
     if Core.StopFeatures then Core.StopFeatures() end
+    if State.Runtime.NetBoostReset then pcall(State.Runtime.NetBoostReset) end
 
     pcall(function()
         -- гасим Role ESP
@@ -2497,6 +2509,77 @@ Core.Movement.EnableFPSBoost = function()
     warn("[Violite] Optimization module unavailable")
 end
 
+-- Частота отправки физики. По умолчанию клиент шлёт 15 пакетов/с, а другие клиенты
+-- достраивают нас между пакетами кривой по скорости — любая подмена (скорость,
+-- позиция) выглядит дрожью. На 60 пакетах дрожь спуфа ~в 4 раза меньше
+-- (замер на двух клиентах: P95 0.48 → 0.11 stud). Holders — функции, которым
+-- сейчас нужна повышенная частота; исходное значение возвращается после последней.
+do
+    local boost = {Holders = {}, Original = nil, Active = false, Rate = "60", Flag = "S2PhysicsSenderRate"}
+
+    local function apply()
+        local want = next(boost.Holders) ~= nil
+        if want == boost.Active then return end
+        if type(setfflag) ~= "function" or type(getfflag) ~= "function" then return end
+        if want then
+            local ok, current = pcall(getfflag, boost.Flag)
+            if not ok or current == nil then return end
+            boost.Original = tostring(current)
+            if pcall(setfflag, boost.Flag, boost.Rate) then boost.Active = true end
+        else
+            pcall(setfflag, boost.Flag, boost.Original or "15")
+            boost.Active = false
+        end
+    end
+
+    State.Runtime.NetBoost = function(reason, enabled)
+        boost.Holders[reason] = enabled and true or nil
+        apply()
+    end
+
+    -- Выгрузка скрипта: вернуть частоту, даже если кто-то не успел отпустить.
+    State.Runtime.NetBoostReset = function()
+        table.clear(boost.Holders)
+        apply()
+        State.Runtime.PhysicsNudgeReset()
+    end
+end
+
+-- Стоящего персонажа Roblox не отправляет: подмена CFrame/скорости на Heartbeat до
+-- сети не доходит (замер: Orbit на месте у наблюдателя с радиусом 0.00). Отправщик
+-- судит по физике, поэтому в физику подмешиваем знакопеременные ±0.05 studs/s по Y —
+-- в сумме ноль, а отправка живая (с этим Orbit на месте виден, радиус 2.2).
+-- NetworkIsSleeping тут не помогает: у стоящего персонажа он и так false.
+do
+    local nudge = {Holders = {}, Sign = 1, Connection = nil}
+
+    local function update()
+        local want = next(nudge.Holders) ~= nil
+        if want and not nudge.Connection then
+            nudge.Connection = Core.Connect(RunService.Stepped, function()
+                local character = LocalPlayer.Character
+                local root = character and character:FindFirstChild("HumanoidRootPart")
+                if not root or root.Anchored then return end
+                nudge.Sign = -nudge.Sign
+                root.AssemblyLinearVelocity += Vector3.yAxis * (0.05 * nudge.Sign)
+            end)
+        elseif not want and nudge.Connection then
+            nudge.Connection:Disconnect()
+            nudge.Connection = nil
+        end
+    end
+
+    State.Runtime.PhysicsNudge = function(reason, enabled)
+        nudge.Holders[reason] = enabled and true or nil
+        update()
+    end
+
+    State.Runtime.PhysicsNudgeReset = function()
+        table.clear(nudge.Holders)
+        update()
+    end
+end
+
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 5: CHARACTER FUNCTIONS
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -2674,7 +2757,7 @@ end
 
 local function SetupPlayerDataListener()
     local success, remotes = pcall(function()
-        return game.ReplicatedStorage:WaitForChild("Remotes", 5)
+        return ReplicatedStorage:WaitForChild("Remotes", 5)
     end)
 
     if not success or not remotes then return end
@@ -3839,10 +3922,53 @@ end
 -- нож, второй нож Dual, эффекты скинченджера, — и вернуть их удавалось не
 -- всегда. Теперь клона нет: виден реальный полёт, а точка возврата просто
 -- запоминается здесь.
+-- Флинг и Fake Position оба подменяют физику корня. На время любого флинга
+-- (очередь или Walk Fling) Fake Position выключаем и возвращаем после, если он
+-- был включён. Holders — кто держит паузу, чтобы пересекающиеся флинги не
+-- включили его раньше времени.
+Fling.FakePositionPaused = false
+Fling.FakePositionHolders = {}
+Fling.FakePositionResumeToken = 0
+
+function Fling.PauseFakePosition(reason)
+    if State.Settings.FakePositionEnabled and State.Runtime.SetFakePosition then
+        Fling.FakePositionPaused = true
+        State.Runtime.SetFakePosition(false)
+    end
+    if Fling.FakePositionPaused then Fling.FakePositionHolders[reason] = true end
+end
+
+function Fling.ResumeFakePosition(reason)
+    Fling.FakePositionHolders[reason] = nil
+    if not Fling.FakePositionPaused or next(Fling.FakePositionHolders) then return end
+    Fling.FakePositionResumeToken += 1
+    local token = Fling.FakePositionResumeToken
+    -- Ждём волны восстановления Humanoid из EndSession, иначе смещение ляжет на телепорт.
+    Core.Tasks.delay(0.35, function()
+        if token ~= Fling.FakePositionResumeToken or not Fling.FakePositionPaused then return end
+        if Fling.SessionActive or State.Runtime.WalkFlingActive then
+            Fling.FakePositionHolders[Fling.SessionActive and "session" or "walk"] = true
+            return
+        end
+        Fling.FakePositionPaused = false
+        if not State.Settings.FakePositionEnabled then State.Runtime.SetFakePosition(true) end
+    end)
+end
+
+-- Пользователь сам переключил Fake Position — отложенное включение отменяется.
+function Fling.ForgetFakePositionPause()
+    Fling.FakePositionPaused = false
+    table.clear(Fling.FakePositionHolders)
+    Fling.FakePositionResumeToken += 1
+end
+-- cleanupSession объявлена выше Fling — доступ через State.Runtime.
+State.Runtime.ForgetFakePositionPause = Fling.ForgetFakePositionPause
+
 function Fling.BeginSession()
     local char = LocalPlayer.Character
     local _, rp = Fling.CharParts(char)
     if not char or not rp then return false end
+    Fling.PauseFakePosition("session")
     -- Запоминаем, куда вернуть. Раньше эту роль играл рут клона.
     Fling.ReturnCF = rp.CFrame
     Fling.ReturnPhases = Fling.SnapshotTrackPhases(char)
@@ -3929,6 +4055,7 @@ function Fling.EndSession(sync)
     end
 
     Fling.RestoreDestroyHeight()
+    Fling.ResumeFakePosition("session")
 end
 
 function Fling.DropDeadChar(char)
@@ -4624,6 +4751,43 @@ local function FlingMurderer()
     FlingPlayer(murderer)
 end
 
+-- Walk Fling: гигантская скорость уходит в сеть, а своя физика идёт с настоящей.
+-- Схема как у Velocity Spoofer: подмена на Heartbeat, синхронное восстановление на
+-- первом RenderStep. Раньше внутри Heartbeat ждали RenderStepped:Wait(): при
+-- отложенных сигналах поток просыпался уже после физики, и персонаж сам улетал
+-- (замер: сотни кадров со скачком >2 stud, до 397 stud за кадр).
+local WalkFlingSpoof = {
+    BindName = "MM2_WalkFlingRestore",
+    Root = nil, Real = nil, Sent = nil,
+    Range = 12,          -- подменяем, только когда кто-то рядом: иначе лишь дрожь для остальных
+    NextNearbyCheck = 0, Nearby = false,
+}
+
+local function walkFlingRestore()
+    local root, real, sent = WalkFlingSpoof.Root, WalkFlingSpoof.Real, WalkFlingSpoof.Sent
+    WalkFlingSpoof.Root, WalkFlingSpoof.Real, WalkFlingSpoof.Sent = nil, nil, nil
+    if root and root.Parent and real and sent then
+        -- Убираем только свою подмену: изменения скорости между фазами сохраняются.
+        root.AssemblyLinearVelocity = root.AssemblyLinearVelocity - sent + real
+    end
+end
+
+local function walkFlingTargetNearby(root)
+    local now = os.clock()
+    if now < WalkFlingSpoof.NextNearbyCheck then return WalkFlingSpoof.Nearby end
+    WalkFlingSpoof.NextNearbyCheck = now + 0.1
+    WalkFlingSpoof.Nearby = false
+    for _, player in ipairs(Players:GetPlayers()) do
+        local character = player ~= LocalPlayer and player.Character
+        local other = character and character:FindFirstChild("HumanoidRootPart")
+        if other and (other.Position - root.Position).Magnitude <= WalkFlingSpoof.Range then
+            WalkFlingSpoof.Nearby = true
+            break
+        end
+    end
+    return WalkFlingSpoof.Nearby
+end
+
 local function WalkFlingStop(forced)
     if not forced then
         State.Settings.WalkFlingEnabledByUser = false
@@ -4636,6 +4800,10 @@ local function WalkFlingStop(forced)
         State.Runtime.WalkFlingConnection:Disconnect()
         State.Runtime.WalkFlingConnection = nil
     end
+    pcall(function() RunService:UnbindFromRenderStep(WalkFlingSpoof.BindName) end)
+    pcall(walkFlingRestore)
+    State.Runtime.NetBoost("walkfling", false)
+    Fling.ResumeFakePosition("walk")
 
     -- Полный сброс физики персонажа
     Core.Tasks.spawn(function()
@@ -4677,11 +4845,24 @@ local function WalkFlingStart()
     -- Антифлинг больше не выключается вручную: он сам подавляется, пока поднят
     -- State.WalkFlingActive (см. Fling.AntiFlingSuppressed). Иначе снятая с чужих
     -- тел коллизия убивала бы WalkFling — он тоже бьёт контактом.
+    Fling.PauseFakePosition("walk")
     State.Runtime.WalkFlingActive = true
+    -- 60 пакетов/с: подменённая скорость чаще доходит до цели в момент контакта.
+    State.Runtime.NetBoost("walkfling", true)
 
-    local movel = 0.1
+    local bound = pcall(function()
+        RunService:BindToRenderStep(WalkFlingSpoof.BindName, Enum.RenderPriority.First.Value, function()
+            pcall(walkFlingRestore)
+        end)
+    end)
+    if not bound then
+        WalkFlingStop(true)
+        return
+    end
 
     State.Runtime.WalkFlingConnection = Core.Connect(RunService.Heartbeat, function()
+        -- Каждый Heartbeat начинаем с настоящей скорости: подмена не накапливается.
+        walkFlingRestore()
         -- ВАЖНО: Получаем СВЕЖУЮ ссылку каждый кадр
         local currentChar = LocalPlayer.Character
         local currentRoot = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
@@ -4698,17 +4879,13 @@ local function WalkFlingStart()
         end
 
         local vel = currentRoot.AssemblyLinearVelocity
+        if vel.Magnitude <= 2 or not walkFlingTargetNearby(currentRoot) then return end
 
-        if vel.Magnitude > 2 then
-            currentRoot.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
-            RunService.RenderStepped:Wait()
-            if not State.Runtime.WalkFlingActive then return end
-            currentRoot.AssemblyLinearVelocity = vel
-            RunService.Stepped:Wait()
-            if not State.Runtime.WalkFlingActive then return end
-            currentRoot.AssemblyLinearVelocity = vel + Vector3.new(0, movel, 0)
-            movel = -movel
-        end
+        -- Прежний ±0.1 по Y не нужен: подмена только в движении (>2 studs/s), а
+        -- движущийся персонаж и так отправляется.
+        local sent = vel * 10000 + Vector3.new(0, 10000, 0)
+        WalkFlingSpoof.Root, WalkFlingSpoof.Real, WalkFlingSpoof.Sent = currentRoot, vel, sent
+        currentRoot.AssemblyLinearVelocity = sent
     end)
 end
 
@@ -7668,6 +7845,156 @@ local function ToggleKillAura(state)
     end
 end
 
+-- Velocity Spoofer: подменяем отправляемую скорость корня по схеме Fake Position —
+-- подмена на Heartbeat (после физики, перед репликацией), восстановление на первом
+-- RenderStep. Своя симуляция идёт с настоящей скоростью, а упреждение противников
+-- (silent aim, предикт выстрела/броска) берёт фейковую.
+do
+    local runtime = {
+        BindName = "MM2_VelocitySpoofRestore",
+        Root = nil, Real = nil, Sent = nil,
+        LegitJumpVelocity = 50, -- стартовая скорость прыжка при стандартных настройках плейса
+    }
+    State.Runtime.VelocitySpoofRuntime = runtime
+
+    -- Прыжок «как у всех»: из настроек плейса, а не из текущего (возможно изменённого) Humanoid.
+    -- Гравитацию читаем сейчас — Swim потом выставляет её в 0.
+    pcall(function()
+        local starter = game:GetService("StarterPlayer")
+        if starter.CharacterUseJumpPower then
+            runtime.LegitJumpVelocity = starter.CharacterJumpPower
+        else
+            runtime.LegitJumpVelocity = math.sqrt(2 * Workspace.Gravity * starter.CharacterJumpHeight)
+        end
+    end)
+
+    -- Настоящая скорость для своих систем, пока корень несёт подменённую.
+    State.Runtime.GetRealVelocity = function(root)
+        local velocity = root.AssemblyLinearVelocity
+        if runtime.Root == root and runtime.Real and runtime.Sent then
+            return velocity - runtime.Sent + runtime.Real
+        end
+        return velocity
+    end
+
+    local function restoreVelocity()
+        local root, real, sent = runtime.Root, runtime.Real, runtime.Sent
+        runtime.Root, runtime.Real, runtime.Sent = nil, nil, nil
+        if root and root.Parent and real and sent then
+            -- Убираем только нашу подмену: изменения скорости игрой между фазами сохраняются.
+            root.AssemblyLinearVelocity = root.AssemblyLinearVelocity - sent + real
+        end
+    end
+
+    local function spoofedVelocity(real)
+        if State.Settings.VelocitySpoofMode == "Zero" then
+            -- Направление настоящее, величина не выше стандартной ходьбы: бег, WalkSpeed
+            -- и fly снаружи выглядят обычной ходьбой, упреждение недолетает.
+            local cap = math.clamp(tonumber(State.Settings.VelocitySpoofSpeed) or CONFIG.DefaultWalkSpeed, 0, 20)
+            -- В полёте (любой Fly/Swim) ограничиваем всю скорость: вертикаль fly тоже выдаёт.
+            if State.Settings.FlyEnabled then
+                return real.Magnitude > cap and real.Unit * cap or real
+            end
+            local flat = Vector3.new(real.X, 0, real.Z)
+            if flat.Magnitude > cap then flat = flat.Unit * cap end
+            -- На земле вверх не быстрее обычного прыжка; падение оставляем физичным.
+            return flat + Vector3.yAxis * math.min(real.Y, runtime.LegitJumpVelocity)
+        end
+        local strength = math.clamp(tonumber(State.Settings.VelocitySpoofStrength) or 150, 20, 500)
+        return Vector3.yAxis * strength
+    end
+
+    -- Фейковая скорость выгибает нашу кривую у других между пакетами — видимая дрожь.
+    -- Режим «только мардерер»: спуфим лишь в роли убийцы, чтобы мазали именно шерифы,
+    -- а в остальных ролях выглядим обычно. Себя проверяем напрямую (свой рюкзак виден),
+    -- с запасным вариантом по серверным данным роли.
+    local function isMurderer()
+        local now = os.clock()
+        if now < (runtime.NextRoleCheck or 0) then return runtime.Murderer end
+        runtime.NextRoleCheck = now + 0.1
+        local character = LocalPlayer.Character
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        local knife = (character and character:FindFirstChild("Knife")) or (backpack and backpack:FindFirstChild("Knife"))
+        local data = State.Cache.PlayerData and State.Cache.PlayerData[LocalPlayer.Name]
+        runtime.Murderer = knife ~= nil or (type(data) == "table" and data.Role == "Murderer")
+        return runtime.Murderer
+    end
+
+    -- Будет ли спуф в этом кадре. Fake Position по нему решает, трогать ли скорость:
+    -- результат не зависит от порядка Heartbeat-подписок.
+    State.Runtime.VelocitySpoofActive = function()
+        if not State.Settings.VelocitySpoofEnabled then return false end
+        if Fling.SessionActive or State.Runtime.WalkFlingActive then return false end
+        return not State.Settings.VelocitySpoofMurdererOnly or isMurderer()
+    end
+
+    -- Частоту держим, пока идёт спуф, и отпускаем через секунду без него —
+    -- чтобы флаг не дёргался на каждом доставании/убирании оружия.
+    local function updateBoost(spoofing)
+        local now = os.clock()
+        if spoofing then runtime.LastSpoof = now end
+        local hold = spoofing or now - (runtime.LastSpoof or 0) < 1
+        State.Runtime.NetBoost("velocity", hold)
+        -- Без этого стоящий персонаж не отправляется, и спуф на месте не доходит.
+        State.Runtime.PhysicsNudge("velocity", hold)
+    end
+
+    local function disableOnError(err)
+        State.Runtime.SetVelocitySpoof(false)
+        if State.Runtime.VelocitySpoofToggle then State.Runtime.VelocitySpoofToggle:Set(false, false) end
+        warn("[Velocity Spoofer] " .. tostring(err))
+        ShowNotification("Velocity Spoofer stopped: " .. tostring(err), CONFIG.Colors.Red)
+    end
+
+    State.Runtime.SetVelocitySpoof = function(enabled)
+        State.Settings.VelocitySpoofEnabled = false
+        if runtime.Connection then runtime.Connection:Disconnect(); runtime.Connection = nil end
+        if runtime.Removing then runtime.Removing:Disconnect(); runtime.Removing = nil end
+        if runtime.Bound then
+            pcall(function() RunService:UnbindFromRenderStep(runtime.BindName) end)
+            runtime.Bound = false
+        end
+        pcall(restoreVelocity)
+        runtime.LastSpoof = nil
+        State.Runtime.NetBoost("velocity", false)
+        State.Runtime.PhysicsNudge("velocity", false)
+        if not enabled then return end
+
+        local ok, err = pcall(function()
+            RunService:BindToRenderStep(runtime.BindName, Enum.RenderPriority.First.Value, function()
+                local restored, restoreError = pcall(restoreVelocity)
+                if not restored then disableOnError(restoreError) end
+            end)
+        end)
+        if not ok then disableOnError(err); return end
+        runtime.Bound = true
+        State.Settings.VelocitySpoofEnabled = true
+        runtime.Removing = Core.Connect(LocalPlayer.CharacterRemoving, function()
+            runtime.Root, runtime.Real, runtime.Sent = nil, nil, nil
+        end)
+        runtime.Connection = Core.Connect(RunService.Heartbeat, function()
+            local success, failure = pcall(function()
+                -- Подмена не накапливается: каждый Heartbeat начинаем с настоящей скорости.
+                restoreVelocity()
+                if not State.Settings.VelocitySpoofEnabled then return end
+                local character = LocalPlayer.Character
+                local root = character and character:FindFirstChild("HumanoidRootPart")
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                -- Флинг сам управляет скоростью корня — не мешаем ему.
+                local spoofing = root and humanoid and humanoid.Health > 0 and not root.Anchored
+                    and State.Runtime.VelocitySpoofActive()
+                updateBoost(spoofing)
+                if not spoofing then return end
+                local real = root.AssemblyLinearVelocity
+                local sent = spoofedVelocity(real)
+                runtime.Root, runtime.Real, runtime.Sent = root, real, sent
+                root.AssemblyLinearVelocity = sent
+            end)
+            if not success then disableOnError(failure) end
+        end)
+    end
+end
+
 -- Fake Position: подмена на отправку физики с восстановлением перед камерой.
 do
     local runtime = {
@@ -7696,7 +8023,7 @@ do
         local position = root.Position
         local radius = math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10)
         local maximum = math.clamp(tonumber(State.Settings.FakeLagMaxDelay) or 200, 50, 500) / 1000
-        local speed = root.AssemblyLinearVelocity.Magnitude
+        local speed = State.Runtime.GetRealVelocity(root).Magnitude
         local delay = math.min(maximum, radius / math.max(speed, runtime.MotionSpeed))
         local elapsed = math.max(0, now - lag.StartedAt)
         local distance = lag.Position and (position - lag.Position).Magnitude or 0
@@ -7714,12 +8041,33 @@ do
 
     local function restorePosition()
         local root, original, sent = runtime.Root, runtime.Original, runtime.Sent
+        local velReal, velSent = runtime.VelReal, runtime.VelSent
         runtime.Root, runtime.Original, runtime.Sent = nil, nil, nil
+        runtime.VelReal, runtime.VelSent = nil, nil
         State.Runtime.FakePositionOffset = Vector3.zero
         if root and root.Parent and original and sent then
             -- Убираем только нашу добавку, сохраняя движение между фазами.
             root.CFrame = root.CFrame - (sent.Position - original.Position)
+            if velReal and velSent then
+                root.AssemblyLinearVelocity = root.AssemblyLinearVelocity - velSent + velReal
+            end
         end
+    end
+
+    -- Скорость, согласованная с отправляемой позицией. Другие клиенты тянут нас между
+    -- пакетами по скорости: при удержании фейклага настоящая скорость уводила модель
+    -- вперёд с откатом (дрожь) и заодно подсказывала упреждению, где мы на самом деле.
+    -- Static и Jitter не трогаем: у Static смещение постоянное, у Jitter тряска — цель.
+    local function consistentVelocity(real, adaptive)
+        if adaptive then
+            return runtime.Lag.Holding and Vector3.zero or nil
+        end
+        if State.Settings.FakePositionMode == "Orbit" then
+            local omega = runtime.Speed * 2 * math.pi
+            return real + (runtime.Side * -math.sin(runtime.Angle) + runtime.Vertical * math.cos(runtime.Angle))
+                * (runtime.Radius * omega)
+        end
+        return nil
     end
 
     local function updateAxes(root)
@@ -7748,8 +8096,27 @@ do
         direction = direction.Unit
         local side = direction:Cross(Vector3.yAxis)
         if side.Magnitude < 0.001 then side = Vector3.xAxis end
-        runtime.Side = side.Unit
-        runtime.Vertical = direction:Cross(runtime.Side).Unit
+        runtime.TargetSide = side.Unit
+        runtime.TargetVertical = direction:Cross(runtime.TargetSide).Unit
+        -- Первое направление после включения — сразу, дальше только плавно.
+        if not runtime.AxesReady then
+            runtime.Side, runtime.Vertical = runtime.TargetSide, runtime.TargetVertical
+            runtime.AxesReady = true
+        end
+    end
+
+    -- Оси и радиус тянутся к новым целям, а не прыгают: смена угрозы или случайного
+    -- радиуса раньше давала рывок смещения у других (замер: 5 рывков >1 stud за 4 с в Static).
+    local function smoothTowardTargets(dt)
+        local blend = 1 - math.exp(-dt * 10)
+        local function approach(current, target)
+            local mixed = current:Lerp(target, blend)
+            -- Почти противоположные векторы при смешивании схлопываются — берём цель.
+            return mixed.Magnitude > 0.05 and mixed.Unit or target
+        end
+        if runtime.TargetSide then runtime.Side = approach(runtime.Side, runtime.TargetSide) end
+        if runtime.TargetVertical then runtime.Vertical = approach(runtime.Vertical, runtime.TargetVertical) end
+        if runtime.RadiusTarget then runtime.Radius += (runtime.RadiusTarget - runtime.Radius) * blend end
     end
 
     local function estimateReplicatedFrame(root, realFrame, candidateFrame, paused)
@@ -7762,7 +8129,7 @@ do
         local _, angle = delta:ToAxisAngle()
         local moving = delta.Position.Magnitude >= runtime.MotionDistance
             or math.abs(angle) >= runtime.MotionAngle
-            or root.AssemblyLinearVelocity.Magnitude >= runtime.MotionSpeed
+            or State.Runtime.GetRealVelocity(root).Magnitude >= runtime.MotionSpeed
             or root.AssemblyAngularVelocity.Magnitude >= runtime.MotionAngularSpeed
         runtime.EstimateMoving = moving
 
@@ -7795,10 +8162,13 @@ do
         runtime.EstimateRoot, runtime.LastRealFrame, runtime.EstimatedFrame = nil, nil, nil
         runtime.EstimateMoving = false
         resetFakeLag()
+        State.Runtime.NetBoost("fakeposition", false)
+        State.Runtime.PhysicsNudge("fakeposition", false)
         if not enabled then return end
 
         runtime.Angle, runtime.Flip, runtime.NextRandom, runtime.NextTarget = 0, false, 0, 0
         runtime.Frame, runtime.LastFrame = 0, -1
+        runtime.AxesReady = false
         local ok, err = pcall(function()
             RunService:BindToRenderStep(runtime.BindName, Enum.RenderPriority.First.Value, function()
                 runtime.Frame += 1
@@ -7809,6 +8179,8 @@ do
         if not ok then disableOnError(err); return end
         runtime.Bound = true
         State.Settings.FakePositionEnabled = true
+        -- 60 пакетов/с: Orbit перестаёт рассыпаться на 3 точки за оборот, смещение ровнее.
+        State.Runtime.NetBoost("fakeposition", true)
         runtime.Removing = Core.Connect(LocalPlayer.CharacterRemoving, function()
             pcall(restorePosition)
             resetFakeLag()
@@ -7828,6 +8200,10 @@ do
                 local humanoid = character and character:FindFirstChildOfClass("Humanoid")
                 if not root or not humanoid or humanoid.Health <= 0 then resetFakeLag(); return end
                 local adaptive = State.Settings.FakePositionMode == "Adaptive Fakelag"
+                -- Толчок физики (отправка на месте) только для Static. Orbit и Jitter на
+                -- месте намеренно не отправляются: крутятся/трясутся лишь в движении —
+                -- так их видно и контролировать, и это легитнее.
+                State.Runtime.PhysicsNudge("fakeposition", State.Settings.FakePositionMode == "Static")
                 if Fling.SessionActive or State.Runtime.WalkFlingActive or State.Settings.FlyEnabled
                     or State.Settings.AutoFarmEnabled or humanoid.Sit or root.Anchored
                     or (adaptive and State.Settings.IsInvisible) then
@@ -7844,8 +8220,9 @@ do
                 if not adaptive and now >= runtime.NextRandom then
                     runtime.NextRandom = now + 0.16 + math.random() * 0.24
                     runtime.Speed = math.clamp(tonumber(State.Settings.FakePositionSpeed) or 5, 0.5, 12) * (0.7 + math.random() * 0.6)
-                    runtime.Radius = math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10) * (0.8 + math.random() * 0.2)
+                    runtime.RadiusTarget = math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10) * (0.8 + math.random() * 0.2)
                 end
+                if not adaptive then smoothTowardTargets(dt) end
                 local offset
                 if adaptive then
                     local attacking = character:FindFirstChildOfClass("Tool")
@@ -7870,6 +8247,15 @@ do
                     pcall(PingChams.pushSample, tick(), character, estimate, true)
                 end
                 root.CFrame = runtime.Sent
+                -- Velocity Spoofer в этом кадре главнее: его скорость и есть цель.
+                if not State.Runtime.VelocitySpoofActive() then
+                    local real = root.AssemblyLinearVelocity
+                    local velocity = consistentVelocity(real, adaptive)
+                    if velocity then
+                        runtime.VelReal, runtime.VelSent = real, velocity
+                        root.AssemblyLinearVelocity = velocity
+                    end
+                end
             end)
             if not success then disableOnError(failure) end
         end)
@@ -8243,7 +8629,7 @@ local function respawn(plr)
 end
 
 -- Очистка при выходе игрока
-Core.Connect(game.Players.PlayerRemoving, function(plr)
+Core.Connect(Players.PlayerRemoving, function(plr)
     respawning[plr.UserId] = nil
 end)
 
@@ -8527,7 +8913,7 @@ local function ServerLagger()
 end
 
 local function SpeedGlitch()
-    local player = game.Players.LocalPlayer
+    local player = Players.LocalPlayer
     player.Character:WaitForChild('Humanoid')
     task.wait(0.1)
 
@@ -9105,6 +9491,7 @@ Core.StopFeatures = function()
         {"Fling", State.Runtime.FlingCleanup}, {"Fly", StopFly},
         {"NoClip", DisableNoClip}, {"AntiFling", DisableAntiFling},
         {"Hitbox", DisableExtendedHitbox}, {"Pickup", DisableInstantPickup},
+        {"VelocitySpoof", function() State.Runtime.SetVelocitySpoof(false) end},
         {"KillAura", function() ToggleKillAura(false) end},
         {"GodMode", function() if State.Settings.GodModeEnabled then ToggleGodMode() end end},
         {"CoinMuter", StopCoinMuter}, {"FriendViewer", StopFriendViewer},
@@ -9195,7 +9582,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
                 State.Runtime.PingChamsGUI.Enabled = on and (State.Runtime.PingChamsTextTransparency or 1) < 0.995
             end
         end,
-        FakePosition = function(on) State.Runtime.SetFakePosition(on) end,
+        FakePosition = function(on) Fling.ForgetFakePositionPause() State.Runtime.SetFakePosition(on) end,
         FakePositionMode = function(v)
             if v == "Orbit" or v == "Jitter" or v == "Static" or v == "Adaptive Fakelag" then
                 State.Settings.FakePositionMode = v
@@ -9210,6 +9597,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         FakePositionFaceThreat = function(on) State.Settings.FakePositionFaceThreat = on end,
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
         ExtendedHitboxSize = function(v) State.Settings.ExtendedHitboxSize = v if State.Settings.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end,
+        VelocitySpoof = function(on) State.Runtime.SetVelocitySpoof(on) end,
+        VelocitySpoofMode = function(v) if v == "Anti-Aim" or v == "Zero" then State.Settings.VelocitySpoofMode = v end end,
+        VelocitySpoofMurdererOnly = function(on) State.Settings.VelocitySpoofMurdererOnly = on end,
+        VelocitySpoofStrength = function(v) State.Settings.VelocitySpoofStrength = math.clamp(tonumber(v) or 150, 20, 500) end,
+        VelocitySpoofSpeed = function(v) State.Settings.VelocitySpoofSpeed = math.clamp(tonumber(v) or CONFIG.DefaultWalkSpeed, 0, 20) end,
         SpawnAtPlayer = function(on) State.Settings.SpawnAtPlayer = on end,
         KillAuraRange = function(v) State.Settings.KillAuraRange = v end,
         KillAuraStatic = function(on)
@@ -10015,6 +10407,13 @@ do
         CombatTab:CreateSection("EXTENDED HITBOX", "right")
         CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
         CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit", 10, 30, State.Settings.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
+
+        CombatTab:CreateSection("VELOCITY SPOOFER", "right")
+        State.Runtime.VelocitySpoofToggle = CombatTab:CreateToggle("Velocity Spoofer", "Report fake velocity to other players", "VelocitySpoof", false)
+        CombatTab:CreateDropdown("Spoof Mode", "Anti-Aim: fake upward velocity; Zero: never above normal speed", {"Anti-Aim", "Zero"}, State.Settings.VelocitySpoofMode, "VelocitySpoofMode")
+        CombatTab:CreateToggle("Only As Murderer", "On: spoof only while you are murderer (sheriffs miss). Off: always", "VelocitySpoofMurdererOnly", State.Settings.VelocitySpoofMurdererOnly)
+        CombatTab:CreateSlider("Anti-Aim Strength", "Fake upward speed in studs/s; higher = more jitter for others", 20, 500, State.Settings.VelocitySpoofStrength, "VelocitySpoofStrength", 10)
+        CombatTab:CreateSlider("Zero Max Speed", "Highest speed reported in Zero mode (place default: " .. CONFIG.DefaultWalkSpeed .. ")", 0, 20, State.Settings.VelocitySpoofSpeed, "VelocitySpoofSpeed", 1)
 end
 
 do
@@ -10123,6 +10522,7 @@ do
             AFKMode = "AFKModeEnabled", AntiFling = "AntiFlingEnabled", WalkFling = "WalkFlingEnabledByUser",
             ExtendedHitbox = "ExtendedHitboxEnabled", InstantPickup = "InstantPickupEnabled", BulletTracers = "BulletTracersEnabled",
             FriendViewer = "FriendViewerEnabled", PingChams = "PingChamsEnabled", FakePosition = "FakePositionEnabled",
+            VelocitySpoof = "VelocitySpoofEnabled",
             Orbit = "OrbitEnabled", LoopFling = "LoopFlingEnabled", BlockPath = "BlockPathEnabled",
             HandleAutoRejoin = "AutoRejoinEnabled", HandleAutoReconnect = "AutoReconnectEnabled",
         }
