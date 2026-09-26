@@ -6,10 +6,12 @@
 --
 -- Горизонтальная скорость персонажа считается здесь по модели Source
 -- (Friction → Accelerate на земле, AirAccelerate в воздухе) с фиксированным шагом
--- TickRate. Humanoid не отключается: каждый кадр ему выставляется цель «идти
--- ровно с нашей скоростью» (Move(dir) + WalkSpeed = |v|), поэтому его контроллер
--- не тормозит и не рулит, а стены, склоны и анимации работают штатно.
--- Вертикаль — физика Roblox, кроме импульса прыжка.
+-- TickRate. Симуляция включается только на время bhop (прыжок с зажатым Space)
+-- и отдаёт ходьбу Roblox после приземления без Space; пока тоггл включён,
+-- корпус всегда смотрит по yaw камеры. Humanoid не отключается: во время bhop
+-- ему выставляется цель «идти ровно с нашей скоростью» (Move(dir) + WalkSpeed
+-- = |v|), поэтому его контроллер не тормозит и не рулит, а стены, склоны и
+-- анимации работают штатно. Вертикаль — физика Roblox, кроме импульса прыжка.
 --
 -- Математика стрейфа (AirAccelerate, как в CS:GO/CS2):
 --   A = AirAccelerate · wishSpeed · dt   (разгон за тик, wishSpeed — полный)
@@ -61,18 +63,25 @@ return function(env)
         JumpLockout = 0.12,       -- сек после прыжка, пока пол ещё «виден»
         GroundedMaxUp = 2,        -- вертикальная скорость, выше которой это не посадка
         MaxFrameTime = 0.1,       -- защита аккумулятора от спирали после фриза
+        DisengageMargin = 0.5,    -- запас над скоростью ходьбы, при котором ещё скользим по Source
+        StrafeModes = {"View", "Directional"},
+        StepBindName = "MM2_BhopStep",
     }
 
     local State = {
         Enabled = false,
+        Engaged = false,         -- идёт bhop: скорость считает Source-симуляция
         AutoStrafe = true,
+        StrafeMode = "View",     -- View — как в CS (A/D вручную), Directional — WASD = направление
         Values = {},
         Connections = {},
         StepConnection = nil,
         RemovingConnection = nil,
+        StepBound = false,       -- шаг привязан к RenderStep
         Controls = nil,          -- ControlModule (nil — ещё не искали, false — нет)
         Humanoid = nil,          -- Humanoid, у которого мы забрали управление
         SavedWalkSpeed = nil,
+        SavedAutoRotate = nil,
         Accumulator = 0,
         PrevYaw = nil,
         LastSide = 1,            -- сторона последнего стрейфа (+1 / −1)
@@ -311,17 +320,33 @@ return function(env)
     -- ══════════════════════════════════════════════════════════════════════════
     -- БЛОК 5: ЗАХВАТ HUMANOID И ШАГ СИМУЛЯЦИИ
     -- ══════════════════════════════════════════════════════════════════════════
-    local function release()
+    -- Два уровня владения персонажем:
+    --   • Humanoid захвачен (тоггл включён) — только поворот корпуса за камерой;
+    --     ходьба остаётся родной Roblox, играть можно как без скрипта.
+    --   • Engaged (идёт bhop) — горизонтальную скорость считает Source-симуляция.
+    --     Включается прыжком с зажатым Space, выключается после приземления без
+    --     Space, когда трение опустило скорость до обычной ходьбы.
+    local function disengage()
         local humanoid = State.Humanoid
-        State.Humanoid = nil
-        if humanoid and humanoid.Parent then
+        if State.Engaged and humanoid and humanoid.Parent then
             pcall(function()
                 local restore = Main.Runtime.SettingsDirty and Main.Settings.WalkSpeed or State.SavedWalkSpeed
                 if restore then humanoid.WalkSpeed = restore end
             end)
         end
-        State.SavedWalkSpeed = nil
+        State.Engaged = false
         State.Accumulator = 0
+    end
+
+    local function release()
+        disengage()
+        local humanoid = State.Humanoid
+        State.Humanoid = nil
+        if humanoid and humanoid.Parent and State.SavedAutoRotate ~= nil then
+            pcall(function() humanoid.AutoRotate = State.SavedAutoRotate end)
+        end
+        State.SavedWalkSpeed = nil
+        State.SavedAutoRotate = nil
         State.PrevYaw = nil
     end
 
@@ -329,8 +354,28 @@ return function(env)
         if State.Humanoid == humanoid then return end
         release()
         State.Humanoid = humanoid
+        State.SavedAutoRotate = humanoid.AutoRotate
+        if env.Remember then
+            pcall(env.Remember, humanoid, "WalkSpeed")
+            pcall(env.Remember, humanoid, "AutoRotate")
+        end
+        -- Корпус крутим сами, за камерой (как модель игрока в CS)
+        humanoid.AutoRotate = false
+    end
+
+    local function engage(humanoid)
+        if State.Engaged then return end
+        -- Родная скорость снимается в момент захвата: до него WalkSpeed не наш
         State.SavedWalkSpeed = humanoid.WalkSpeed
-        if env.Remember then pcall(env.Remember, humanoid, "WalkSpeed") end
+        State.Engaged = true
+        State.Accumulator = 0
+    end
+
+    -- Yaw корпуса = yaw камеры. Позиция и линейная скорость сборки не меняются
+    local function faceCamera(root, yaw)
+        root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+        local w = root.AssemblyAngularVelocity
+        root.AssemblyAngularVelocity = Vector3.new(w.X, 0, w.Z)
     end
 
     -- Системы MainScript, которые сами двигают корень, имеют приоритет
@@ -343,7 +388,25 @@ return function(env)
         return BAIL_STATES[humanoid:GetState()] == true
     end
 
-    -- Кадр: PreSimulation — после ControlModule (RenderStep), до физики
+    -- wishDir одного воздушного тика по режиму стрейфа.
+    --   View (как в CS): A/D — ручной стрейф, сырой wishDir от ввода, поворот
+    --     даёт мышь (синхрон стрейфа с камерой = прирост скорости). Без A/D
+    --     автостребфер ведёт траекторию вдоль камеры (W / ничего) или назад (S).
+    --   Directional: WASD задаёт желаемое направление, солвер доворачивает к нему.
+    local function airWish(vx, vz, mx, mz, yaw, wishSpeed, p, dt, auto)
+        local dx, dz = desiredDirection(mx, mz, yaw)
+        if not auto then return dx, dz end
+        if State.StrafeMode == "Directional" then
+            return solveStrafe(vx, vz, dx, dz, wishSpeed, p, dt)
+        end
+        if math.abs(mx) > 1e-3 then
+            return dx, dz
+        end
+        local tx, tz = desiredDirection(0, mz > 1e-3 and 1 or -1, yaw)
+        return solveStrafe(vx, vz, tx, tz, wishSpeed, p, dt)
+    end
+
+    -- Кадр: RenderStep после ControlModule и камеры, до физики
     local function step(frameDt)
         local character = LocalPlayer.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -354,9 +417,11 @@ return function(env)
         end
         takeover(humanoid)
 
+        local yaw = cameraYaw()
+        faceCamera(root, yaw)
+
         local p = State.Values
         local tickDt = 1 / p.TickRate
-        local wishSpeed = groundSpeed()
 
         -- Стартуем с реальной скорости: удары о стены, склоны и толчки игры уже
         -- в ней (аналог ClipVelocity в Source). Velocity Spoofer MainScript свою
@@ -370,6 +435,16 @@ return function(env)
         local grounded = humanoid.FloorMaterial ~= Enum.Material.Air and vy <= CONFIG.GroundedMaxUp
             and now - State.LastJump > CONFIG.JumpLockout
             and humanoid:GetState() ~= Enum.HumanoidStateType.Jumping
+
+        if not State.Engaged then
+            -- Без Space персонажем управляет Roblox — трогаем только поворот
+            if not holdingJump then
+                State.PrevYaw = yaw
+                return
+            end
+            engage(humanoid)
+        end
+        local wishSpeed = groundSpeed()
 
         -- Прыжок в тик приземления ДО трения (как CheckJumpButton → Friction
         -- в PM_WalkMove): тик на земле не успевает съесть скорость
@@ -387,7 +462,6 @@ return function(env)
         local steps = math.floor(State.Accumulator / tickDt)
         State.Accumulator -= steps * tickDt
 
-        local yaw = cameraYaw()
         local prevYaw = State.PrevYaw or yaw
         local yawDelta = wrapAngle(yaw - prevYaw)
         State.PrevYaw = yaw
@@ -396,18 +470,16 @@ return function(env)
         local autoStrafe = State.AutoStrafe and holdingJump
 
         for i = 1, steps do
-            local dx, dz, strength = desiredDirection(mx, mz, prevYaw + yawDelta * (i / steps))
+            local subYaw = prevYaw + yawDelta * (i / steps)
             if grounded then
+                local dx, dz, strength = desiredDirection(mx, mz, subYaw)
                 vx, vz = friction(vx, vz, p, tickDt)
                 if strength > 0 then
                     vx, vz = accelerate(vx, vz, dx, dz, wishSpeed * strength, p.GroundAccel, tickDt)
                 end
             else
                 local before = math.sqrt(vx * vx + vz * vz)
-                local wx, wz = dx, dz
-                if autoStrafe then
-                    wx, wz = solveStrafe(vx, vz, dx, dz, wishSpeed, p, tickDt)
-                end
+                local wx, wz = airWish(vx, vz, mx, mz, subYaw, wishSpeed, p, tickDt, autoStrafe)
                 if wx ~= 0 or wz ~= 0 then
                     vx, vz = airAccelerate(vx, vz, wx, wz, wishSpeed, p.AirAccel, p.AirCap, tickDt)
                 end
@@ -423,10 +495,17 @@ return function(env)
 
         State.Vx, State.Vz = vx, vz
         root.AssemblyLinearVelocity = Vector3.new(vx, vy, vz)
+        humanoid.Jump = false
+
+        local speed = math.sqrt(vx * vx + vz * vz)
+        if grounded and not holdingJump and speed <= wishSpeed + CONFIG.DisengageMargin then
+            -- Приземлились без Space и трение погасило разгон — отдаём ходьбу Roblox
+            disengage()
+            return
+        end
 
         -- Цель Humanoid'а = наша скорость: его контроллер не тормозит и не рулит.
-        -- Humanoid.Jump гасим — прыжками управляем сами, без landing-задержки Roblox
-        local speed = math.sqrt(vx * vx + vz * vz)
+        -- Humanoid.Jump погашен выше — прыжками управляем сами, без landing-задержки
         if speed > 0.05 then
             humanoid.WalkSpeed = speed
             humanoid:Move(Vector3.new(vx / speed, 0, vz / speed), false)
@@ -434,7 +513,6 @@ return function(env)
             humanoid.WalkSpeed = wishSpeed
             humanoid:Move(Vector3.zero, false)
         end
-        humanoid.Jump = false
         if jumped then
             -- Freefall, а не Jumping: Jumping сам ставит Y = JumpPower и перетёр бы импульс
             humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
@@ -453,27 +531,41 @@ return function(env)
         State.Enabled = false
         disconnect(State.StepConnection); State.StepConnection = nil
         disconnect(State.RemovingConnection); State.RemovingConnection = nil
+        if State.StepBound then
+            pcall(function() RunService:UnbindFromRenderStep(CONFIG.StepBindName) end)
+            State.StepBound = false
+        end
         release()
         if not enabled or State.Unloaded then return end
 
         State.Enabled = true
         State.LastJump = 0
         State.RemovingConnection = connect(LocalPlayer.CharacterRemoving, function()
-            State.Humanoid, State.SavedWalkSpeed = nil, nil
-            State.Accumulator, State.PrevYaw = 0, nil
+            State.Humanoid, State.SavedWalkSpeed, State.SavedAutoRotate = nil, nil, nil
+            State.Accumulator, State.PrevYaw, State.Engaged = 0, nil, false
         end)
-        local usePreSim = pcall(function() return RunService.PreSimulation end)
-        local signal = usePreSim and RunService.PreSimulation or RunService.Stepped
-        State.StepConnection = connect(signal, function(a, b)
-            -- PreSimulation отдаёт (dt), Stepped — (time, dt)
-            local dt = usePreSim and a or b
+        local function runStep(dt)
             local ok, err = pcall(step, tonumber(dt) or 1 / 60)
             if not ok then
                 warn("[Movement] " .. tostring(err))
                 Module.SetEnabled(false)
                 setToggleVisual(false)
             end
+        end
+        -- Шаг живёт на RenderStep после ControlModule (Input) и камеры (Camera).
+        -- Проверено в клиенте: Humanoid:Move из PreSimulation действует лишь со
+        -- следующего кадра, и в воздухе Humanoid тянет новую скорость к цели
+        -- прошлого кадра — A/D разворачивали траекторию, а стрейф терял ~40%
+        -- прироста. Здесь Move, скорость и поворот корпуса ставятся в одном кадре
+        State.StepBound = pcall(function()
+            RunService:BindToRenderStep(CONFIG.StepBindName, Enum.RenderPriority.Camera.Value + 1, runStep)
         end)
+        if not State.StepBound then
+            -- Фолбэк для executor'ов без BindToRenderStep: PreSimulation (dt) / Stepped (time, dt)
+            local usePreSim = pcall(function() return RunService.PreSimulation end)
+            local signal = usePreSim and RunService.PreSimulation or RunService.Stepped
+            State.StepConnection = connect(signal, function(a, b) runStep(usePreSim and a or b) end)
+        end
     end
 
     function Module.Toggle()
@@ -503,6 +595,9 @@ return function(env)
 
     Module.Handlers.Bhop = function(on) Module.SetEnabled(on) end
     Module.Handlers.BhopAutoStrafe = function(on) State.AutoStrafe = on and true or false end
+    Module.Handlers.BhopStrafeMode = function(v)
+        if table.find(CONFIG.StrafeModes, v) then State.StrafeMode = v end
+    end
     Module.Handlers.BhopResetPhysics = Module.ResetPhysics
     for _, param in ipairs(CONFIG.Params) do
         Module.Handlers[param.Flag] = function(v) setValue(param.Key, v) end
@@ -511,8 +606,9 @@ return function(env)
     -- Две секции на вкладке: управление слева, физика Source справа
     function Module.BuildSections(tab)
         tab:CreateSection("BHOP & AUTOSTRAFE")
-        State.Toggle = tab:CreateToggle("Bunnyhop", "Source movement, hold Space to bhop", "Bhop", false, CONFIG.KeybindName)
-        tab:CreateToggle("Autostrafe", "WASD sets direction, strafes are computed", "BhopAutoStrafe", State.AutoStrafe)
+        State.Toggle = tab:CreateToggle("Bunnyhop", "Hold Space to bhop, body follows camera", "Bhop", false, CONFIG.KeybindName)
+        tab:CreateToggle("Autostrafe", "Strafes are computed while Space is held", "BhopAutoStrafe", State.AutoStrafe)
+        tab:CreateDropdown("Strafe Mode", "View: A/D strafe like CS, Directional: WASD = direction", CONFIG.StrafeModes, State.StrafeMode, "BhopStrafeMode")
         for _, param in ipairs(CONFIG.Params) do
             if CONFIG.MainParams[param.Key] then
                 tab:CreateSlider(param.Label, param.Hint, param.Min, param.Max, State.Values[param.Key], param.Flag, param.Step)
