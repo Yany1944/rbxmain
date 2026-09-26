@@ -156,6 +156,7 @@ local CONFIG = {
         Modules = {
             Visuals = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Visuals.lua",
             Optimization = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Optimization.lua",
+            Movement = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Movement.lua",
         },
         HideKey = Enum.KeyCode.Insert,
         Colors = {
@@ -2196,6 +2197,7 @@ local function cleanupSession()
     -- Модули восстанавливают освещение, рендер и приостановленные соединения.
     if State.Runtime.OptimizationModule then pcall(State.Runtime.OptimizationModule.Destroy) end
     if State.Runtime.VisualsModule then pcall(State.Runtime.VisualsModule.Destroy) end
+    if State.Runtime.MovementModule then pcall(State.Runtime.MovementModule.Destroy) end
 
 
     -- Восстанавливаем настоящую позицию до остановки остальных систем.
@@ -9059,6 +9061,8 @@ local function HandleActionInput(input)
         ToggleFly()
     end
 
+    if State.Runtime.MovementModule then State.Runtime.MovementModule.OnInput(input) end
+
     if input.KeyCode == State.Settings.Keybinds.NoClip and State.Settings.Keybinds.NoClip ~= Enum.KeyCode.Unknown then
         if State.Settings.NoClipEnabled then
             DisableNoClip()
@@ -9820,6 +9824,9 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         if State.Runtime.VisualsModule and State.Runtime.VisualsModule.Handlers[key] then
             return State.Runtime.VisualsModule.Handlers[key]
         end
+        if State.Runtime.MovementModule and State.Runtime.MovementModule.Handlers[key] then
+            return State.Runtime.MovementModule.Handlers[key]
+        end
         return State.Runtime.OptimizationModule and State.Runtime.OptimizationModule.Handlers[key]
     end})
 })
@@ -9833,8 +9840,13 @@ GUI.Init()
 do
     -- Отдельная функция даёт загрузчику собственный бюджет регистров Luau.
     (function()
-        local context = {GUI = GUI, CONFIG = CONFIG, State = State, ShowNotification = ShowNotification, Tasks = Core.Tasks}
-        for _,entry in ipairs({{"Visuals", "VisualsModule"}, {"Optimization", "OptimizationModule"}}) do
+        local context = {
+            GUI = GUI, CONFIG = CONFIG, State = State, ShowNotification = ShowNotification, Tasks = Core.Tasks,
+            Connect = Core.Connect, Remember = Core.Remember,
+            -- Movement уступает корень флингу (Fling — локальная таблица MainScript)
+            IsMovementBusy = function() return Fling.SessionActive == true end,
+        }
+        for _,entry in ipairs({{"Visuals", "VisualsModule"}, {"Optimization", "OptimizationModule"}, {"Movement", "MovementModule"}}) do
             local ok, result = pcall(function()
                 local source = game:HttpGet(CONFIG.Modules[entry[1]], true)
                 local chunk, compileError = loadstring(source)
@@ -10308,6 +10320,9 @@ do
 
         MainTab:CreateSection("Speed Glitch")
         MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
+
+        -- Bhop / автострейф: секции строит модуль Libraryes/Movement.lua
+        if State.Runtime.MovementModule then State.Runtime.MovementModule.BuildSections(MainTab) end
 
         MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key + LMB)", "clicktp", "ClickTP")
