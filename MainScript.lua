@@ -208,6 +208,32 @@ local CONFIG = {
             Script       = "violite",                     -- метка принадлежности в файле
             Version      = 1,                             -- версия схемы файла
         },
+        -- Desync (вкладка Combat). Подмена реплицируемого CFrame/скорости корня.
+        -- Замеры на двух аккаунтах в MM2: Spin и Pitch наблюдатель видит точно.
+        -- Chaos: случайные линейная и угловая скорости, CFrame не пишется (запись CFrame
+        -- гасит у наблюдателей экстраполяцию) — образ скачет (1500 studs/s → до ~40
+        -- studs) и кувыркается. Своя физика всегда идёт по реальному телу (подмена
+        -- снимается до симуляции), киллзоны и касания срабатывают по настоящей позиции.
+        Desync = {
+            Modes   = {"Jitter", "Static", "Spin", "Chaos", "Adaptive Fakelag"},
+            Pitches = {Straight = 0, Up = 89, Down = -89},   -- градусы наклона корпуса
+            PitchOrder = {"Straight", "Up", "Down"},
+            SpinSpeed     = {90, 2000},    -- град/с
+            ChaosStrength = {0, 10000},    -- studs/s случайной скорости (0 — только кувыркание)
+            ChaosAngular  = 200,           -- рад/с случайной угловой скорости (кувыркание)
+            -- Замер в раунде: через некоторое время (респаун, старт раунда, перезаход
+            -- наблюдателя) наблюдатели перестают экстраполировать по нашей скорости —
+            -- Chaos превращается в дрожь, хотя скорости до них доходят. Переключение
+            -- на Jitter на ~0.25 с это оживляет — делаем его сами раз в интервал.
+            -- Гибрид (CFrame-хаос через кадр + скорости) держал эффект стабильнее, но
+            -- у игрока в раунде выбрасывал персонажа — отказались
+            RefreshInterval  = 2.5,        -- сек между всплесками
+            RefreshBurst     = 0.35,       -- сек длительность всплеска
+            RefreshAmplitude = 3,          -- studs сдвига вбок (±, через кадр)
+            -- Чамсы Chaos: сколько секунд наблюдатель дорисовывает нас по поддельной
+            -- скорости (замер: 1500 studs/s → скачки до ~40 studs ≈ 1/40 с)
+            ChaosChamsLead   = 1 / 40,
+        },
 	}
 
 local Players = game:GetService("Players")
@@ -222,6 +248,7 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 Core.StarterGui = game:GetService("StarterGui")
+Core.PhysicsService = game:GetService("PhysicsService")
 local LocalPlayer = Players.LocalPlayer
 -- Стандартная скорость плейса (обычно 16) — ориентир для Velocity Spoofer Zero.
 CONFIG.DefaultWalkSpeed = 16
@@ -298,7 +325,10 @@ local State = {
         FakePositionEnabled = false,
         FakePositionMode = "Jitter",
         FakePositionRadius = 3,
-        FakePositionSpeed = 5,
+        FakePositionPitch = "Straight",
+        FakeSpinSpeed = 720,
+        FakeSpinLocal = false,
+        FakeChaosStrength = 1500,
         FakeLagMaxDelay = 200,
         FakePositionFaceThreat = true,
         SpawnAtPlayer = false,
@@ -1300,8 +1330,13 @@ do
             local gp
             if src:IsA("MeshPart") or src:IsA("Part") then
                 gp = Core.Own(src:Clone())
+                -- Ауры Visuals (атрибут StandaloneVFX_Owner) и прочие эффекты живут внутри
+                -- частей и клонировались вместе с ними — у призрака была вторая аура
                 for _, d in ipairs(gp:GetDescendants()) do
-                    if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("Motor6D") then
+                    if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("Motor6D")
+                        or d:GetAttribute("StandaloneVFX_Owner") ~= nil
+                        or d:IsA("ParticleEmitter") or d:IsA("Beam") or d:IsA("Trail") or d:IsA("Light")
+                        or d:IsA("Fire") or d:IsA("Smoke") or d:IsA("Sparkles") then
                         pcall(function() d:Destroy() end)
                     end
                 end
@@ -7924,6 +7959,11 @@ do
 
     -- Будет ли спуф в этом кадре. Fake Position по нему решает, трогать ли скорость:
     -- результат не зависит от порядка Heartbeat-подписок.
+    -- Для Chaos: спуфнутая скорость как центр кляксы и снятие нашей подмены,
+    -- если Heartbeat спуфа в этом кадре успел сработать раньше Chaos
+    State.Runtime.SpoofedVelocity = function(real) return spoofedVelocity(real) end
+    State.Runtime.VelocitySpoofRelease = function() pcall(restoreVelocity) end
+
     State.Runtime.VelocitySpoofActive = function()
         if not State.Settings.VelocitySpoofEnabled then return false end
         if Fling.SessionActive or State.Runtime.WalkFlingActive then return false end
@@ -7952,6 +7992,7 @@ do
         State.Settings.VelocitySpoofEnabled = false
         if runtime.Connection then runtime.Connection:Disconnect(); runtime.Connection = nil end
         if runtime.Removing then runtime.Removing:Disconnect(); runtime.Removing = nil end
+        if runtime.PreSim then runtime.PreSim:Disconnect(); runtime.PreSim = nil end
         if runtime.Bound then
             pcall(function() RunService:UnbindFromRenderStep(runtime.BindName) end)
             runtime.Bound = false
@@ -7974,6 +8015,9 @@ do
         runtime.Removing = Core.Connect(LocalPlayer.CharacterRemoving, function()
             runtime.Root, runtime.Real, runtime.Sent = nil, nil, nil
         end)
+        -- Страховка: подмена снимается и прямо перед физикой — если отрисовка кадра
+        -- пропустилась, своя симуляция всё равно не увидит фейковую скорость
+        runtime.PreSim = Core.Connect(RunService.PreSimulation, function() pcall(restoreVelocity) end)
         runtime.Connection = Core.Connect(RunService.Heartbeat, function()
             local success, failure = pcall(function()
                 -- Подмена не накапливается: каждый Heartbeat начинаем с настоящей скорости.
@@ -7987,6 +8031,10 @@ do
                     and State.Runtime.VelocitySpoofActive()
                 updateBoost(spoofing)
                 if not spoofing then return end
+                -- Chaos в Desync сам шлёт линейную скорость поверх нашей (спуф — центр
+                -- кляксы, Chaos — разброс), поэтому в эти кадры не пишем, чтобы не
+                -- складывать две подмены с разным порядком восстановления
+                if State.Runtime.ChaosOwnsVelocity and State.Runtime.ChaosOwnsVelocity() then return end
                 local real = root.AssemblyLinearVelocity
                 local sent = spoofedVelocity(real)
                 runtime.Root, runtime.Real, runtime.Sent = root, real, sent
@@ -8001,15 +8049,22 @@ end
 do
     local runtime = {
         BindName = "MM2_FakePositionRestore",
-        Angle = 0, Flip = false, NextRandom = 0, NextTarget = 0,
+        VisualBindName = "MM2_FakePositionLocalSpin",
+        SpinAt = 0, LastSpinAt = 0,
+        Flip = false, NextRandom = 0, NextTarget = 0,
         Frame = 0, LastFrame = -1,
-        Radius = 3, Speed = 5,
+        Radius = 3, SpinAngle = 0,
         Side = Vector3.xAxis, Vertical = -Vector3.yAxis,
         MotionDistance = 0.01, MotionAngle = math.rad(0.5),
         MotionSpeed = 0.1, MotionAngularSpeed = 0.05,
         Lag = {Root = nil, Position = nil, StartedAt = 0, Delay = 0, HeldFor = 0, Holding = false},
     }
     State.Runtime.FakePositionRuntime = runtime
+    -- Chaos в последних кадрах сам слал линейную скорость — спуф в это время молчит
+    State.Runtime.ChaosOwnsVelocity = function()
+        return State.Settings.FakePositionEnabled and runtime.ChaosOwnedAt ~= nil
+            and os.clock() - runtime.ChaosOwnedAt < 0.1
+    end
 
     local function resetFakeLag()
         runtime.Lag.Root, runtime.Lag.Position = nil, nil
@@ -8044,32 +8099,291 @@ do
     local function restorePosition()
         local root, original, sent = runtime.Root, runtime.Original, runtime.Sent
         local velReal, velSent = runtime.VelReal, runtime.VelSent
+        local angReal, angSent = runtime.AngReal, runtime.AngSent
         runtime.Root, runtime.Original, runtime.Sent = nil, nil, nil
         runtime.VelReal, runtime.VelSent = nil, nil
+        runtime.AngReal, runtime.AngSent = nil, nil
         State.Runtime.FakePositionOffset = Vector3.zero
-        if root and root.Parent and original and sent then
-            -- Убираем только нашу добавку, сохраняя движение между фазами.
-            root.CFrame = root.CFrame - (sent.Position - original.Position)
-            if velReal and velSent then
-                root.AssemblyLinearVelocity = root.AssemblyLinearVelocity - velSent + velReal
-            end
+        if not root or not root.Parent then return end
+        if original and sent then
+            -- Убираем только нашу добавку (позицию и поворот: Spin/Pitch),
+            -- сохраняя движение между фазами: current = sent·Δ → original·Δ.
+            root.CFrame = original * sent:ToObjectSpace(root.CFrame)
+        end
+        if velReal and velSent then
+            root.AssemblyLinearVelocity = root.AssemblyLinearVelocity - velSent + velReal
+        end
+        if angReal and angSent then
+            root.AssemblyAngularVelocity = root.AssemblyAngularVelocity - angSent + angReal
         end
     end
 
     -- Скорость, согласованная с отправляемой позицией. Другие клиенты тянут нас между
     -- пакетами по скорости: при удержании фейклага настоящая скорость уводила модель
     -- вперёд с откатом (дрожь) и заодно подсказывала упреждению, где мы на самом деле.
-    -- Static и Jitter не трогаем: у Static смещение постоянное, у Jitter тряска — цель.
+    -- Static, Jitter и Spin не трогаем: у Static смещение постоянное, у Jitter тряска — цель.
     local function consistentVelocity(real, adaptive)
         if adaptive then
             return runtime.Lag.Holding and Vector3.zero or nil
         end
-        if State.Settings.FakePositionMode == "Orbit" then
-            local omega = runtime.Speed * 2 * math.pi
-            return real + (runtime.Side * -math.sin(runtime.Angle) + runtime.Vertical * math.cos(runtime.Angle))
-                * (runtime.Radius * omega)
-        end
         return nil
+    end
+
+    local function randomUnit()
+        local direction = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5)
+        return direction.Magnitude > 1e-3 and direction.Unit or Vector3.yAxis
+    end
+
+    -- Chaos: только скорости, CFrame не пишем (запись CFrame гасит у наблюдателей
+    -- экстраполяцию); редкие всплески Jitter делает Heartbeat (см. RefreshInterval). Линейная — вокруг настоящей
+    -- (или спуфнутой, если включён Velocity Spoofer: он задаёт центр кляксы, Chaos —
+    -- разброс); угловая — кувыркание.
+    local function applyChaos(root, now)
+        local limits = CONFIG.Desync.ChaosStrength
+        local strength = math.clamp(tonumber(State.Settings.FakeChaosStrength) or 0, limits[1], limits[2])
+        runtime.Root = root
+        if strength > 0 then
+            -- Линейную скорость ведём мы; при активном спуфе он задаёт центр кляксы
+            local spoof = State.Runtime.VelocitySpoofActive()
+            if spoof then State.Runtime.VelocitySpoofRelease() end
+            local real = root.AssemblyLinearVelocity
+            local base = spoof and State.Runtime.SpoofedVelocity(real) or real
+            runtime.VelReal, runtime.VelSent = real, base + randomUnit() * strength
+            root.AssemblyLinearVelocity = runtime.VelSent
+            runtime.ChaosOwnedAt = now
+        end
+        local realW = root.AssemblyAngularVelocity
+        runtime.AngReal, runtime.AngSent = realW, randomUnit() * CONFIG.Desync.ChaosAngular
+        root.AssemblyAngularVelocity = runtime.AngSent
+    end
+
+    -- Поворот, который увидят другие: Spin крутит yaw, Pitch наклоняет корпус
+    -- (вверх / вниз) поверх Jitter / Static / Spin / Adaptive
+    local function spinSpeed()
+        local limits = CONFIG.Desync.SpinSpeed
+        return math.rad(math.clamp(tonumber(State.Settings.FakeSpinSpeed) or 720, limits[1], limits[2]))
+    end
+
+    -- Поворот по yaw исходной позы + наклон Pitch; angle — угол Spin (nil — без Spin)
+    local function composeRotation(original, angle)
+        local rotation = original.Rotation
+        if angle then
+            local look = original.LookVector
+            rotation = CFrame.Angles(0, math.atan2(-look.X, -look.Z) + angle, 0)
+        end
+        local pitch = CONFIG.Desync.Pitches[State.Settings.FakePositionPitch] or 0
+        if pitch ~= 0 then rotation *= CFrame.Angles(math.rad(pitch), 0, 0) end
+        return rotation
+    end
+
+    local function sentRotation(original, dt)
+        if State.Settings.FakePositionMode ~= "Spin" then return composeRotation(original, nil) end
+        runtime.SpinAngle = (runtime.SpinAngle + spinSpeed() * dt) % (2 * math.pi)
+        runtime.SpinAt = os.clock()
+        runtime.LastSpinAt = runtime.SpinAt
+        return composeRotation(original, runtime.SpinAngle)
+    end
+
+    -- Spin Local Too: чисто визуально крутим себя так же, как нас видят другие.
+    -- Персонажа не трогаем вовсе: замеры — наклон корня (Pitch Up/Down) Humanoid
+    -- принимал за опрокидывание (FallingDown, персонаж падал и не бежал), а у R15 в
+    -- MM2 корень связан с телом AnimationConstraint, который решает физика, — поворот
+    -- сустава до отрисовки не доходит. Поэтому показываем локальную копию: клоны
+    -- частей без суставов и коллизий раскладываются каждый кадр по позе настоящих
+    -- частей (анимации сохраняются) и поворачиваются вокруг корня, а настоящие части
+    -- скрываются только у нас через LocalTransparencyModifier.
+    -- Ауры Visuals (эффекты внутри частей, атрибут StandaloneVFX_Owner) клонируются
+    -- вместе с частями и едут с копией; на настоящем теле их эффекты на это время
+    -- выключаем — LocalTransparencyModifier частицы и лучи не прячет, была бы вторая аура
+    runtime.AvatarMap, runtime.AvatarHidden, runtime.AvatarEffects = {}, {}, {}
+    runtime.AvatarCount, runtime.AvatarAuraCount, runtime.AvatarCheckAt = 0, 0, 0
+    runtime.AvatarRebuildAt = nil
+
+    -- Вызывается при правке ауры. Пересобираем с задержкой после последней правки:
+    -- ползунок цвета дёргает обработчик на каждом шаге, копия не пересобирается каждый кадр
+    State.Runtime.RefreshLocalSpin = function()
+        runtime.AvatarRebuildAt = os.clock() + 0.15
+    end
+
+    local function auraObjects(character)
+        local ok, found = pcall(function() return character:QueryDescendants("[$StandaloneVFX_Owner]") end)
+        return ok and found or {}
+    end
+
+    local function unhideReal()
+        for part in pairs(runtime.AvatarHidden) do
+            if part.Parent then pcall(function() part.LocalTransparencyModifier = 0 end) end
+        end
+        table.clear(runtime.AvatarHidden)
+        for effect in pairs(runtime.AvatarEffects) do
+            if effect.Parent then pcall(function() effect.Enabled = true end) end
+        end
+        table.clear(runtime.AvatarEffects)
+    end
+
+    local function hideRealAuras(character)
+        for _, effect in ipairs(auraObjects(character)) do
+            local ok, enabled = pcall(function() return effect.Enabled end)
+            if ok and enabled == true and not runtime.AvatarEffects[effect] then
+                runtime.AvatarEffects[effect] = true
+                effect.Enabled = false
+            end
+        end
+    end
+
+    local function destroyLocalSpin()
+        unhideReal()
+        if runtime.AvatarModel then pcall(function() runtime.AvatarModel:Destroy() end) end
+        runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = nil, nil, 0
+        table.clear(runtime.AvatarMap)
+    end
+
+    -- Все части, включая HumanoidRootPart: он невидим, но на нём сидят Magic Circle,
+    -- крылья и др. — без его копии эти ауры оставались бы на настоящем корне
+    local function avatarSources(character)
+        return character:QueryDescendants("BasePart")
+    end
+
+    -- Группа коллизий, которая не сталкивается с персонажем (в MM2 — PlayerNoCollision).
+    -- Клиент свои группы регистрировать не может, берём из уже заведённых игрой
+    local function noCollisionGroup(root)
+        local found
+        pcall(function()
+            for _, group in ipairs(Core.PhysicsService:GetRegisteredCollisionGroups()) do
+                if not Core.PhysicsService:CollisionGroupsAreCollidable(group.name, root.CollisionGroup) then
+                    found = group.name
+                    break
+                end
+            end
+        end)
+        return found
+    end
+
+    local function buildLocalSpin(character, sources)
+        destroyLocalSpin()
+        local root = character:FindFirstChild("HumanoidRootPart")
+        local group = root and noCollisionGroup(root)
+        local model = Core.New("Model")
+        model.Name = "VioliteLocalSpin"
+        for _, src in ipairs(sources) do
+            local ok, copy = pcall(function() return src:Clone() end)
+            if ok and copy then
+                Core.Own(copy)
+                for _, d in ipairs(copy:GetDescendants()) do
+                    if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("BaseScript") or d:IsA("Sound") then
+                        pcall(function() d:Destroy() end)
+                    end
+                end
+                copy.Anchored = true
+                copy.CanCollide = false
+                copy.CanQuery = false
+                copy.CanTouch = false
+                copy.Massless = true
+                if group then copy.CollisionGroup = group end
+                copy.Parent = model
+                runtime.AvatarMap[src] = copy
+            end
+        end
+        -- Одежда (Shirt/Pants/ShirtGraphic) и цвета тела — объекты модели, на части их
+        -- накладывает Humanoid. Без него копия была «голой»: кладём копии одежды и
+        -- неактивный Humanoid (без машины состояний, ника и полоски здоровья).
+        -- Замер: Humanoid принудительно включает торсу копии CanCollide/CanQuery —
+        -- заякоренный торс внутри нашего тела давал Climbing ↔ Running и падение.
+        -- Поэтому Humanoid — только если есть группа без столкновений с персонажем
+        local realHumanoid = character:FindFirstChildOfClass("Humanoid")
+        for _, item in ipairs(character:GetChildren()) do
+            if item:IsA("Clothing") or item:IsA("ShirtGraphic") or item:IsA("BodyColors") then
+                local ok, copy = pcall(function() return item:Clone() end)
+                if ok and copy then Core.Own(copy).Parent = model end
+            end
+        end
+        if group then pcall(function()
+            local humanoid = Core.New("Humanoid")
+            humanoid.EvaluateStateMachine = false
+            humanoid.RequiresNeck = false
+            humanoid.BreakJointsOnDeath = false
+            humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+            humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+            if realHumanoid then humanoid.RigType = realHumanoid.RigType end
+            humanoid.Parent = model
+        end) end
+        model.Parent = Workspace.CurrentCamera
+        runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = model, character, #sources
+        -- Клонировали с включёнными эффектами (unhideReal до клонирования их вернул),
+        -- теперь гасим их на настоящем теле
+        runtime.AvatarAuraCount = #auraObjects(character)
+        hideRealAuras(character)
+    end
+
+    local function applyLocalSpin()
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        local active = root and State.Settings.FakePositionEnabled and State.Settings.FakeSpinLocal
+            and State.Settings.FakePositionMode == "Spin"
+            -- Heartbeat Spin в последних кадрах работал (не пауза из-за флинга/посадки)
+            and os.clock() - runtime.LastSpinAt <= 0.1
+        -- Камера вплотную к голове: копия плавно гаснет, как Roblox гасит своё тело
+        -- (иначе голова копии закрывала обзор); в первом лице копии нет вовсе
+        local camera = Workspace.CurrentCamera
+        local head = character and character:FindFirstChild("Head")
+        local fade = 0
+        if active and camera and head then
+            local distance = (camera.CFrame.Position - head.Position).Magnitude
+            fade = math.clamp(1 - (distance - 0.5) / 2.5, 0, 1)
+            if fade >= 0.999 then active = false end
+        end
+        if not active then
+            if runtime.AvatarModel then destroyLocalSpin() end
+            return
+        end
+        -- Состав частей меняется (тул, аксессуар) — сверяем не каждый кадр
+        local now = os.clock()
+        if runtime.AvatarRebuildAt and now >= runtime.AvatarRebuildAt then
+            runtime.AvatarRebuildAt = nil
+            buildLocalSpin(character, avatarSources(character))
+        elseif runtime.AvatarChar ~= character or not runtime.AvatarModel or not runtime.AvatarModel.Parent then
+            buildLocalSpin(character, avatarSources(character))
+        elseif now >= runtime.AvatarCheckAt then
+            runtime.AvatarCheckAt = now + 0.5
+            -- Сменился набор частей или аур (включили/выключили ауру) — пересобираем
+            local sources = avatarSources(character)
+            if #sources ~= runtime.AvatarCount or #auraObjects(character) ~= runtime.AvatarAuraCount then
+                buildLocalSpin(character, sources)
+            end
+        end
+        -- Угол досчитываем к моменту отрисовки: вращение плавное при любом FPS
+        local angle = runtime.SpinAngle + spinSpeed() * (now - runtime.SpinAt)
+        local rootFrame = root.CFrame
+        local shown = CFrame.new(rootFrame.Position) * composeRotation(rootFrame, angle)
+        local inverse = rootFrame:Inverse()
+        for src, copy in pairs(runtime.AvatarMap) do
+            if src.Parent then
+                copy.CFrame = shown * (inverse * src.CFrame)
+                copy.Transparency = src.Transparency
+                copy.LocalTransparencyModifier = fade
+                runtime.AvatarHidden[src] = true
+                src.LocalTransparencyModifier = 1
+            else
+                copy.Transparency = 1
+            end
+        end
+    end
+
+    -- Оценка образа Chaos для чамсов: наблюдатель дорисовывает нас по поддельным
+    -- скоростям в пределах окна пакета — берём случайную точку этого окна
+    local function chaosEstimate(root)
+        local frame = root.CFrame
+        local t = CONFIG.Desync.ChaosChamsLead * math.random()
+        local position = frame.Position
+        if runtime.VelSent and runtime.VelReal then
+            position += (runtime.VelSent - runtime.VelReal) * t
+        end
+        local rotation = frame.Rotation
+        local w = runtime.AngSent
+        if w and w.Magnitude > 1e-3 then
+            rotation = CFrame.fromAxisAngle(w.Unit, w.Magnitude * t) * rotation
+        end
+        return CFrame.new(position) * rotation
     end
 
     local function updateAxes(root)
@@ -8156,11 +8470,14 @@ do
         State.Settings.FakePositionEnabled = false
         if runtime.Connection then runtime.Connection:Disconnect(); runtime.Connection = nil end
         if runtime.Removing then runtime.Removing:Disconnect(); runtime.Removing = nil end
+        if runtime.PreSim then runtime.PreSim:Disconnect(); runtime.PreSim = nil end
         if runtime.Bound then
             pcall(function() RunService:UnbindFromRenderStep(runtime.BindName) end)
             runtime.Bound = false
         end
         pcall(restorePosition)
+        pcall(function() RunService:UnbindFromRenderStep(runtime.VisualBindName) end)
+        pcall(destroyLocalSpin)
         runtime.EstimateRoot, runtime.LastRealFrame, runtime.EstimatedFrame = nil, nil, nil
         runtime.EstimateMoving = false
         resetFakeLag()
@@ -8168,7 +8485,7 @@ do
         State.Runtime.PhysicsNudge("fakeposition", false)
         if not enabled then return end
 
-        runtime.Angle, runtime.Flip, runtime.NextRandom, runtime.NextTarget = 0, false, 0, 0
+        runtime.SpinAngle, runtime.Flip, runtime.NextRandom, runtime.NextTarget = 0, false, 0, 0
         runtime.Frame, runtime.LastFrame = 0, -1
         runtime.AxesReady = false
         local ok, err = pcall(function()
@@ -8181,13 +8498,23 @@ do
         if not ok then disableOnError(err); return end
         runtime.Bound = true
         State.Settings.FakePositionEnabled = true
-        -- 60 пакетов/с: Orbit перестаёт рассыпаться на 3 точки за оборот, смещение ровнее.
+        -- 60 пакетов/с: Spin и Chaos у других плавнее, смещение ровнее.
         State.Runtime.NetBoost("fakeposition", true)
         runtime.Removing = Core.Connect(LocalPlayer.CharacterRemoving, function()
             pcall(restorePosition)
+            pcall(destroyLocalSpin)
             resetFakeLag()
             runtime.NextTarget = 0
             runtime.EstimateRoot, runtime.LastRealFrame, runtime.EstimatedFrame = nil, nil, nil
+        end)
+        -- Страховка: подмена (CFrame и скорости) снимается и прямо перед физикой —
+        -- своя симуляция никогда не идёт с фейковым состоянием, даже без отрисовки
+        runtime.PreSim = Core.Connect(RunService.PreSimulation, function() pcall(restorePosition) end)
+        pcall(function()
+            RunService:BindToRenderStep(runtime.VisualBindName, Enum.RenderPriority.Camera.Value + 2, function()
+                local ok, err = pcall(applyLocalSpin)
+                if not ok then warn("[Desync] local spin: " .. tostring(err)); pcall(destroyLocalSpin) end
+            end)
         end)
         runtime.Connection = Core.Connect(RunService.Heartbeat, function(dt)
             local success, failure = pcall(function()
@@ -8202,10 +8529,24 @@ do
                 local humanoid = character and character:FindFirstChildOfClass("Humanoid")
                 if not root or not humanoid or humanoid.Health <= 0 then resetFakeLag(); return end
                 local adaptive = State.Settings.FakePositionMode == "Adaptive Fakelag"
-                -- Толчок физики (отправка на месте) только для Static. Orbit и Jitter на
-                -- месте намеренно не отправляются: крутятся/трясутся лишь в движении —
-                -- так их видно и контролировать, и это легитнее.
-                State.Runtime.PhysicsNudge("fakeposition", State.Settings.FakePositionMode == "Static")
+                -- Толчок физики (отправка на месте): стоящего персонажа Roblox не шлёт.
+                -- Static, Spin, Chaos и наклон Pitch должны быть видны и на месте;
+                -- Jitter намеренно трясётся лишь в движении — так легитнее.
+                local mode = State.Settings.FakePositionMode
+                -- Chaos: раз в RefreshInterval на RefreshBurst идём веткой Jitter — это
+                -- возвращает наблюдателям экстраполяцию (см. CONFIG.Desync)
+                local burst = false
+                if mode == "Chaos" then
+                    local clock = os.clock()
+                    if clock - (runtime.BurstAt or -math.huge) >= CONFIG.Desync.RefreshInterval then
+                        runtime.BurstAt = clock
+                    end
+                    burst = clock - runtime.BurstAt < CONFIG.Desync.RefreshBurst
+                    if burst then mode = "Jitter" end
+                end
+                local nudging = mode == "Static" or mode == "Spin" or mode == "Chaos"
+                    or (CONFIG.Desync.Pitches[State.Settings.FakePositionPitch] or 0) ~= 0
+                State.Runtime.PhysicsNudge("fakeposition", nudging)
                 if Fling.SessionActive or State.Runtime.WalkFlingActive or State.Settings.FlyEnabled
                     or State.Settings.AutoFarmEnabled or humanoid.Sit or root.Anchored
                     or (adaptive and State.Settings.IsInvisible) then
@@ -8221,30 +8562,38 @@ do
                 end
                 if not adaptive and now >= runtime.NextRandom then
                     runtime.NextRandom = now + 0.16 + math.random() * 0.24
-                    runtime.Speed = math.clamp(tonumber(State.Settings.FakePositionSpeed) or 5, 0.5, 12) * (0.7 + math.random() * 0.6)
                     runtime.RadiusTarget = math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10) * (0.8 + math.random() * 0.2)
                 end
                 if not adaptive then smoothTowardTargets(dt) end
+                if mode == "Chaos" then
+                    resetFakeLag()
+                    applyChaos(root, now)
+                    if State.Settings.PingChamsEnabled then
+                        pcall(PingChams.pushSample, tick(), character, chaosEstimate(root), true)
+                    end
+                    return
+                end
                 local offset
                 if adaptive then
                     local attacking = character:FindFirstChildOfClass("Tool")
                         and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
                     offset = fakeLagOffset(root, now, attacking)
-                elseif State.Settings.FakePositionMode == "Static" then
+                elseif mode == "Static" then
                     offset = runtime.Side * math.clamp(tonumber(State.Settings.FakePositionRadius) or 3, 0.5, 10)
-                elseif State.Settings.FakePositionMode == "Jitter" then
+                elseif mode == "Jitter" then
                     runtime.Flip = not runtime.Flip
-                    offset = runtime.Side * (runtime.Flip and runtime.Radius or -runtime.Radius)
+                    local amplitude = burst and CONFIG.Desync.RefreshAmplitude or runtime.Radius
+                    offset = runtime.Side * (runtime.Flip and amplitude or -amplitude)
                 else
-                    runtime.Angle = (runtime.Angle + runtime.Speed * 2 * math.pi * dt) % (2 * math.pi)
-                    offset = runtime.Side * (runtime.Radius * math.cos(runtime.Angle))
-                        + runtime.Vertical * (runtime.Radius * math.sin(runtime.Angle))
+                    -- Spin: позиция настоящая, крутится только поворот
+                    offset = Vector3.zero
                 end
                 if not adaptive then resetFakeLag() end
                 runtime.Root, runtime.Original = root, root.CFrame
-                runtime.Sent = runtime.Original + offset
+                runtime.Sent = CFrame.new(runtime.Original.Position + offset) * sentRotation(runtime.Original, dt)
                 State.Runtime.FakePositionOffset = offset
-                local estimate = estimateReplicatedFrame(root, runtime.Original, runtime.Sent, adaptive)
+                -- Режимы с толчком физики уходят в сеть и стоя — оценка идёт каждый кадр
+                local estimate = estimateReplicatedFrame(root, runtime.Original, runtime.Sent, adaptive or nudging)
                 if State.Settings.PingChamsEnabled then
                     pcall(PingChams.pushSample, tick(), character, estimate, true)
                 end
@@ -9588,7 +9937,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         end,
         FakePosition = function(on) Fling.ForgetFakePositionPause() State.Runtime.SetFakePosition(on) end,
         FakePositionMode = function(v)
-            if v == "Orbit" or v == "Jitter" or v == "Static" or v == "Adaptive Fakelag" then
+            if table.find(CONFIG.Desync.Modes, v) then
                 State.Settings.FakePositionMode = v
                 local lag = State.Runtime.FakePositionRuntime.Lag
                 lag.Root, lag.Position = nil, nil
@@ -9596,7 +9945,10 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             end
         end,
         FakePositionRadius = function(v) State.Settings.FakePositionRadius = math.clamp(tonumber(v) or 3, 0.5, 10) end,
-        FakePositionSpeed = function(v) State.Settings.FakePositionSpeed = math.clamp(tonumber(v) or 5, 0.5, 12) end,
+        FakePositionPitch = function(v) if CONFIG.Desync.Pitches[v] then State.Settings.FakePositionPitch = v end end,
+        FakeSpinLocal = function(on) State.Settings.FakeSpinLocal = on end,
+        FakeSpinSpeed = function(v) State.Settings.FakeSpinSpeed = math.clamp(tonumber(v) or 720, CONFIG.Desync.SpinSpeed[1], CONFIG.Desync.SpinSpeed[2]) end,
+        FakeChaosStrength = function(v) State.Settings.FakeChaosStrength = math.clamp(tonumber(v) or 1500, CONFIG.Desync.ChaosStrength[1], CONFIG.Desync.ChaosStrength[2]) end,
         FakeLagMaxDelay = function(v) State.Settings.FakeLagMaxDelay = math.clamp(tonumber(v) or 200, 50, 500) end,
         FakePositionFaceThreat = function(on) State.Settings.FakePositionFaceThreat = on end,
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
@@ -9822,7 +10174,17 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         GetRole         = function() return State.Runtime.Session.GetRole() end,
     }, {__index = function(_, key)
         if State.Runtime.VisualsModule and State.Runtime.VisualsModule.Handlers[key] then
-            return State.Runtime.VisualsModule.Handlers[key]
+            local handler = State.Runtime.VisualsModule.Handlers[key]
+            -- Любая правка ауры (вкл/выкл, цвет, насыщенность, яркость, сброс) — копия
+            -- Spin Local Too должна пересобраться, иначе показывала бы старую ауру
+            if type(key) == "string" and (key:sub(1, 4) == "Aura" or key == "ResetAuras") then
+                return function(...)
+                    local result = table.pack(handler(...))
+                    if State.Runtime.RefreshLocalSpin then State.Runtime.RefreshLocalSpin() end
+                    return table.unpack(result, 1, result.n)
+                end
+            end
+            return handler
         end
         if State.Runtime.MovementModule and State.Runtime.MovementModule.Handlers[key] then
             return State.Runtime.MovementModule.Handlers[key]
@@ -10322,7 +10684,11 @@ do
         MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
         -- Bhop / автострейф: секции строит модуль Libraryes/Movement.lua
-        if State.Runtime.MovementModule then State.Runtime.MovementModule.BuildSections(MainTab) end
+        -- (физику Source — ниже, под FLY SETTINGS; старая версия модуля строит всё сразу)
+        local movement = State.Runtime.MovementModule
+        if movement then
+            if movement.BuildMainSection then movement.BuildMainSection(MainTab) else movement.BuildSections(MainTab) end
+        end
 
         MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key + LMB)", "clicktp", "ClickTP")
@@ -10335,6 +10701,8 @@ do
         MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
         ----------------------------------------------------------------------------
         MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
+
+        if movement and movement.BuildPhysicsSection then movement.BuildPhysicsSection(MainTab) end
 end
 
 do
@@ -10366,6 +10734,34 @@ do
         AimTab:CreateSection("PREDICTION & OFFSET", "right")
         AimTab:CreateSlider("Prediction", "Movement prediction strength", 0, 30, State.Settings.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
         AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.Settings.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
+end
+
+do
+    local AntiAimTab = GUI.CreateTab("Anti-Aim")
+
+        AntiAimTab:CreateSection("DESYNC")
+        State.Runtime.FakePositionToggle = AntiAimTab:CreateToggle("Desync", "Send a fake position / rotation to other players", "FakePosition", false)
+        AntiAimTab:CreateDropdown("Desync Mode", "Chaos: tumbling blob; Adaptive Fakelag holds recent positions", CONFIG.Desync.Modes, State.Settings.FakePositionMode, "FakePositionMode")
+        AntiAimTab:CreateDropdown("Pitch", "Body tilt seen by others (not in Chaos)", CONFIG.Desync.PitchOrder, State.Settings.FakePositionPitch, "FakePositionPitch")
+        AntiAimTab:CreateSlider("Desync Radius", "Offset / adaptive fakelag limit in studs", 0.5, 10, State.Settings.FakePositionRadius, "FakePositionRadius", 0.1)
+        AntiAimTab:CreateToggle("Face Threat", "Orient the offset toward the threat or nearest player", "FakePositionFaceThreat", State.Settings.FakePositionFaceThreat)
+
+        AntiAimTab:CreateSection("DESYNC CHAMS")
+        AntiAimTab:CreateToggle("Ping / Desync Chams", "Show estimated fake position during desync; ping ghost otherwise", "PingChams")
+        AntiAimTab:CreateToggle("Chams Label", "Show text above Ping / Desync Chams", "PingChamsShowLabel", State.Settings.PingChamsShowLabel)
+
+        AntiAimTab:CreateSection("MODE SETTINGS", "right")
+        AntiAimTab:CreateSlider("Spin Speed", "Spin mode: degrees per second", CONFIG.Desync.SpinSpeed[1], CONFIG.Desync.SpinSpeed[2], State.Settings.FakeSpinSpeed, "FakeSpinSpeed", 10)
+        AntiAimTab:CreateToggle("Spin Local Too", "Spin mode: visually spin on your screen as others see you", "FakeSpinLocal", State.Settings.FakeSpinLocal)
+        AntiAimTab:CreateSlider("Chaos Strength", "Chaos: fake speed, higher = image jumps farther (0 = tumble only)", CONFIG.Desync.ChaosStrength[1], CONFIG.Desync.ChaosStrength[2], State.Settings.FakeChaosStrength, "FakeChaosStrength", 100)
+        AntiAimTab:CreateSlider("Fakelag Max Delay", "Adaptive mode: maximum hold in milliseconds", 50, 500, State.Settings.FakeLagMaxDelay, "FakeLagMaxDelay", 10)
+
+        AntiAimTab:CreateSection("VELOCITY SPOOFER", "right")
+        State.Runtime.VelocitySpoofToggle = AntiAimTab:CreateToggle("Velocity Spoofer", "Report fake velocity to other players", "VelocitySpoof", false)
+        AntiAimTab:CreateDropdown("Spoof Mode", "Anti-Aim: fake upward velocity; Zero: never above normal speed", {"Anti-Aim", "Zero"}, State.Settings.VelocitySpoofMode, "VelocitySpoofMode")
+        AntiAimTab:CreateToggle("Only As Murderer", "On: spoof only while you are murderer (sheriffs miss). Off: always", "VelocitySpoofMurdererOnly", State.Settings.VelocitySpoofMurdererOnly)
+        AntiAimTab:CreateSlider("Anti-Aim Strength", "Fake upward speed in studs/s; higher = more jitter for others", 20, 500, State.Settings.VelocitySpoofStrength, "VelocitySpoofStrength", 10)
+        AntiAimTab:CreateSlider("Zero Max Speed", "Highest speed reported in Zero mode (place default: " .. CONFIG.DefaultWalkSpeed .. ")", 0, 20, State.Settings.VelocitySpoofSpeed, "VelocitySpoofSpeed", 1)
 end
 
 do
@@ -10402,16 +10798,6 @@ do
         CombatTab:CreateToggle("Static Zone", "Disable circle animation", "KillAuraStatic", false)
         CombatTab:CreateKeybindButton("Instant Kill All", "instantkillall", "InstantKillAll")
 
-        CombatTab:CreateSection("ANTI-AIM")
-        State.Runtime.FakePositionToggle = CombatTab:CreateToggle("Fake Position", "Offset your position for other players", "FakePosition", false)
-        CombatTab:CreateDropdown("Desync Mode", "Position pattern; Adaptive Fakelag holds recent positions", {"Orbit", "Jitter", "Static", "Adaptive Fakelag"}, State.Settings.FakePositionMode, "FakePositionMode")
-        CombatTab:CreateSlider("Desync Radius", "Offset / adaptive fakelag travel limit in studs", 0.5, 10, State.Settings.FakePositionRadius, "FakePositionRadius", 0.1)
-        CombatTab:CreateSlider("Desync Speed", "Orbit rotations per second", 0.5, 12, State.Settings.FakePositionSpeed, "FakePositionSpeed", 0.5)
-        CombatTab:CreateSlider("Fakelag Max Delay", "Adaptive mode: maximum hold in milliseconds", 50, 500, State.Settings.FakeLagMaxDelay, "FakeLagMaxDelay", 10)
-        CombatTab:CreateToggle("Face Threat", "Orient the offset toward the threat or nearest player", "FakePositionFaceThreat", State.Settings.FakePositionFaceThreat)
-        CombatTab:CreateToggle("Ping / Desync Chams", "Show estimated fake position during desync; ping ghost otherwise", "PingChams")
-        CombatTab:CreateToggle("Chams Label", "Show text above Ping / Desync Chams", "PingChamsShowLabel", State.Settings.PingChamsShowLabel)
-
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.Settings.ShootMurdererMode or "Magic", "ShootMurdererMode")
         CombatTab:CreateSlider("Shoot Lead", "Prediction lead over ping", 0, 0.2, State.Settings.ShootLead, "ShootLead", 0.01)
@@ -10422,13 +10808,6 @@ do
         CombatTab:CreateSection("EXTENDED HITBOX", "right")
         CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
         CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit", 10, 30, State.Settings.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
-
-        CombatTab:CreateSection("VELOCITY SPOOFER", "right")
-        State.Runtime.VelocitySpoofToggle = CombatTab:CreateToggle("Velocity Spoofer", "Report fake velocity to other players", "VelocitySpoof", false)
-        CombatTab:CreateDropdown("Spoof Mode", "Anti-Aim: fake upward velocity; Zero: never above normal speed", {"Anti-Aim", "Zero"}, State.Settings.VelocitySpoofMode, "VelocitySpoofMode")
-        CombatTab:CreateToggle("Only As Murderer", "On: spoof only while you are murderer (sheriffs miss). Off: always", "VelocitySpoofMurdererOnly", State.Settings.VelocitySpoofMurdererOnly)
-        CombatTab:CreateSlider("Anti-Aim Strength", "Fake upward speed in studs/s; higher = more jitter for others", 20, 500, State.Settings.VelocitySpoofStrength, "VelocitySpoofStrength", 10)
-        CombatTab:CreateSlider("Zero Max Speed", "Highest speed reported in Zero mode (place default: " .. CONFIG.DefaultWalkSpeed .. ")", 0, 20, State.Settings.VelocitySpoofSpeed, "VelocitySpoofSpeed", 1)
 end
 
 do

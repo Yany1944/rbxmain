@@ -1417,6 +1417,8 @@ return function(env)
             visual   = "eye",
             esp      = "eye",
             combat   = "crosshair",
+            ["anti-aim"] = "shield-check",
+            antiaim  = "shield-check",
             farming  = "dollar",
             farm     = "dollar",
             fun      = "sparkles",
@@ -1534,6 +1536,13 @@ return function(env)
                 line(7.25, 13, 1.5, 3)
                 line(0, 7.25, 3, 1.5)
                 line(13, 7.25, 3, 1.5)
+            elseif n == "anti-aim" or n == "antiaim" then
+                -- shield: корпус-контур, сведённый книзу, + галочка
+                ring(2, 1, 12, 9, 3)
+                line(2.9, 10.2, 7.5, 1.5, 38, 1)
+                line(5.6, 10.2, 7.5, 1.5, -38, 1)
+                line(4.8, 6.4, 3.5, 1.5, 45, 1)
+                line(6.6, 5.6, 5.5, 1.5, -45, 1)
             elseif n == "visuals" then
                 -- eye: пилюля-контур + зрачок
                 ring(0, 4, 16, 8, 4)

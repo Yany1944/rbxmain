@@ -604,7 +604,8 @@ return function(env)
     end
 
     -- Две секции на вкладке: управление слева, физика Source справа
-    function Module.BuildSections(tab)
+    -- Управление bhop (левая колонка вкладки)
+    function Module.BuildMainSection(tab)
         tab:CreateSection("BHOP & AUTOSTRAFE")
         State.Toggle = tab:CreateToggle("Bunnyhop", "Hold Space to bhop, body follows camera", "Bhop", false, CONFIG.KeybindName)
         tab:CreateToggle("Autostrafe", "Strafes are computed while Space is held", "BhopAutoStrafe", State.AutoStrafe)
@@ -614,7 +615,10 @@ return function(env)
                 tab:CreateSlider(param.Label, param.Hint, param.Min, param.Max, State.Values[param.Key], param.Flag, param.Step)
             end
         end
+    end
 
+    -- Физика Source (правая колонка; MainScript ставит её под FLY SETTINGS)
+    function Module.BuildPhysicsSection(tab)
         tab:CreateSection("SOURCE PHYSICS", "right")
         for _, param in ipairs(CONFIG.Params) do
             if not CONFIG.MainParams[param.Key] then
@@ -622,6 +626,12 @@ return function(env)
             end
         end
         tab:CreateButton("", "Reset Physics (CS2)", MainConfig.Colors.Accent, "BhopResetPhysics")
+    end
+
+    -- Совместимость со старым MainScript: обе секции подряд
+    function Module.BuildSections(tab)
+        Module.BuildMainSection(tab)
+        Module.BuildPhysicsSection(tab)
     end
 
     function Module.Destroy()
