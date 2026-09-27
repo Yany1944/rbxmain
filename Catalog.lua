@@ -108,14 +108,17 @@ local accessory={[8]=true,[41]=true,[42]=true,[43]=true,[44]=true,[45]=true,[46]
 local function isCosmetic(o)
     return o:IsA('Accessory') or o:IsA('Shirt') or o:IsA('Pants') or o:IsA('ShirtGraphic')
 end
-local function hide(o)
-    if not app.Hidden[o] then app.Hidden[o]=o.Parent; o.Parent=nil end
+-- ctx: app (свой персонаж) или контекст синхронизированного чужого игрока из app.Remote
+local function hide(o,ctx)
+    ctx=ctx or app
+    if not ctx.Hidden[o] then ctx.Hidden[o]=o.Parent; o.Parent=nil end
 end
-local function restoreHidden(predicate)
+local function restoreHidden(predicate,ctx)
+    ctx=ctx or app
     local restore={}
-    for o,parent in pairs(app.Hidden) do if predicate(o,parent) then table.insert(restore,{o,parent}) end end
+    for o,parent in pairs(ctx.Hidden) do if predicate(o,parent) then table.insert(restore,{o,parent}) end end
     for _,v in ipairs(restore) do
-        app.Hidden[v[1]]=nil
+        ctx.Hidden[v[1]]=nil
         if v[2] and v[2].Parent then pcall(function() v[1].Parent=v[2] end) else v[1]:Destroy() end
     end
 end
@@ -134,10 +137,11 @@ local function remapHeadReferences(ch,fromHead,toHead)
         end
     end
 end
-local function restoreHead()
-    local original=app.HeadOriginal
+local function restoreHead(ctx)
+    ctx=ctx or app
+    local original=ctx.HeadOriginal
     if not original then return end
-    local ch=app.HeadCharacter
+    local ch=ctx.HeadCharacter
     if ch and ch.Parent then
         local currentHead=ch:FindFirstChild('Head')
         if currentHead and currentHead~=original then
@@ -151,14 +155,15 @@ local function restoreHead()
     elseif not original.Parent then
         original:Destroy()
     end
-    app.HeadOriginal=nil; app.HeadCharacter=nil
+    ctx.HeadOriginal=nil; ctx.HeadCharacter=nil
 end
-local function destroyItem(id)
-    local item=app.Items[id]
+local function destroyItem(id,ctx)
+    ctx=ctx or app
+    local item=ctx.Items[id]
     if item then
-        if item.Kind==79 then restoreHead()
+        if item.Kind==79 then restoreHead(ctx)
         elseif item.Object and item.Object.Parent then item.Object:Destroy() end
-        app.Items[id]=nil
+        ctx.Items[id]=nil
     end
 end
 local function clearVisuals()
@@ -171,12 +176,13 @@ local function clearVisuals()
     restoreHead()
     restoreHidden(function() return true end)
 end
-local function hideOriginal(ch)
-    local added={}; for _,it in pairs(app.Items) do added[it.Object]=true end
-    for _,o in ipairs(ch:GetChildren()) do if isCosmetic(o) and not added[o] then hide(o) end end
+local function hideOriginal(ch,ctx)
+    ctx=ctx or app
+    local added={}; for _,it in pairs(ctx.Items) do added[it.Object]=true end
+    for _,o in ipairs(ch:GetChildren()) do if isCosmetic(o) and not added[o] then hide(o,ctx) end end
     local head=ch:FindFirstChild('Head')
     if head then for _,o in ipairs(head:GetChildren()) do
-        if o:IsA('Decal') and o:FindFirstChildOfClass('WrapTextureTransfer') and not added[o] then hide(o) end
+        if o:IsA('Decal') and o:FindFirstChildOfClass('WrapTextureTransfer') and not added[o] then hide(o,ctx) end
     end end
 end
 function app.SetHideOriginal(value)
@@ -257,10 +263,7 @@ local function normalizedTransform(data)
     end
     return out
 end
-function app.SetTransform(id,data)
-    local it=app.Items[id]
-    assert(it and it.Weld,'Select an equipped accessory')
-    assert(not it.Layered,'Transform Item is not available for layered clothing')
+local function transformItem(it,data)
     local t=normalizedTransform(data)
     local h=it.Object.Handle
     local s=Vector3.new(unpack(t.Scale))
@@ -273,6 +276,13 @@ function app.SetTransform(id,data)
     it.Weld.C1=it.BaseC1*CFrame.new(unpack(t.Position))*CFrame.fromEulerAnglesXYZ(math.rad(t.Rotation[1]),math.rad(t.Rotation[2]),math.rad(t.Rotation[3]))
     h.CFrame=it.Weld.Part1.CFrame*it.Weld.C1*it.Weld.C0:Inverse()
     it.Transform=t
+    return t
+end
+function app.SetTransform(id,data)
+    local it=app.Items[id]
+    assert(it and it.Weld,'Select an equipped accessory')
+    assert(not it.Layered,'Transform Item is not available for layered clothing')
+    local t=transformItem(it,data)
     if app.Desired[id] then app.Desired[id].Transform=t end
     if app.UpdateTransformFields then app.UpdateTransformFields(id) end
     if app.RequestPreview then app.RequestPreview() end
@@ -291,10 +301,11 @@ end
 
 local bodyProperties={'Head','Torso','LeftArm','RightArm','LeftLeg','RightLeg','HeightScale','WidthScale','DepthScale','HeadScale','BodyTypeScale','ProportionScale'}
 local scaleValues={HeightScale='BodyHeightScale',WidthScale='BodyWidthScale',DepthScale='BodyDepthScale',HeadScale='HeadScale',BodyTypeScale='BodyTypeScale',ProportionScale='BodyProportionScale'}
-local function bodyContext(ch)
+local function bodyContext(ch,ctx)
+    ctx=ctx or app
     local h=ch:FindFirstChildOfClass('Humanoid')
     local d=h:GetAppliedDescription()
-    for _,it in pairs(app.Items) do if it.Kind==79 then d.Head=it.Id; break end end
+    for _,it in pairs(ctx.Items) do if it.Kind==79 then d.Head=it.Id; break end end
     for prop,name in pairs(scaleValues) do local v=h:FindFirstChild(name); if v then d[prop]=v.Value end end
     local key={h.RigType.Name}
     for _,prop in ipairs(bodyProperties) do table.insert(key,tostring(d[prop])) end
@@ -395,16 +406,17 @@ local function loadFittedWearable(id,kind,description,rig,active)
     return chosen
 end
 
-local function attachDynamicHead(head,ch)
+local function attachDynamicHead(head,ch,ctx)
+    ctx=ctx or app
     assert(head and head:IsA('MeshPart'),'Invalid Dynamic Head')
     local currentHead=ch:FindFirstChild('Head')
     assert(currentHead and currentHead:IsA('BasePart'),'Character has no head')
-    if not app.HeadOriginal then
-        app.HeadOriginal=currentHead
-        app.HeadCharacter=ch
+    if not ctx.HeadOriginal then
+        ctx.HeadOriginal=currentHead
+        ctx.HeadCharacter=ch
         currentHead.Parent=nil
     end
-    local original=app.HeadOriginal
+    local original=ctx.HeadOriginal
     head.Name='Head'
     head.CFrame=original.CFrame
     head.Anchored=false; head.CanCollide=false; head.CanTouch=false; head.Massless=true
@@ -413,32 +425,37 @@ local function attachDynamicHead(head,ch)
     return head
 end
 
-function app.WearAsync(rawId,expectedRevision,hint)
-    local id=type(rawId)=='number' and rawId or tonumber(tostring(rawId):match('^%s*(%d+)%s*$') or tostring(rawId):match('/catalog/(%d+)'))
-    assert(id and id>0 and id%1==0,'Enter an asset ID or a catalog link')
-    local ch=current(); local rev=expectedRevision or app.Revision
-    assert(valid(rev,ch),'Operation cancelled')
-    if app.Items[id] and app.Items[id].Object.Parent then return 'Item is already equipped' end
-
-    local description,bodyKey,rig=bodyContext(ch)
-    local cached=app.Cache[id]
+-- Посадка зависит от тела: шаблоны аксессуаров, макияжа и голов кэшируем по телу,
+-- чтобы свой персонаж и синхронизированные чужие не вытесняли шаблоны друг друга
+local function cacheKey(id,bodyKey)
+    local info=network.Metadata[id]
+    if info and (accessory[info.Kind] or makeup[info.Kind] or info.Kind==79) then return string.format('%.0f',id)..'|'..bodyKey end
+    return id
+end
+-- Общая примерка для любого персонажа: ctx — app или контекст чужого игрока,
+-- active() — жив ли ещё запрос. Возвращает надетый предмет и шаблон из кэша
+local function wearOn(ctx,ch,id,hint,active)
+    local description,bodyKey,rig=bodyContext(ch,ctx)
+    local cached=app.Cache[cacheKey(id,bodyKey)]
     if cached and (accessory[cached.Kind] or makeup[cached.Kind] or cached.Kind==79) and cached.BodyKey~=bodyKey then
-        cached.Template:Destroy(); app.Cache[id]=nil; cached=nil
+        cached=nil
     end
     if not cached then
         local chosen,fit,info
         local ok,err=pcall(function()
-            info=itemMetadata(id,hint,function() return valid(rev,ch) end)
+            info=itemMetadata(id,hint,active)
             assert(info.Kind==79 or accessory[info.Kind] or clothing[info.Kind] or makeup[info.Kind],'Unsupported item type. Body parts and bundles are excluded')
-            chosen,fit=loadFittedWearable(id,info.Kind,description,rig,function() return valid(rev,ch) end)
+            chosen,fit=loadFittedWearable(id,info.Kind,description,rig,active)
             for _,scriptObject in ipairs(chosen:QueryDescendants('LuaSourceContainer')) do scriptObject:Destroy() end
-            assert(valid(rev,ch),'Operation cancelled')
+            assert(active(),'Operation cancelled')
         end)
         description:Destroy()
         if not ok then if chosen then chosen:Destroy() end; error(err,0) end
         chosen.Archivable=true
         cached={Template=chosen,Kind=info.Kind,Name=info.Name,Layered=#chosen:QueryDescendants('WrapLayer')>0,BodyKey=bodyKey,Fit=fit}
-        app.Cache[id]=cached
+        local key=cacheKey(id,bodyKey)
+        if app.Cache[key] then app.Cache[key].Template:Destroy() end
+        app.Cache[key]=cached
     else description:Destroy() end
 
     local kind=cached.Kind
@@ -447,14 +464,16 @@ function app.WearAsync(rawId,expectedRevision,hint)
         assert(humanoid.RigType==Enum.HumanoidRigType.R15,'Layered clothing requires R15')
     end
 
+    -- У своего персонажа выбор хранится в Desired, у чужого — только надетое
+    local owned=ctx.Desired or ctx.Items
     local chosen=cached.Template:Clone()
     local weld,base
     local ok,err=pcall(function()
         if kind==79 then
             local remove={}
-            for key,item in pairs(app.Desired) do if item.Kind==79 and key~=id then table.insert(remove,key) end end
-            for _,key in ipairs(remove) do destroyItem(key); app.Desired[key]=nil end
-            attachDynamicHead(chosen,ch)
+            for key,item in pairs(owned) do if item.Kind==79 and key~=id then table.insert(remove,key) end end
+            for _,key in ipairs(remove) do destroyItem(key,ctx); owned[key]=nil end
+            attachDynamicHead(chosen,ch,ctx)
         elseif makeup[kind] then
             local head=ch:FindFirstChild('Head')
             assert(head and head:IsA('MeshPart') and head:FindFirstChildOfClass('WrapTarget'),'Makeup requires a compatible MeshPart head with WrapTarget')
@@ -466,22 +485,21 @@ function app.WearAsync(rawId,expectedRevision,hint)
             local parent=kind==18 and ch:FindFirstChild('Head') or ch
             assert(parent,'Head is still loading')
             local remove={}
-            for key,item in pairs(app.Desired) do if item.Kind==kind then table.insert(remove,key) end end
-            for _,key in ipairs(remove) do destroyItem(key); app.Desired[key]=nil end
-            for _,o in ipairs(parent:GetChildren()) do if o:IsA(clothing[kind]) then hide(o) end end
+            for key,item in pairs(owned) do if item.Kind==kind then table.insert(remove,key) end end
+            for _,key in ipairs(remove) do destroyItem(key,ctx); owned[key]=nil end
+            for _,o in ipairs(parent:GetChildren()) do if o:IsA(clothing[kind]) then hide(o,ctx) end end
             chosen.Parent=parent
         end
     end)
     if not ok then chosen:Destroy(); error(err) end
 
-    local previous=app.Desired[id] and app.Desired[id].Transform
     local it={Id=id,Name=cached.Name,Kind=kind,Object=chosen,Weld=weld,Base=base,Layered=cached.Layered}
-    app.Items[id]=it
+    ctx.Items[id]=it
     local order=hint and hint.LayerOrder
     if cached.Layered or makeup[kind] then
         if not order then
             order=1
-            for _,v in pairs(app.Desired) do order=math.max(order,(v.LayerOrder or 0)+1) end
+            for _,v in pairs(owned) do order=math.max(order,(v.LayerOrder or 0)+1) end
             if makeup[kind] then for _,o in ipairs(ch.Head:GetChildren()) do
                 if o:IsA('Decal') and o~=chosen then order=math.max(order,o.ZIndex+1) end
             end end
@@ -490,15 +508,27 @@ function app.WearAsync(rawId,expectedRevision,hint)
         if makeup[kind] then chosen.ZIndex=order end
     end
     it.LayerOrder=order
-    app.Desired[id]={Id=id,Name=cached.Name,Kind=kind,LayerOrder=order}
     if weld and not cached.Layered then
         local h=chosen.Handle
         it.BaseSize=h.Size; it.BaseC1=weld.C1; it.BaseAttachments={}
         for _,a in ipairs(h:QueryDescendants('Attachment')) do it.BaseAttachments[a]=a.CFrame end
         it.Mesh=h:FindFirstChildOfClass('SpecialMesh')
         if it.Mesh then it.BaseMeshScale=it.Mesh.Scale; it.BaseMeshOffset=it.Mesh.Offset end
-        app.SetTransform(id,previous or defaultTransform())
     end
+    return it,cached
+end
+
+function app.WearAsync(rawId,expectedRevision,hint)
+    local id=type(rawId)=='number' and rawId or tonumber(tostring(rawId):match('^%s*(%d+)%s*$') or tostring(rawId):match('/catalog/(%d+)'))
+    assert(id and id>0 and id%1==0,'Enter an asset ID or a catalog link')
+    local ch=current(); local rev=expectedRevision or app.Revision
+    assert(valid(rev,ch),'Operation cancelled')
+    if app.Items[id] and app.Items[id].Object.Parent then return 'Item is already equipped' end
+
+    local it,cached=wearOn(app,ch,id,hint,function() return valid(rev,ch) end)
+    local previous=app.Desired[id] and app.Desired[id].Transform
+    app.Desired[id]={Id=id,Name=cached.Name,Kind=it.Kind,LayerOrder=it.LayerOrder}
+    if it.Weld and not cached.Layered then app.SetTransform(id,previous or defaultTransform()) end
     refresh(); return 'Equipped: '..cached.Name
 end
 function app.Remove(id)
@@ -1937,8 +1967,130 @@ connect(player.CharacterAppearanceLoaded,function(ch)
         app.HandleCharacterAdded(ch)
     end
 end)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Синхронизация образа с пользователями скрипта
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Транспорт — relay скинченджера: он берёт ExportSync у провайдера catalog в
+-- getgenv().LookSync и приносит чужой образ в ApplyRemote. Формат {x=HideOriginal,
+-- i={{id,layerOrder,transform9?}}}; тип предмета не передаётся — проверяем сами через
+-- MarketplaceService, чтобы чужой пир не заставил грузить произвольный ассет.
+-- Чужой персонаж одевается тем же wearOn, но в своём контексте (Items/Hidden/Head)
+local SYNC_MAX_ITEMS=40
+app.Remote={}
+function app.ExportSync()
+    local outfit=app.ExportOutfit()
+    if #outfit.AssetIds==0 and not outfit.HideOriginal then return nil end
+    local items={}
+    for _,id in ipairs(outfit.AssetIds) do
+        if #items>=SYNC_MAX_ITEMS then break end
+        local d=app.Desired[id]
+        local entry={id,d and d.LayerOrder or 0}
+        local t=d and d.Transform
+        if t then
+            local identity=true
+            for axis=1,3 do
+                if t.Position[axis]~=0 or t.Rotation[axis]~=0 or t.Scale[axis]~=1 then identity=false end
+            end
+            if not identity then
+                entry[3]={t.Position[1],t.Position[2],t.Position[3],t.Rotation[1],t.Rotation[2],t.Rotation[3],t.Scale[1],t.Scale[2],t.Scale[3]}
+            end
+        end
+        table.insert(items,entry)
+    end
+    return {x=outfit.HideOriginal==true,i=items}
+end
+local function remoteValid(ctx,rev,ch)
+    return app.Alive and ctx.Alive and ctx.Revision==rev and ctx.Player.Character==ch and ch.Parent~=nil
+end
+local function clearRemoteVisuals(ctx)
+    local ids={}; for id in pairs(ctx.Items) do table.insert(ids,id) end
+    -- Голову возвращаем последней, как и у своего персонажа
+    table.sort(ids,function(a,b) return (ctx.Items[a] and ctx.Items[a].Kind==79) and false or (ctx.Items[b] and ctx.Items[b].Kind==79) end)
+    for _,id in ipairs(ids) do destroyItem(id,ctx) end
+    restoreHead(ctx)
+    restoreHidden(function() return true end,ctx)
+end
+-- Одно поколение на спавн и на версию образа: устаревшие загрузки не одевают новый персонаж
+local function dressRemote(ctx)
+    ctx.Revision+=1
+    local rev,ch,data=ctx.Revision,ctx.Player.Character,ctx.Data
+    clearRemoteVisuals(ctx)
+    if not data or not ch then return end
+    task.spawn(function()
+        local started=os.clock()
+        while remoteValid(ctx,rev,ch) and (not ch:FindFirstChildOfClass('Humanoid') or not ch:FindFirstChild('Head')) do
+            if os.clock()-started>15 then return end
+            task.wait(0.1)
+        end
+        while remoteValid(ctx,rev,ch) and not ctx.Player:HasAppearanceLoaded() and os.clock()-started<10 do task.wait(0.15) end
+        task.wait(0.65)
+        if not remoteValid(ctx,rev,ch) then return end
+        if data.x then pcall(hideOriginal,ch,ctx) end
+        local active=function() return remoteValid(ctx,rev,ch) end
+        for _,entry in ipairs(data.i) do
+            if not active() then return end
+            local id,order,tf=entry[1],entry[2],entry[3]
+            local ok,it=pcall(wearOn,ctx,ch,id,{LayerOrder=order>0 and order or nil},active)
+            if ok and it and it.Weld and not it.Layered and tf then
+                pcall(transformItem,it,{Position={tf[1],tf[2],tf[3]},Rotation={tf[4],tf[5],tf[6]},Scale={tf[7],tf[8],tf[9]}})
+            end
+        end
+    end)
+end
+local function forgetRemote(player)
+    local ctx=app.Remote[player]
+    if not ctx then return end
+    app.Remote[player]=nil
+    ctx.Alive=false; ctx.Revision+=1
+    for _,c in ipairs(ctx.Connections) do c:Disconnect() end
+    clearRemoteVisuals(ctx)
+end
+function app.ApplyRemote(target,data)
+    if not app.Alive or typeof(target)~='Instance' or not target:IsA('Player') or target==player then return end
+    local clean={x=type(data)=='table' and data.x==true,i={}}
+    if type(data)=='table' and type(data.i)=='table' then
+        for _,entry in ipairs(data.i) do
+            if #clean.i>=SYNC_MAX_ITEMS then break end
+            local id=type(entry)=='table' and tonumber(entry[1])
+            if id and id>0 and id%1==0 and id<2^53 then
+                local tf=entry[3]
+                if type(tf)=='table' then
+                    local numbers={}
+                    for i=1,9 do local v=tonumber(tf[i]); if not v or v~=v or math.abs(v)==math.huge then numbers=nil; break end; numbers[i]=v end
+                    tf=numbers
+                else tf=nil end
+                table.insert(clean.i,{id,math.max(0,math.floor(tonumber(entry[2]) or 0)),tf})
+            end
+        end
+    end
+    if #clean.i==0 and not clean.x then forgetRemote(target); return end
+    local ctx=app.Remote[target]
+    if not ctx then
+        ctx={Player=target,Items={},Hidden={},Revision=0,Alive=true,Connections={}}
+        app.Remote[target]=ctx
+        table.insert(ctx.Connections,connect(target.CharacterAdded,function() task.defer(dressRemote,ctx) end))
+        -- Внешность с сервера догрузилась после нашей примерки — одеваем заново
+        table.insert(ctx.Connections,connect(target.CharacterAppearanceLoaded,function(ch)
+            if ch==target.Character and ctx.Alive then dressRemote(ctx) end
+        end))
+    end
+    ctx.Data=clean
+    dressRemote(ctx)
+end
+local lookProvider={Export=app.ExportSync,Apply=app.ApplyRemote}
+pcall(function()
+    env.LookSync=env.LookSync or {Providers={}}
+    env.LookSync.Providers.catalog=lookProvider
+end)
+connect(Players.PlayerRemoving,forgetRemote)
+
 function app.Unload()
     if not app.Alive then return end
+    pcall(function()
+        if env.LookSync and env.LookSync.Providers.catalog==lookProvider then env.LookSync.Providers.catalog=nil end
+    end)
+    local remote={}; for target in pairs(app.Remote) do table.insert(remote,target) end
+    for _,target in ipairs(remote) do forgetRemote(target) end
     app.Reset(); app.Alive=false; searchSerial+=1
     for _,c in ipairs(app.Connections) do c:Disconnect() end
     for _,v in pairs(app.Cache) do v.Template:Destroy() end

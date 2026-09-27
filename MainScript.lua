@@ -9408,60 +9408,54 @@ do
 
     local FakeCosmetics = {
         hl = nil,
-        hlChar = nil,
         kb = nil,
-        kbChar = nil,
+        Remote = {},   -- [Player] = {Player, Data, Headless, Korblox, Connection}
     }
 
-    local function ApplyFakeHeadless(enabled, character)
-        character = character or LocalPlayer.Character
-        if not enabled then
-            if FakeCosmetics.hl then
-                for _, item in ipairs(FakeCosmetics.hl) do
-                    local inst, origTrans = item[1], item[2]
-                    if inst and inst.Parent then
-                        pcall(function() inst.Transparency = origTrans end)
-                    end
-                end
-                FakeCosmetics.hl = nil
-                FakeCosmetics.hlChar = nil
+    -- Headless на любом персонаже: прячем голову и её декали, помним исходную прозрачность.
+    -- Catalog может подменить Head динамической головой — прячем и новую
+    local function startHeadless(character)
+        local hl = { Character = character, Hidden = {}, Connections = {}, Alive = true }
+        local function hideObject(item)
+            if hl.Hidden[item] == nil then hl.Hidden[item] = item.Transparency end
+            pcall(function() item.Transparency = 1 end)
+        end
+        local function hideHead(head)
+            if not head:IsA("BasePart") then return end
+            hideObject(head)
+            for _, desc in ipairs(head:GetDescendants()) do
+                if desc:IsA("Decal") then hideObject(desc) end
             end
-            return
+            table.insert(hl.Connections, Core.Connect(head.DescendantAdded, function(desc)
+                if hl.Alive and desc:IsA("Decal") then hideObject(desc) end
+            end))
         end
-
-        if not character then return end
-        local head = character:FindFirstChild("Head") or character:WaitForChild("Head", 2)
-        if not head then return end
-
-        if FakeCosmetics.hl and FakeCosmetics.hlChar == character then
-            return
+        function hl.Cleanup()
+            if not hl.Alive then return end
+            hl.Alive = false
+            for _, connection in ipairs(hl.Connections) do connection:Disconnect() end
+            table.clear(hl.Connections)
+            for item, transparency in pairs(hl.Hidden) do
+                if item.Parent then pcall(function() item.Transparency = transparency end) end
+            end
+            table.clear(hl.Hidden)
         end
-
-        FakeCosmetics.hlChar = character
-        FakeCosmetics.hl = { { head, head.Transparency } }
-        pcall(function() head.Transparency = 1 end)
-
+        local head = character:FindFirstChild("Head")
+        if head then hideHead(head) end
+        -- Лицо классической головы бывает вне Head (старые риги) — как и раньше, по имени
         for _, desc in ipairs(character:GetDescendants()) do
-            if desc:IsA("Decal") and desc.Name == "face" then
-                table.insert(FakeCosmetics.hl, { desc, desc.Transparency })
-                pcall(function() desc.Transparency = 1 end)
-            end
+            if desc:IsA("Decal") and desc.Name == "face" then hideObject(desc) end
         end
+        table.insert(hl.Connections, Core.Connect(character.ChildAdded, function(child)
+            if hl.Alive and child.Name == "Head" then hideHead(child) end
+        end))
+        table.insert(hl.Connections, Core.Connect(character.Destroying, hl.Cleanup))
+        return hl
     end
 
-    local function ApplyFakeKorblox(enabled, character)
-        local previous = FakeCosmetics.kb
-        if not enabled then
-            if previous then previous.Cleanup() end
-            return
-        end
-        character = character or LocalPlayer.Character
-        if not character then return end
-        if previous and FakeCosmetics.kbChar == character then return end
-        if previous then previous.Cleanup() end
-
-        local kb = { Connections = {}, Hidden = {}, Revision = 0, Alive = true }
-        FakeCosmetics.kb, FakeCosmetics.kbChar = kb, character
+    -- Нога Korblox на любом R15-персонаже; onCleanup — чтобы владелец забыл ссылку
+    local function startKorblox(character, onCleanup)
+        local kb = { Character = character, Connections = {}, Hidden = {}, Revision = 0, Alive = true }
         local function restoreParts()
             for part, transparency in pairs(kb.Hidden) do
                 if part.Parent then pcall(function() part.Transparency = transparency end) end
@@ -9469,15 +9463,14 @@ do
             table.clear(kb.Hidden)
         end
         function kb.Cleanup()
+            if not kb.Alive then return end
             kb.Alive = false
             kb.Revision += 1
             for _, connection in ipairs(kb.Connections) do connection:Disconnect() end
             table.clear(kb.Connections)
             if kb.Visual then kb.Visual:Destroy(); kb.Visual = nil end
             restoreParts()
-            if FakeCosmetics.kb == kb then
-                FakeCosmetics.kb, FakeCosmetics.kbChar = nil, nil
-            end
+            if onCleanup then onCleanup(kb) end
         end
         local function connect(signal, callback)
             table.insert(kb.Connections, Core.Connect(signal, callback))
@@ -9591,10 +9584,108 @@ do
         end)
         connect(character.Destroying, kb.Cleanup)
         schedule()
+        return kb
+    end
+
+    local function ApplyFakeHeadless(enabled, character)
+        character = character or LocalPlayer.Character
+        if not enabled then
+            if FakeCosmetics.hl then FakeCosmetics.hl.Cleanup(); FakeCosmetics.hl = nil end
+            return
+        end
+
+        if not character then return end
+        local head = character:FindFirstChild("Head") or character:WaitForChild("Head", 2)
+        if not head then return end
+
+        if FakeCosmetics.hl and FakeCosmetics.hl.Alive and FakeCosmetics.hl.Character == character then
+            return
+        end
+        if FakeCosmetics.hl then FakeCosmetics.hl.Cleanup() end
+        FakeCosmetics.hl = startHeadless(character)
+    end
+
+    local function ApplyFakeKorblox(enabled, character)
+        local previous = FakeCosmetics.kb
+        if not enabled then
+            if previous then previous.Cleanup() end
+            return
+        end
+        character = character or LocalPlayer.Character
+        if not character then return end
+        if previous and previous.Character == character then return end
+        if previous then previous.Cleanup() end
+        FakeCosmetics.kb = startKorblox(character, function(kb)
+            if FakeCosmetics.kb == kb then FakeCosmetics.kb = nil end
+        end)
+    end
+
+    -- Синхронизация с пользователями скрипта: skinchanger приносит через relay {h, k}
+    -- чужого игрока и зовёт провайдер cosmetics. Вешаем то же самое на его персонажа
+    local function clearRemote(player)
+        local entry = FakeCosmetics.Remote[player]
+        if not entry then return end
+        FakeCosmetics.Remote[player] = nil
+        if entry.Connection then entry.Connection:Disconnect() end
+        if entry.Headless then entry.Headless.Cleanup() end
+        if entry.Korblox then entry.Korblox.Cleanup() end
+    end
+
+    local function dressRemote(entry)
+        if FakeCosmetics.Remote[entry.Player] ~= entry then return end
+        local character = entry.Player.Character
+        local hl, kb = entry.Headless, entry.Korblox
+        if hl and (not hl.Alive or hl.Character ~= character or not entry.Data.h) then hl.Cleanup(); entry.Headless = nil end
+        if kb and (not kb.Alive or kb.Character ~= character or not entry.Data.k) then kb.Cleanup(); entry.Korblox = nil end
+        if not character or not character.Parent then return end
+        if entry.Data.h and not entry.Headless then entry.Headless = startHeadless(character) end
+        if entry.Data.k and not entry.Korblox then entry.Korblox = startKorblox(character) end
+    end
+
+    local function applyRemote(player, data)
+        if typeof(player) ~= "Instance" or not player:IsA("Player") or player == LocalPlayer then return end
+        local headless = type(data) == "table" and data.h == true
+        local korblox = type(data) == "table" and data.k == true
+        if not headless and not korblox then clearRemote(player); return end
+        local entry = FakeCosmetics.Remote[player]
+        if not entry then
+            entry = { Player = player }
+            FakeCosmetics.Remote[player] = entry
+            entry.Connection = Core.Connect(player.CharacterAdded, function()
+                task.defer(dressRemote, entry)
+            end)
+        end
+        entry.Data = { h = headless, k = korblox }
+        dressRemote(entry)
+    end
+
+    local lookProvider = {
+        Export = function()
+            local headless, korblox = State.Settings.FakeHeadless == true, State.Settings.FakeKorblox == true
+            return (headless or korblox) and { h = headless, k = korblox } or nil
+        end,
+        Apply = applyRemote,
+    }
+    pcall(function()
+        local env = getgenv()
+        env.LookSync = env.LookSync or { Providers = {} }
+        env.LookSync.Providers.cosmetics = lookProvider
+    end)
+    Core.Connect(Players.PlayerRemoving, clearRemote)
+
+    local function StopLookSync()
+        pcall(function()
+            local registry = getgenv().LookSync
+            if registry and registry.Providers.cosmetics == lookProvider then registry.Providers.cosmetics = nil end
+        end)
+        local players = {}
+        for player in pairs(FakeCosmetics.Remote) do players[#players + 1] = player end
+        for _, player in ipairs(players) do clearRemote(player) end
     end
 
     State.Runtime.ApplyFakeHeadless = ApplyFakeHeadless
     State.Runtime.ApplyFakeKorblox = ApplyFakeKorblox
+    State.Runtime.StopLookSync = StopLookSync
 end
 
 -- Все функции уже объявлены: ошибка одной системы не пропускает остальные.
@@ -9616,6 +9707,7 @@ Core.StopFeatures = function()
         {"CoinTracer", RemoveCoinTracer},
         {"Headless", function() State.Runtime.ApplyFakeHeadless(false) end},
         {"Korblox", function() State.Runtime.ApplyFakeKorblox(false) end},
+        {"LookSync", function() if State.Runtime.StopLookSync then State.Runtime.StopLookSync() end end},
         {"UI optimization", Core.Movement.DisableUIOnly},
     }) do
         Core.Try(entry[1], entry[2])
