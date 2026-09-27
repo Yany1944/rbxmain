@@ -287,7 +287,6 @@ local State = {
         Ninja = Enum.KeyCode.Unknown,
         Floss = Enum.KeyCode.Unknown,
         ClickTP = Enum.KeyCode.Unknown,
-        GodMode = Enum.KeyCode.Unknown,
         FlingPlayer = Enum.KeyCode.Unknown,
         knifeThrow = Enum.KeyCode.Unknown,
         NoClip = Enum.KeyCode.Unknown,
@@ -341,7 +340,6 @@ local State = {
         CoinFarmDelay = 2,
         UndergroundMode = false,
         UndergroundOffset = 2.5,
-        GodModeWithAutoFarm = true,
         IsInvisible = false,
         AutoLoadOnTeleport = true,
         AutoRejoinEnabled = false,
@@ -356,7 +354,6 @@ local State = {
         FlingGhostVisual = false,
         WalkFlingEnabledByUser = false,
         NoClipEnabled = false,
-        GodModeEnabled = false,
         PlayerNicknamesESP = false,
         PingChamsEnabled = false,
         PingChamsShowLabel = true,
@@ -378,6 +375,7 @@ local State = {
         BlockPathSpeed = 0.2,
         FakeHeadless = false,
         FakeKorblox = false,
+        AntiTrapEnabled = false,
     },
     Cache = {
         CoinBlacklist = {},
@@ -422,10 +420,6 @@ local State = {
         NoClipConnection = nil,
         NoClipRespawnConnection = nil,
         NoClipObjects = nil,
-        GodModeConnections = {},
-        HealthConnection = nil,
-        DamageBlockerConnection = nil,
-        StateConnection = nil,
         PreviousMurderer = nil,
         PreviousSheriff = nil,
         HeroSent = false,
@@ -2345,16 +2339,6 @@ local function cleanupSession()
         State.Runtime.Connections = {}
     end)
 
-    -- Очистка GodMode connections (отдельное хранилище)
-    pcall(function()
-        for _, connection in ipairs(State.Runtime.GodModeConnections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
-            end
-        end
-        State.Runtime.GodModeConnections = {}
-    end)
-
     -- Восстановление FallenPartsDestroyHeight
     pcall(function()
         Workspace.FallenPartsDestroyHeight = State.Runtime.FallenPartsDestroyHeight
@@ -3489,6 +3473,94 @@ local function StartTrapTracking()
     end)
 
     Core.Track(connection)
+end
+
+-- Anti-Trap: ловушка убийцы (перк Trap) действует только на клиенте жертвы. Сервер
+-- шлёт TrapSystem.TrapHitLocal, а игровой TrapScriptClient ставит WalkSpeed 0.01 и
+-- JumpPower 1 на 4 с, показывает TrapGUI и шлёт TrapReplicate (по нему остальные и
+-- убийца видят сработавшую ловушку). Отключаем именно этот обработчик — нет ни
+-- замедления, ни окна, ни сигнала убийце. Без getconnections — запасной путь:
+-- свой обработчик сразу возвращает скорость и убирает окно.
+do
+    local anti = {Muted = {}, Fallback = nil, Watch = nil}
+
+    local function trapRemote()
+        local system = ReplicatedStorage:FindFirstChild("TrapSystem")
+        return system and system:FindFirstChild("TrapHitLocal")
+    end
+
+    local function isGameHandler(fn)
+        local ok, source = pcall(debug.info, fn, "s")
+        return ok and type(source) == "string" and source:find("TrapScriptClient", 1, true) ~= nil
+    end
+
+    -- true — игровые обработчики найдены и отключены (или их нет)
+    local function muteGameHandlers(remote)
+        if type(getconnections) ~= "function" then return false end
+        local ok = pcall(function()
+            for _, conn in ipairs(getconnections(remote.OnClientEvent)) do
+                if not anti.Muted[conn] and conn.Function and isGameHandler(conn.Function) then
+                    conn:Disable()
+                    anti.Muted[conn] = true
+                end
+            end
+        end)
+        return ok
+    end
+
+    local function unmuteGameHandlers()
+        for conn in pairs(anti.Muted) do pcall(function() conn:Enable() end) end
+        table.clear(anti.Muted)
+    end
+
+    -- Запасной путь: игровой обработчик уже замедлил — возвращаем как было
+    local function undoTrap()
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = State.Runtime.SettingsDirty and State.Settings.WalkSpeed or CONFIG.DefaultWalkSpeed
+            humanoid.JumpPower = State.Runtime.SettingsDirty and State.Settings.JumpPower or 50
+        end
+        local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        local trapGui = gui and gui:FindFirstChild("TrapGUI")
+        if trapGui then trapGui:Destroy() end
+    end
+
+    State.Runtime.SetAntiTrap = function(enabled)
+        State.Settings.AntiTrapEnabled = enabled == true
+        if anti.Fallback then anti.Fallback:Disconnect(); anti.Fallback = nil end
+        if anti.Watch then Core.Tasks.cancel(anti.Watch); anti.Watch = nil end
+        unmuteGameHandlers()
+        if not State.Settings.AntiTrapEnabled then return end
+
+        local remote = trapRemote()
+        if not remote then
+            -- Не MM2 или система ловушек ещё не загружена — ждём её в фоне
+            anti.Watch = Core.Tasks.spawn(function()
+                local system = ReplicatedStorage:WaitForChild("TrapSystem", 60)
+                if system and system:WaitForChild("TrapHitLocal", 10) and State.Settings.AntiTrapEnabled then
+                    State.Runtime.SetAntiTrap(true)
+                end
+            end)
+            return
+        end
+        if not muteGameHandlers(remote) then
+            anti.Fallback = Core.Connect(remote.OnClientEvent, function()
+                Core.Tasks.defer(undoTrap)
+            end)
+        end
+        -- Включили уже сидя в ловушке: игровой таймер «через 4 с вернуть» мог оборваться
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.WalkSpeed < 0.1 then undoTrap() end
+        -- TrapScriptClient может переподключиться (перезагрузка PlayerScripts) — перепроверяем
+        anti.Watch = Core.Tasks.spawn(function()
+            while State.Settings.AntiTrapEnabled do
+                task.wait(5)
+                if not anti.Fallback then muteGameHandlers(remote) end
+            end
+        end)
+    end
 end
 
 -- Единая точка реакции: «текущий ган — вот этот» либо «гана нет».
@@ -5516,143 +5588,14 @@ local function CleanupCoinBlacklist()
 
 end
 
--- ResetCharacter() - Ресет с сохранением GodMode
+-- ResetCharacter() - Ресет персонажа (автофарм: выйти из раунда до его конца)
 local function ResetCharacter()
-
-
-    local wasGodModeEnabled = State.Settings.GodModeEnabled
-
-    if wasGodModeEnabled then
-
-        State.Settings.GodModeEnabled = false
-
-        -- Отключаем ВСЕ connections
-        if State.Runtime.HealthConnection then
-            State.Runtime.HealthConnection:Disconnect()
-            State.Runtime.HealthConnection = nil
-        end
-        if State.Runtime.StateConnection then
-            State.Runtime.StateConnection:Disconnect()
-            State.Runtime.StateConnection = nil
-        end
-        if State.Runtime.DamageBlockerConnection then
-            State.Runtime.DamageBlockerConnection:Disconnect()
-            State.Runtime.DamageBlockerConnection = nil
-        end
-
-        for _, connection in ipairs(State.Runtime.GodModeConnections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
-            end
-        end
-        State.Runtime.GodModeConnections = {}  -- Очищаем таблицу
-
-        -- Возвращаем нормальное здоровье
-        local character = LocalPlayer.Character
-        if character then
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                pcall(function()
-                    humanoid.MaxHealth = 100
-                    humanoid.Health = 100
-                end)
-            end
-
-            local ff = character:FindFirstChild("ForceField")
-            if ff then
-                ff:Destroy()
-            end
-        end
-    end
-
-    -- ДЕЛАЕМ РЕСЕТ
     pcall(function()
         local character = LocalPlayer.Character
-        if character then
-            local humanoid = character:FindFirstChild("Humanoid")
-            if humanoid then
-                humanoid.Health = 0
-            end
-        end
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid.Health = 0 end
     end)
-
-    -- ЖДЁМ НОВОГО ПЕРСОНАЖА
-    if wasGodModeEnabled then
-        Core.Tasks.spawn(function()
-            -- ВАЖНО: проверяем что автофарм всё ещё работает
-            if not State.Settings.AutoFarmEnabled then
-
-                return
-            end
-
-            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-
-            -- Проверка ещё раз перед восстановлением
-            if not State.Settings.AutoFarmEnabled then
-                return
-            end
-
-
-            local humanoid = character:WaitForChild("Humanoid", 10)
-            if not humanoid then
-
-                return
-            end
-
-            -- Финальная проверка
-            if not State.Settings.AutoFarmEnabled then
-                return
-            end
-
-            task.wait(0.5)
-
-
-            State.Settings.GodModeEnabled = true
-
-            if ApplyGodMode then ApplyGodMode() end
-            if SetupHealthProtection then SetupHealthProtection() end
-            if SetupDamageBlocker then SetupDamageBlocker() end
-
-            -- Очищаем старые connections перед созданием новых
-            for _, connection in ipairs(State.Runtime.GodModeConnections) do
-                if connection and connection.Connected then
-                    connection:Disconnect()
-                end
-            end
-            State.Runtime.GodModeConnections = {}
-
-            -- HP monitoring
-            local godModeConnection = Core.Connect(RunService.Heartbeat, function()
-                if State.Settings.GodModeEnabled and LocalPlayer.Character then
-                    local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                    if hum then
-                        if hum.Health ~= math.huge then
-                            hum.Health = math.huge
-                        end
-                        local state = hum:GetState()
-                        if state == Enum.HumanoidStateType.Dead then
-                            hum:ChangeState(Enum.HumanoidStateType.Running)
-                        end
-                    end
-                end
-            end)
-            table.insert(State.Runtime.GodModeConnections, godModeConnection)
-
-            -- Respawn protection
-            local respawnConnection = Core.Connect(LocalPlayer.CharacterAdded, function(newChar)
-                if State.Settings.GodModeEnabled then
-                    task.wait(0.5)
-                    if ApplyGodMode then ApplyGodMode() end
-                    if SetupHealthProtection then SetupHealthProtection() end
-                    if SetupDamageBlocker then SetupDamageBlocker() end
-                end
-            end)
-            table.insert(State.Runtime.GodModeConnections, respawnConnection)
-
-        end)
-    end
 end
-
 
 local function FloatCharacter()
     local character = LocalPlayer.Character
@@ -5958,7 +5901,6 @@ end
 local shootMurderer
 local InstantKillAll
 local knifeThrow
-local ToggleGodMode
 
 local function CountPlayersWithKnife()
     local count = 0
@@ -5995,12 +5937,6 @@ local function StartAutoFarm()
 
     State.Runtime.CoinFarmThread = Core.Tasks.spawn(function()
         local allowFly = false
-
-        if State.Settings.GodModeWithAutoFarm and not State.Settings.GodModeEnabled then
-            pcall(function()
-                ToggleGodMode()
-            end)
-        end
 
         if State.Settings.AutoFarmEnabled and not State.Settings.IsInvisible then
             pcall(function()
@@ -6197,34 +6133,12 @@ local function StartAutoFarm()
                             UnfloatCharacter()
                         end)
 
-                        if State.Settings.GodModeWithAutoFarm and State.Settings.GodModeEnabled then
-                            pcall(function()
-                                ToggleGodMode()
-                            end)
-                        end
-
                         ResetCharacter()
                         State.Cache.CoinBlacklist = {}
                         noCoinsAttempts = 0
                         allowFly = false
 
                         task.wait(2)
-
-                        if State.Settings.GodModeWithAutoFarm then
-                            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                            local humanoid = character:WaitForChild("Humanoid", 5)
-
-                            if humanoid then
-                                task.wait(1)
-
-                                if not State.Settings.GodModeEnabled then
-                                    pcall(function()
-                                        ToggleGodMode()
-                                    end)
-                                end
-                                task.wait(0.3)
-                            end
-                        end
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
@@ -6474,32 +6388,11 @@ local function StartAutoFarm()
                         continue
                     end
 
-                    if State.Settings.GodModeWithAutoFarm and State.Settings.GodModeEnabled then
-                        pcall(function()
-                            ToggleGodMode()
-                        end)
-                    end
-
                     ResetCharacter()
                     State.Cache.CoinBlacklist = {}
                     noCoinsAttempts = 0
 
                     task.wait(2)
-
-                    if State.Settings.GodModeWithAutoFarm then
-                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                        local humanoid = character:WaitForChild("Humanoid", 5)
-
-                        if humanoid then
-                            task.wait(1)
-
-                            if not State.Settings.GodModeEnabled then
-                                pcall(function()
-                                    ToggleGodMode()
-                                end)
-                            end
-                        end
-                    end
 
                     repeat
                         if not State.Settings.IsInvisible then
@@ -6525,38 +6418,12 @@ local function StartAutoFarm()
                         UnfloatCharacter()
                     end)
 
-                    -- Выключаем годмод перед ресетом
-                    if State.Settings.GodModeWithAutoFarm and State.Settings.GodModeEnabled then
-                        pcall(function()
-                            ToggleGodMode()  -- Выключаем только если был включен автофармом
-                        end)
-
-                    end
-
                     ResetCharacter()
                     State.Cache.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     allowFly = false
 
                     task.wait(2)
-
-                    -- ИСПРАВЛЕННЫЙ КОД: Включаем годмод после респавна
-                    if State.Settings.GodModeWithAutoFarm then  -- БЕЗ проверки State.GodModeEnabled!
-                        -- Ждём появления персонажа
-                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                        local humanoid = character:WaitForChild("Humanoid", 5)
-
-                        if humanoid then
-                            task.wait(1)  -- Даём серверу инициализировать персонажа
-
-                            if not State.Settings.GodModeEnabled then
-                                pcall(function()
-                                    ToggleGodMode()
-                                end)
-
-                            end
-                        end
-                    end
 
                     repeat
                         task.wait(1)
@@ -6636,175 +6503,8 @@ local function StopXPFarm()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 12: GODMODE SYSTEM
+-- БЛОК 12: PLAYER NICKNAMES ESP
 -- ══════════════════════════════════════════════════════════════════════════════
-local ApplyGodMode, SetupHealthProtection, SetupDamageBlocker
-
--- ApplyGodMode() - Установка Health = math.huge
-ApplyGodMode = function()
-    if not State.Settings.GodModeEnabled then return end
-
-    local character = LocalPlayer.Character
-    if not character then return end
-
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-
-    pcall(function()
-        State.Runtime.GodModeOriginal = State.Runtime.GodModeOriginal or {}
-        if not State.Runtime.GodModeOriginal[humanoid] then
-            State.Runtime.GodModeOriginal[humanoid] = {MaxHealth = humanoid.MaxHealth, Health = humanoid.Health}
-        end
-        humanoid.MaxHealth = math.huge
-        humanoid.Health = math.huge
-
-        if not character:FindFirstChild("ForceField") then
-            local ff = Core.New("ForceField")
-            ff.Visible = false
-            ff.Parent = character
-            State.Runtime.GodModeForceFields = State.Runtime.GodModeForceFields or {}
-            State.Runtime.GodModeForceFields[ff] = true
-        end
-
-        if State.Settings.WalkSpeed ~= 18 then
-            humanoid.WalkSpeed = State.Settings.WalkSpeed
-        end
-        if State.Settings.JumpPower ~= 50 then
-            humanoid.JumpPower = State.Settings.JumpPower
-        end
-    end)
-end
-
--- SetupHealthProtection() - Защита Health/StateChanged
-SetupHealthProtection = function()
-    if State.Runtime.HealthConnection then
-        State.Runtime.HealthConnection:Disconnect()
-    end
-
-    if State.Runtime.StateConnection then
-        State.Runtime.StateConnection:Disconnect()
-    end
-
-    local character = LocalPlayer.Character
-    if not character then return end
-
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-
-    State.Runtime.StateConnection = Core.Connect(humanoid.StateChanged, function(oldState, newState)
-        if State.Settings.GodModeEnabled then
-            if newState == Enum.HumanoidStateType.Dead then
-                humanoid:ChangeState(Enum.HumanoidStateType.Running)
-                humanoid.Health = math.huge
-            end
-        end
-    end)
-    Core.Track(State.Runtime.StateConnection)
-
-    State.Runtime.HealthConnection = Core.Connect(humanoid:GetPropertyChangedSignal("Health"), function()
-        if State.Settings.GodModeEnabled and humanoid.Health < math.huge then
-            humanoid.Health = math.huge
-        end
-    end)
-
-    Core.Track(State.Runtime.HealthConnection)
-end
--- SetupDamageBlocker() - Блокировка Ragdoll/CreatorTag
-SetupDamageBlocker = function()
-    if State.Runtime.DamageBlockerConnection then
-        State.Runtime.DamageBlockerConnection:Disconnect()
-    end
-
-    local character = LocalPlayer.Character
-    if not character then return end
-
-    State.Runtime.DamageBlockerConnection = Core.Connect(character.ChildAdded, function(child)
-        if State.Settings.GodModeEnabled then
-            if child.Name == "Ragdoll" or child.Name == "CreatorTag" or
-               (child:IsA("ObjectValue") and child.Name == "creator") then
-                Core.Tasks.spawn(function()
-                    child:Destroy()
-                end)
-            end
-        end
-    end)
-
-    Core.Track(State.Runtime.DamageBlockerConnection)
-end
-
--- ToggleGodMode() - Включение/отключение
-ToggleGodMode = function()
-    State.Settings.GodModeEnabled = not State.Settings.GodModeEnabled
-    if State.Settings.GodModeEnabled then
-        if State.Settings.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
-        end
-
-        ApplyGodMode()
-        SetupHealthProtection()
-        SetupDamageBlocker()
-
-        -- HP monitoring
-        local godModeConnection = Core.Connect(RunService.Heartbeat, function()
-            if State.Settings.GodModeEnabled and LocalPlayer.Character then
-                local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    if humanoid.Health ~= math.huge then
-                        humanoid.Health = math.huge
-                    end
-                    local state = humanoid:GetState()
-                    if state == Enum.HumanoidStateType.Dead then
-                        humanoid:ChangeState(Enum.HumanoidStateType.Running)
-                    end
-                end
-            end
-        end)
-        table.insert(State.Runtime.GodModeConnections, godModeConnection)  -- В ОТДЕЛЬНОЕ хранилище
-
-        local respawnConnection = Core.Connect(LocalPlayer.CharacterAdded, function(character)
-            if State.Settings.GodModeEnabled then
-                task.wait(0.5)
-                ApplyGodMode()
-                SetupHealthProtection()
-                SetupDamageBlocker()
-            end
-        end)
-        table.insert(State.Runtime.GodModeConnections, respawnConnection)
-    else
-        if State.Settings.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",CONFIG.Colors.Text)
-        end
-
-        -- Отключаем локальные connections
-        if State.Runtime.HealthConnection then
-            State.Runtime.HealthConnection:Disconnect()
-            State.Runtime.HealthConnection = nil
-        end
-        if State.Runtime.StateConnection then
-            State.Runtime.StateConnection:Disconnect()
-            State.Runtime.StateConnection = nil
-        end
-        if State.Runtime.DamageBlockerConnection then
-            State.Runtime.DamageBlockerConnection:Disconnect()
-            State.Runtime.DamageBlockerConnection = nil
-        end
-
-        -- Очищаем ТОЛЬКО GodMode connections
-        for _, connection in ipairs(State.Runtime.GodModeConnections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
-            end
-        end
-        State.Runtime.GodModeConnections = {}
-
-        for humanoid, original in pairs(State.Runtime.GodModeOriginal or {}) do
-            pcall(function() humanoid.MaxHealth = original.MaxHealth; humanoid.Health = original.Health end)
-        end
-        for ff in pairs(State.Runtime.GodModeForceFields or {}) do pcall(function() ff:Destroy() end) end
-        State.Runtime.GodModeOriginal = {}
-        State.Runtime.GodModeForceFields = {}
-    end
-end
 
 ----------------------------------------------------------------
 -- PLAYER NICKNAMES ESP
@@ -7155,14 +6855,28 @@ knifeThrow = function(silent)
         if nearestPlayer and nearestPlayer.Character then
             local targetHRP = nearestPlayer.Character:FindFirstChild("HumanoidRootPart")
             if targetHRP then
-                -- Позади игрока на 4 studs, центр торса
-                local behindOffset = -targetHRP.CFrame.LookVector * 4
-                local upOffset = Vector3.new(0, 0.5, 0)
-                spawnPosition = targetHRP.Position + behindOffset + upOffset
+                -- Как у Magic: предикт по пингу + полёт ножа, прицел в реальный торс,
+                -- точка появления ножа — с чистым путём до цели (раньше: ровно 4 studs
+                -- за спиной без проверки стен и без упреждения)
+                local targetHum = nearestPlayer.Character:FindFirstChildOfClass("Humanoid")
+                local pingValue = 50
+                pcall(function()
+                    pingValue = tonumber(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString():match("%d+")) or 50
+                end)
+                local spawnDistance = 3
+                local travel = spawnDistance / 96   -- ThrowSpeed ножа по умолчанию, studs/s
+                local aimPoint = State.Runtime.ComputeAimPoint(nearestPlayer.Character, targetHRP, targetHum,
+                    pingValue / 1000 + (State.Settings.ShootLead or 0.09) + travel)
+                local velocity = targetHRP.AssemblyLinearVelocity
+                local flatVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+                local preferred = {-targetHRP.CFrame.LookVector}
+                if flatVelocity.Magnitude > 2 then table.insert(preferred, 1, flatVelocity) end
+                spawnPosition = State.Runtime.FindClearOrigin(aimPoint, nearestPlayer.Character, preferred, spawnDistance)
 
-                -- Вектор через центр HumanoidRootPart
-                local directionToTorso = (targetHRP.Position - spawnPosition).Unit
-                targetPosition = targetHRP.Position + (directionToTorso * 500)
+                -- Нож летит дальше цели — прицел не должен обрываться у тела
+                local direction = (aimPoint - spawnPosition)
+                direction = direction.Magnitude > 1e-3 and direction.Unit or -targetHRP.CFrame.LookVector
+                targetPosition = aimPoint + direction * 500
             else
                 spawnPosition = LocalPlayer.Character.RightHand.Position
                 targetPosition = mouse.Hit.Position
@@ -7301,6 +7015,59 @@ local function computeAimPoint(char, hrp, thum, t)
     if not part then return predictedHRP end
     return part.Position + (predictedHRP - hrp.Position)
 end
+-- knifeThrow объявлен в файле раньше — достаёт предиктор отсюда
+State.Runtime.ComputeAimPoint = computeAimPoint
+
+-- ─── Свободная точка вылета (Magic-выстрел и Spawn Knife Near Player) ─────────
+-- Сервер бьёт лучом (или гонит нож) от присланной нами точки к цели, и стена
+-- между ними съедает попадание. Раньше точка стояла на фиксированном смещении
+-- (5 studs по ходу / 3 за спиной) — у стены она уходила внутрь стены или за неё.
+-- Теперь перебираем направления от цели: сначала предпочтительные, потом круг и
+-- круг под углом сверху; луч от цели к точке проверяет, что путь чист. Берём
+-- первое полностью чистое, иначе — с наибольшим свободным расстоянием.
+-- Лучи ловят всё с CanQuery (включая некасаемые), как консервативный серверный.
+-- Функция в State.Runtime: у чанка почти исчерпан лимит локалей.
+State.Runtime.FindClearOrigin = function(targetPos, targetChar, preferred, distance)
+    distance = distance or 4
+    local minDistance = math.min(1.5, distance)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {targetChar, LocalPlayer.Character, Workspace.CurrentCamera}
+
+    local directions = {}
+    for _, dir in ipairs(preferred or {}) do
+        if dir.Magnitude > 1e-3 then table.insert(directions, dir.Unit) end
+    end
+    for i = 0, 11 do
+        local a = i * math.pi / 6
+        table.insert(directions, Vector3.new(math.cos(a), 0, math.sin(a)))
+    end
+    for i = 0, 7 do
+        local a = i * math.pi / 4
+        table.insert(directions, Vector3.new(math.cos(a), 1, math.sin(a)).Unit)
+    end
+    table.insert(directions, Vector3.yAxis)
+
+    -- Луч, стартующий внутри детали, её не видит — поэтому путь проверяем в обе
+    -- стороны: от цели наружу (находит стену) и от вылета к цели (как серверный луч)
+    local function clearBack(origin)
+        return Workspace:Raycast(origin, targetPos - origin, params) == nil
+    end
+
+    local bestOrigin, bestFree = nil, -1
+    for _, dir in ipairs(directions) do
+        local hit = Workspace:Raycast(targetPos, dir * distance, params)
+        local free = hit and hit.Distance - 0.5 or distance
+        local origin = targetPos + dir * math.max(free, 0.1)
+        if clearBack(origin) then
+            if not hit then return origin end
+            if free > bestFree then bestFree, bestOrigin = free, origin end
+        end
+    end
+    if bestFree >= minDistance then return bestOrigin end
+    -- Цель зажата со всех сторон: вылет почти из самой цели
+    return bestOrigin or targetPos + Vector3.yAxis * 0.5
+end
 
 shootMurderer = function(forceMagic)
     -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
@@ -7389,19 +7156,16 @@ shootMurderer = function(forceMagic)
         -- Интент-предикт: горизонталь по MoveDirection, вертикаль парабола + пол
         local predictedPos = computeAimPoint(murderer.Character, murdererHRP, murdererHum, predictionTime)
 
-        local spawnPosition, targetPosition
-
-        if enemyVelocity.Magnitude > 2 then
-            -- Цель бежит: Спавним пулю СПЕРЕДИ (5 studs) и стреляем В НЕГО
-            local moveDir = enemyVelocity.Unit
-            spawnPosition = predictedPos + (moveDir * 5)
-            targetPosition = predictedPos
-        else
-            -- Цель стоит: Спавним СЗАДИ (3 studs) используя LookVector
-            local backDir = -murdererHRP.CFrame.LookVector
-            spawnPosition = predictedPos + (backDir * 3)
-            targetPosition = predictedPos
-        end
+        -- Предпочтение прежнее (по ходу, если бежит; за спиной, если стоит; затем
+        -- с нашей стороны), но точка вылета берётся только с чистым путём до цели
+        local flatVelocity = Vector3.new(enemyVelocity.X, 0, enemyVelocity.Z)
+        local preferred = {}
+        if flatVelocity.Magnitude > 2 then table.insert(preferred, flatVelocity) end
+        table.insert(preferred, -murdererHRP.CFrame.LookVector)
+        local myRoot = shooterChar:FindFirstChild("HumanoidRootPart")
+        if myRoot then table.insert(preferred, myRoot.Position - predictedPos) end
+        local spawnPosition = State.Runtime.FindClearOrigin(predictedPos, murderer.Character, preferred, 4)
+        local targetPosition = predictedPos
 
         argsShootRemote = {
             [1] = CFrame.lookAt(spawnPosition, targetPosition),
@@ -9397,10 +9161,6 @@ local function HandleActionInput(input)
         State.Runtime.ClickTPActive = true
     end
 
-    if input.KeyCode == State.Settings.Keybinds.GodMode and State.Settings.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
-        ToggleGodMode()
-    end
-
     if input.KeyCode == State.Settings.Keybinds.FlingPlayer and State.Settings.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
         if State.Runtime.SelectedPlayerForFling then
             local targetPlayer = getPlayerByName(State.Runtime.SelectedPlayerForFling)
@@ -9850,8 +9610,8 @@ Core.StopFeatures = function()
         {"Hitbox", DisableExtendedHitbox}, {"Pickup", DisableInstantPickup},
         {"VelocitySpoof", function() State.Runtime.SetVelocitySpoof(false) end},
         {"KillAura", function() ToggleKillAura(false) end},
-        {"GodMode", function() if State.Settings.GodModeEnabled then ToggleGodMode() end end},
         {"CoinMuter", StopCoinMuter}, {"FriendViewer", StopFriendViewer},
+        {"AntiTrap", function() State.Runtime.SetAntiTrap(false) end},
         {"BulletTracers", function() ToggleBulletTracers(false) end},
         {"CoinTracer", RemoveCoinTracer},
         {"Headless", function() State.Runtime.ApplyFakeHeadless(false) end},
@@ -9972,6 +9732,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             ApplyKillAuraZoneStyle()
         end,
         InstantPickup = function(on) if on then EnableInstantPickup() else DisableInstantPickup() end end,
+        AntiTrap = function(on) State.Runtime.SetAntiTrap(on) end,
 
         -- Farming
         AutoFarm = function(on)
@@ -10700,7 +10461,6 @@ do
         MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key + LMB)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
-        MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
 
         MainTab:CreateSection("FLY SETTINGS", "right")
         MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
@@ -10811,6 +10571,9 @@ do
         CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", false)
+
+        CombatTab:CreateSection("PROTECTION", "right")
+        CombatTab:CreateToggle("Anti Trap", "Murderer traps don't slow you, murderer isn't notified", "AntiTrap", false)
 
         CombatTab:CreateSection("EXTENDED HITBOX", "right")
         CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
@@ -10923,7 +10686,7 @@ do
             AFKMode = "AFKModeEnabled", AntiFling = "AntiFlingEnabled", WalkFling = "WalkFlingEnabledByUser",
             ExtendedHitbox = "ExtendedHitboxEnabled", InstantPickup = "InstantPickupEnabled", BulletTracers = "BulletTracersEnabled",
             FriendViewer = "FriendViewerEnabled", PingChams = "PingChamsEnabled", FakePosition = "FakePositionEnabled",
-            VelocitySpoof = "VelocitySpoofEnabled",
+            VelocitySpoof = "VelocitySpoofEnabled", AntiTrap = "AntiTrapEnabled",
             Orbit = "OrbitEnabled", LoopFling = "LoopFlingEnabled", BlockPath = "BlockPathEnabled",
             HandleAutoRejoin = "AutoRejoinEnabled", HandleAutoReconnect = "AutoReconnectEnabled",
         }
