@@ -1334,6 +1334,7 @@ do
                 -- частей и клонировались вместе с ними — у призрака была вторая аура
                 for _, d in ipairs(gp:GetDescendants()) do
                     if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("Motor6D")
+                        or d:IsA("Decal")
                         or d:GetAttribute("StandaloneVFX_Owner") ~= nil
                         or d:IsA("ParticleEmitter") or d:IsA("Beam") or d:IsA("Trail") or d:IsA("Light")
                         or d:IsA("Fire") or d:IsA("Smoke") or d:IsA("Sparkles") then
@@ -1611,7 +1612,10 @@ local function StartPingChams()
                     local off = samplePast.offsets and samplePast.offsets[src]
                     if off then
                         gp.Color        = CONFIG.Colors.Accent
-                        gp.Transparency = State.Runtime.PingChamsTransparency
+                        -- Скрытое на настоящем теле (Fake Headless — голова, Fake Korblox —
+                        -- настоящая правая нога) скрыто и у призрака; нога Korblox —
+                        -- обычная часть персонажа и показывается как есть
+                        gp.Transparency = src.Transparency >= 0.99 and 1 or State.Runtime.PingChamsTransparency
                         gp.Material     = Enum.Material.ForceField
                         gp.CFrame       = State.Runtime.PingChamsSmoothFrame * off
                     else
@@ -9879,13 +9883,16 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         ViewClip = function(on) if on then Core.Movement.EnableViewClip() else Core.Movement.DisableViewClip() end end,
 
         -- Cosmetics
+        -- Копия Spin Local Too клонирует части с их видом — после смены косметики пересобираем
         FakeHeadless = function(on)
             State.Settings.FakeHeadless = on
             if State.Runtime.ApplyFakeHeadless then State.Runtime.ApplyFakeHeadless(on) end
+            if State.Runtime.RefreshLocalSpin then State.Runtime.RefreshLocalSpin() end
         end,
         FakeKorblox = function(on)
             State.Settings.FakeKorblox = on
             if State.Runtime.ApplyFakeKorblox then State.Runtime.ApplyFakeKorblox(on) end
+            if State.Runtime.RefreshLocalSpin then State.Runtime.RefreshLocalSpin() end
         end,
 
         -- Notifications toggle

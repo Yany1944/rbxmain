@@ -1120,17 +1120,45 @@ function VFX.RecolorAura(name)
     end
 end
 
-function VFX.ToggleAura(name, enabled, targetCharacter)
-    assert(AurasDB[name], 'Unknown aura '..tostring(name))
-    enabled=enabled==true
-    State.Auras[name]=enabled
-    VFX.ClearAura(name)
-    if not enabled or State.Unloaded then return end
-    local char=targetCharacter or LocalPlayer.Character
-    if not char or not char:FindFirstChild('HumanoidRootPart') then return end
+-- Ауры с частями, которых ещё нет (R15 догружает голову/конечности уже после
+-- торса — отсюда было «Missing character part Head»), ждут их, а не падают
+local PendingAura = {}
+local AURA_PART_WAIT = 10   -- сек ожидания недостающих частей персонажа
+
+-- Части тела, на которые у ауры нет опоры; пусто — всё на месте
+local function missingAuraParts(name, char)
+    local missing = {}
+    for _, item in ipairs(AurasDB[name]) do
+        if not item.ParentId and not resolveCharPart(char, item.BodyPart) then
+            missing[item.BodyPart] = true
+        end
+    end
+    local list = {}
+    for part in pairs(missing) do table.insert(list, part) end
+    return list
+end
+
+-- Собирает ауру. Объекты без опоры (части так и не появилось) пропускаются вместе
+-- со всем, что к ним прицеплено, — остальная аура работает
+local function buildAura(name, char)
     local items=AurasDB[name]
     local record={Objects={},Colors={},Character=char}
     AuraObjects[name]=record
+    local skipped={}
+    local function isSkipped(index, depth)
+        if skipped[index]~=nil then return skipped[index] end
+        local item=items[index]
+        local result
+        if depth>#items then
+            result=true
+        elseif item.ParentId then
+            result=isSkipped(item.ParentId, depth+1)
+        else
+            result=resolveCharPart(char,item.BodyPart)==nil
+        end
+        skipped[index]=result
+        return result
+    end
     local ok,err=pcall(function()
         -- Allocate before resolving any references: repeated names are safe.
         for i,item in ipairs(items) do
@@ -1149,19 +1177,23 @@ function VFX.ToggleAura(name, enabled, targetCharacter)
             end
         end
         for i,item in ipairs(items) do
-            local parent=item.ParentId and record.Objects[item.ParentId] or resolveCharPart(char,item.BodyPart)
-            assert(parent, 'Missing character part '..item.BodyPart)
             local obj=record.Objects[i]
-            if not item.ParentId and obj:IsA('Attachment') and parent.Name~=item.BodyPart then
-                if item.BodyPart=='Torso' and parent.Name=='UpperTorso' then
-                    obj.CFrame=CFrame.new(0,-0.7,0)*obj.CFrame
-                elseif item.BodyPart=='UpperTorso' and parent.Name=='Torso' then
-                    obj.CFrame=CFrame.new(0,0.7,0)*obj.CFrame
-                elseif item.BodyPart=='LowerTorso' and parent.Name=='Torso' then
-                    obj.CFrame=CFrame.new(0,-0.5,0)*obj.CFrame
+            if isSkipped(i, 0) then
+                -- Опоры нет: объект не показываем (уничтожит ClearAura вместе с остальными)
+                record.Colors[obj]=nil
+            else
+                local parent=item.ParentId and record.Objects[item.ParentId] or resolveCharPart(char,item.BodyPart)
+                if not item.ParentId and obj:IsA('Attachment') and parent.Name~=item.BodyPart then
+                    if item.BodyPart=='Torso' and parent.Name=='UpperTorso' then
+                        obj.CFrame=CFrame.new(0,-0.7,0)*obj.CFrame
+                    elseif item.BodyPart=='UpperTorso' and parent.Name=='Torso' then
+                        obj.CFrame=CFrame.new(0,0.7,0)*obj.CFrame
+                    elseif item.BodyPart=='LowerTorso' and parent.Name=='Torso' then
+                        obj.CFrame=CFrame.new(0,-0.5,0)*obj.CFrame
+                    end
                 end
+                obj.Parent=parent
             end
-            obj.Parent=parent
         end
         VFX.RecolorAura(name)
     end)
@@ -1177,7 +1209,41 @@ function VFX.ToggleAura(name, enabled, targetCharacter)
     return true
 end
 
+function VFX.ToggleAura(name, enabled, targetCharacter)
+    assert(AurasDB[name], 'Unknown aura '..tostring(name))
+    enabled=enabled==true
+    State.Auras[name]=enabled
+    VFX.ClearAura(name)
+    PendingAura[name]=nil
+    if not enabled or State.Unloaded then return end
+    local char=targetCharacter or LocalPlayer.Character
+    -- Персонажа нет (смерть/респаун): аура включится сама в CharacterAdded
+    if not char or not char:FindFirstChild('HumanoidRootPart') then return true end
+    if #missingAuraParts(name, char)==0 then return buildAura(name, char) end
+
+    -- Части догружаются: ждём их, затем собираем; что так и не появилось — пропускаем
+    local token={}
+    PendingAura[name]=token
+    task.spawn(function()
+        local deadline=os.clock()+AURA_PART_WAIT
+        while os.clock()<deadline and #missingAuraParts(name, char)>0 do
+            task.wait(0.25)
+            if PendingAura[name]~=token or State.Unloaded or not State.Auras[name]
+                or LocalPlayer.Character~=char or not char.Parent then return end
+        end
+        if PendingAura[name]~=token then return end
+        PendingAura[name]=nil
+        local still=missingAuraParts(name, char)
+        if #still>0 then
+            warn('[Visuals] '..name..': no '..table.concat(still, ', ')..' — shown without those parts')
+        end
+        buildAura(name, char)
+    end)
+    return true
+end
+
 TrackConnection(LocalPlayer.CharacterRemoving:Connect(function()
+    table.clear(PendingAura)
     for name in pairs(AuraObjects) do VFX.ClearAura(name) end
 end))
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
