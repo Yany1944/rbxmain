@@ -348,15 +348,20 @@ local CONFIG = {
             ChangeSplit    = {Stop = 0.35, Reverse = 0.25, Left = 0.2, Right = 0.2},
             JumpRatePrior  = 0.25,   -- прыжков/с у цели до набора своей статистики
             InnocentRadius = 2.5,    -- studs: чужой игрок ближе к лучу — не стреляем (убьём невиновного)
-            -- Самопроверка предикта на текущей цели (см. selfCheck): p80 ошибки
-            -- до GoodError — полное доверие, от BadError — ноль
+            -- Самопроверка предикта на текущей цели (см. selfCheck). Ошибка входит в
+            -- шанс как разброс поперёк луча (см. chanceFor), а не множителем: множитель
+            -- при p80 = 0.86 studs резал любой шанс до 81% и Auto Fire молчал целый раунд,
+            -- хотя с такой ошибкой выстрел в корпус попадает. От BadError — не стреляем
             SelfCheck = {
                 Interval   = 0.1,    -- сек между контрольными предсказаниями
                 Window     = 4,      -- сек памяти ошибок
                 MinSamples = 4,
                 Percentile = 0.8,
-                GoodError  = 0.6,    -- studs
-                BadError   = 2.0,
+                GoodError  = 0.6,    -- studs: ниже — ошибку не учитываем
+                BadError   = 2.0,    -- studs: выше — модель на этой цели не доверяем
+                -- p80 поперечной ошибки ≈ 1.8σ; разброс — точки ±σ, ±2σ с весами нормали
+                BlurOffsets = {0, 1, -1, 2, -2},
+                BlurWeights = {0.40, 0.24, 0.24, 0.06, 0.06},
                 KAlpha     = 0.05,   -- сглаживание ошибки кандидатов K
                 KMinSamples = 15,    -- проверок до первого переключения K
             },
@@ -7860,8 +7865,8 @@ do
     -- модели на ЭТОЙ цели можно мерить вживую: ставим предсказание «ввод не
     -- поменяется» и сверяем с видимой позицией в срок. Смены ввода и прыжки внутри
     -- окна — не ошибка модели, такие проверки выбрасываем. Если модель стабильно
-    -- врёт (стена, лаги, спуфер без резолвера) — Health снижает шанс, и Auto Fire
-    -- не тратит выстрел.
+    -- врёт (стена, лаги, спуфер без резолвера) — её поперечная часть размывает
+    -- попадание в chanceFor, а при ошибке от BadError Health = 0 и Auto Fire молчит.
     local function changedBetween(list, from, to)
         for i = #list, 1, -1 do
             local t = list[i]
@@ -7905,11 +7910,15 @@ do
             local sorted = {}
             for i, e in ipairs(Aim.Errors) do sorted[i] = e[2] end
             table.sort(sorted)
-            local err = sorted[math.max(1, math.ceil(#sorted * SC.Percentile))]
-            Aim.Health = math.clamp(1 - (err - SC.GoodError) / (SC.BadError - SC.GoodError), 0, 1)
-            Aim.ModelError = err
+            local rank = math.max(1, math.ceil(#sorted * SC.Percentile))
+            local err = sorted[rank]
+            local horizontal = {}
+            for i, e in ipairs(Aim.Errors) do horizontal[i] = e[3] end
+            table.sort(horizontal)
+            Aim.Health = err >= SC.BadError and 0 or 1
+            Aim.ModelError, Aim.LateralError = err, horizontal[rank]
         else
-            Aim.Health, Aim.ModelError = 1, nil
+            Aim.Health, Aim.ModelError, Aim.LateralError = 1, nil, nil
         end
         -- новое предсказание — сразу для всех кандидатов K
         if now < Aim.NextCheck then return end
@@ -7960,18 +7969,30 @@ do
         return true
     end
 
-    local function chanceFor(origin, aim, boxes, scenarios)
+    -- blur — σ поперечной ошибки модели (studs): каждый сценарий сдвигаем поперёк
+    -- луча по горизонтали на ±σ, ±2σ. Сдвиг вдоль луча на попадание не влияет
+    local function chanceFor(origin, aim, boxes, scenarios, blur)
         local delta = aim - origin
         local distance = delta.Magnitude
         if distance < 1e-3 then return 0 end
         local dir = delta / distance
         local maxT = distance + 12
+        local SC = SA.SelfCheck
+        local side = Vector3.new(-dir.Z, 0, dir.X)
+        local offsets, weights = {0}, {1}
+        if blur and blur > 0.05 and side.Magnitude > 1e-3 then
+            side = side.Unit
+            offsets, weights = SC.BlurOffsets, SC.BlurWeights
+        end
         local chance = 0
         for _, s in ipairs(scenarios) do
-            for _, box in ipairs(boxes) do
-                if rayHitsBox(origin, dir, maxT, box.cf + s.disp, box.half) then
-                    chance += s.w
-                    break
+            for k, offset in ipairs(offsets) do
+                local shift = s.disp + (offset ~= 0 and side * (offset * blur) or Vector3.zero)
+                for _, box in ipairs(boxes) do
+                    if rayHitsBox(origin, dir, maxT, box.cf + shift, box.half) then
+                        chance += s.w * weights[k]
+                        break
+                    end
                 end
             end
         end
@@ -7998,13 +8019,28 @@ do
             end
             if head then table.insert(candidates, head.Position + keep.disp:Lerp(stop.disp, 0.5)) end
         end
-        local best, bestChance = candidates[1], -1
+        -- Сначала геометрия без разброса, затем разброс по ошибке модели для двух
+        -- лучших точек (дорого считать для всех): выбираем устойчивую к ошибке
+        local ranked = {}
         for _, aim in ipairs(candidates) do
-            local chance = chanceFor(origin, aim, boxes, scenarios)
-            if chance > bestChance + 1e-6 then best, bestChance = aim, chance end
+            table.insert(ranked, {aim = aim, geo = chanceFor(origin, aim, boxes, scenarios)})
         end
-        return {aim = best, chance = bestChance * Aim.Health, ctx = ctx, spoof = Aim.Spoof,
-            geometric = bestChance, health = Aim.Health}
+        table.sort(ranked, function(a, b) return a.geo > b.geo end)
+        local SC = SA.SelfCheck
+        local lateral = Aim.LateralError
+        local blur = lateral and lateral > SC.GoodError and lateral / 1.8 or nil
+        local best = ranked[1]
+        best.chance = best.geo
+        if blur then
+            best.chance = chanceFor(origin, best.aim, boxes, scenarios, blur)
+            local second = ranked[2]
+            if second and second.geo > best.chance then
+                second.chance = chanceFor(origin, second.aim, boxes, scenarios, blur)
+                if second.chance > best.chance + 1e-6 then best = second end
+            end
+        end
+        return {aim = best.aim, chance = best.chance * Aim.Health, ctx = ctx, spoof = Aim.Spoof,
+            geometric = best.geo, health = Aim.Health, blur = blur}
     end
 
     -- Можно ли стрелять по этой линии: карта не закрывает цель, и ни один другой
@@ -8123,9 +8159,10 @@ do
         local parts = {}
         for reason, count in pairs(d.Counts) do table.insert(parts, {reason, count}) end
         table.sort(parts, function(a, b) return a[2] > b[2] end)
-        local lines = {string.format("evals=%d shots=%d maxChance=%.0f%% last: chance=%.0f%% geo=%.0f%% health=%.2f modelErr=%s ping=%dms K=%.2f spoof=%s",
+        local lines = {string.format("evals=%d shots=%d maxLowChance=%.0f%% last: chance=%.0f%% geo=%.0f%% health=%.2f modelErr=%s blur=%s ping=%dms K=%.2f spoof=%s",
             d.Evals, d.Shots, d.MaxChance * 100, (d.Chance or 0) * 100, (d.Geo or 0) * 100, d.Health or 1,
-            d.ModelError and string.format("%.2f", d.ModelError) or "-", math.floor((d.Ping or 0) * 1000 + 0.5),
+            d.ModelError and string.format("%.2f", d.ModelError) or "-", d.Blur and string.format("%.2f", d.Blur) or "-",
+            math.floor((d.Ping or 0) * 1000 + 0.5),
             d.K or 0, tostring(d.Spoof))}
         for _, entry in ipairs(parts) do
             table.insert(lines, string.format("  %-12s %5d  %.0f%%", entry[1], entry[2], entry[2] / math.max(d.Evals, 1) * 100))
@@ -8149,7 +8186,9 @@ do
             Diag.Chance, Diag.Geo, Diag.Health = solution.chance, solution.geometric, solution.health
             Diag.Spoof, Diag.K = solution.spoof, solution.ctx and solution.ctx.K
             Diag.Ping, Diag.ModelError = solution.ctx and solution.ctx.L - SA.ServerLead, Aim.ModelError
-            if solution.chance > Diag.MaxChance then Diag.MaxChance = solution.chance end
+            Diag.Blur = solution.blur
+            -- лучший шанс, при котором НЕ выстрелили из-за шанса (стена/невиновный — отдельно)
+            if reason == "low_chance" and solution.chance > Diag.MaxChance then Diag.MaxChance = solution.chance end
         end
         -- Цель видна, пистолет готов, а выстрела всё нет — один раз за раунд говорим почему
         if reason == "cooldown" or reason == "pending" or reason == "tracking" or reason == "no_target" then return end
@@ -8158,8 +8197,9 @@ do
             Diag.Warned = true
             local text = REASONS[reason] or reason
             if reason == "low_chance" then
-                text ..= string.format(" (best %.0f%%, need %.0f%%, health %.2f)",
-                    Diag.MaxChance * 100, SA.FireChance * 100, Diag.Health or 1)
+                text ..= string.format(" (best %.0f%%, need %.0f%%, model error %s)",
+                    Diag.MaxChance * 100, SA.FireChance * 100,
+                    Diag.ModelError and string.format("%.2f", Diag.ModelError) or "-")
             end
             ShowNotification("<font color=\"rgb(255, 165, 0)\">Auto Fire waiting </font><font color=\"rgb(220,220,220)\">" .. text .. "</font>", CONFIG.Colors.Text)
         end
@@ -8204,6 +8244,7 @@ do
         end
         Diag.Counts.fired = (Diag.Counts.fired or 0) + 1
         Diag.Chance, Diag.Geo, Diag.Health = solution.chance, solution.geometric, solution.health
+        Diag.ModelError, Diag.Blur = Aim.ModelError, solution.blur
         Diag.Shots += 1
         Diag.Since = nil
         State.Runtime.FireSheriffShot(gun, origin, solution, true)
