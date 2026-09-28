@@ -310,6 +310,26 @@ local CONFIG = {
             Randomization = {0, 10},       -- 0..10 → 0..100% разброса
             MaxDistance   = 12,            -- studs: дальше удержание сбрасываем (телепорт и т.п.)
         },
+        -- Передвижение (вкладка Main). Speed и Fly двигают CFrame по MoveDirection:
+        -- WalkSpeed/PlatformStand не меняются, наружу уходит обычная ходьба
+        -- Toggle: бинд включает/выключает; Hold: работает, пока зажат; Always: всегда
+        BindModes = {"Toggle", "Hold", "Always"},
+        Speed = {
+            Range = {0, 20},       -- studs/s сверх обычной ходьбы; 0 — без изменения
+            Step  = 0.5,
+        },
+        Fly = {
+            Modes = {"Fly", "Vehicle Fly", "Swim"},
+            HoverVelocity = Vector3.new(0, math.pi - 2, 0),   -- подпор против гравитации (как в исходнике)
+        },
+        -- Aspect Ratio («растянутое разрешение»): после обновления камеры её CFrame
+        -- домножается на сжатие по вертикали. 1 — как есть
+        AspectRatio = {
+            Range = {0.1, 1.2},
+            Step  = 0.01,
+            TweenRate = 20,        -- 1/с, плавность смены (≈0.15 с до цели)
+            BindName = "Violite_AspectRatio",
+        },
         -- Выстрел шерифа (Shoot Murderer / Wallbang / Auto Fire / Resolver).
         -- Замеры на двух аккаунтах (пинг ~235 мс у обоих):
         --   • сервер MM2 бьёт лучом origin→target без лаг-компенсации, засчитывает
@@ -438,6 +458,7 @@ local State = {
         PickupGun = Enum.KeyCode.Unknown,
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
+        Speed = Enum.KeyCode.Unknown,
         Invisibility = Enum.KeyCode.Unknown,
         KillAura = Enum.KeyCode.Unknown,
     },
@@ -447,14 +468,20 @@ local State = {
         InnocentESP = false,
         NotificationsEnabled = false,
         AvatarDisplayEnabled = false,
-        WalkSpeed = 16,
         JumpPower = 50,
         MaxCameraZoom = 15,
         CameraFOV = 70,
         ViewClipEnabled = false,
-        FlyEnabled = false,
+        AspectRatioEnabled = false,
+        AspectRatioValue = 0.75,
+        SpeedEnabled = false,       -- включён биндом в режиме Toggle
+        SpeedValue = 6,             -- studs/s сверх ходьбы
+        SpeedBindMode = "Hold",
+        FlyToggleOn = false,        -- включён биндом в режиме Toggle
+        FlyEnabled = false,         -- Fly реально работает (по режиму бинда)
         FlyType = "Fly",
         FlySpeed = 40,
+        FlyBindMode = "Toggle",
         ExtendedHitboxSize = 15,
         ExtendedHitboxEnabled = false,
         VelocitySpoofEnabled = false,
@@ -537,10 +564,9 @@ local State = {
     Runtime = {
         SettingsDirty = false,
         FlyConnection = nil,
-        FlyBodyVelocity = nil,
-        FlyBodyGyro = nil,
-        CFlyHead = nil,
         SwimConnection = nil,
+        SpeedBindRow = nil,         -- GUI-строки «режим + бинд» (подсветка активности)
+        FlyBindRow = nil,
         FakePositionOffset = Vector3.zero,
         CoinFarmThread = nil,
         LastCacheTime = 0,
@@ -2756,19 +2782,7 @@ end
 -- БЛОК 5: CHARACTER FUNCTIONS
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- ApplyWalkSpeed() - Установка скорости
-function Core.Movement.ApplyWalkSpeed(speed)
-    State.Runtime.SettingsDirty = true
-    State.Settings.WalkSpeed = speed
-    local character = LocalPlayer.Character
-    if not character then return end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        Core.Remember(humanoid, "WalkSpeed")
-        humanoid.WalkSpeed = speed
-        State.Settings.WalkSpeed = speed
-    end
-end
+-- Скорость ходьбы больше не меняем через WalkSpeed — см. Speed (блок Fly/Speed)
 
 -- ApplyJumpPower() - Установка прыжка
 function Core.Movement.ApplyJumpPower(power)
@@ -2793,7 +2807,6 @@ end
 
 -- ApplyCharacterSettings() - Применение всех настроек
 function Core.Movement.ApplyCharacterSettings()
-    Core.Movement.ApplyWalkSpeed(State.Settings.WalkSpeed)
     Core.Movement.ApplyJumpPower(State.Settings.JumpPower)
     Core.Movement.ApplyMaxCameraZoom(State.Settings.MaxCameraZoom)
 end
@@ -2808,6 +2821,168 @@ function Core.Movement.ApplyFOV(fov)
             FieldOfView = fov
         }):Play()
         State.Settings.CameraFOV = fov
+    end
+end
+
+-- Aspect Ratio (перенос из стороннего скрипта): сразу после обновления камеры
+-- домножаем её CFrame на сжатие по вертикали — картинка растягивается, как при
+-- «stretched res». Look/Right-векторы камеры при этом не меняются. Смена
+-- значения и выключение идут плавно; когда коэффициент вернулся к 1 — отвязываемся.
+do
+    local AR = CONFIG.AspectRatio
+    local current = 1
+    local bound = false
+    local lastBase, lastOut = nil, nil   -- исходный и выставленный нами CFrame камеры
+
+    -- ESP-подписи (наши BillboardGui: ники, GUN, Trap, Ping) рисуются через ту же
+    -- растянутую камеру: шрифт сплющивается, StudsOffset сжимается и подпись
+    -- съезжает с головы. Пока растяжение активно, свои билборды прячем нулевым
+    -- Size с обрезкой (Enabled остаётся за логикой ESP; PlayerToHideFrom и
+    -- MaxDistance для своего клиента не прячут — проверено) и рисуем копии в ScreenGui над
+    -- точкой, спроецированной уже растянутой камерой (WorldToViewportPoint её
+    -- учитывает — сверено с ручной проекцией).
+    local overlay, mirrors, nextScan = nil, {}, 0
+
+    local function guiObjects(root)
+        local list = {}
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("GuiObject") then table.insert(list, d) end
+        end
+        return list
+    end
+
+    local function releaseMirror(billboard)
+        local mirror = mirrors[billboard]
+        if not mirror then return end
+        mirrors[billboard] = nil
+        pcall(function() mirror.Frame:Destroy() end)
+        pcall(function()
+            billboard.Size = mirror.Size
+            billboard.ClipsDescendants = mirror.Clips
+        end)
+    end
+
+    local function releaseAll()
+        for billboard in pairs(mirrors) do releaseMirror(billboard) end
+        if overlay then pcall(function() overlay:Destroy() end); overlay = nil end
+    end
+
+    local function buildMirror(billboard)
+        if not overlay or not overlay.Parent then
+            overlay = Core.New("ScreenGui", {Name = "Violite_AspectESP", IgnoreGuiInset = true, ResetOnSpawn = false, DisplayOrder = -1})
+            local ok = pcall(function() overlay.Parent = gethui() end)
+            if not ok or not overlay.Parent then overlay.Parent = CoreGui end
+        end
+        local frame = Core.New("Frame", {BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Parent = overlay})
+        for _, child in ipairs(billboard:GetChildren()) do
+            if child:IsA("GuiObject") then child:Clone().Parent = frame end
+        end
+        mirrors[billboard] = {Frame = frame, Source = guiObjects(billboard), Copy = guiObjects(frame),
+            Size = billboard.Size, Clips = billboard.ClipsDescendants}
+        frame.Size = UDim2.fromOffset(billboard.Size.X.Offset, billboard.Size.Y.Offset)
+        -- Нулевой размер + обрезка: без обрезки текст вылезает за нулевую рамку
+        billboard.Size = UDim2.new()
+        billboard.ClipsDescendants = true
+    end
+
+    local function updateMirrors(camera)
+        local now = os.clock()
+        if now >= nextScan then
+            nextScan = now + 0.5
+            for object in pairs(Core.Objects) do
+                if typeof(object) == "Instance" and object:IsA("BillboardGui") and not mirrors[object] and object.Parent then
+                    pcall(buildMirror, object)
+                end
+            end
+        end
+        local up, right = camera.CFrame.UpVector.Unit, camera.CFrame.RightVector.Unit
+        for billboard, mirror in pairs(mirrors) do
+            local adornee = billboard.Adornee or billboard.Parent
+            local anchor = adornee and ((adornee:IsA("Attachment") and adornee.WorldPosition)
+                or (adornee:IsA("BasePart") and adornee.Position))
+            -- Удалён / перестроен — отпускаем, пересоберём при следующем скане
+            if not billboard.Parent or #mirror.Source ~= #guiObjects(billboard) then
+                releaseMirror(billboard)
+            else
+                local visible = billboard.Enabled and anchor ~= nil
+                if visible then
+                    local offset = billboard.StudsOffset
+                    local point = anchor + billboard.StudsOffsetWorldSpace + right * offset.X + up * offset.Y
+                    local screen, inFront = camera:WorldToViewportPoint(point)
+                    visible = inFront and screen.Z <= billboard.MaxDistance
+                    if visible then
+                        mirror.Frame.Position = UDim2.fromOffset(screen.X, screen.Y)
+                        for i, source in ipairs(mirror.Source) do
+                            local copy = mirror.Copy[i]
+                            if copy then
+                                copy.Visible = source.Visible
+                                if source:IsA("TextLabel") then
+                                    copy.Text = source.Text
+                                    copy.TextColor3 = source.TextColor3
+                                    copy.TextTransparency = source.TextTransparency
+                                end
+                            end
+                        end
+                    end
+                end
+                mirror.Frame.Visible = visible
+            end
+        end
+    end
+
+    local function unbind()
+        if bound then
+            pcall(function() RunService:UnbindFromRenderStep(AR.BindName) end)
+            bound = false
+        end
+        -- Статичная камера осталась бы сжатой — возвращаем исходную матрицу
+        local camera = Workspace.CurrentCamera
+        if camera and lastOut and camera.CFrame == lastOut then camera.CFrame = lastBase end
+        lastBase, lastOut = nil, nil
+        releaseAll()
+    end
+
+    local function step(dt)
+        local goal = State.Settings.AspectRatioEnabled and State.Settings.AspectRatioValue or 1
+        current += (goal - current) * (1 - math.exp(-AR.TweenRate * dt))
+        if not State.Settings.AspectRatioEnabled and math.abs(current - 1) < 1e-3 then
+            current = 1
+            unbind()
+            return
+        end
+        local camera = Workspace.CurrentCamera
+        if camera then
+            -- Камеру этот кадр никто не обновил (Scriptable, спектатор) — сжимаем
+            -- исходную матрицу, а не уже сжатую, иначе масштаб копится каждый кадр
+            local base = camera.CFrame
+            if lastOut and base == lastOut then base = lastBase end
+            camera.CFrame = base * CFrame.new(0, 0, 0, 1, 0, 0, 0, current, 0, 0, 0, 1)
+            lastBase, lastOut = base, camera.CFrame
+            local ok, err = pcall(updateMirrors, camera)
+            if not ok then warn("[Aspect Ratio] ESP: " .. tostring(err)) end
+        end
+    end
+
+    Core.Movement.SetAspectRatio = function(enabled, instant)
+        State.Settings.AspectRatioEnabled = enabled == true
+        if instant and not State.Settings.AspectRatioEnabled then
+            current = 1
+            unbind()
+            return
+        end
+        if not bound then
+            bound = pcall(function()
+                RunService:BindToRenderStep(AR.BindName, Enum.RenderPriority.Camera.Value + 1, step)
+            end)
+            if not bound then
+                State.Settings.AspectRatioEnabled = false
+                warn("[Violite] Aspect Ratio: BindToRenderStep недоступен")
+            end
+        end
+    end
+
+    Core.Movement.SetAspectRatioValue = function(value)
+        State.Settings.AspectRatioValue = math.clamp(tonumber(value) or 1, AR.Range[1], AR.Range[2])
     end
 end
 
@@ -3878,7 +4053,7 @@ do
         local character = LocalPlayer.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         if humanoid then
-            humanoid.WalkSpeed = State.Runtime.SettingsDirty and State.Settings.WalkSpeed or CONFIG.DefaultWalkSpeed
+            humanoid.WalkSpeed = CONFIG.DefaultWalkSpeed
             humanoid.JumpPower = State.Runtime.SettingsDirty and State.Settings.JumpPower or 50
         end
         local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -5572,202 +5747,72 @@ local function getRoot(char)
 		return nil
 	end
 end
-local FLYING = false
-local QEfly = true
-local flyKeyDown = nil
-local flyKeyUp = nil
-local CFloop = nil
 local swimming = false
 local oldgrav = workspace.Gravity
 local swimbeat = nil
 local gravReset = nil
 
 -- ═══════════════════════════════════════════════════════════
--- FLY SYSTEM (INFINITE YIELD BASED)
+-- FLY SYSTEM
 -- ═══════════════════════════════════════════════════════════
-
--- Базовый Fly (PC)
-local function startBaseFly(vfly)
-    local plr = LocalPlayer
-    local char = plr.Character or plr.CharacterAdded:Wait()
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if not humanoid then
-        repeat task.wait() until char:FindFirstChildOfClass("Humanoid")
-        humanoid = char:FindFirstChildOfClass("Humanoid")
-    end
-
-    if flyKeyDown or flyKeyUp then
-        flyKeyDown:Disconnect()
-        flyKeyUp:Disconnect()
-    end
-
-    local T = getRoot(char)
-    local CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-    local lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-    local SPEED = 0
-
-    local function FLY()
-        FLYING = true
-        local BG = Core.New('BodyGyro')
-        local BV = Core.New('BodyVelocity')
-        BG.P = 9e4
-        BG.Parent = T
-        BV.Parent = T
-        BG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-        BG.CFrame = T.CFrame
-        BV.Velocity = Vector3.new(0, 0, 0)
-        BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-
-        State.Runtime.FlyBodyGyro = BG
-        State.Runtime.FlyBodyVelocity = BV
-
-        Core.Tasks.spawn(function()
-            repeat task.wait()
-                local camera = Workspace.CurrentCamera
-                if not vfly and humanoid then
-                    humanoid.PlatformStand = true
-                end
-
-                if CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0 then
-                    SPEED = 50
-                elseif not (CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0) and SPEED ~= 0 then
-                    SPEED = 0
-                end
-
-                if (CONTROL.L + CONTROL.R) ~= 0 or (CONTROL.F + CONTROL.B) ~= 0 or (CONTROL.Q + CONTROL.E) ~= 0 then
-                    BV.Velocity = ((camera.CFrame.LookVector * (CONTROL.F + CONTROL.B)) + ((camera.CFrame * CFrame.new(CONTROL.L + CONTROL.R, (CONTROL.F + CONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - camera.CFrame.p)) * SPEED
-                    lCONTROL = {F = CONTROL.F, B = CONTROL.B, L = CONTROL.L, R = CONTROL.R}
-                elseif (CONTROL.L + CONTROL.R) == 0 and (CONTROL.F + CONTROL.B) == 0 and (CONTROL.Q + CONTROL.E) == 0 and SPEED ~= 0 then
-                    BV.Velocity = ((camera.CFrame.LookVector * (lCONTROL.F + lCONTROL.B)) + ((camera.CFrame * CFrame.new(lCONTROL.L + lCONTROL.R, (lCONTROL.F + lCONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - camera.CFrame.p)) * SPEED
-                else
-                    BV.Velocity = Vector3.new(0, 0, 0)
-                end
-                BG.CFrame = camera.CFrame
-            until not FLYING
-            CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-            lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-            SPEED = 0
-            BG:Destroy()
-            BV:Destroy()
-
-            if humanoid then humanoid.PlatformStand = false end
-        end)
-    end
-
-    local flyspeed = State.Settings.FlySpeed / 50
-
-    flyKeyDown = Core.Connect(UserInputService.InputBegan, function(input, processed)
-        if processed then return end
-        if input.KeyCode == Enum.KeyCode.W then
-            CONTROL.F = flyspeed
-        elseif input.KeyCode == Enum.KeyCode.S then
-            CONTROL.B = -flyspeed
-        elseif input.KeyCode == Enum.KeyCode.A then
-            CONTROL.L = -flyspeed
-        elseif input.KeyCode == Enum.KeyCode.D then
-            CONTROL.R = flyspeed
-        elseif input.KeyCode == Enum.KeyCode.E and QEfly then
-            CONTROL.Q = flyspeed * 2
-        elseif input.KeyCode == Enum.KeyCode.Q and QEfly then
-            CONTROL.E = -flyspeed * 2
-        end
-        pcall(function() Workspace.CurrentCamera.CameraType = Enum.CameraType.Track end)
-    end)
-
-    flyKeyUp = Core.Connect(UserInputService.InputEnded, function(input, processed)
-        if processed then return end
-        if input.KeyCode == Enum.KeyCode.W then
-            CONTROL.F = 0
-        elseif input.KeyCode == Enum.KeyCode.S then
-            CONTROL.B = 0
-        elseif input.KeyCode == Enum.KeyCode.A then
-            CONTROL.L = 0
-        elseif input.KeyCode == Enum.KeyCode.D then
-            CONTROL.R = 0
-        elseif input.KeyCode == Enum.KeyCode.E then
-            CONTROL.Q = 0
-        elseif input.KeyCode == Enum.KeyCode.Q then
-            CONTROL.E = 0
-        end
-    end)
-
-    Core.Track(flyKeyDown)
-    Core.Track(flyKeyUp)
-
-    FLY()
-end
-
--- Отключение базового Fly
-local function stopBaseFly()
-    FLYING = false
-    if flyKeyDown or flyKeyUp then
-        flyKeyDown:Disconnect()
-        flyKeyUp:Disconnect()
-    end
-    if State.Runtime.FlyBodyGyro then
-        State.Runtime.FlyBodyGyro:Destroy()
-        State.Runtime.FlyBodyGyro = nil
-    end
-    if State.Runtime.FlyBodyVelocity then
-        State.Runtime.FlyBodyVelocity:Destroy()
-        State.Runtime.FlyBodyVelocity = nil
-    end
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
-        LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
-    end
-    pcall(function() Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
-end
-
--- CFrame Fly
-local function startCFrameFly()
-    local speaker = LocalPlayer
-    local char = speaker.Character or speaker.CharacterAdded:Wait()
-
-    speaker.Character:FindFirstChildOfClass('Humanoid').PlatformStand = true
-    local Head = speaker.Character:WaitForChild("Head")
-    Head.Anchored = true
-    State.Runtime.CFlyHead = Head
-
-    if CFloop then CFloop:Disconnect() end
-
-    CFloop = Core.Connect(RunService.Heartbeat, function(deltaTime)
-        if not FLYING or not speaker.Character or not speaker.Character:FindFirstChild('Head') then
-            return
-        end
-
-        local CFspeed = State.Settings.FlySpeed
-        local Head = speaker.Character.Head
-        local moveDirection = speaker.Character:FindFirstChildOfClass('Humanoid').MoveDirection * (CFspeed * deltaTime)
-        local headCFrame = Head.CFrame
+-- Fly / Vehicle Fly: каждый Heartbeat сдвигаем CFrame по MoveDirection и держим
+-- маленькую скорость вверх, чтобы гравитация не тянула вниз. Прежний Fly (IY)
+-- читал только НАЖАТИЯ WASD после включения — зажатую заранее W приходилось
+-- перенажимать — и ставил PlatformStand + BodyGyro/BodyVelocity. Здесь ввод берётся
+-- из MoveDirection каждый кадр, состояние гуманоида и физобъекты не трогаются.
+-- Вертикаль: Space/E — вверх, Q — вниз, W/S — по наклону камеры.
+local function startMotionFly(vehicle)
+    if State.Runtime.FlyConnection then State.Runtime.FlyConnection:Disconnect() end
+    State.Runtime.FlyConnection = Core.Connect(RunService.Heartbeat, function(dt)
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local root = humanoid and humanoid.RootPart
+        if not root or humanoid.Health <= 0 then return end
         local camera = Workspace.CurrentCamera
-        local cameraCFrame = camera.CFrame
-        local cameraOffset = headCFrame:ToObjectSpace(cameraCFrame).Position
-        cameraCFrame = cameraCFrame * CFrame.new(-cameraOffset.X, -cameraOffset.Y, -cameraOffset.Z + 1)
-        local cameraPosition = cameraCFrame.Position
-        local headPosition = headCFrame.Position
+        if not camera then return end
+        local typing = UserInputService:GetFocusedTextBox() ~= nil
+        local function down(key) return not typing and UserInputService:IsKeyDown(key) end
 
-        local objectSpaceVelocity = CFrame.new(cameraPosition, Vector3.new(headPosition.X, cameraPosition.Y, headPosition.Z)):VectorToObjectSpace(moveDirection)
-        Head.CFrame = CFrame.new(headPosition) * (cameraCFrame - cameraPosition) * CFrame.new(objectSpaceVelocity)
+        local look = camera.CFrame.LookVector
+        local move = humanoid.MoveDirection
+        local body = root
+        if vehicle and humanoid.SeatPart then
+            -- В сиденье MoveDirection пустой: направление по WASD относительно камеры
+            body = humanoid.SeatPart.AssemblyRootPart or humanoid.SeatPart
+            local forward = Vector3.new(look.X, 0, look.Z)
+            local right = camera.CFrame.RightVector
+            right = Vector3.new(right.X, 0, right.Z)
+            forward = forward.Magnitude > 1e-3 and forward.Unit or Vector3.zero
+            right = right.Magnitude > 1e-3 and right.Unit or Vector3.zero
+            local f = (down(Enum.KeyCode.W) and 1 or 0) - (down(Enum.KeyCode.S) and 1 or 0)
+            local r = (down(Enum.KeyCode.D) and 1 or 0) - (down(Enum.KeyCode.A) and 1 or 0)
+            move = forward * f + right * r
+            if move.Magnitude > 1 then move = move.Unit end
+        end
+
+        local vertical
+        if down(Enum.KeyCode.Space) or down(Enum.KeyCode.E) then
+            vertical = 1
+        elseif down(Enum.KeyCode.Q) then
+            vertical = -1
+        else
+            local pitch = (down(Enum.KeyCode.S) and -look.Y) or (down(Enum.KeyCode.W) and look.Y) or 0
+            vertical = pitch * math.clamp(move.Magnitude, 0, 1)
+        end
+
+        body.AssemblyLinearVelocity = CONFIG.Fly.HoverVelocity
+        body.CFrame += Vector3.new(move.X, vertical, move.Z) * (dt * State.Settings.FlySpeed)
     end)
-
-    FLYING = true
-    Core.Track(CFloop)
 end
 
--- Отключение CFrame Fly
-local function stopCFrameFly()
-    FLYING = false
-    if CFloop then
-        CFloop:Disconnect()
-        CFloop = nil
+local function stopMotionFly()
+    if State.Runtime.FlyConnection then
+        State.Runtime.FlyConnection:Disconnect()
+        State.Runtime.FlyConnection = nil
     end
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
-        LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
-    end
-    if State.Runtime.CFlyHead then
-        State.Runtime.CFlyHead.Anchored = false
-        State.Runtime.CFlyHead = nil
-    end
+    -- Остаточная подпорка скорости не должна подкидывать после выключения
+    local root = getRoot(LocalPlayer.Character)
+    if root then pcall(function() root.AssemblyLinearVelocity = Vector3.zero end) end
 end
 
 -- Swim
@@ -5833,57 +5878,117 @@ local function stopSwim()
     end
 end
 
--- Главные функции управления
-local function StartFly(flyType)
-    if State.Settings.FlyEnabled then
-        StopFly()
-        task.wait(0.1)
-    end
+-- Главные функции управления. quiet — без уведомления (режим Hold: включение на
+-- каждое удержание бинда не должно спамить тостами)
+local function StartFly(flyType, quiet)
+    if State.Settings.FlyEnabled then return end
+    if not table.find(CONFIG.Fly.Modes, flyType) then flyType = CONFIG.Fly.Modes[1] end
 
     State.Settings.FlyEnabled = true
     State.Settings.FlyType = flyType
 
-    if flyType == "Fly" then
-        startBaseFly(false)
-    elseif flyType == "Vehicle Fly" then
-        startBaseFly(true)
-    elseif flyType == "CFrame Fly" then
-        startCFrameFly()
-    elseif flyType == "Swim" then
+    if flyType == "Swim" then
         startSwim()
+    else
+        startMotionFly(flyType == "Vehicle Fly")
     end
 
-    if State.Settings.NotificationsEnabled then
+    if not quiet and State.Settings.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220,220,220)\">Fly</font> (" .. flyType .. "): <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
     end
 end
 
-local function StopFly()
+local function StopFly(quiet)
     if not State.Settings.FlyEnabled then return end
 
     local currentType = State.Settings.FlyType
     State.Settings.FlyEnabled = false
 
-    if currentType == "CFrame Fly" then
-        stopCFrameFly()
-    elseif currentType == "Swim" then
+    if currentType == "Swim" then
         stopSwim()
     else
-        stopBaseFly()
+        stopMotionFly()
     end
 
-    if State.Settings.NotificationsEnabled then
+    if not quiet and State.Settings.NotificationsEnabled then
         ShowNotification("<font color=\"rgb(220,220,220)\">Fly </font>(" .. currentType .. "): <font color=\"rgb(255, 85, 85)\">OFF</font>", CONFIG.Colors.Text)
     end
 end
 
+-- ═══════════════════════════════════════════════════════════
+-- SPEED И РЕЖИМЫ БИНДОВ (Toggle / Hold)
+-- ═══════════════════════════════════════════════════════════
+-- Speed (перенос из стороннего скрипта, стиль normal): WalkSpeed не трогаем, а
+-- каждый Heartbeat досдвигаем CFrame по MoveDirection на SpeedValue studs/s.
+-- Свойство WalkSpeed остаётся ванильным (его проверяют клиентские античиты),
+-- и наружу уходит обычная скорость ходьбы.
+-- Режим бинда у Speed и Fly (выпадающий список в строке фичи):
+--   Toggle — нажатие бинда включает/выключает; Hold — работает, пока бинд зажат;
+--   Always — работает всегда. Пока фича работает, чип бинда подсвечен акцентом.
+do
+    local MovementBinds = {
+        {Key = "Speed", Mode = "SpeedBindMode", Setting = "SpeedEnabled", Row = "SpeedBindRow"},
+        {Key = "Fly", Mode = "FlyBindMode", Setting = "FlyToggleOn", Row = "FlyBindRow"},
+    }
 
-local function ToggleFly()
-    if State.Settings.FlyEnabled then
-        StopFly()
-    else
-        StartFly(State.Settings.FlyType)
+    State.Runtime.BindHeld = function(key)
+        local bind = State.Settings.Keybinds[key]
+        if not bind or bind == Enum.KeyCode.Unknown then return false end
+        if UserInputService:GetFocusedTextBox() then return false end
+        return UserInputService:IsKeyDown(bind)
     end
+
+    local function bindActive(entry)
+        local mode = State.Settings[entry.Mode]
+        if mode == "Always" then return true end
+        if mode == "Hold" then return State.Runtime.BindHeld(entry.Key) end
+        return State.Settings[entry.Setting] == true
+    end
+
+    -- Нажатие бинда в режиме Toggle
+    State.Runtime.OnMovementBind = function(input)
+        for _, entry in ipairs(MovementBinds) do
+            local bind = State.Settings.Keybinds[entry.Key]
+            if bind and bind ~= Enum.KeyCode.Unknown and input.KeyCode == bind and State.Settings[entry.Mode] == "Toggle" then
+                State.Settings[entry.Setting] = not State.Settings[entry.Setting]
+            end
+        end
+    end
+
+    -- Смена режима сбрасывает «включено биндом», чтобы Toggle не стартовал сам
+    State.Runtime.SetBindMode = function(key, mode)
+        if not table.find(CONFIG.BindModes, mode) then return end
+        for _, entry in ipairs(MovementBinds) do
+            if entry.Key == key then
+                State.Settings[entry.Mode] = mode
+                State.Settings[entry.Setting] = false
+            end
+        end
+    end
+
+    Core.Connect(RunService.Heartbeat, function(dt)
+        local speedOn, wantFly = bindActive(MovementBinds[1]), bindActive(MovementBinds[2])
+        for i, on in ipairs({speedOn, wantFly}) do
+            local row = State.Runtime[MovementBinds[i].Row]
+            if row and row.SetActive then row:SetActive(on) end
+        end
+
+        -- Fly: уведомления только в режиме Toggle — Hold/Always не спамят тостами
+        if wantFly ~= State.Settings.FlyEnabled then
+            local quiet = State.Settings.FlyBindMode ~= "Toggle"
+            if wantFly then StartFly(State.Settings.FlyType, quiet) else StopFly(quiet) end
+        end
+
+        -- Speed
+        local value = State.Settings.SpeedValue
+        if not speedOn or value <= 0 or State.Settings.FlyEnabled then return end
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local root = humanoid and humanoid.RootPart
+        if not root or humanoid.Health <= 0 or humanoid.SeatPart or humanoid.PlatformStand or root.Anchored then return end
+        local move = humanoid.MoveDirection
+        root.CFrame += Vector3.new(move.X, 0, move.Z) * (dt * value)
+    end)
 end
 
 
@@ -10453,9 +10558,8 @@ local function HandleActionInput(input)
         end
     end
 
-    if input.KeyCode == State.Settings.Keybinds.Fly and State.Settings.Keybinds.Fly ~= Enum.KeyCode.Unknown then
-        ToggleFly()
-    end
+    -- Speed / Fly: в режиме Toggle бинд переключает тогл; Hold проверяется каждый кадр
+    State.Runtime.OnMovementBind(input)
 
     if State.Runtime.MovementModule then State.Runtime.MovementModule.OnInput(input) end
 
@@ -10979,7 +11083,10 @@ Core.StopFeatures = function()
         {"Aimbot", function() Core.Aimbot.SetEnabled(false) end},
         {"AutoFarm", StopAutoFarm}, {"XP Farm", StopXPFarm},
         {"WalkFling", function() WalkFlingStop(false) end},
-        {"Fling", State.Runtime.FlingCleanup}, {"Fly", StopFly},
+        {"Fling", State.Runtime.FlingCleanup},
+        {"Fly", function() State.Settings.FlyToggleOn = false; State.Settings.FlyBindMode = "Toggle"; StopFly(true) end},
+        {"Speed", function() State.Settings.SpeedEnabled = false; State.Settings.SpeedBindMode = "Toggle" end},
+        {"AspectRatio", function() Core.Movement.SetAspectRatio(false, true) end},
         {"NoClip", DisableNoClip}, {"AntiFling", DisableAntiFling},
         {"Hitbox", DisableExtendedHitbox}, {"Pickup", DisableInstantPickup},
         {"VelocitySpoof", function() State.Runtime.SetVelocitySpoof(false) end},
@@ -11012,10 +11119,16 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
     ShowNotification = ShowNotification,
     Handlers = setmetatable({
         -- Character
-        ApplyWalkSpeed = Core.Movement.ApplyWalkSpeed,
         ApplyJumpPower = Core.Movement.ApplyJumpPower,
         ApplyMaxCameraZoom = Core.Movement.ApplyMaxCameraZoom,
         ApplyFOV = function(v) pcall(function() Core.Movement.ApplyFOV(v) end) end,
+        AspectRatio = function(on) Core.Movement.SetAspectRatio(on) end,
+        AspectRatioValue = function(v) Core.Movement.SetAspectRatioValue(v) end,
+        SpeedValue = function(v)
+            local range = CONFIG.Speed.Range
+            State.Settings.SpeedValue = math.clamp(tonumber(v) or 0, range[1], range[2])
+        end,
+        SpeedBindMode = function(v) State.Runtime.SetBindMode("Speed", v) end,
         ViewClip = function(on) if on then Core.Movement.EnableViewClip() else Core.Movement.DisableViewClip() end end,
 
         -- Cosmetics
@@ -11283,15 +11396,15 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.Settings.AimbotConfig.MouseButton = value
         end,
 
-        -- FLY ОБРАБОТЧИКИ (добавить здесь)
+        -- FLY ОБРАБОТЧИКИ
+        -- Смена режима на лету: гасим текущий, Heartbeat Fly поднимет новый в следующем
+        -- кадре. Старые конфиги с «CFrame Fly» (вырезан) падают на Fly
         FlyMode = function(value)
+            if not table.find(CONFIG.Fly.Modes, value) then value = CONFIG.Fly.Modes[1] end
+            if State.Settings.FlyEnabled then StopFly(true) end
             State.Settings.FlyType = value
-            if State.Settings.FlyEnabled then
-                StopFly()
-                task.wait(0.1)
-                StartFly(State.Settings.FlyType)
-            end
         end,
+        FlyBindMode = function(v) State.Runtime.SetBindMode("Fly", v) end,
 
         FlySpeed = function(value)
             State.Settings.FlySpeed = value
@@ -11833,12 +11946,26 @@ do
     local MainTab = GUI.CreateTab("Main")
 
         MainTab:CreateSection("CHARACTER SETTINGS")
-        MainTab:CreateInputField("WalkSpeed", "Set custom walk speed", State.Settings.WalkSpeed, "ApplyWalkSpeed")
+        -- Строка «режим бинда + бинд»; старый закэшированный GUI.lua её не знает —
+        -- тогда режим и бинд отдельными строками
+        local function bindModeRow(title, desc, handlerKey, default, keybindKey)
+            if MainTab.CreateBindModeRow then
+                return MainTab:CreateBindModeRow(title, desc, handlerKey, CONFIG.BindModes, default, keybindKey)
+            end
+            local element = MainTab:CreateDropdown(title, desc, CONFIG.BindModes, default, handlerKey)
+            MainTab:CreateKeybindButton(title .. " Key", keybindKey, keybindKey)
+            return element
+        end
+
+        State.Runtime.SpeedBindRow = bindModeRow("Speed", "WalkSpeed stays vanilla", "SpeedBindMode", State.Settings.SpeedBindMode, "Speed")
+        MainTab:CreateSlider("Speed Value", "Extra studs/s, 0 = off", CONFIG.Speed.Range[1], CONFIG.Speed.Range[2], State.Settings.SpeedValue, "SpeedValue", CONFIG.Speed.Step)
         MainTab:CreateInputField("JumpPower", "Set custom jump power", State.Settings.JumpPower, "ApplyJumpPower")
         MainTab:CreateInputField("Max Camera Zoom", "Set maximum camera distance", State.Settings.MaxCameraZoom, "ApplyMaxCameraZoom")
 
         MainTab:CreateSection("CAMERA")
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.Settings.CameraFOV, "ApplyFOV")
+        MainTab:CreateToggle("Aspect Ratio", "Stretched screen, like stretched res", "AspectRatio", false)
+        MainTab:CreateSlider("Aspect Ratio Value", "1 = normal, lower = stretched", CONFIG.AspectRatio.Range[1], CONFIG.AspectRatio.Range[2], State.Settings.AspectRatioValue, "AspectRatioValue", CONFIG.AspectRatio.Step)
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
 
@@ -11857,9 +11984,9 @@ do
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
 
         MainTab:CreateSection("FLY SETTINGS", "right")
-        MainTab:CreateDropdown("Fly Mode", "Select fly type", {"Fly", "Vehicle Fly", "CFrame Fly", "Swim"}, "Fly", "FlyMode")
+        State.Runtime.FlyBindRow = bindModeRow("Fly", "Space/E up, Q down", "FlyBindMode", State.Settings.FlyBindMode, "Fly")
+        MainTab:CreateDropdown("Fly Mode", "Select fly type", CONFIG.Fly.Modes, "Fly", "FlyMode")
         MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 80, State.Settings.FlySpeed, "FlySpeed", 5)
-        MainTab:CreateKeybindButton("Toggle Fly", "Enable/disable flying", "Fly")
         ----------------------------------------------------------------------------
         MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
 
@@ -12083,7 +12210,8 @@ end)
 do
     (function()
         local aliases = {
-            ApplyWalkSpeed = "WalkSpeed", ApplyJumpPower = "JumpPower", ApplyMaxCameraZoom = "MaxCameraZoom", ApplyFOV = "CameraFOV",
+            ApplyJumpPower = "JumpPower", ApplyMaxCameraZoom = "MaxCameraZoom", ApplyFOV = "CameraFOV",
+            AspectRatio = "AspectRatioEnabled",
             UIOnly = "UIOnlyEnabled", CoinMuter = "CoinMuterEnabled", ViewClip = "ViewClipEnabled", FlyMode = "FlyType", AutoFarm = "AutoFarmEnabled", XPFarm = "XPFarmEnabled",
             AFKMode = "AFKModeEnabled", AntiFling = "AntiFlingEnabled", WalkFling = "WalkFlingEnabledByUser",
             ExtendedHitbox = "ExtendedHitboxEnabled", InstantPickup = "InstantPickupEnabled", BulletTracers = "BulletTracersEnabled",

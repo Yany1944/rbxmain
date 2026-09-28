@@ -506,7 +506,33 @@ local SKYBOXES = {
         MoonTextureId = "rbxasset://sky/moon.jpg",
         StarCount = 3000,
         CelestialBodiesShown = false
-    }
+    },
+    -- Пять небес из стороннего скрипта (asset id не совпадают с нашими выше)
+    ["Black Storm"] = {
+        Bk = "rbxassetid://15502511288", Dn = "rbxassetid://15502508460", Ft = "rbxassetid://15502510289",
+        Lf = "rbxassetid://15502507918", Rt = "rbxassetid://15502509398", Up = "rbxassetid://15502511911",
+        StarCount = 3000, CelestialBodiesShown = true
+    },
+    ["Blue Space"] = {
+        Bk = "rbxassetid://15536110634", Dn = "rbxassetid://15536112543", Ft = "rbxassetid://15536116141",
+        Lf = "rbxassetid://15536114370", Rt = "rbxassetid://15536118762", Up = "rbxassetid://15536117282",
+        StarCount = 3000, CelestialBodiesShown = true
+    },
+    ["Stormy Sky"] = {
+        Bk = "rbxassetid://18703245834", Dn = "rbxassetid://18703243349", Ft = "rbxassetid://18703240532",
+        Lf = "rbxassetid://18703237556", Rt = "rbxassetid://18703235430", Up = "rbxassetid://18703232671",
+        StarCount = 3000, CelestialBodiesShown = true
+    },
+    ["Pastel Pink Sky"] = {
+        Bk = "rbxassetid://12216109205", Dn = "rbxassetid://12216109875", Ft = "rbxassetid://12216109489",
+        Lf = "rbxassetid://12216110170", Rt = "rbxassetid://12216110471", Up = "rbxassetid://12216108877",
+        StarCount = 3000, CelestialBodiesShown = true
+    },
+    ["Classic Realistic Sky"] = {
+        Bk = "rbxassetid://653719502", Dn = "rbxassetid://653718790", Ft = "rbxassetid://653719067",
+        Lf = "rbxassetid://653719190", Rt = "rbxassetid://653718931", Up = "rbxassetid://653719321",
+        StarCount = 3000, CelestialBodiesShown = true
+    },
 }
 
 local function applySkyDataToInstance(sky, d)
@@ -1606,7 +1632,16 @@ Handlers.ClearAtmoGlare = function(v)
 end
 
 -- 9. Custom Skies
-local SkyToggleNames = {"AnimeSky", "PinkSky", "HeavenlyClouds", "RealisticSky", "RainSky", "SpaceSky"}
+local SkyToggleNames = {"AnimeSky", "PinkSky", "HeavenlyClouds", "RealisticSky", "RainSky", "SpaceSky",
+    "BlackStormSky", "BlueSpaceSky", "StormySky", "PastelPinkSky", "ClassicRealisticSky"}
+-- Новые небеса: флаг тогла → имя в SKYBOXES (обработчики генерируются ниже)
+local ExtraSkies = {
+    {Flag = "BlackStormSky", Name = "Black Storm", Hint = "Dark thunderstorm clouds"},
+    {Flag = "BlueSpaceSky", Name = "Blue Space", Hint = "Blue nebula starfield"},
+    {Flag = "StormySky", Name = "Stormy Sky", Hint = "Grey stormy overcast"},
+    {Flag = "PastelPinkSky", Name = "Pastel Pink Sky", Hint = "Soft pink pastel clouds"},
+    {Flag = "ClassicRealisticSky", Name = "Classic Realistic Sky", Hint = "Clear classic daylight sky"},
+}
 local function resetOtherSkyToggles(activeKey)
     for _, k in ipairs(SkyToggleNames) do
         if k ~= activeKey and State.UIElements[k] and State.UIElements[k].Set then
@@ -1632,6 +1667,11 @@ Handlers.RainSky = function(on)
 end
 Handlers.SpaceSky = function(on)
     if on then resetOtherSkyToggles("SpaceSky") VFX.ApplySky("Space Sky") else VFX.ApplySky("Default") end
+end
+for _, sky in ipairs(ExtraSkies) do
+    Handlers[sky.Flag] = function(on)
+        if on then resetOtherSkyToggles(sky.Flag) VFX.ApplySky(sky.Name) else VFX.ApplySky("Default") end
+    end
 end
 Handlers.ResetSky = function()
     VFX.ApplySky("Default")
@@ -1713,6 +1753,7 @@ for key,name in pairs(ShaderNames) do
 end
 local SkyNames = {AnimeSky = "Anime Sky", PinkSky = "Pink Sky", HeavenlyClouds = "Heavenly Clouds",
     RealisticSky = "Realistic Sky", RainSky = "Rain Sky", SpaceSky = "Space Sky"}
+for _, sky in ipairs(ExtraSkies) do SkyNames[sky.Flag] = sky.Name end
 for key,name in pairs(SkyNames) do
     local handler = Handlers[key]
     Handlers[key] = function(on)
@@ -1825,6 +1866,9 @@ do
     tab:CreateToggle("Realistic Sky", "Hyper-realistic crisp daylight sky", "RealisticSky", false)
     tab:CreateToggle("Rain Sky", "Gloomy overcast raincloud skybox", "RainSky", false)
     tab:CreateToggle("Space Sky", "Deep cosmic galaxy starfield", "SpaceSky", false)
+    for _, sky in ipairs(ExtraSkies) do
+        tab:CreateToggle(sky.Name, sky.Hint, sky.Flag, false)
+    end
     tab:CreateButton("Reset Sky", "Restore Original Map Sky", CONFIG.Colors.Accent, "ResetSky")
 end
 

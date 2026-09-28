@@ -2812,6 +2812,103 @@ return function(env)
                 return element
             end
 
+            -- Строка «режим бинда + чип бинда» (Speed, Fly): вместо тогла — выпадающий
+            -- список режимов (Toggle / Hold / Always) и чип клавиши. Сам режим решает
+            -- MainScript; элемент умеет подсветить чип, пока фича работает (SetActive)
+            function TabFunctions:CreateBindModeRow(title, desc, handlerKey, modes, default, keybindKey)
+                local hasDesc = desc ~= nil and desc ~= ""
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
+                local CHIP_W, DD_W = 60, 96
+                addRowText(row, title, desc, CHIP_W + DD_W + EDGE + 8 + 16)
+
+                local chip = makeKeybindChip(row, keybindKey, CHIP_W, CTRL_H, UDim2.new(1, -(CHIP_W + EDGE), 0.5, -CTRL_H / 2))
+
+                local dropdown = Create("TextButton", {
+                    Text = default,
+                    Font = FONT.Bold,
+                    TextSize = TS.Button,
+                    TextColor3 = T.Text,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    BackgroundColor3 = T.Surface1,
+                    Position = UDim2.new(1, -(CHIP_W + EDGE + 8 + DD_W), 0.5, -CTRL_H / 2),
+                    Size = UDim2.new(0, DD_W, 0, CTRL_H),
+                    AutoButtonColor = false,
+                    ZIndex = 5,
+                    Parent = row
+                })
+                AddCorner(dropdown, R_CTRL)
+                local ddStroke = AddStroke(dropdown, STROKE_W, T.Border)
+                Create("UIPadding", {
+                    PaddingLeft = UDim.new(0, 12),
+                    PaddingRight = UDim.new(0, 24),
+                    Parent = dropdown
+                })
+                glyphChevron(dropdown, 24)
+                dropdown.MouseEnter:Connect(function()
+                    TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
+                end)
+                dropdown.MouseLeave:Connect(function()
+                    TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+                end)
+
+                local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
+
+                local element = {
+                    __type = "Dropdown",
+                    Value = default,
+                    Options = modes,
+                    Instance = dropdown,
+                    Active = false,
+                }
+
+                function element:Set(option, fire)
+                    self.Value = tostring(option)
+                    dropdown.Text = self.Value
+                    if fire then
+                        callHandler(handlerKey, self.Value)
+                    end
+                end
+
+                -- Подсветка текста чипа акцентом, пока фича реально работает (обводку
+                -- чипа перекрашивает его ховер — её не трогаем)
+                function element:SetActive(on)
+                    on = on == true
+                    if self.Active == on then return end
+                    self.Active = on
+                    chip.TextColor3 = on and T.Accent or T.Text
+                end
+
+                registerElement(handlerKey, element)
+                table.insert(themeHooks, function()
+                    chip.TextColor3 = element.Active and T.Accent or T.Text
+                end)
+
+                for _, option in ipairs(modes) do
+                    local optionBtn = popoverRow(overlay, option)
+                    optionBtn.MouseButton1Click:Connect(function()
+                        element:Set(option, true)
+                        close()
+                    end)
+                end
+
+                local function listHeight()
+                    return #modes * (POPOVER_ROW + 2) + POPOVER_PAD * 2
+                end
+
+                dropdown.MouseButton1Click:Connect(function()
+                    if overlay.Visible then
+                        close()
+                    else
+                        overlay.Visible = true
+                        overlay.CanvasSize = UDim2.new(0, 0, 0, listHeight())
+                        openAt(math.min(232, listHeight()))
+                    end
+                end)
+
+                return element
+            end
+
             function TabFunctions:CreateThemeDropdown(title, desc)
                 local element = self:CreateDropdown(title or "Theme", desc or "Interface color palette",
                     GUI.GetThemes(), currentThemeName, nil)
