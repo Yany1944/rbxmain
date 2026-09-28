@@ -303,11 +303,11 @@ local CONFIG = {
         },
         -- Fake Lag: удержание отправляемой позиции, отдельно от Desync.
         -- Длина каждого удержания — случайная между Min и Max Delay, разброс задаёт
-        -- Randomization (0 — всегда Max, ровный паттерн; 100 — равномерно Min..Max)
+        -- Randomization (0 — всегда Max, ровный паттерн; 10 — равномерно Min..Max)
         FakeLag = {
-            MinDelay      = {0, 500},      -- мс
-            MaxDelay      = {50, 1000},    -- мс
-            Randomization = {0, 100},      -- %
+            MinDelay      = {0, 300},      -- мс
+            MaxDelay      = {50, 300},    -- мс
+            Randomization = {0, 10},       -- 0..10 → 0..100% разброса
             MaxDistance   = 12,            -- studs: дальше удержание сбрасываем (телепорт и т.п.)
         },
 	}
@@ -406,7 +406,7 @@ local State = {
         FakeLagEnabled = false,
         FakeLagMinDelay = 80,
         FakeLagMaxDelay = 200,
-        FakeLagRandomization = 30,
+        FakeLagRandomization = 3,
         SpawnAtPlayer = false,
         CanShootMurderer = true,
         ShootCooldown = 3,
@@ -8149,7 +8149,7 @@ do
         local limits = CONFIG.FakeLag
         local maximum = math.clamp(tonumber(State.Settings.FakeLagMaxDelay) or 200, limits.MaxDelay[1], limits.MaxDelay[2])
         local minimum = math.min(maximum, math.clamp(tonumber(State.Settings.FakeLagMinDelay) or 80, limits.MinDelay[1], limits.MinDelay[2]))
-        local spread = math.clamp(tonumber(State.Settings.FakeLagRandomization) or 0, limits.Randomization[1], limits.Randomization[2]) / 100
+        local spread = math.clamp(tonumber(State.Settings.FakeLagRandomization) or 0, limits.Randomization[1], limits.Randomization[2]) / limits.Randomization[2]
         return (maximum - (maximum - minimum) * spread * math.random()) / 1000
     end
 
@@ -10136,7 +10136,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         FakeLag = function(on) State.Runtime.SetFakeLag(on) end,
         FakeLagMinDelay = function(v) State.Settings.FakeLagMinDelay = math.clamp(tonumber(v) or 80, CONFIG.FakeLag.MinDelay[1], CONFIG.FakeLag.MinDelay[2]) end,
         FakeLagMaxDelay = function(v) State.Settings.FakeLagMaxDelay = math.clamp(tonumber(v) or 200, CONFIG.FakeLag.MaxDelay[1], CONFIG.FakeLag.MaxDelay[2]) end,
-        FakeLagRandomization = function(v) State.Settings.FakeLagRandomization = math.clamp(tonumber(v) or 30, CONFIG.FakeLag.Randomization[1], CONFIG.FakeLag.Randomization[2]) end,
+        FakeLagRandomization = function(v) State.Settings.FakeLagRandomization = math.clamp(tonumber(v) or 3, CONFIG.FakeLag.Randomization[1], CONFIG.FakeLag.Randomization[2]) end,
         ExtendedHitbox = function(on) if on then EnableExtendedHitbox() else DisableExtendedHitbox() end end,
         ExtendedHitboxSize = function(v) State.Settings.ExtendedHitboxSize = v if State.Settings.ExtendedHitboxEnabled then UpdateHitboxSize(v) end end,
         VelocitySpoof = function(on) State.Runtime.SetVelocitySpoof(on) end,
@@ -10956,20 +10956,14 @@ do
         AntiAimTab:CreateDropdown("Desync Mode", "Jitter: side shake; Spin: rotation; Chaos: tumbling blob", CONFIG.Desync.Modes, State.Settings.FakePositionMode, "FakePositionMode")
         AntiAimTab:CreateDropdown("Pitch", "Body tilt seen by others (not in Chaos)", CONFIG.Desync.PitchOrder, State.Settings.FakePositionPitch, "FakePositionPitch")
         AntiAimTab:CreateSlider("Desync Radius", "Jitter offset in studs; Chaos strength (10 = 5000 studs/s)", CONFIG.Desync.Radius[1], CONFIG.Desync.Radius[2], State.Settings.FakePositionRadius, "FakePositionRadius", 0.1)
+        AntiAimTab:CreateSlider("Spin Speed", "Spin mode: degrees per second", CONFIG.Desync.SpinSpeed[1], CONFIG.Desync.SpinSpeed[2], State.Settings.FakeSpinSpeed, "FakeSpinSpeed", 10)
+        AntiAimTab:CreateToggle("Spin Local Too", "Spin mode: visually spin on your screen as others see you", "FakeSpinLocal", State.Settings.FakeSpinLocal)
 
         AntiAimTab:CreateSection("FAKE LAG")
         State.Runtime.FakeLagToggle = AntiAimTab:CreateToggle("Enable Fake Lag", "Hold your sent position for short bursts (paused in Chaos)", "FakeLag", false)
         AntiAimTab:CreateSlider("Min Delay", "Shortest hold in milliseconds", CONFIG.FakeLag.MinDelay[1], CONFIG.FakeLag.MinDelay[2], State.Settings.FakeLagMinDelay, "FakeLagMinDelay", 10)
         AntiAimTab:CreateSlider("Max Delay", "Longest hold in milliseconds", CONFIG.FakeLag.MaxDelay[1], CONFIG.FakeLag.MaxDelay[2], State.Settings.FakeLagMaxDelay, "FakeLagMaxDelay", 10)
-        AntiAimTab:CreateSlider("Randomization", "0: always Max Delay; 100: random between Min and Max", CONFIG.FakeLag.Randomization[1], CONFIG.FakeLag.Randomization[2], State.Settings.FakeLagRandomization, "FakeLagRandomization", 1)
-
-        AntiAimTab:CreateSection("DESYNC CHAMS")
-        AntiAimTab:CreateToggle("Ping / Desync Chams", "Show estimated fake position during desync; ping ghost otherwise", "PingChams")
-        AntiAimTab:CreateToggle("Chams Label", "Show text above Ping / Desync Chams", "PingChamsShowLabel", State.Settings.PingChamsShowLabel)
-
-        AntiAimTab:CreateSection("MODE SETTINGS", "right")
-        AntiAimTab:CreateSlider("Spin Speed", "Spin mode: degrees per second", CONFIG.Desync.SpinSpeed[1], CONFIG.Desync.SpinSpeed[2], State.Settings.FakeSpinSpeed, "FakeSpinSpeed", 10)
-        AntiAimTab:CreateToggle("Spin Local Too", "Spin mode: visually spin on your screen as others see you", "FakeSpinLocal", State.Settings.FakeSpinLocal)
+        AntiAimTab:CreateSlider("Randomization", "0: always Max Delay; 10: random between Min and Max", CONFIG.FakeLag.Randomization[1], CONFIG.FakeLag.Randomization[2], State.Settings.FakeLagRandomization, "FakeLagRandomization", 1)
 
         AntiAimTab:CreateSection("VELOCITY SPOOFER", "right")
         State.Runtime.VelocitySpoofToggle = AntiAimTab:CreateToggle("Velocity Spoofer", "Report fake velocity to other players", "VelocitySpoof", false)
@@ -10977,6 +10971,10 @@ do
         AntiAimTab:CreateToggle("Only As Murderer", "On: spoof only while you are murderer (sheriffs miss). Off: always", "VelocitySpoofMurdererOnly", State.Settings.VelocitySpoofMurdererOnly)
         AntiAimTab:CreateSlider("Anti-Aim Strength", "Fake upward speed in studs/s; higher = more jitter for others", 20, 500, State.Settings.VelocitySpoofStrength, "VelocitySpoofStrength", 10)
         AntiAimTab:CreateSlider("Zero Max Speed", "Highest speed reported in Zero mode (place default: " .. CONFIG.DefaultWalkSpeed .. ")", 0, 20, State.Settings.VelocitySpoofSpeed, "VelocitySpoofSpeed", 1)
+
+        AntiAimTab:CreateSection("DESYNC CHAMS", "right")
+        AntiAimTab:CreateToggle("Ping / Desync Chams", "Show estimated fake position during desync; ping ghost otherwise", "PingChams")
+        AntiAimTab:CreateToggle("Chams Label", "Show text above Ping / Desync Chams", "PingChamsShowLabel", State.Settings.PingChamsShowLabel)
 end
 
 do
