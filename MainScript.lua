@@ -9377,6 +9377,50 @@ do
         return ok and found or {}
     end
 
+    -- Эффекты на частях (частицы, трейлы, лучи, свет, огонь: эффекты скинов ножа и
+    -- пистолета, в руке и на дисплее). LocalTransparencyModifier их не прячет —
+    -- на настоящем теле они висели на месте, а не крутились с копией. Поэтому
+    -- настоящие гасим, копии включаем, а «намерение» владельца (скинченджер
+    -- включает/выключает эффект, например на броске) переносим на копию
+    local EFFECT_CLASSES = {ParticleEmitter = true, Trail = true, Beam = true, PointLight = true,
+        SpotLight = true, SurfaceLight = true, Fire = true, Smoke = true, Sparkles = true}
+    local FX_TAG = "VioliteSpinFx"
+    runtime.AvatarFx, runtime.AvatarFxCount = {}, 0
+
+    -- Эффекты самой части; во вложенных частях — их собственные (те — отдельные
+    -- источники). Ауры Visuals ведёт hideRealAuras
+    local function sourceEffects(src)
+        local list = {}
+        for _, d in ipairs(src:GetDescendants()) do
+            if EFFECT_CLASSES[d.ClassName] and d:FindFirstAncestorWhichIsA("BasePart") == src
+                and d:GetAttribute("StandaloneVFX_Owner") == nil then
+                table.insert(list, d)
+            end
+        end
+        return list
+    end
+
+    local function effectCount(sources)
+        local count = 0
+        for _, src in ipairs(sources) do count += #sourceEffects(src) end
+        return count
+    end
+
+    -- Сигналы свойств могут приходить отложенно, поэтому свою запись отличаем
+    -- счётчиком ожидаемых событий, а не флагом на время присваивания
+    local function trackEffect(real, copy)
+        local entry = {Copy = copy, Intent = real.Enabled, Own = 0}
+        copy.Enabled = entry.Intent
+        entry.Conn = Core.Connect(real:GetPropertyChangedSignal("Enabled"), function()
+            if entry.Own > 0 then entry.Own -= 1; return end
+            entry.Intent = real.Enabled
+            if copy.Parent then copy.Enabled = entry.Intent end
+            if real.Enabled then entry.Own += 1; real.Enabled = false end
+        end)
+        if real.Enabled then entry.Own += 1; real.Enabled = false end
+        runtime.AvatarFx[real] = entry
+    end
+
     local function unhideReal()
         for part in pairs(runtime.AvatarHidden) do
             if part.Parent then pcall(function() part.LocalTransparencyModifier = 0 end) end
@@ -9386,6 +9430,11 @@ do
             if effect.Parent then pcall(function() effect.Enabled = true end) end
         end
         table.clear(runtime.AvatarEffects)
+        for real, entry in pairs(runtime.AvatarFx) do
+            pcall(function() entry.Conn:Disconnect() end)
+            if real.Parent then pcall(function() real.Enabled = entry.Intent end) end
+        end
+        table.clear(runtime.AvatarFx)
     end
 
     local function hideRealAuras(character)
@@ -9465,9 +9514,20 @@ do
         local model = Core.New("Model")
         model.Name = "VioliteLocalSpin"
         for _, src in ipairs(sources) do
+            -- Метим эффекты, чтобы найти их пары в клоне; метки сразу снимаем
+            local effects = sourceEffects(src)
+            for i, effect in ipairs(effects) do pcall(function() effect:SetAttribute(FX_TAG, i) end) end
             local ok, copy = pcall(function() return src:Clone() end)
+            for _, effect in ipairs(effects) do pcall(function() effect:SetAttribute(FX_TAG, nil) end) end
             if ok and copy then
                 Core.Own(copy)
+                for _, d in ipairs(copy:GetDescendants()) do
+                    local index = d:GetAttribute(FX_TAG)
+                    if index then
+                        d:SetAttribute(FX_TAG, nil)
+                        if effects[index] then pcall(trackEffect, effects[index], d) end
+                    end
+                end
                 for _, d in ipairs(copy:GetDescendants()) do
                     -- Вложенные части — отдельные источники (детали скинов на дисплеях),
                     -- в клоне родителя они были бы вторыми копиями без синхронизации
@@ -9512,6 +9572,7 @@ do
         model.Parent = Workspace.CurrentCamera
         runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = model, character, #sources
         runtime.AvatarDisplays = displaySignature(character, sources)
+        runtime.AvatarFxCount = effectCount(sources)
         setSpinFlag(true)
         -- Клонировали с включёнными эффектами (unhideReal до клонирования их вернул),
         -- теперь гасим их на настоящем теле
@@ -9552,7 +9613,8 @@ do
             -- Сменился набор частей или аур (включили/выключили ауру) — пересобираем
             local sources = avatarSources(character)
             if #sources ~= runtime.AvatarCount or #auraObjects(character) ~= runtime.AvatarAuraCount
-                or displaySignature(character, sources) ~= runtime.AvatarDisplays then
+                or displaySignature(character, sources) ~= runtime.AvatarDisplays
+                or effectCount(sources) ~= runtime.AvatarFxCount then
                 buildLocalSpin(character, sources)
             end
         end
