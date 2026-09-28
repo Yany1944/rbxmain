@@ -482,6 +482,7 @@ local State = {
         ShootCooldown = 3,
         ShootLead = 0.09,   -- упреждение сверх пинга для броска ножа; у выстрела — CONFIG.SheriffAim
         AutoFireEnabled = false,
+        AutoFireMode = "Visible",   -- Visible: стрелять при чистой линии; Chance: только при шансе ≥ FireChance
         ResolverEnabled = false,
         AutoFarmEnabled = false,
         CoinFarmFlySpeed = 22,
@@ -8169,8 +8170,28 @@ do
         end
         return table.concat(lines, "\n")
     end
+    -- Итоги автовыстрелов по Log: принятые сервером и попадания, по режиму и резолву
+    local function shotSummary()
+        local groups, order = {}, {}
+        for _, info in ipairs(Aim.Log) do
+            if not info.rejected then
+                local key = tostring(info.mode or "?") .. (info.spoof and "+resolved" or "")
+                local g = groups[key]
+                if not g then g = {shots = 0, hits = 0, chance = 0}; groups[key] = g; table.insert(order, key) end
+                g.shots += 1
+                g.chance += info.chance or 0
+                if info.hit then g.hits += 1 end
+            end
+        end
+        local parts = {}
+        for _, key in ipairs(order) do
+            local g = groups[key]
+            table.insert(parts, string.format("%s %d/%d (avg chance %.0f%%)", key, g.hits, g.shots, g.chance / g.shots * 100))
+        end
+        return #parts > 0 and ("[Auto Fire] hits/shots: " .. table.concat(parts, ", ") .. "\n") or ""
+    end
     Aim.Report = function()
-        return "[Auto Fire] current:\n" .. diagReport(Diag) .. (Aim.LastReport and ("\n[Auto Fire] previous:\n" .. Aim.LastReport) or "")
+        return shotSummary() .. "[Auto Fire] current:\n" .. diagReport(Diag) .. (Aim.LastReport and ("\n[Auto Fire] previous:\n" .. Aim.LastReport) or "")
     end
     Aim.ResetDiag = function()
         if Diag.Evals > 0 then Aim.LastReport = diagReport(Diag) end
@@ -8225,9 +8246,16 @@ do
 
         local origin = Aim.SilentOrigin(character, gun or stored)
         if not origin then return block(now, "no_origin") end
+        -- Visible — как Only Visible во вкладке Aim, но луч от точки вылета пули до
+        -- предсказанной точки: разброса в MM2 нет, сервер бьёт ровно этим лучом, так
+        -- что чистый луч = попадание, если предикт верен. Шанс считаем только для лога
+        local visibleMode = State.Settings.AutoFireMode ~= "Chance"
+        local function passes(solution)
+            return visibleMode or solution.chance >= SA.FireChance
+        end
         local solution = Aim.Solve(origin)
         if not solution then return block(now, "no_solution") end
-        if solution.chance < SA.FireChance then return block(now, "low_chance", solution) end
+        if not passes(solution) then return block(now, "low_chance", solution) end
         local clear, why = Aim.LineClear(origin, solution.aim, solution.ctx)
         if not clear then return block(now, why or "wall", solution) end
 
@@ -8240,7 +8268,7 @@ do
             origin = Aim.SilentOrigin(character, gun)
             solution = Aim.Solve(origin)
             if not solution then return block(now, "no_solution") end
-            if solution.chance < SA.FireChance then return block(now, "low_chance", solution) end
+            if not passes(solution) then return block(now, "low_chance", solution) end
         end
         Diag.Counts.fired = (Diag.Counts.fired or 0) + 1
         Diag.Chance, Diag.Geo, Diag.Health = solution.chance, solution.geometric, solution.health
@@ -8290,7 +8318,8 @@ State.Runtime.FireSheriffShot = function(gun, origin, solution, auto, modeText, 
     if not remote then return false, "Remote not found" end
     local aim = solution.aim
     State.Settings.CanShootMurderer = false
-    local info = auto and {t = os.clock(), chance = solution.chance, spoof = solution.spoof, target = Aim.Target} or nil
+    local info = auto and {t = os.clock(), chance = solution.chance, spoof = solution.spoof, target = Aim.Target,
+        mode = State.Settings.AutoFireMode} or nil
     local ok, err = pcall(function()
         remote:FireServer(CFrame.lookAt(origin, aim), CFrame.new(aim))
     end)
@@ -11033,6 +11062,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         VelocitySpoofSpeed = function(v) State.Settings.VelocitySpoofSpeed = math.clamp(tonumber(v) or CONFIG.DefaultWalkSpeed, 0, 20) end,
         SpawnAtPlayer = function(on) State.Settings.SpawnAtPlayer = on end,
         AutoFire = function(on) State.Runtime.SheriffAim.SetAutoFire(on) end,
+        AutoFireMode = function(v) if v == "Visible" or v == "Chance" then State.Settings.AutoFireMode = v end end,
         Resolver = function(on) State.Runtime.SheriffAim.SetResolver(on) end,
         KillAuraRange = function(v) State.Settings.KillAuraRange = v end,
         KillAuraStatic = function(on)
@@ -11853,6 +11883,7 @@ do
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
         CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer", "Silent shot from your gun with movement lead")
         CombatTab:CreateToggle("Auto Fire", "Shoots the murderer when a hit is likely", "AutoFire", false)
+        CombatTab:CreateDropdown("Auto Fire Mode", "Visible: clear line to lead point; Chance: only high hit chance", {"Visible", "Chance"}, State.Settings.AutoFireMode, "AutoFireMode")
         CombatTab:CreateToggle("Resolver", "Use only versus velocity spoofer", "Resolver", false)
         CombatTab:CreateKeybindButton("Wallbang", "wallbang", "Wallbang", "Shot through walls from next to the murderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun", "Grabs the dropped gun from anywhere")
