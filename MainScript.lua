@@ -338,7 +338,6 @@ local CONFIG = {
             -- Auto Fire: стреляет, как только луч от точки вылета до точки упреждения чист
             MinTrackTime   = 0.45,   -- сек наблюдения за целью до первого автовыстрела
             AutoInterval   = 1 / 30, -- сек между оценками Auto Fire
-            DiagWarnAfter  = 6,      -- сек без выстрела при готовом пистолете → уведомление с причиной
             -- Смены ввода цели: средняя длина «отрезка» постоянного ввода по её истории,
             -- с априором (PriorSegments отрезков по PriorDuration с)
             PriorSegments  = 2,
@@ -8118,11 +8117,60 @@ do
         end)
     end
 
-    -- Итог автовыстрела для статистики: смерть цели вскоре после принятия выстрела
+    -- Разбор автовыстрела: через L после отправки мы видим убийцу там, где его видел
+    -- сервер при обработке выстрела. Сверяем тот же луч с его настоящими хитбоксами,
+    -- картой и другими игроками — отсюда причина, если выстрел не убил
+    local function observeShot(info)
+        local obs = {}
+        info.obs = obs
+        local char = info.target and info.target.Character
+        local delta = info.aim - info.origin
+        local distance = delta.Magnitude
+        if not char or distance < 1e-3 then return end
+        local dir = delta / distance
+        for _, box in ipairs(hitboxes(char)) do
+            if rayHitsBox(info.origin, dir, distance + 12, box.cf, box.half) then obs.onTarget = true break end
+        end
+        local torso = pickAimPart(char) or char:FindFirstChild("HumanoidRootPart")
+        if torso then
+            local rel = torso.Position - info.origin
+            obs.missBy = (rel - dir * rel:Dot(dir)).Magnitude
+        end
+        local wall = Workspace:Raycast(info.origin, dir * math.max(distance - 1.5, 0.1), mapParams())
+        obs.wall = wall ~= nil
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player ~= info.target and player.Character then
+                for _, box in ipairs(hitboxes(player.Character)) do
+                    if rayHitsBox(info.origin, dir, distance, box.cf, box.half) then obs.blocker = player.Name break end
+                end
+                if obs.blocker then break end
+            end
+        end
+    end
+
+    local function missReason(info, pending)
+        if not pending.confirmed then return "server rejected the shot (lag or cooldown)" end
+        local obs = info.obs
+        if not obs then return "murderer left before the check" end
+        if obs.blocker then return "bullet hit " .. obs.blocker .. " first" end
+        if obs.wall then return "wall moved into the line" end
+        if obs.onTarget then return "line was on target, server didn't count it (lag)" end
+        local off = obs.missBy and string.format(" (off by %.1f studs)", obs.missBy) or ""
+        if changedBetween(Aim.SegTimes, info.t, info.due) then return "murderer changed direction" .. off end
+        if changedBetween(Aim.Jumps, info.t - 0.05, info.due) then return "murderer jumped" .. off end
+        if info.spoof then return "resolved position was wrong" .. off end
+        if Aim.Spoof then return "velocity spoof detected too late" .. off end
+        if not State.Settings.ResolverEnabled then return "prediction missed, spoofer? try Resolver" .. off end
+        return "prediction missed" .. off
+    end
+
+    -- Итог автовыстрела: смерть цели вскоре после принятия выстрела; иначе — промах
+    -- с причиной (единственное уведомление Auto Fire)
     local function settlePending(now)
         local pending = Aim.Pending
         if not pending then return end
         local info = pending.info
+        if info and info.due and not info.obs and now >= info.due then pcall(observeShot, info) end
         if info and info.target then
             local char = info.target.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -8138,6 +8186,11 @@ do
                 State.Settings.CanShootMurderer = true
                 if info then info.rejected = true end
             end
+            if info and not info.hit then
+                info.missReason = missReason(info, pending)
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Auto Fire missed </font><font color=\"rgb(220,220,220)\">"
+                    .. info.missReason .. "</font>", CONFIG.Colors.Text)
+            end
             Aim.Pending = nil
         end
     end
@@ -8145,14 +8198,8 @@ do
     -- Диагностика Auto Fire: почему очередная оценка не выстрелила. Счётчики —
     -- за текущую цель (раунд); прошлый раунд остаётся в LastReport. Читать через
     -- getgenv().MM2_Runtime.SheriffAim.Report()
-    local Diag = {Counts = {}, Evals = 0, Shots = 0, Since = nil, Warned = false}
+    local Diag = {Counts = {}, Evals = 0, Shots = 0}
     Aim.Diag = Diag
-    local REASONS = {
-        cooldown = "gun cooldown", pending = "waiting shot result", tracking = "still tracking target",
-        no_target = "no murderer", no_gun = "no gun", no_origin = "no shot origin",
-        no_solution = "no prediction", wall = "wall in the way",
-        innocent = "innocent near the line", equip = "equip failed", dead = "we are dead",
-    }
 
     local function diagReport(d)
         local parts = {}
@@ -8186,7 +8233,17 @@ do
             local g = groups[key]
             table.insert(parts, string.format("%s %d/%d (avg chance %.0f%%)", key, g.hits, g.shots, g.chance / g.shots * 100))
         end
-        return #parts > 0 and ("[Auto Fire] hits/shots: " .. table.concat(parts, ", ") .. "\n") or ""
+        local misses, missOrder = {}, {}
+        for _, info in ipairs(Aim.Log) do
+            local reason = info.missReason and info.missReason:gsub(" %(off by.*%)", "")
+            if reason then
+                if not misses[reason] then misses[reason] = 0; table.insert(missOrder, reason) end
+                misses[reason] += 1
+            end
+        end
+        for i, reason in ipairs(missOrder) do missOrder[i] = reason .. " x" .. misses[reason] end
+        return (#parts > 0 and ("[Auto Fire] hits/shots: " .. table.concat(parts, ", ") .. "\n") or "")
+            .. (#missOrder > 0 and ("[Auto Fire] misses: " .. table.concat(missOrder, "; ") .. "\n") or "")
     end
     Aim.Report = function()
         return shotSummary() .. "[Auto Fire] current:\n" .. diagReport(Diag) .. (Aim.LastReport and ("\n[Auto Fire] previous:\n" .. Aim.LastReport) or "")
@@ -8194,7 +8251,7 @@ do
     Aim.ResetDiag = function()
         if Diag.Evals > 0 then Aim.LastReport = diagReport(Diag) end
         table.clear(Diag.Counts)
-        Diag.Evals, Diag.Shots, Diag.Since, Diag.Warned = 0, 0, nil, false
+        Diag.Evals, Diag.Shots = 0, 0
         Diag.Chance, Diag.Geo = nil, nil
     end
 
@@ -8206,14 +8263,6 @@ do
             Diag.Spoof, Diag.K = solution.spoof, solution.ctx and solution.ctx.K
             Diag.Ping, Diag.ModelError = solution.ctx and solution.ctx.L - SA.ServerLead, Aim.ModelError
             Diag.Blur = solution.blur
-        end
-        -- Цель видна, пистолет готов, а выстрела всё нет — один раз за раунд говорим почему
-        if reason == "cooldown" or reason == "pending" or reason == "tracking" or reason == "no_target" then return end
-        Diag.Since = Diag.Since or now
-        if not Diag.Warned and now - Diag.Since >= SA.DiagWarnAfter then
-            Diag.Warned = true
-            local text = REASONS[reason] or reason
-            ShowNotification("<font color=\"rgb(255, 165, 0)\">Auto Fire waiting </font><font color=\"rgb(220,220,220)\">" .. text .. "</font>", CONFIG.Colors.Text)
         end
     end
 
@@ -8260,7 +8309,6 @@ do
         Diag.Chance, Diag.Geo, Diag.Health = solution.chance, solution.geometric, solution.health
         Diag.ModelError, Diag.Blur = Aim.ModelError, solution.blur
         Diag.Shots += 1
-        Diag.Since = nil
         State.Runtime.FireSheriffShot(gun, origin, solution, true)
     end
 
@@ -8304,7 +8352,10 @@ State.Runtime.FireSheriffShot = function(gun, origin, solution, auto, modeText, 
     if not remote then return false, "Remote not found" end
     local aim = solution.aim
     State.Settings.CanShootMurderer = false
-    local info = auto and {t = os.clock(), chance = solution.chance, spoof = solution.spoof, target = Aim.Target} or nil
+    -- due — когда видимая позиция убийцы совпадёт с той, что видел сервер при выстреле
+    local now = os.clock()
+    local info = auto and {t = now, chance = solution.chance, spoof = solution.spoof, target = Aim.Target,
+        origin = origin, aim = aim, due = now + (solution.ctx and solution.ctx.L or Aim.Ping() + CONFIG.SheriffAim.ServerLead)} or nil
     local ok, err = pcall(function()
         remote:FireServer(CFrame.lookAt(origin, aim), CFrame.new(aim))
     end)
@@ -8322,8 +8373,9 @@ State.Runtime.FireSheriffShot = function(gun, origin, solution, auto, modeText, 
             for _ = 1, 4 do CreateTracer(origin, aim, 2) end
         end)
     end
-    if not quiet then
-        local label = auto and ("Auto Fire " .. math.floor(solution.chance * 100 + 0.5) .. "%") or (modeText or "Silent")
+    -- Auto Fire молчит при выстреле и попадании — уведомляет только о промахе (settlePending)
+    if not quiet and not auto then
+        local label = modeText or "Silent"
         if solution.spoof then label ..= ", resolved" end
         ShowNotification("<font color=\"rgb(168,228,160)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. label .. "] Cooldown: " .. State.Settings.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
     end
