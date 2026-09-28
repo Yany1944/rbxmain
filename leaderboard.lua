@@ -136,7 +136,7 @@ local State = {
     ReconnectThread = nil,
 
     -- Farm Sync — координация серверов между аккаунтами на одном ПК.
-    -- Каждый инстанс пишет свой jobId в общий стор (папка 7yd7/FarmSync);
+    -- Каждый инстанс пишет свой jobId в общий стор (папка VioCFG/Violite/FarmSync);
     -- если два аккаунта оказались на одном сервере — «лишний» делает ServerHop.
     FarmSyncEnabled = false,
     FarmSyncThread = nil,
@@ -6717,7 +6717,7 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- Задача: в реальном времени знать, какой аккаунт на каком сервере сидит, и не
 -- давать двум своим аккаунтам фармить на одном инстансе. Канал обмена — файлы в
--- папке executor'а 7yd7/FarmSync (все инстансы на одном ПК видят одну ФС).
+-- папке executor'а VioCFG/Violite/FarmSync (все инстансы на одном ПК видят одну ФС).
 --
 -- Модель без гонок записи: каждый аккаунт пишет ТОЛЬКО свой файл <userId>.json и
 -- читает чужие. Если у executor'а нет listfiles — мягкая деградация на единый
@@ -6729,9 +6729,9 @@ end
 
 local FarmSync = {}
 do
-    local FOLDER    = "7yd7"
-    local SYNC_DIR  = "7yd7/FarmSync"
-    local ONE_FILE  = "7yd7/farmsync.json"   -- фолбэк без listfiles
+    local FOLDERS   = {"VioCFG", "VioCFG/Violite"}   -- папка конфигов Violite
+    local SYNC_DIR  = "VioCFG/Violite/FarmSync"
+    local ONE_FILE  = "VioCFG/Violite/farmsync.json"   -- фолбэк без listfiles
 
     local HEARTBEAT_INTERVAL = 4    -- как часто пишем свой статус (сек)
     local STALE_TTL          = 15   -- запись старше — аккаунт считается ушедшим
@@ -6752,7 +6752,9 @@ do
     -- Гарантируем наличие папок хранилища
     pcall(function()
         if type(makefolder) == "function" then
-            if type(isfolder) ~= "function" or not isfolder(FOLDER) then makefolder(FOLDER) end
+            for _, dir in ipairs(FOLDERS) do
+                if type(isfolder) ~= "function" or not isfolder(dir) then makefolder(dir) end
+            end
             if hasList and (type(isfolder) ~= "function" or not isfolder(SYNC_DIR)) then
                 makefolder(SYNC_DIR)
             end

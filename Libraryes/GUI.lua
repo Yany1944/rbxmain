@@ -63,6 +63,111 @@ return function(env)
     }
 
     ----------------------------------------------------------------
+    -- ТЕМЫ ОФОРМЛЕНИЯ
+    -- Тема подменяет шкалу G и алиасы T на месте. Код ниже читает токены
+    -- при создании элементов и в обработчиках, а уже созданное окно
+    -- перекрашивает GUI.SetTheme (repaintTheme). Контраст сверен по WCAG
+    -- с Violite: основной текст ≥ 16:1, второстепенный ≥ 5.7:1, надписи
+    -- на акценте ≥ 4.5:1 (у Violite белый — как было), трек тогла ≥ 3:1.
+    ----------------------------------------------------------------
+    -- Всё, что пишет GUI, лежит в папке конфигов Violite (как профили .vio)
+    local STORAGE_FOLDERS = {"VioCFG", "VioCFG/Violite"}
+    local THEME_FILE = "VioCFG/Violite/theme.txt"
+    local rgb = Color3.fromRGB
+    local DARK_SCALE = {
+        Bg100 = rgb(10, 10, 10), Bg200 = rgb(0, 0, 0),
+        Gray100 = rgb(26, 26, 26), Gray200 = rgb(31, 31, 31), Gray300 = rgb(41, 41, 41),
+        Gray400 = rgb(46, 46, 46), Gray500 = rgb(69, 69, 69), Gray600 = rgb(135, 135, 135),
+        Gray700 = rgb(143, 143, 143), Gray1000 = rgb(237, 237, 237),
+        Red800 = rgb(217, 48, 54), Red900 = rgb(255, 97, 102),
+    }
+    local THEMES = {
+        Order = {"Violite", "Midnight", "Emerald", "Sakura"},
+        -- Исходная тема: чёрный Geist + розовый акцент хоста, белые надписи на кнопках
+        Violite = {G = DARK_SCALE, Accent = CONFIG.Colors.Accent or G.Purple700, ButtonInk = rgb(255, 255, 255)},
+        Midnight = {
+            G = {
+                Bg100 = rgb(11, 15, 28), Bg200 = rgb(5, 8, 18),
+                Gray100 = rgb(22, 28, 45), Gray200 = rgb(27, 34, 53), Gray300 = rgb(36, 44, 66),
+                Gray400 = rgb(42, 51, 75), Gray500 = rgb(64, 75, 105), Gray600 = rgb(120, 132, 160),
+                Gray700 = rgb(138, 150, 178), Gray1000 = rgb(230, 236, 247),
+                Red800 = rgb(217, 48, 54), Red900 = rgb(255, 107, 112),
+            },
+            Accent = rgb(122, 162, 255),
+        },
+        Emerald = {
+            G = {
+                Bg100 = rgb(9, 16, 13), Bg200 = rgb(4, 10, 8),
+                Gray100 = rgb(20, 30, 26), Gray200 = rgb(25, 36, 31), Gray300 = rgb(33, 46, 40),
+                Gray400 = rgb(38, 52, 46), Gray500 = rgb(60, 78, 70), Gray600 = rgb(120, 140, 131),
+                Gray700 = rgb(138, 158, 149), Gray1000 = rgb(233, 242, 237),
+                Red800 = rgb(217, 48, 54), Red900 = rgb(255, 107, 112),
+            },
+            Accent = rgb(52, 211, 153),
+        },
+        Sakura = {
+            G = {
+                Bg100 = rgb(255, 255, 255), Bg200 = rgb(253, 247, 250),
+                Gray100 = rgb(250, 238, 244), Gray200 = rgb(246, 230, 238), Gray300 = rgb(240, 220, 230),
+                Gray400 = rgb(236, 214, 225), Gray500 = rgb(212, 184, 198), Gray600 = rgb(160, 130, 146),
+                Gray700 = rgb(112, 88, 101), Gray1000 = rgb(38, 24, 32),
+                Red800 = rgb(214, 40, 57), Red900 = rgb(196, 30, 58),
+            },
+            Accent = rgb(200, 60, 140), Knob = rgb(255, 255, 255), TrackBg = rgb(170, 128, 149),
+        },
+    }
+    local currentThemeName = "Violite"
+
+    -- Относительная яркость и контраст по WCAG 2 — для подписи на цветной заливке
+    local function luminance(c)
+        local function ch(v) return v <= 0.03928 and v / 12.92 or ((v + 0.055) / 1.055) ^ 2.4 end
+        return 0.2126 * ch(c.R) + 0.7152 * ch(c.G) + 0.0722 * ch(c.B)
+    end
+    local function contrast(a, b)
+        local la, lb = luminance(a), luminance(b)
+        return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05)
+    end
+    -- Надпись на заливке: у темы может быть своя (Violite — белая), иначе
+    -- белый или почти чёрный — что контрастнее
+    local function inkOn(fill)
+        local theme = THEMES[currentThemeName]
+        if theme.ButtonInk then return theme.ButtonInk end
+        local white, black = rgb(255, 255, 255), rgb(10, 10, 10)
+        return contrast(white, fill) >= contrast(black, fill) and white or black
+    end
+
+    -- Токены темы → G, T и акцент хоста (MainScript передаёт CONFIG.Colors.Accent в кнопки)
+    local function applyThemeTokens(name)
+        local theme = THEMES[name]
+        if not theme then return false end
+        currentThemeName = name
+        for key, value in pairs(theme.G) do G[key] = value end
+        T.Canvas, T.Surface1, T.Surface2 = G.Bg200, G.Bg100, G.Gray100
+        T.Border, T.BorderHi, T.Divider = G.Gray400, G.Gray500, G.Gray200
+        T.Text, T.TextDark = G.Gray1000, G.Gray700
+        T.Accent = theme.Accent
+        T.AccentText = theme.AccentText or theme.Accent
+        T.AccentInk = G.Bg100
+        T.Danger, T.DangerBg = G.Red900, G.Red800
+        T.TrackBg = theme.TrackBg or G.Gray400
+        T.Knob = theme.Knob or G.Gray1000
+        CONFIG.Colors.Accent = theme.Accent
+        return true
+    end
+
+    do
+        local saved
+        pcall(function()
+            if isfile and isfile(THEME_FILE) then saved = readfile(THEME_FILE):match("^%s*(.-)%s*$") end
+        end)
+        applyThemeTokens(THEMES[saved] and saved or "Violite")
+    end
+
+    -- Элементы с вычисляемыми цветами (кнопки, тоглы) перерисовываются этими хуками
+    local themeHooks = {}
+    local themeListeners = {}
+
+    ----------------------------------------------------------------
     -- ШРИФТЫ: Geist Sans ≈ Inter. В Roblox Inter нет (проверено —
     -- rbxasset://fonts/families/Inter.json не резолвится), ближайший
     -- нейтральный гротеск — BuilderSans. Веса как в Geist: 400 для текста,
@@ -91,6 +196,7 @@ return function(env)
             Body = face(Enum.FontWeight.Regular, Enum.Font.Gotham),          -- 400
             Mono = face(Enum.FontWeight.Regular, Enum.Font.Gotham),          -- значения
             Head = face(Enum.FontWeight.SemiBold, Enum.Font.GothamSemibold), -- 600
+            Mark = face(Enum.FontWeight.Heavy, Enum.Font.GothamBlack),       -- 800, знак «V» в логотипе
         }
     end
 
@@ -203,17 +309,12 @@ return function(env)
         }
     end
 
-    -- Логотип бренда: PNG из репозитория кладём в 7yd7/Assets и отдаём
-    -- движку через getcustomasset. Если executor не умеет в файлы —
-    -- фолбэк на нарисованный акцентный ромб
-    local LOGO_URL = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/V_pale_pink_glow_fullhd.png"
-    local LOGO_DIR = "7yd7"
-    local LOGO_ASSETS = "7yd7/Assets"
-    local LOGO_PATH = "7yd7/Assets/violite_logo.png"
+    -- Папки ассетов (иконка Auras) — внутри папки конфигов Violite
+    local ASSET_FOLDERS = {"VioCFG", "VioCFG/Violite", "VioCFG/Violite/Assets"}
 
     -- Angel outfit — Lorc / Game-icons.net, CC BY 3.0 (Assets/LICENSE.txt).
     -- Roblox использует PNG: белая маска из SVG окрашивается через ImageColor3.
-    local AURA_ICON_PATH = "7yd7/Assets/GameIconsAngelOutfit_1b1061bf.png"
+    local AURA_ICON_PATH = "VioCFG/Violite/Assets/GameIconsAngelOutfit_1b1061bf.png"
     local AURA_ICON_PNG = "\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\082\000\000\000\064\000\000\000\064\008\006\000\000\000\170\105\113\222\000\000\000\009\112\072\089\115\000\000\011\019\000\000\011\019\001\000\154\156\024\000\000\007\098\073\068\065\084\120\156\237\154\009\176\213\083\028\199\111\155\010\037\132\164\140\162\133\188\020\106\212\212\160\073\150\201\120\205\068\074\011\021\134\180\072\137\049\053\150\136\100\138\169\103\105\038\049\106\122\079\166\018\090\044\209\180\042\147\044\237\101\139\054\042\180\168\212\199\252\244\251\115\058\157\243\095\238\125\247\041\115\191\051\111\222\123\247\158\223\114\126\231\156\223\249\045\039\149\202\033\135\028\074\018\064\057\160\030\208\026\104\007\220\012\180\215\255\047\001\042\164\254\079\000\074\001\173\128\231\128\207\129\253\132\227\032\176\006\120\089\013\084\046\117\060\002\040\013\244\212\201\004\056\000\044\000\070\001\189\117\245\243\245\247\221\192\112\224\003\096\143\065\179\009\120\004\168\152\058\094\000\084\003\022\026\147\248\009\232\011\156\026\147\254\068\160\059\176\214\224\177\030\184\056\251\218\187\149\025\002\204\003\138\128\202\017\227\079\182\086\125\138\124\022\070\019\194\171\060\240\170\193\107\007\080\059\130\166\172\210\200\002\012\003\078\073\071\246\223\000\234\000\235\172\051\058\048\021\002\053\086\128\085\050\137\084\230\071\233\083\131\103\081\196\248\078\150\190\027\129\075\211\017\124\014\240\141\195\073\245\143\160\155\101\140\029\153\088\176\155\231\096\243\056\069\140\189\195\161\243\022\089\204\164\066\167\225\070\139\008\186\177\198\216\247\018\009\245\243\124\195\224\185\040\098\236\185\030\189\231\203\141\020\087\096\107\015\147\109\064\153\008\218\139\128\125\006\077\215\132\243\181\249\181\213\171\049\064\126\012\154\175\060\250\119\138\043\116\186\135\065\097\076\250\124\227\042\059\004\188\008\156\025\075\248\191\060\042\171\019\059\096\240\121\032\038\237\227\030\253\023\199\033\174\026\018\172\244\073\048\001\217\009\239\027\180\178\043\038\107\108\144\103\059\071\141\016\235\170\019\123\013\248\221\160\093\014\092\153\064\246\085\248\017\238\011\128\059\067\136\219\199\085\194\224\119\025\240\018\240\131\131\223\078\096\051\176\093\087\216\196\207\192\068\224\026\185\009\018\202\172\025\050\135\135\163\136\095\015\033\190\062\169\001\044\222\245\129\014\122\085\074\168\091\168\206\182\072\157\231\147\226\051\128\198\073\039\237\008\196\124\008\119\204\028\142\184\124\232\153\058\070\001\156\014\052\210\191\037\169\242\097\135\215\184\028\062\255\097\024\105\068\104\189\050\089\165\098\078\182\122\232\145\105\172\159\117\139\152\071\125\031\179\230\017\132\107\141\177\133\234\228\106\150\224\124\109\125\027\105\114\037\088\097\124\254\086\196\060\110\244\049\236\074\052\174\208\177\141\213\113\237\002\006\001\039\148\224\196\207\085\031\018\092\145\130\110\250\221\025\192\238\136\057\244\243\049\126\052\134\001\166\121\028\230\090\221\122\101\179\056\241\011\117\226\102\160\037\088\018\004\104\192\208\024\115\120\193\039\096\076\012\098\089\245\150\134\207\144\107\204\132\056\209\001\073\003\159\144\073\159\004\116\004\102\059\174\074\212\024\193\217\175\001\252\022\099\014\147\124\194\038\018\015\043\130\064\006\184\218\218\138\001\036\152\122\071\157\101\157\132\078\077\002\162\123\244\044\071\109\231\094\006\237\212\152\250\207\242\009\159\065\124\140\054\232\100\146\081\144\235\103\014\048\014\120\074\253\070\240\243\140\030\167\249\049\087\048\192\088\067\007\169\040\197\197\018\159\001\230\146\012\093\012\218\199\040\089\076\054\206\125\083\224\143\004\180\043\125\006\152\151\080\009\057\127\215\026\244\178\154\037\129\073\065\177\020\184\192\225\135\162\176\202\103\128\005\105\040\035\091\182\185\117\028\162\042\191\153\224\121\099\229\107\001\223\166\193\099\181\207\000\011\211\084\074\050\183\086\006\159\150\090\205\045\078\236\177\142\092\061\079\130\021\007\107\124\006\152\147\129\130\114\006\187\027\188\170\167\185\163\092\216\016\196\249\202\187\149\022\103\210\197\114\159\001\222\046\006\101\011\130\168\080\126\107\081\035\147\035\049\001\056\205\208\241\126\207\181\155\004\243\051\141\003\162\032\215\217\217\006\223\188\052\118\195\006\203\193\086\176\074\228\153\096\166\207\000\005\105\050\148\170\171\013\241\204\029\172\242\246\125\192\175\017\188\100\183\060\045\253\008\043\073\251\218\049\118\107\154\250\022\198\041\063\135\193\108\093\009\246\234\238\049\139\151\001\166\155\025\163\230\237\079\056\012\177\095\139\034\181\172\186\224\024\015\223\034\173\040\217\122\184\198\218\024\149\164\166\238\130\107\053\126\212\100\104\139\231\170\236\109\054\058\165\077\166\193\211\086\077\112\206\179\116\105\167\077\013\027\059\181\109\182\042\166\094\046\012\240\025\160\141\135\192\078\066\036\005\254\200\049\110\177\006\038\190\158\130\116\153\110\055\051\070\187\086\015\092\039\181\127\015\253\135\122\253\205\116\124\183\200\113\036\092\201\147\160\163\207\000\117\061\004\223\059\062\027\239\009\066\102\104\133\247\038\077\154\092\144\222\097\023\179\199\160\198\095\016\226\016\111\083\063\034\183\130\013\185\018\071\199\212\091\208\204\103\128\050\122\142\092\043\039\074\216\126\032\223\145\155\163\254\160\180\254\228\107\220\110\158\121\009\146\250\025\017\093\041\061\126\223\025\099\118\235\078\234\020\236\024\201\227\029\178\228\204\223\162\037\049\019\191\000\075\061\006\168\226\052\128\000\088\230\033\114\089\120\092\072\022\086\096\110\111\053\134\084\107\170\167\066\000\156\165\063\071\116\160\066\146\173\193\122\107\216\112\021\078\004\027\147\244\225\076\244\177\154\021\193\025\107\017\162\220\017\070\072\023\033\252\165\227\212\192\017\104\201\255\119\121\104\102\071\009\235\235\033\124\069\243\118\027\095\234\153\151\036\005\207\074\100\082\227\151\094\129\011\019\244\200\126\226\217\153\062\186\161\081\002\047\247\016\174\215\045\044\055\000\174\055\003\154\014\031\242\056\204\068\181\066\245\011\035\060\186\060\171\223\203\141\098\067\194\228\243\067\110\146\240\230\014\135\095\088\184\038\041\104\232\217\142\187\130\123\092\157\158\043\019\156\026\247\005\152\234\032\171\104\099\187\081\253\173\234\137\004\011\052\017\115\005\068\007\099\189\024\225\200\071\014\038\134\104\076\110\191\026\065\183\098\105\035\200\025\237\040\111\125\028\245\092\070\019\040\121\086\099\223\056\146\007\084\139\168\253\111\086\217\082\079\116\097\105\156\005\072\001\247\122\024\044\051\130\021\023\006\057\042\186\029\116\215\060\024\084\147\099\200\111\034\173\112\013\153\059\219\171\166\145\160\011\157\245\123\169\032\187\048\036\174\001\170\135\068\081\181\067\074\232\226\125\155\164\178\008\145\239\041\156\078\081\191\080\197\115\253\009\242\146\008\090\232\097\210\223\216\170\139\060\241\120\086\222\244\169\111\112\069\139\043\129\074\058\070\034\076\023\214\037\021\214\195\195\232\051\099\076\013\071\132\040\024\151\133\249\167\060\001\207\038\179\217\025\082\218\127\040\169\176\138\026\078\186\208\208\234\197\127\225\024\211\163\152\039\223\214\113\044\037\116\174\107\029\221\063\061\229\186\228\157\042\252\247\240\008\107\156\196\007\239\090\099\246\006\045\171\098\058\247\210\088\049\049\215\238\076\171\163\117\097\124\186\130\171\058\004\007\219\238\168\192\070\218\206\154\170\238\049\154\150\025\053\075\213\177\005\219\122\159\022\110\111\117\069\151\158\122\192\094\187\214\144\084\129\129\030\171\182\013\161\041\157\209\019\085\055\207\074\097\198\212\238\144\011\195\051\021\092\222\122\170\122\084\155\252\088\128\245\064\051\192\234\168\183\205\073\094\093\109\115\132\149\255\212\239\254\075\232\221\111\135\239\242\127\131\226\020\210\204\017\123\015\075\029\003\208\226\138\009\041\190\180\201\134\160\218\250\104\049\192\214\076\095\131\023\131\078\165\116\171\155\047\085\242\178\041\176\140\122\225\055\053\002\187\033\107\194\226\233\211\084\013\048\077\211\227\018\123\171\148\067\014\057\228\144\067\014\057\164\142\107\252\005\077\164\112\175\144\170\180\248\000\000\000\000\073\069\078\068\174\066\096\130"
     local auraIconAsset
     local function loadAuraIconAsset()
@@ -222,8 +323,9 @@ return function(env)
             if not (isfile and writefile and getcustomasset) then return end
             if not isfile(AURA_ICON_PATH) then
                 if makefolder then
-                    if not (isfolder and isfolder(LOGO_DIR)) then pcall(makefolder, LOGO_DIR) end
-                    if not (isfolder and isfolder(LOGO_ASSETS)) then pcall(makefolder, LOGO_ASSETS) end
+                    for _, dir in ipairs(ASSET_FOLDERS) do
+                        if not (isfolder and isfolder(dir)) then pcall(makefolder, dir) end
+                    end
                 end
                 writefile(AURA_ICON_PATH, AURA_ICON_PNG)
             end
@@ -232,30 +334,6 @@ return function(env)
         return auraIconAsset
     end
 
-    local function loadLogoAsset()
-        local cached = getgenv().Violite_LogoAsset
-        if cached ~= nil then
-            return cached or nil
-        end
-        local asset
-        pcall(function()
-            if not (isfile and writefile and getcustomasset) then return end
-            if not isfile(LOGO_PATH) then
-                if makefolder then
-                    if not (isfolder and isfolder(LOGO_DIR)) then pcall(makefolder, LOGO_DIR) end
-                    if not (isfolder and isfolder(LOGO_ASSETS)) then pcall(makefolder, LOGO_ASSETS) end
-                end
-                local data = game:HttpGet(LOGO_URL, true)
-                if type(data) ~= "string" or #data == 0 then return end
-                writefile(LOGO_PATH, data)
-            end
-            if isfile(LOGO_PATH) then
-                asset = getcustomasset(LOGO_PATH)
-            end
-        end)
-        getgenv().Violite_LogoAsset = asset or false
-        return asset
-    end
 
     ----------------------------------------------------------------
     -- ХЕЛПЕРЫ UI (БЛОК 19)
@@ -637,28 +715,53 @@ return function(env)
     local ACRYLIC_DISTANCE = 0.001
     local ACRYLIC_ALPHA = 0.98
 
-    local function attachAcrylic(target)
-        local Workspace = game:GetService("Workspace")
+    -- Один DepthOfField на все стёкла (окно, уведомления): второй эффект
+    -- выключил бы первый. Ближнее поле мылит только то, что попало под
+    -- стекло, поэтому общий эффект обслуживает любое число прямоугольников;
+    -- включён, пока видно хоть одно стекло, и снимается с последним
+    local acrylicShared = { Handles = {}, Dof = nil, SavedDof = nil }
+
+    local function acrylicRefresh()
         local Lighting = game:GetService("Lighting")
-        if not Workspace.CurrentCamera then return nil end
-
-        -- Свой DoF работает только когда чужие выключены, иначе они
-        -- перебивают ближнее поле. Исходные значения запоминаем.
-        local savedDof = {}
-        for _, e in ipairs(Lighting:GetChildren()) do
-            if e:IsA("DepthOfFieldEffect") then
-                savedDof[e] = e.Enabled
-                e.Enabled = false
+        if next(acrylicShared.Handles) == nil then
+            if acrylicShared.Dof then pcall(function() acrylicShared.Dof:Destroy() end) end
+            for e, enabled in pairs(acrylicShared.SavedDof or {}) do
+                pcall(function() e.Enabled = enabled end)
             end
+            acrylicShared.Dof, acrylicShared.SavedDof = nil, nil
+            return
         end
+        if not acrylicShared.Dof then
+            -- Свой DoF работает только когда чужие выключены, иначе они
+            -- перебивают ближнее поле. Исходные значения запоминаем.
+            acrylicShared.SavedDof = {}
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("DepthOfFieldEffect") then
+                    acrylicShared.SavedDof[e] = e.Enabled
+                    e.Enabled = false
+                end
+            end
+            acrylicShared.Dof = Create("DepthOfFieldEffect", {
+                Name = "Violite_Acrylic",
+                FarIntensity = 0,
+                InFocusRadius = 0.1,
+                NearIntensity = 1,
+                Parent = Lighting
+            })
+        end
+        local anyVisible = false
+        for handle in pairs(acrylicShared.Handles) do
+            if handle.Visible then anyVisible = true; break end
+        end
+        acrylicShared.Dof.Enabled = anyVisible
+    end
 
-        local dof = Create("DepthOfFieldEffect", {
-            Name = "Violite_Acrylic",
-            FarIntensity = 0,
-            InFocusRadius = 0.1,
-            NearIntensity = 1,
-            Parent = Lighting
-        })
+    -- opts.Inset — поджим стекла от краёв в пикселях (по умолчанию формула
+    -- Fluent под большое окно; мелким плашкам вроде тостов нужен свой)
+    local function attachAcrylic(target, opts)
+        opts = opts or {}
+        local Workspace = game:GetService("Workspace")
+        if not Workspace.CurrentCamera then return nil end
 
         local folder = Create("Folder", {
             Name = "Violite_AcrylicBlur",
@@ -696,7 +799,7 @@ return function(env)
             if not cam or not part.Parent or not target.Parent then return end
             -- Края стекла поджимаем, чтобы они не торчали из-под скруглений
             -- окна. Формула из Fluent: чем выше вьюпорт, тем больше запас.
-            local offset = math.clamp(cam.ViewportSize.Y / 2560 * 48 + 8, 8, 56)
+            local offset = opts.Inset or math.clamp(cam.ViewportSize.Y / 2560 * 48 + 8, 8, 56)
             local size = target.AbsoluteSize - Vector2.new(offset, offset)
             local pos = target.AbsolutePosition + Vector2.new(offset / 2, offset / 2)
             if size.X <= 0 or size.Y <= 0 then return end
@@ -717,7 +820,11 @@ return function(env)
             )
         end
 
+        local handle = { Visible = true, Faded = false }
         local conns = {}
+        local function applyTransparency()
+            part.Transparency = (handle.Visible and not handle.Faded) and ACRYLIC_ALPHA or 1
+        end
         local function bindCamera()
             local cam = Workspace.CurrentCamera
             if not cam then return end
@@ -737,23 +844,39 @@ return function(env)
         table.insert(conns, target:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
         task.defer(render)
 
-        return {
-            SetVisible = function(on)
-                pcall(function()
-                    part.Transparency = on and ACRYLIC_ALPHA or 1
-                    dof.Enabled = on
-                    if on then render() end
-                end)
-            end,
-            Destroy = function()
-                for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-                pcall(function() folder:Destroy() end)
-                pcall(function() dof:Destroy() end)
-                for e, enabled in pairs(savedDof) do
-                    pcall(function() e.Enabled = enabled end)
-                end
-            end,
-        }
+        function handle.SetVisible(on)
+            handle.Visible = on and true or false
+            pcall(function()
+                applyTransparency()
+                if on then render() end
+            end)
+            pcall(acrylicRefresh)
+        end
+        -- Для плашек, которые проявляются: стекло гасится вместе с ними
+        -- (у Glass нет плавной прозрачности — переключаем на середине)
+        function handle.SetFade(alpha)
+            handle.Faded = alpha > 0.5
+            pcall(applyTransparency)
+        end
+        function handle.Destroy()
+            if not acrylicShared.Handles[handle] then return end
+            acrylicShared.Handles[handle] = nil
+            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+            pcall(function() folder:Destroy() end)
+            pcall(acrylicRefresh)
+        end
+        -- Цель удалили (тост ушёл, окно закрыли) — стекло уходит следом
+        table.insert(conns, target.Destroying:Connect(handle.Destroy))
+
+        acrylicShared.Handles[handle] = true
+        acrylicRefresh()
+        return handle
+    end
+
+    -- Хосту (уведомления MainScript): то же стекло, что под окном
+    function GUI.AttachAcrylic(target, opts)
+        local ok, handle = pcall(attachAcrylic, target, opts)
+        return ok and handle or nil
     end
 
     ----------------------------------------------------------------
@@ -858,49 +981,57 @@ return function(env)
             Parent = mainFrame
         })
 
-        -- Логотип бренда. Исходник 1920x1080, светящийся глиф «V» занимает
-        -- по центру всего ~304px высоты — при обычном кропе всего кадра знак
-        -- утонул бы в пустом поле. Резать пиксельным ImageRect нельзя:
-        -- движок ужимает текстуры больше 1024px, и координаты исходника
-        -- промахиваются. Поэтому кроп делаем геометрией: картинка со
-        -- ScaleType.Crop берётся заведомо крупнее рамки, а рамка её клипает.
-        -- Множитель 1080/400 наводит на глиф, пропорции не трогаются.
+        -- Знак бренда — векторный, из элементов интерфейса, без фото: «V»
+        -- основным цветом текста с лёгким акцентным свечением и уголки
+        -- видоискателя по краям — оба мотива из прежнего логотипа. Цвета —
+        -- токены темы, поэтому знак читается и на тёмных, и на светлых темах
+        -- и перекрашивается вместе с окном
         local LOGO_BOX = 26
-        local LOGO_ZOOM = 1080 / 400
-        local logoAsset = loadLogoAsset()
-        if logoAsset then
-            local logoBox = Create("Frame", {
-                Name = "LogoMark",
-                BackgroundTransparency = 1,
-                ClipsDescendants = true,
-                Position = UDim2.new(0, EDGE, 0, 17),
-                Size = UDim2.new(0, LOGO_BOX, 0, LOGO_BOX),
-                Parent = sidebar
-            })
-            AddCorner(logoBox, R_CTRL)
-            Create("ImageLabel", {
-                Name = "Image",
-                Image = logoAsset,
-                ScaleType = Enum.ScaleType.Crop,
-                BackgroundTransparency = 1,
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, 0, 0.5, 0),
-                Size = UDim2.new(0, math.floor(LOGO_BOX * LOGO_ZOOM),
-                                 0, math.floor(LOGO_BOX * LOGO_ZOOM)),
-                Parent = logoBox
-            })
-        else
-            local logoMark = Create("Frame", {
-                Name = "LogoMark",
-                BackgroundColor3 = T.Accent,
-                BorderSizePixel = 0,
-                Position = UDim2.new(0, EDGE + 6, 0, 23),
-                Size = UDim2.new(0, 13, 0, 13),
-                Rotation = 45,
-                Parent = sidebar
-            })
-            AddCorner(logoMark, 3)
+        local LOGO_BRACKET = 6       -- длина луча уголка
+        local LOGO_BRACKET_W = 1.5   -- толщина луча
+        local logoMark = Create("Frame", {
+            Name = "LogoMark",
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, EDGE, 0, 17),
+            Size = UDim2.new(0, LOGO_BOX, 0, LOGO_BOX),
+            Parent = sidebar
+        })
+        for _, corner in ipairs({Vector2.new(0, 0), Vector2.new(1, 0), Vector2.new(0, 1), Vector2.new(1, 1)}) do
+            for _, size in ipairs({UDim2.new(0, LOGO_BRACKET, 0, LOGO_BRACKET_W), UDim2.new(0, LOGO_BRACKET_W, 0, LOGO_BRACKET)}) do
+                Create("Frame", {
+                    Name = "Bracket",
+                    BackgroundColor3 = T.Accent,
+                    BorderSizePixel = 0,
+                    AnchorPoint = corner,
+                    Position = UDim2.new(corner.X, 0, corner.Y, 0),
+                    Size = size,
+                    Parent = logoMark
+                })
+            end
         end
+        local logoGlyph = Create("TextLabel", {
+            Name = "Glyph",
+            Text = "V",
+            Font = FONT.Mark,
+            TextSize = 20,
+            TextColor3 = T.Text,
+            BackgroundTransparency = 1,
+            -- оптический центр глифа на 1px ниже геометрического
+            Position = UDim2.new(0, 0, 0, 1),
+            Size = UDim2.new(1, 0, 1, 0),
+            Parent = logoMark
+        })
+        local logoGlow = Create("UIStroke", {
+            Color = T.Accent,
+            Thickness = 1.5,
+            Transparency = luminance(T.Surface1) > 0.5 and 0.75 or 0.6,
+            Parent = logoGlyph
+        })
+
+        -- Свечение на светлых темах тише, иначе ореол грязнит тёмную «V»
+        table.insert(themeHooks, function()
+            logoGlow.Transparency = luminance(T.Surface1) > 0.5 and 0.75 or 0.6
+        end)
 
         local LOGO_TEXT_X = EDGE + LOGO_BOX + 8
 
@@ -1087,8 +1218,9 @@ return function(env)
             Text = "for my кошичка жена",
             Font = FONT.Body,
             TextSize = TS.LogoSub,
-            TextColor3 = Color3.fromRGB(220, 145, 230),
-            TextTransparency = 0.35,
+            -- на светлой теме — тёмный розовый без прозрачности (см. repaintTree)
+            TextColor3 = luminance(T.Surface1) > 0.5 and Color3.fromRGB(168, 52, 150) or Color3.fromRGB(220, 145, 230),
+            TextTransparency = luminance(T.Surface1) > 0.5 and 0 or 0.35,
             TextXAlignment = Enum.TextXAlignment.Left,
             BackgroundTransparency = 1,
             Position = UDim2.new(0, EDGE, 1, -26),
@@ -1968,7 +2100,7 @@ return function(env)
                 Text = name,
                 Font = isActive and FONT.Bold or FONT.Body,
                 TextSize = TS.Option,
-                TextColor3 = isActive and T.Accent or T.Text,
+                TextColor3 = isActive and T.AccentText or T.Text,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 BackgroundTransparency = 1,
@@ -2556,7 +2688,7 @@ return function(env)
                 AddCorner(toggleBg, TOG_H / 2)
 
                 local toggleCircle = Create("Frame", {
-                    BackgroundColor3 = T.Text,
+                    BackgroundColor3 = T.Knob,
                     BackgroundTransparency = 0.16,   -- rgba(237,237,237,.84) в Geist
                     Position = UDim2.new(0, default and KNOB_ON or KNOB_OFF, 0.5, -KNOB / 2),
                     Size = UDim2.new(0, KNOB, 0, KNOB),
@@ -2564,6 +2696,7 @@ return function(env)
                     Parent = toggleBg
                 })
                 AddCorner(toggleCircle, KNOB / 2)
+                toggleCircle:SetAttribute("ThemeRole", "Knob")
 
                 -- Опциональный чип бинда слева от тогла
                 if keybindKey then
@@ -2592,6 +2725,9 @@ return function(env)
                 end
 
                 registerElement(handlerKey, element)
+                table.insert(themeHooks, function()
+                    toggleBg.BackgroundColor3 = element.Value and T.Accent or T.TrackBg
+                end)
 
                 -- Сразу вызываем handler с начальным значением, чтобы State
                 -- был синхронизирован с GUI
@@ -2688,6 +2824,21 @@ return function(env)
                     end
                 end)
 
+                return element
+            end
+
+            function TabFunctions:CreateThemeDropdown(title, desc)
+                local element = self:CreateDropdown(title or "Theme", desc or "Interface color palette",
+                    GUI.GetThemes(), currentThemeName, nil)
+                local baseSet = element.Set
+                function element:Set(option, fire)
+                    baseSet(self, option, false)
+                    if fire then GUI.SetTheme(self.Value) end
+                end
+                -- Тему могли сменить не из этого списка — надпись следует за текущей
+                GUI.OnThemeChanged(function(tokens)
+                    baseSet(element, tokens.Name, false)
+                end)
                 return element
             end
 
@@ -3078,27 +3229,34 @@ return function(env)
                 --   default (color = nil)  — тёмная заливка + рамка
                 --   error   (color = Red)  — заливка red-800
                 --   custom  (свой цвет)    — заливка переданным цветом
-                local isDanger = color == CONFIG.Colors.Red
-                local isDefault = color == nil
-                local baseColor = isDanger and T.DangerBg or (isDefault and T.Surface1 or color)
-                local hoverColor
-                if isDefault then
-                    hoverColor = G.Gray200
-                elseif isDanger then
-                    hoverColor = Color3.fromRGB(233, 68, 74)
-                else
-                    hoverColor = Color3.fromRGB(
-                        math.min(255, baseColor.R * 255 + 20),
-                        math.min(255, baseColor.G * 255 + 20),
-                        math.min(255, baseColor.B * 255 + 20)
-                    )
+                -- Роль, а не захваченный цвет: акцентная кнопка следует за темой
+                local role = color == CONFIG.Colors.Red and "danger"
+                    or (color == nil and "default" or (color == CONFIG.Colors.Accent and "accent" or "custom"))
+                local baseColor, hoverColor, inkColor
+                local function resolveColors()
+                    baseColor = role == "danger" and T.DangerBg or (role == "default" and T.Surface1
+                        or (role == "accent" and T.Accent or color))
+                    if role == "default" then
+                        hoverColor = G.Gray200
+                    elseif role == "danger" and currentThemeName == "Violite" then
+                        hoverColor = Color3.fromRGB(233, 68, 74)
+                    else
+                        hoverColor = Color3.fromRGB(
+                            math.min(255, baseColor.R * 255 + 20),
+                            math.min(255, baseColor.G * 255 + 20),
+                            math.min(255, baseColor.B * 255 + 20)
+                        )
+                    end
+                    inkColor = role == "default" and T.Text or inkOn(baseColor)
                 end
+                resolveColors()
+                local isDefault = role == "default"
 
                 local button = Create("TextButton", {
                     Text = buttonText,
                     Font = FONT.Bold,
                     TextSize = TS.Button,
-                    TextColor3 = Color3.fromRGB(255, 255, 255),
+                    TextColor3 = inkColor,
                     BackgroundColor3 = baseColor,
                     -- 12 + 20 + 6 + 32 + 12 = 82 при заголовке; иначе строго по центру
                     Position = hasTitle and UDim2.new(0, EDGE, 0, 38) or UDim2.new(0, EDGE, 0.5, -CTRL_H / 2),
@@ -3110,6 +3268,11 @@ return function(env)
                 if isDefault then
                     AddStroke(button, STROKE_W, T.Border)
                 end
+                table.insert(themeHooks, function()
+                    resolveColors()
+                    button.BackgroundColor3 = baseColor
+                    button.TextColor3 = inkColor
+                end)
 
                 button.MouseButton1Click:Connect(function()
                     callHandler(handlerKey)
@@ -3274,6 +3437,114 @@ return function(env)
     -- API
     ----------------------------------------------------------------
 
+    ----------------------------------------------------------------
+    -- СМЕНА ТЕМЫ НА ЛЕТУ
+    -- Уже созданное окно перекрашивается сопоставлением «старый цвет →
+    -- новый» отдельно для фона, текста и обводки: одно значение может
+    -- играть разные роли (у светлых тем фон карточки и бегунок — белые),
+    -- поэтому при совпадении побеждает роль, стоящая в списке раньше.
+    ----------------------------------------------------------------
+    local function colorKey(c)
+        return string.format("%d,%d,%d", math.round(c.R * 255), math.round(c.G * 255), math.round(c.B * 255))
+    end
+
+    local function themeSnapshot()
+        return {
+            Background = {T.Canvas, T.Surface1, T.Surface2, T.Divider, G.Gray300, T.Border, T.BorderHi,
+                T.Accent, T.DangerBg, T.Text, T.TextDark},
+            Text = {T.Text, T.TextDark, T.AccentText, T.Danger},
+            Stroke = {T.Border, T.BorderHi, G.Gray600, T.Accent, T.TextDark, T.Text, T.Divider},
+        }
+    end
+
+    local function themeMap(old, new)
+        local map = {}
+        for group, list in pairs(old) do
+            local byKey = {}
+            for i, c in ipairs(list) do
+                local key = colorKey(c)
+                if byKey[key] == nil then byKey[key] = new[group][i] end
+            end
+            map[group] = byKey
+        end
+        return map
+    end
+
+    local THEME_PROPS = {
+        BackgroundColor3 = "Background", ScrollBarImageColor3 = "Background",
+        TextColor3 = "Text", PlaceholderColor3 = "Text", ImageColor3 = "Text",
+    }
+
+    local function repaintTree(root, map)
+        for _, obj in ipairs(root:GetDescendants()) do
+            -- Личная подпись в сайдбаре остаётся розовой в любой теме; на светлом фоне —
+            -- тёмный розовый без прозрачности, иначе не читается
+            if obj.Name == "Dedication" and obj:IsA("TextLabel") then
+                local light = luminance(T.Surface1) > 0.5
+                obj.TextColor3 = light and Color3.fromRGB(168, 52, 150) or Color3.fromRGB(220, 145, 230)
+                obj.TextTransparency = light and 0 or 0.35
+            else
+                if obj:GetAttribute("ThemeRole") == "Knob" then
+                    obj.BackgroundColor3 = T.Knob
+                elseif obj:IsA("UIStroke") then
+                    local new = map.Stroke[colorKey(obj.Color)]
+                    if new then obj.Color = new end
+                elseif obj:IsA("GuiObject") then
+                    for prop, group in pairs(THEME_PROPS) do
+                        local ok, value = pcall(function() return obj[prop] end)
+                        if ok and typeof(value) == "Color3" then
+                            local new = map[group][colorKey(value)]
+                            if new then obj[prop] = new end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    function GUI.GetThemes()
+        return table.clone(THEMES.Order)
+    end
+
+    function GUI.GetTheme()
+        return currentThemeName
+    end
+
+    -- Токены для хоста (уведомления MainScript подстраиваются под тему)
+    function GUI.GetThemeTokens()
+        return {
+            Name = currentThemeName, IsLight = luminance(T.Surface1) > 0.5,
+            RootTransparency = ROOT_TRANSPARENCY,   -- прозрачность фона окна (под ним — стекло)
+            Canvas = T.Canvas, Surface = T.Surface1, Border = T.Border,
+            Text = T.Text, TextDark = T.TextDark, Accent = T.Accent, AccentText = T.AccentText, Danger = T.Danger,
+        }
+    end
+
+    function GUI.OnThemeChanged(fn)
+        table.insert(themeListeners, fn)
+    end
+
+    function GUI.SetTheme(name)
+        if not THEMES[name] or name == currentThemeName then return false end
+        local old = themeSnapshot()
+        applyThemeTokens(name)
+        local map = themeMap(old, themeSnapshot())
+        local gui = State.UIElements.MainGui
+        if gui then repaintTree(gui, map) end
+        for _, hook in ipairs(themeHooks) do pcall(hook) end
+        pcall(function()
+            if makefolder then
+                for _, dir in ipairs(STORAGE_FOLDERS) do
+                    if not (isfolder and isfolder(dir)) then makefolder(dir) end
+                end
+            end
+            writefile(THEME_FILE, name)
+        end)
+        local tokens = GUI.GetThemeTokens()
+        for _, fn in ipairs(themeListeners) do pcall(fn, tokens) end
+        return true
+    end
+
     function GUI.Init()
         CreateUI()
     end
@@ -3287,6 +3558,10 @@ return function(env)
         end
         -- Эффекты живут в Lighting и в дереве камеры, сами вместе с ScreenGui
         -- они не уберутся: стекло надо снять и вернуть чужие DepthOfField
+        -- Стёкла уведомлений тоже снимаем: иначе они остались бы перед камерой
+        local handles = {}
+        for handle in pairs(acrylicShared.Handles) do handles[#handles + 1] = handle end
+        for _, handle in ipairs(handles) do pcall(handle.Destroy) end
         if State.UIElements.Acrylic then
             pcall(function()
                 State.UIElements.Acrylic.Destroy()

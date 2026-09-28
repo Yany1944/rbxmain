@@ -189,7 +189,7 @@ local CONFIG = {
             TopOffset = 100,          -- ниже верхней панели Roblox и таймера раунда MM2
             Gap = 8,
             SlideOffset = 10,
-            MinWidth = 320, MaxWidth = 440,  -- минимум держит стопку ровной колонкой
+            MinWidth = 240, MaxWidth = 440,  -- ширина по тексту
             MinHeight = 44,
             PaddingX = 14, PaddingY = 11,
             IconSize = 16, IconGap = 10,
@@ -197,8 +197,11 @@ local CONFIG = {
             Radius = 10,
             ProgressHeight = 2,
             ProgressTransparency = 0.35,
-            Background = Color3.fromRGB(10, 10, 10),   -- background-100
-            BackgroundTransparency = 0.04,
+            -- Фон как у окна меню: цвет полотна и его прозрачность, под ним — то же
+            -- стекло с размытием (GUI.AttachAcrylic). Тема GUI обновляет оба поля
+            Background = Color3.fromRGB(0, 0, 0),      -- background-200 (полотно окна)
+            BackgroundTransparency = 0.12,
+            AcrylicInset = 6,         -- поджим стекла от краёв: не торчит из-под скруглений
             Border = Color3.fromRGB(46, 46, 46),        -- gray-400
             Text = Color3.fromRGB(237, 237, 237),       -- gray-1000
             TextDark = Color3.fromRGB(143, 143, 143),   -- gray-700
@@ -208,6 +211,22 @@ local CONFIG = {
                 Warning = {Icon = "warning-fill",      Color = Color3.fromRGB(255, 153, 10)},   -- amber-800
                 Off     = {Icon = "stop-circle",       Color = Color3.fromRGB(143, 143, 143)},
                 Info    = {Icon = "information-fill",  Color = Color3.fromRGB(82, 173, 250)},   -- blue-900
+            },
+            -- Светлые темы GUI: цветной текст и иконки темнее, чтобы на белом держать ≥ 4.5:1
+            LightRichPalette = {
+                ["255,85,85"]   = Color3.fromRGB(206, 34, 40),
+                ["168,228,160"] = Color3.fromRGB(21, 128, 61),
+                ["85,255,120"]  = Color3.fromRGB(21, 128, 61),
+                ["255,165,0"]   = Color3.fromRGB(180, 83, 9),
+                ["255,170,50"]  = Color3.fromRGB(180, 83, 9),
+                ["255,200,50"]  = Color3.fromRGB(161, 98, 7),
+                ["85,255,255"]  = Color3.fromRGB(29, 78, 216),
+                ["50,150,255"]  = Color3.fromRGB(29, 78, 216),
+            },
+            LightKindColors = {
+                Success = Color3.fromRGB(21, 128, 61), Error = Color3.fromRGB(206, 34, 40),
+                Warning = Color3.fromRGB(180, 83, 9), Off = Color3.fromRGB(102, 102, 102),
+                Info = Color3.fromRGB(29, 78, 216),
             },
             -- Цвета, которыми размечен текст в вызовах, → палитра Geist
             RichPalette = {
@@ -224,8 +243,8 @@ local CONFIG = {
         },
         -- Настройки Server Hop / Rejoin. Всё, что можно крутить, — только здесь.
         ServerHop = {
-            VisitedFile      = "7yd7/serverhop_visited.json", -- {jobId = os.time()}
-            CacheFile        = "7yd7/serverhop_cache.json",   -- кэш списка серверов
+            VisitedFile      = "VioCFG/Violite/serverhop_visited.json", -- {jobId = os.time()}
+            CacheFile        = "VioCFG/Violite/serverhop_cache.json",   -- кэш списка серверов
             VisitedLifetime  = 30 * 60,  -- сколько секунд считать сервер «только что посещённым»
             VisitedLimit     = 250,      -- страховка от разрастания файла истории
             CacheLifetime    = 240,      -- сколько секунд переиспользовать список серверов
@@ -3019,6 +3038,18 @@ local function ShowNotification(richText, defaultColor)
             Plain = plain, Count = 1, Width = width,
         }
         table.insert(Notify.Items, item)
+
+        -- Размытие под карточкой — то же стекло, что под окном меню; гаснет вместе
+        -- с тостом, уходит при его удалении (GUI снимает стекло по Destroying)
+        if Notify.AttachAcrylic then
+            local acrylic = Notify.AttachAcrylic(card, { Inset = cfg.AcrylicInset })
+            if acrylic then
+                acrylic.SetFade(group.GroupTransparency)
+                Core.Connect(group:GetPropertyChangedSignal("GroupTransparency"), function()
+                    acrylic.SetFade(group.GroupTransparency)
+                end)
+            end
+        end
 
         local enter = TweenInfo.new(cfg.EnterTime, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
         Core.Tween(slot, enter, { Size = UDim2.new(0, width, 0, height) }):Play()
@@ -10304,6 +10335,33 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
     end})
 })
 
+-- Уведомления в палитре текущей темы GUI: фон, рамка и текст — токены темы,
+-- цветные акценты текста и иконок в светлых темах — затемнённые варианты
+do
+    local cfg = CONFIG.Notification
+    local darkPalette, darkKinds = table.clone(cfg.RichPalette), {}
+    for name, kind in pairs(cfg.Kinds) do darkKinds[name] = kind.Color end
+    local function applyNotificationTheme(tokens)
+        cfg.Background, cfg.Border = tokens.Canvas, tokens.Border
+        cfg.BackgroundTransparency = tokens.RootTransparency or cfg.BackgroundTransparency
+        cfg.Text, cfg.TextDark = tokens.Text, tokens.TextDark
+        local palette = table.clone(darkPalette)
+        if tokens.IsLight then
+            for key, color in pairs(cfg.LightRichPalette) do palette[key] = color end
+        end
+        palette["220,220,220"] = tokens.Text
+        cfg.RichPalette = palette
+        for name, kind in pairs(cfg.Kinds) do
+            kind.Color = tokens.IsLight and cfg.LightKindColors[name] or darkKinds[name]
+        end
+    end
+    Notify.AttachAcrylic = GUI.AttachAcrylic
+    if GUI.GetThemeTokens and GUI.OnThemeChanged then
+        applyNotificationTheme(GUI.GetThemeTokens())
+        GUI.OnThemeChanged(applyNotificationTheme)
+    end
+end
+
 Core.CleanupGUI = GUI.Cleanup
 GUI.Init()
 
@@ -11006,6 +11064,10 @@ do
         UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
         UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",false)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
+        -- Палитра интерфейса (закэшированный CDN старый GUI.lua тем не знает — тогда без пункта)
+        if UtilityTab.CreateThemeDropdown then
+            UtilityTab:CreateThemeDropdown("Theme", "Interface color palette")
+        end
 
         UtilityTab:CreateSection("DANGER ZONE", "right")
         UtilityTab:CreateButton("", "SERVER CRASHER", Color3.fromRGB(255, 85, 85), "ServerLagger")
