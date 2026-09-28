@@ -310,6 +310,70 @@ local CONFIG = {
             Randomization = {0, 10},       -- 0..10 → 0..100% разброса
             MaxDistance   = 12,            -- studs: дальше удержание сбрасываем (телепорт и т.п.)
         },
+        -- Выстрел шерифа (Shoot Murderer / Wallbang / Auto Fire / Resolver).
+        -- Замеры на двух аккаунтах (пинг ~235 мс у обоих):
+        --   • сервер MM2 бьёт лучом origin→target без лаг-компенсации, засчитывает
+        --     первое задетое: части тела И аксессуары; origin почти не проверяет;
+        --   • серверный кулдаун ровно 3.0 с от принятого выстрела, ранние выстрелы
+        --     молча отбрасываются и кулдаун не сбрасывают;
+        --   • видимая позиция убийцы отстаёт от истины на ~0.39 с, MoveDirection —
+        --     только на ~0.23 с (свойство идёт без буфера интерполяции физики);
+        --   • сервер держит убийцу на ~0.10 с позади истины → упреждение от видимой
+        --     позиции = пинг шерифа + ~0.055 с (подтверждено попаданиями).
+        SheriffAim = {
+            ServerLead     = 0.055,  -- сек сверх пинга до обработки выстрела сервером
+            -- сек, на сколько MoveDirection опережает видимую позицию (замер 0.14–0.18,
+            -- плавает с сетью): кандидаты, лучший выбирает самопроверка
+            IntentLeads    = {0.08, 0.11, 0.14, 0.17, 0.20, 0.23},
+            IntentLeadDefault = 3,   -- индекс стартового кандидата (0.14)
+            MaxLead        = 0.6,    -- сек: выше пинг — предикт не тянем дальше
+            Response       = 60,     -- 1/с, отклик скорости на смену ввода на земле (почти мгновенно)
+            AirAccel       = 140,    -- studs/s²: в воздухе скорость меняется с постоянным ускорением
+            SimStep        = 1 / 60,
+            History        = 1.6,    -- сек истории наблюдений за целью
+            ServerCooldown = 3.0,    -- сек, серверный кулдаун пистолета
+            CooldownMargin = 0.06,   -- сек запаса, чтобы не стрелять в ещё идущий кулдаун
+            ConfirmExtra   = 0.45,   -- сек сверх пинга ждём трассер своего выстрела
+            PartMargin     = 0.12,   -- studs: хитбоксы сжимаем — край тела не считаем попаданием
+            -- Auto Fire: стреляем, только когда вероятность попадания ≥ порога
+            FireChance     = 0.85,
+            MinTrackTime   = 0.45,   -- сек наблюдения за целью до первого автовыстрела
+            AutoInterval   = 1 / 30, -- сек между оценками Auto Fire
+            DiagWarnAfter  = 6,      -- сек без выстрела при готовом пистолете → уведомление с причиной
+            -- Смены ввода цели: средняя длина «отрезка» постоянного ввода по её истории,
+            -- с априором (PriorSegments отрезков по PriorDuration с)
+            PriorSegments  = 2,
+            PriorDuration  = 0.9,
+            SegmentAngle   = 25,     -- градусов: поворот ввода больше этого — новый отрезок
+            ChangeSplit    = {Stop = 0.35, Reverse = 0.25, Left = 0.2, Right = 0.2},
+            JumpRatePrior  = 0.25,   -- прыжков/с у цели до набора своей статистики
+            InnocentRadius = 2.5,    -- studs: чужой игрок ближе к лучу — не стреляем (убьём невиновного)
+            -- Самопроверка предикта на текущей цели (см. selfCheck): p80 ошибки
+            -- до GoodError — полное доверие, от BadError — ноль
+            SelfCheck = {
+                Interval   = 0.1,    -- сек между контрольными предсказаниями
+                Window     = 4,      -- сек памяти ошибок
+                MinSamples = 4,
+                Percentile = 0.8,
+                GoodError  = 0.6,    -- studs
+                BadError   = 2.0,
+                KAlpha     = 0.05,   -- сглаживание ошибки кандидатов K
+                KMinSamples = 15,    -- проверок до первого переключения K
+            },
+            -- Resolver: заявленная скорость против скорости по смещению позиции за окно.
+            -- Честный игрок (замер с прыжками и стенами, окно 0.3 с): расхождение не
+            -- выше 4.0 по горизонтали и 9.7 по вертикали; Anti-Aim даёт ~100 по вертикали
+            Resolver = {
+                Window        = 0.3,   -- сек окна сравнения
+                VertMismatch  = 20,    -- studs/s
+                HorizMismatch = 5,     -- studs/s, либо доля скорости ниже
+                HorizRatio    = 0.25,
+                Engage        = 0.6,   -- доля подозрительных кадров за последнюю секунду
+                EngageTime    = 0.5,   -- сек подряд выше доли — включаем резолв
+                Release       = 1.5,   -- сек без подозрений — выключаем
+                TeleportSpeed = 150,   -- studs/s: быстрее — телепорт, окно сбрасываем
+            },
+        },
 	}
 
 local Players = game:GetService("Players")
@@ -366,7 +430,8 @@ local State = {
         FlingPlayer = Enum.KeyCode.Unknown,
         knifeThrow = Enum.KeyCode.Unknown,
         NoClip = Enum.KeyCode.Unknown,
-        ShootMurderer = Enum.KeyCode.Unknown,
+        ShootMurderer = Enum.KeyCode.Unknown,   -- Silent
+        Wallbang = Enum.KeyCode.Unknown,        -- Magic
         PickupGun = Enum.KeyCode.Unknown,
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
@@ -410,8 +475,9 @@ local State = {
         SpawnAtPlayer = false,
         CanShootMurderer = true,
         ShootCooldown = 3,
-        ShootMurdererMode = "Magic",
-        ShootLead = 0.09,
+        ShootLead = 0.09,   -- упреждение сверх пинга для броска ножа; у выстрела — CONFIG.SheriffAim
+        AutoFireEnabled = false,
+        ResolverEnabled = false,
         AutoFarmEnabled = false,
         CoinFarmFlySpeed = 22,
         CoinFarmDelay = 2,
@@ -4010,6 +4076,13 @@ local Fling = {
     FlingerAngular = 50,  -- порог угловой скорости
     FlingerLinear = 120,  -- порог линейной скорости (обычное падение ~50-90)
     FlingerHold = 3,      -- секунд держать защиту после последнего всплеска
+
+    -- «Already flung»: цель быстрее FlungSpeed считается уже летящей. Настойчивый
+    -- ForceClicks-й клик по ней за ForceWindow секунд всё равно запускает флинг
+    FlungSpeed = 500,
+    ForceClicks = 3,
+    ForceWindow = 3,
+    ForceClickLog = {},   -- userId -> {os.clock() последних кликов}
     SavedHumState = nil,
     MaskedChar = nil,
     DestroyHeightSet = false,
@@ -5121,14 +5194,26 @@ local function FlingPlayer(playerToFling, repeatMode, method)
         return
     end
 
-    if targetPart.AssemblyLinearVelocity.Magnitude > 500 then
-        if State.Settings.NotificationsEnabled then
-            ShowNotification(
-                "<font color=\"rgb(220,220,220)\">Fling: Already flung</font>",
-                CONFIG.Colors.Text
-            )
+    if targetPart.AssemblyLinearVelocity.Magnitude > Fling.FlungSpeed then
+        -- Считаем клики по летящей цели за последние ForceWindow секунд
+        local now = os.clock()
+        local clicks = {}
+        for _, t in ipairs(Fling.ForceClickLog[playerToFling.UserId] or {}) do
+            if now - t <= Fling.ForceWindow then table.insert(clicks, t) end
         end
-        return
+        table.insert(clicks, now)
+        if #clicks < Fling.ForceClicks then
+            Fling.ForceClickLog[playerToFling.UserId] = clicks
+            if State.Settings.NotificationsEnabled then
+                ShowNotification(
+                    "<font color=\"rgb(220,220,220)\">Fling: Already flung</font>",
+                    CONFIG.Colors.Text
+                )
+            end
+            return
+        end
+        -- Третий клик подряд — флингуем, даже если цель ещё летит
+        Fling.ForceClickLog[playerToFling.UserId] = nil
     end
 
     if not Fling.QueueTarget(targetPart, nil, repeatMode, playerToFling.Name, method) then return end
@@ -7360,12 +7445,850 @@ State.Runtime.FindClearOrigin = function(targetPos, targetChar, preferred, dista
     return bestOrigin or targetPos + Vector3.yAxis * 0.5
 end
 
-shootMurderer = function(forceMagic)
-    -- Определяем режим: если forceMagic == true, используем Magic, иначе проверяем настройку
-    local useMode = forceMagic and "Magic" or (State.Settings.ShootMurdererMode or "Magic")
+-- ══════════════════════════════════════════════════════════════════════════════
+-- БЛОК 15.1: SHERIFF AIM — трекер убийцы, предикт выстрела, Resolver, Auto Fire
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Почему так (цифры — в CONFIG.SheriffAim):
+--  • Промах шерифа — почти всегда смена ввода убийцы, пока выстрел «в пути». Но
+--    MoveDirection приходит на ~0.14 с раньше позиции, и бо́льшая часть окна
+--    упреждения уже известна: симулируем гуманоида по истории ввода, а не тянем
+--    скорость по прямой. Неизвестен лишь хвост ≈ пинг − 0.1 с.
+--  • Хвост раскладываем на сценарии (продолжит / стоп / разворот / вбок / прыжок)
+--    с весами из поведения ЭТОЙ цели и считаем, какая доля весов даёт попадание
+--    луча в её реальные хитбоксы (части тела + аксессуары, как на сервере).
+--    Прицел — точка с наибольшей долей; Auto Fire стреляет только выше порога.
+--  • Resolver сверяет заявленную скорость со смещением реплицированной позиции:
+--    честный игрок их не расходит, спуфер — сильно и подолгу.
+-- Всё — через State.Runtime.SheriffAim: у главного чанка почти кончились локали.
+do
+    local SA = CONFIG.SheriffAim
+    local RES = SA.Resolver
+    local Aim = {
+        Target = nil,          -- Player-убийца, за которым следим
+        Samples = {},          -- {t, pos, vel, md, ws}: последние SA.History с
+        Segments = {},         -- длительности завершённых отрезков постоянного ввода
+        SegDir = nil, SegStart = nil,
+        Jumps = {},            -- моменты отрыва от земли
+        WasGrounded = true,
+        StandOffset = nil,     -- высота HRP над полом стоящей цели
+        TrackSince = nil,
+        Spoof = false,         -- Resolver решил, что скорость цели подменена
+        Suspects = {}, SuspectSince = nil, CleanSince = nil,
+        SegTimes = {},         -- моменты смены ввода (для самопроверки)
+        Checks = {},           -- предсказания, ждущие проверки: {due, t0, pos}
+        Errors = {},           -- {t, err}: фактические ошибки предикта на этой цели
+        NextCheck = 0,
+        Health = 1,            -- множитель уверенности по самопроверке
+        KIndex = CONFIG.SheriffAim.IntentLeadDefault,   -- текущий кандидат опережения ввода
+        KError = {}, KSamples = 0,                      -- калибровка K (свойство сети, между целями не сбрасываем)
+        NextShot = 0,          -- os.clock(), раньше которого сервер отбросит выстрел
+        Pending = nil,         -- выстрел, для которого ждём серверный трассер
+        Log = {},              -- последние автовыстрелы: шанс, резолв, итог
+        NextAuto = 0,
+    }
+    State.Runtime.SheriffAim = Aim
+    Core.SheriffAim = Aim      -- для замеров снаружи: getgenv().MM2_Runtime.SheriffAim
 
-    -- Проверка кулдауна
-    if not State.Settings.CanShootMurderer then
+    local function flat(v) return Vector3.new(v.X, 0, v.Z) end
+
+    local function pingSeconds()
+        local ping = 0.2
+        pcall(function()
+            ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+        end)
+        return math.clamp(ping, 0, SA.MaxLead)
+    end
+    Aim.Ping = pingSeconds
+
+    -- Лучи по карте: без персонажей, камеры и серверных трассеров (Part+Beam в корне)
+    local function mapParams(extra)
+        local ignore = {Workspace.CurrentCamera}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character then table.insert(ignore, player.Character) end
+        end
+        for _, child in ipairs(Workspace:GetChildren()) do
+            if child:IsA("BasePart") and child.Name == "Part" and child:FindFirstChildOfClass("Beam") then
+                table.insert(ignore, child)
+            end
+        end
+        if extra then for _, inst in ipairs(extra) do table.insert(ignore, inst) end end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = ignore
+        params.IgnoreWater = true
+        return params
+    end
+
+    local function resetTrack(target)
+        if target ~= Aim.Target and Aim.ResetDiag then Aim.ResetDiag() end
+        Aim.Target = target
+        table.clear(Aim.Samples); table.clear(Aim.Segments); table.clear(Aim.Jumps)
+        table.clear(Aim.Suspects)
+        table.clear(Aim.SegTimes); table.clear(Aim.Checks); table.clear(Aim.Errors)
+        Aim.Health, Aim.NextCheck, Aim.LastRise = 1, 0, nil
+        Aim.SegDir, Aim.SegStart = nil, nil
+        Aim.WasGrounded, Aim.StandOffset = true, nil
+        Aim.TrackSince = target and os.clock() or nil
+        Aim.Spoof, Aim.SuspectSince, Aim.CleanSince = false, nil, nil
+    end
+
+    local function sameInput(a, b)
+        local am, bm = a.Magnitude > 0.1, b.Magnitude > 0.1
+        if am ~= bm then return false end
+        if not am then return true end
+        return a.Unit:Dot(b.Unit) >= math.cos(math.rad(SA.SegmentAngle))
+    end
+
+    -- Позиционная и средняя заявленная скорость цели за последние window с
+    local function windowVelocity(window)
+        local samples = Aim.Samples
+        local n = #samples
+        if n < 3 then return nil end
+        local newest = samples[n]
+        local i = n
+        while i > 1 and newest.t - samples[i - 1].t <= window do i -= 1 end
+        local dt = newest.t - samples[i].t
+        if dt < window * 0.6 then return nil end
+        local sum = Vector3.zero
+        for k = i, n do sum += samples[k].vel end
+        return (newest.pos - samples[i].pos) / dt, sum / (n - i + 1)
+    end
+
+    -- Resolver: доля кадров с подменой за последнюю секунду. Включаем, только если
+    -- доля держится высокой EngageTime подряд; выключаем после Release без подозрений.
+    -- Честного игрока окно 0.3 с не расходит (замер ≤ 4 / 9.7 studs/s) — при сомнении
+    -- резолв не включается и выстрел идёт как без резолвера.
+    local function updateResolver(now)
+        if not State.Settings.ResolverEnabled then
+            if Aim.Spoof or #Aim.Suspects > 0 then
+                Aim.Spoof, Aim.SuspectSince, Aim.CleanSince = false, nil, nil
+                table.clear(Aim.Suspects)
+            end
+            return
+        end
+        local posVel, repVel = windowVelocity(RES.Window)
+        if not posVel then return end
+        local horiz = (flat(posVel) - flat(repVel)).Magnitude
+        local vert = math.abs(posVel.Y - repVel.Y)
+        local suspect = vert > RES.VertMismatch
+            or horiz > math.max(RES.HorizMismatch, RES.HorizRatio * flat(posVel).Magnitude)
+        table.insert(Aim.Suspects, {now, suspect})
+        while #Aim.Suspects > 1 and now - Aim.Suspects[1][1] > 1 do table.remove(Aim.Suspects, 1) end
+        local count = 0
+        for _, entry in ipairs(Aim.Suspects) do if entry[2] then count += 1 end end
+        local share = count / #Aim.Suspects
+        if share >= RES.Engage then Aim.SuspectSince = Aim.SuspectSince or now else Aim.SuspectSince = nil end
+        if suspect then Aim.CleanSince = nil else Aim.CleanSince = Aim.CleanSince or now end
+        if not Aim.Spoof and Aim.SuspectSince and now - Aim.SuspectSince >= RES.EngageTime then
+            Aim.Spoof = true
+        elseif Aim.Spoof and Aim.CleanSince and now - Aim.CleanSince >= RES.Release then
+            Aim.Spoof = false
+        end
+    end
+
+    -- Скорость, от которой стартует предикт: заявленная, а при резолве — по смещению
+    local function sourceVelocity()
+        local newest = Aim.Samples[#Aim.Samples]
+        if Aim.Spoof then
+            local posVel = windowVelocity(0.12) or windowVelocity(RES.Window)
+            if posVel then return posVel end
+        end
+        return newest.vel
+    end
+
+    -- Пол под точкой: высота или nil
+    local function floorY(pos, params)
+        local hit = Workspace:Raycast(pos + Vector3.new(0, 1.5, 0), Vector3.new(0, -80, 0), params)
+        return hit and hit.Position.Y or nil
+    end
+
+    -- Наблюдение за убийцей: каждый кадр, пока у нас пистолет или включён Auto Fire
+    local function track(now)
+        local murderer = getMurder()
+        if murderer == LocalPlayer then murderer = nil end
+        if murderer ~= Aim.Target then resetTrack(murderer) end
+        local char = murderer and murderer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum or hum.Health <= 0 then
+            -- смерть цели — конец раунда для статистики, даже если убийцей снова будет он же
+            if #Aim.Samples > 0 then Aim.ResetDiag(); resetTrack(murderer) end
+            return
+        end
+        local pos, md = hrp.Position, hum.MoveDirection
+        local last = Aim.Samples[#Aim.Samples]
+        if last and (pos - last.pos).Magnitude / math.max(now - last.t, 1 / 240) > RES.TeleportSpeed then
+            resetTrack(murderer)   -- телепорт/респавн: старая история врёт
+        end
+        table.insert(Aim.Samples, {t = now, pos = pos, vel = hrp.AssemblyLinearVelocity,
+            md = Vector3.new(md.X, 0, md.Z), ws = hum.WalkSpeed})
+        while #Aim.Samples > 2 and now - Aim.Samples[1].t > SA.History do table.remove(Aim.Samples, 1) end
+
+        -- Отрезки постоянного ввода → как часто эта цель меняет направление
+        local input = Aim.Samples[#Aim.Samples].md
+        if not Aim.SegDir then
+            Aim.SegDir, Aim.SegStart = input, now
+        elseif not sameInput(Aim.SegDir, input) then
+            table.insert(Aim.Segments, now - Aim.SegStart)
+            if #Aim.Segments > 24 then table.remove(Aim.Segments, 1) end
+            table.insert(Aim.SegTimes, now)
+            if #Aim.SegTimes > 32 then table.remove(Aim.SegTimes, 1) end
+            Aim.SegDir, Aim.SegStart = input, now
+        end
+
+        updateResolver(now)
+
+        -- Земля/прыжки: вертикаль берём из источника скорости (при резолве — по позиции)
+        local params = mapParams()
+        local floor = floorY(pos, params)
+        local vy = sourceVelocity().Y
+        local height = floor and pos.Y - floor
+        local grounded = height ~= nil and height < (Aim.StandOffset or 3.2) + 0.7 and math.abs(vy) < 10
+        if grounded and math.abs(vy) < 1.5 and height > 1 then
+            Aim.StandOffset = Aim.StandOffset and (Aim.StandOffset * 0.8 + height * 0.2) or height
+        end
+        -- Отрыв: вертикальная скорость ПО СМЕЩЕНИЮ пересекла порог снизу. Так и
+        -- спуфер не обманет, и не нужна точная «земля» (ступеньки тоже сюда попадут —
+        -- для самопроверки это тоже «не ошибка модели»)
+        local rise = windowVelocity(0.1)
+        rise = rise and rise.Y or vy
+        if (Aim.LastRise or 0) < 6 and rise >= 12 then
+            table.insert(Aim.Jumps, now)
+            if #Aim.Jumps > 16 then table.remove(Aim.Jumps, 1) end
+        end
+        Aim.LastRise = rise
+        Aim.WasGrounded = grounded
+        Aim.Grounded = grounded
+    end
+
+    -- Последний известный ввод на момент t (ступенька по истории)
+    local function inputAt(t)
+        local samples = Aim.Samples
+        for i = #samples, 1, -1 do
+            if samples[i].t <= t then return samples[i].md end
+        end
+        return samples[1].md
+    end
+
+    -- Горизонтальная симуляция гуманоида: первые K с — ввод из истории (он уже
+    -- известен, но в видимую позицию ещё не попал), дальше — текущий или сценарный
+    local function simulate(ctx, override, changeAt)
+        local offset, velocity = Vector3.zero, ctx.v0
+        local tau, stepMax = 0, SA.SimStep
+        while tau < ctx.L - 1e-6 do
+            local step = math.min(stepMax, ctx.L - tau)
+            local input
+            if tau < ctx.K then
+                input = inputAt(ctx.now - ctx.K + tau)
+            elseif override and tau >= ctx.K + changeAt then
+                input = override
+            else
+                input = ctx.input
+            end
+            local want = input * ctx.ws - velocity
+            if tau < ctx.airTime then
+                -- в воздухе: разгон с ограниченным ускорением (замер ~140 studs/s²)
+                local gap = want.Magnitude
+                local limit = SA.AirAccel * step
+                velocity += gap > limit and want * (limit / gap) or want
+            else
+                velocity += want * (1 - math.exp(-SA.Response * step))
+            end
+            offset += velocity * step
+            tau += step
+        end
+        return offset
+    end
+
+    -- Стена на пути: упираемся в неё и скользим вдоль (одна итерация)
+    local function collide(ctx, offset)
+        local distance = offset.Magnitude
+        if distance < 0.05 then return offset end
+        local dir = offset / distance
+        local hit = Workspace:Raycast(ctx.pos, dir * (distance + 1), ctx.params)
+        if not hit then return offset end
+        local allowed = math.max(hit.Distance - 1, 0)
+        local remaining = offset - dir * allowed
+        local normal = flat(hit.Normal)
+        if normal.Magnitude > 1e-3 then
+            normal = normal.Unit
+            local slide = remaining - normal * remaining:Dot(normal)
+            local start = ctx.pos + dir * allowed
+            if slide.Magnitude > 0.05 and not Workspace:Raycast(start, slide.Unit * (slide.Magnitude + 1), ctx.params) then
+                return dir * allowed + slide
+            end
+        end
+        return dir * allowed
+    end
+
+    -- Вертикаль: на земле — пол под новой точкой, в воздухе — парабола до пола;
+    -- jump — прыжок в начале неизвестного хвоста
+    local function vertical(ctx, offset, jump)
+        local g = Workspace.Gravity
+        local base = ctx.pos + offset
+        local dy
+        if jump then
+            local u = math.max(ctx.L - ctx.K, 0)
+            dy = ctx.jumpVelocity * u - 0.5 * g * u * u
+        elseif ctx.grounded then
+            dy = 0
+        else
+            dy = ctx.vy * ctx.L - 0.5 * g * ctx.L * ctx.L
+        end
+        local floor = floorY(Vector3.new(base.X, ctx.pos.Y + math.max(dy, 0), base.Z), ctx.params)
+        if floor then
+            local stand = floor + ctx.standOffset - ctx.pos.Y
+            if ctx.grounded and not jump then
+                -- ступеньки/склон: следуем за полом, обрыв (> 3 studs) не угадываем
+                if math.abs(stand) <= 3 then dy = stand end
+            else
+                dy = math.max(dy, stand)
+            end
+        end
+        return dy
+    end
+
+    -- Контекст предикта на текущий кадр; nil — предсказывать нечего
+    local function makeContext()
+        local target = Aim.Target
+        local char = target and target.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local newest = Aim.Samples[#Aim.Samples]
+        if not hrp or not hum or not newest or #Aim.Samples < 3 then return nil end
+        local velocity = sourceVelocity()
+        local L = pingSeconds() + SA.ServerLead
+        local input = newest.md
+        -- Скорость ходьбы: свойство (серверное значение); если цель реально бежит
+        -- быстрее по направлению ввода — берём наблюдаемую. Без резолва наблюдаемая —
+        -- заявленная (её и режет Zero-спуфер), с резолвом — по смещению позиции
+        local ws = (newest.ws and newest.ws > 0) and newest.ws or CONFIG.DefaultWalkSpeed
+        local planar = flat(velocity)
+        if input.Magnitude > 0.1 and planar.Magnitude > ws and planar.Unit:Dot(input.Unit) > 0.9 then
+            ws = planar.Magnitude
+        end
+        -- Упёрся в стену / тянется медленнее своей скорости: ввод давно не менялся
+        -- (дольше, чем идёт до видимой позиции), а по смещению цель почти стоит —
+        -- ходьбу по вводу не додумываем, берём наблюдаемую скорость вдоль ввода
+        local K = math.min(SA.IntentLeads[Aim.KIndex], L)
+        if input.Magnitude > 0.1 and Aim.SegStart and newest.t - Aim.SegStart > K + 0.35 then
+            local posVel = windowVelocity(0.25)
+            if posVel then
+                local along = flat(posVel):Dot(input.Unit)
+                if along < ws * 0.7 then ws = math.max(along, 0) end
+            end
+        end
+        local jumpVelocity = 50
+        pcall(function()
+            jumpVelocity = hum.UseJumpPower and hum.JumpPower or math.sqrt(2 * Workspace.Gravity * hum.JumpHeight)
+        end)
+        local params = mapParams()
+        local grounded = Aim.Grounded ~= false
+        local standOffset = Aim.StandOffset or 3
+        -- Сколько ещё лететь до пола (для разгона в воздухе); пола нет — весь горизонт
+        local airTime = 0
+        if not grounded then
+            airTime = L
+            local floor = floorY(newest.pos, params)
+            if floor then
+                local g = Workspace.Gravity
+                local drop = math.max(newest.pos.Y - (floor + standOffset), 0)
+                airTime = math.min((velocity.Y + math.sqrt(velocity.Y ^ 2 + 2 * g * drop)) / g, L)
+            end
+        end
+        return {
+            char = char, hrp = hrp, now = newest.t, pos = newest.pos,
+            v0 = planar, vy = velocity.Y, input = input, ws = ws,
+            L = L, K = K, airTime = airTime,
+            grounded = grounded, jumpVelocity = jumpVelocity,
+            standOffset = standOffset,
+            params = params,
+        }
+    end
+
+    -- Сценарии неизвестного хвоста с весами. Смена ввода — в начале хвоста или в
+    -- его середине (поровну); вероятность смены — из средней длины отрезков цели.
+    local function buildScenarios(ctx)
+        local u = math.max(ctx.L - ctx.K, 0)
+        local total, count = SA.PriorDuration * SA.PriorSegments, SA.PriorSegments
+        for _, d in ipairs(Aim.Segments) do total += d; count += 1 end
+        local changeChance = 1 - math.exp(-u / math.max(total / count, 0.15))
+        local jumpChance = 0
+        if ctx.grounded then
+            local span = math.min(ctx.now - (Aim.TrackSince or ctx.now), 20)
+            local recent = 0
+            for _, t in ipairs(Aim.Jumps) do if ctx.now - t <= 20 then recent += 1 end end
+            local rate = (recent + SA.JumpRatePrior * 2) / (span + 2)
+            jumpChance = 1 - math.exp(-rate * u)
+        end
+
+        local list = {}
+        local function add(name, weight, override, changeAt, jump)
+            if weight <= 0 then return end
+            local offset = collide(ctx, simulate(ctx, override, changeAt or 0))
+            table.insert(list, {name = name, w = weight,
+                disp = Vector3.new(offset.X, vertical(ctx, offset, jump), offset.Z)})
+        end
+
+        local keep = 1 - changeChance
+        add("keep", keep * (1 - jumpChance))
+        add("jump", keep * jumpChance, nil, nil, true)
+        local moving = ctx.input.Magnitude > 0.1
+        local dir = moving and ctx.input.Unit or flat(ctx.hrp.CFrame.LookVector)
+        dir = dir.Magnitude > 1e-3 and dir.Unit or Vector3.xAxis
+        local left = Vector3.new(-dir.Z, 0, dir.X)
+        local changes
+        if moving then
+            changes = {
+                {"stop", SA.ChangeSplit.Stop, Vector3.zero},
+                {"reverse", SA.ChangeSplit.Reverse, -dir},
+                {"left", SA.ChangeSplit.Left, left},
+                {"right", SA.ChangeSplit.Right, -left},
+            }
+        else
+            changes = {{"forward", 0.25, dir}, {"back", 0.25, -dir}, {"left", 0.25, left}, {"right", 0.25, -left}}
+        end
+        for _, change in ipairs(changes) do
+            add(change[1], changeChance * change[2] * 0.5, change[3], 0)
+            add(change[1] .. "_late", changeChance * change[2] * 0.5, change[3], u * 0.5)
+        end
+        return list
+    end
+
+    -- Самопроверка: цель предикта — ровно то, что мы увидим через L секунд (сервер
+    -- видит убийцу на то же время позже, на какое мы его видим). Поэтому ошибку
+    -- модели на ЭТОЙ цели можно мерить вживую: ставим предсказание «ввод не
+    -- поменяется» и сверяем с видимой позицией в срок. Смены ввода и прыжки внутри
+    -- окна — не ошибка модели, такие проверки выбрасываем. Если модель стабильно
+    -- врёт (стена, лаги, спуфер без резолвера) — Health снижает шанс, и Auto Fire
+    -- не тратит выстрел.
+    local function changedBetween(list, from, to)
+        for i = #list, 1, -1 do
+            local t = list[i]
+            if t < from then return false end
+            if t <= to then return true end
+        end
+        return false
+    end
+
+    local function selfCheck(now)
+        local current = Aim.Samples[#Aim.Samples]
+        if not current then return end
+        local SC = SA.SelfCheck
+        -- сверка созревших предсказаний
+        while Aim.Checks[1] and Aim.Checks[1].due <= now do
+            local check = table.remove(Aim.Checks, 1)
+            -- ввод до t0 предикт уже знал; ошибка «не модели» — смена после t0
+            local inputChanged = changedBetween(Aim.SegTimes, check.t0, check.due - check.K)
+            local jumped = changedBetween(Aim.Jumps, check.t0 - 0.05, check.due)
+            if not inputChanged and not jumped and now - check.due < 0.1 then
+                local miss = current.pos - check.pos
+                table.insert(Aim.Errors, {now, miss.Magnitude, flat(miss).Magnitude, miss.Y})
+                -- калибровка K: средний квадрат горизонтальной ошибки каждого кандидата
+                for i, pos in ipairs(check.byK) do
+                    local e = flat(current.pos - pos).Magnitude
+                    Aim.KError[i] = Aim.KError[i] and (Aim.KError[i] * (1 - SC.KAlpha) + e * e * SC.KAlpha) or e * e
+                end
+                Aim.KSamples += 1
+                if Aim.KSamples >= SC.KMinSamples then
+                    local best = Aim.KIndex
+                    for i, e in pairs(Aim.KError) do
+                        if e < Aim.KError[best] then best = i end
+                    end
+                    -- гистерезис: переключаемся, только если новый K заметно лучше
+                    if Aim.KError[best] < Aim.KError[Aim.KIndex] * 0.85 then Aim.KIndex = best end
+                end
+            end
+        end
+        while Aim.Errors[1] and now - Aim.Errors[1][1] > SC.Window do table.remove(Aim.Errors, 1) end
+        if #Aim.Errors >= SC.MinSamples then
+            local sorted = {}
+            for i, e in ipairs(Aim.Errors) do sorted[i] = e[2] end
+            table.sort(sorted)
+            local err = sorted[math.max(1, math.ceil(#sorted * SC.Percentile))]
+            Aim.Health = math.clamp(1 - (err - SC.GoodError) / (SC.BadError - SC.GoodError), 0, 1)
+            Aim.ModelError = err
+        else
+            Aim.Health, Aim.ModelError = 1, nil
+        end
+        -- новое предсказание — сразу для всех кандидатов K
+        if now < Aim.NextCheck then return end
+        Aim.NextCheck = now + SC.Interval
+        local ctx = makeContext()
+        if not ctx then return end
+        local check = {due = now + ctx.L, t0 = now, K = ctx.K, byK = {}}
+        for i, K in ipairs(SA.IntentLeads) do
+            ctx.K = math.min(K, ctx.L)
+            local offset = collide(ctx, simulate(ctx))
+            local pos = ctx.pos + Vector3.new(offset.X, vertical(ctx, offset, false), offset.Z)
+            check.byK[i] = pos
+            if i == Aim.KIndex then check.pos = pos end
+        end
+        table.insert(Aim.Checks, check)
+    end
+
+    -- Хитбоксы цели: видимые части и аксессуары (сервер засчитывает и их), без HRP
+    -- (Extended Hitbox раздувает его только у нас) и без инструментов
+    local function hitboxes(char)
+        local boxes = {}
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.CanQuery
+                and not part:FindFirstAncestorOfClass("Tool") then
+                local half = part.Size / 2 - Vector3.one * SA.PartMargin
+                table.insert(boxes, {cf = part.CFrame,
+                    half = Vector3.new(math.max(half.X, 0.05), math.max(half.Y, 0.05), math.max(half.Z, 0.05))})
+            end
+        end
+        return boxes
+    end
+
+    -- Луч (origin, единичное dir, длина maxT) против OBB (slab-метод)
+    local function rayHitsBox(origin, dir, maxT, cf, half)
+        local lo, ld = cf:PointToObjectSpace(origin), cf:VectorToObjectSpace(dir)
+        local tmin, tmax = 0, maxT
+        for _, axis in ipairs({"X", "Y", "Z"}) do
+            local p, d, e = lo[axis], ld[axis], half[axis]
+            if math.abs(d) < 1e-8 then
+                if math.abs(p) > e then return false end
+            else
+                local t1, t2 = (-e - p) / d, (e - p) / d
+                if t1 > t2 then t1, t2 = t2, t1 end
+                tmin, tmax = math.max(tmin, t1), math.min(tmax, t2)
+                if tmin > tmax then return false end
+            end
+        end
+        return true
+    end
+
+    local function chanceFor(origin, aim, boxes, scenarios)
+        local delta = aim - origin
+        local distance = delta.Magnitude
+        if distance < 1e-3 then return 0 end
+        local dir = delta / distance
+        local maxT = distance + 12
+        local chance = 0
+        for _, s in ipairs(scenarios) do
+            for _, box in ipairs(boxes) do
+                if rayHitsBox(origin, dir, maxT, box.cf + s.disp, box.half) then
+                    chance += s.w
+                    break
+                end
+            end
+        end
+        return chance
+    end
+
+    -- Лучшая точка прицела для заданной точки вылета: {aim, chance, scenarios, ctx}
+    Aim.Solve = function(origin)
+        local ctx = makeContext()
+        if not ctx then return nil end
+        local scenarios = buildScenarios(ctx)
+        local boxes = hitboxes(ctx.char)
+        local torso = pickAimPart(ctx.char)
+        local head = ctx.char:FindFirstChild("Head")
+        local torsoPos = torso and torso.Position or ctx.hrp.Position
+        local keep, stop = scenarios[1], nil
+        for _, s in ipairs(scenarios) do if s.name == "stop" or s.name == "forward" then stop = s break end end
+        local candidates = {torsoPos + keep.disp}
+        if head then table.insert(candidates, head.Position + keep.disp) end
+        if stop then
+            table.insert(candidates, torsoPos + stop.disp)
+            for _, f in ipairs({1 / 3, 2 / 3}) do
+                table.insert(candidates, torsoPos + keep.disp:Lerp(stop.disp, f))
+            end
+            if head then table.insert(candidates, head.Position + keep.disp:Lerp(stop.disp, 0.5)) end
+        end
+        local best, bestChance = candidates[1], -1
+        for _, aim in ipairs(candidates) do
+            local chance = chanceFor(origin, aim, boxes, scenarios)
+            if chance > bestChance + 1e-6 then best, bestChance = aim, chance end
+        end
+        return {aim = best, chance = bestChance * Aim.Health, ctx = ctx, spoof = Aim.Spoof,
+            geometric = bestChance, health = Aim.Health}
+    end
+
+    -- Можно ли стрелять по этой линии: карта не закрывает цель, и ни один другой
+    -- игрок не стоит у луча (сервер убьёт первого задетого — невиновного)
+    Aim.LineClear = function(origin, aim, ctx, allowWalls)
+        local delta = aim - origin
+        local distance = delta.Magnitude
+        if distance < 1e-3 then return false end
+        local dir = delta / distance
+        local wall = Workspace:Raycast(origin, dir * 1000, ctx.params)
+        local reach = wall and wall.Distance or 1000
+        if not allowWalls and reach < distance - 1.5 then return false, "wall" end
+        local L = ctx.L
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player ~= Aim.Target and player.Character then
+                local root = player.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local p = root.Position + root.AssemblyLinearVelocity * L
+                    local along = math.clamp((p - origin):Dot(dir), 0, reach)
+                    if (origin + dir * along - p).Magnitude < SA.InnocentRadius then return false, "innocent" end
+                end
+            end
+        end
+        return true
+    end
+
+    -- Точка вылета как у игры: HRP.GunRaycastAttachment (иначе ручка пистолета).
+    -- Если между головой и ней стена — стреляем от головы (игра такой выстрел запрещает)
+    Aim.SilentOrigin = function(character, gun)
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        local attachment = hrp and hrp:FindFirstChild("GunRaycastAttachment")
+        local origin = attachment and attachment.WorldPosition
+        if not origin then
+            local handle = gun and (gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel"))
+            origin = handle and handle.Position or (hrp and hrp.Position)
+        end
+        local head = character and character:FindFirstChild("Head")
+        if origin and head then
+            local params = mapParams()
+            if Workspace:Raycast(head.Position, origin - head.Position, params) then origin = head.Position end
+        end
+        return origin
+    end
+
+    Aim.FindRemote = function(gun)
+        local remote = gun:FindFirstChild("Shoot")
+            or (gun:FindFirstChild("Events") and gun.Events:FindFirstChild("Shoot"))
+            or (gun:FindFirstChild("KnifeServer") and gun.KnifeServer:FindFirstChild("ShootGun"))
+        if remote and remote:IsA("RemoteEvent") then return remote end
+        for _, child in ipairs(gun:GetDescendants()) do
+            if child:IsA("RemoteEvent") and (child.Name:lower():find("shoot") or child.Name:lower():find("fire")) then
+                return child
+            end
+        end
+        return nil
+    end
+
+    -- Учёт серверного кулдауна: выстрел считаем принятым по трассеру от нашей точки
+    Aim.RegisterShot = function(origin, info)
+        local now = os.clock()
+        local ping = pingSeconds()
+        Aim.Pending = {origin = origin, sent = now, expire = now + ping + SA.ConfirmExtra, info = info}
+        Aim.NextShot = now + ping * 0.5 + SA.ServerCooldown + SA.CooldownMargin
+    end
+
+    local function onTracer(child)
+        local pending = Aim.Pending
+        if not pending or not child:IsA("BasePart") then return end
+        task.defer(function()
+            if Aim.Pending ~= pending or not child.Parent then return end
+            if child:FindFirstChildOfClass("Beam") and (child.Position - pending.origin).Magnitude < 0.05 then
+                pending.confirmed = os.clock()
+                -- сервер принял выстрел ~полпинга назад — от этого и считаем кулдаун
+                Aim.NextShot = os.clock() - pingSeconds() * 0.5 + SA.ServerCooldown + SA.CooldownMargin
+            end
+        end)
+    end
+
+    -- Итог автовыстрела для статистики: смерть цели вскоре после принятия выстрела
+    local function settlePending(now)
+        local pending = Aim.Pending
+        if not pending then return end
+        local info = pending.info
+        if info and info.target then
+            local char = info.target.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local dead = not char or not char.Parent or not hum or hum.Health <= 0 or getMurder() ~= info.target
+            if dead and pending.confirmed then
+                info.hit = true
+            end
+        end
+        if now > pending.expire + (pending.confirmed and 0.4 or 0) then
+            if not pending.confirmed then
+                -- трассера нет: сервер выстрел отбросил, кулдаун не начинался
+                Aim.NextShot = now
+                State.Settings.CanShootMurderer = true
+                if info then info.rejected = true end
+            end
+            Aim.Pending = nil
+        end
+    end
+
+    -- Диагностика Auto Fire: почему очередная оценка не выстрелила. Счётчики —
+    -- за текущую цель (раунд); прошлый раунд остаётся в LastReport. Читать через
+    -- getgenv().MM2_Runtime.SheriffAim.Report()
+    local Diag = {Counts = {}, Evals = 0, Shots = 0, MaxChance = 0, Since = nil, Warned = false}
+    Aim.Diag = Diag
+    local REASONS = {
+        cooldown = "gun cooldown", pending = "waiting shot result", tracking = "still tracking target",
+        no_target = "no murderer", no_gun = "no gun", no_origin = "no shot origin",
+        no_solution = "no prediction", low_chance = "hit chance too low", wall = "wall in the way",
+        innocent = "innocent near the line", equip = "equip failed", dead = "we are dead",
+    }
+
+    local function diagReport(d)
+        local parts = {}
+        for reason, count in pairs(d.Counts) do table.insert(parts, {reason, count}) end
+        table.sort(parts, function(a, b) return a[2] > b[2] end)
+        local lines = {string.format("evals=%d shots=%d maxChance=%.0f%% last: chance=%.0f%% geo=%.0f%% health=%.2f modelErr=%s ping=%dms K=%.2f spoof=%s",
+            d.Evals, d.Shots, d.MaxChance * 100, (d.Chance or 0) * 100, (d.Geo or 0) * 100, d.Health or 1,
+            d.ModelError and string.format("%.2f", d.ModelError) or "-", math.floor((d.Ping or 0) * 1000 + 0.5),
+            d.K or 0, tostring(d.Spoof))}
+        for _, entry in ipairs(parts) do
+            table.insert(lines, string.format("  %-12s %5d  %.0f%%", entry[1], entry[2], entry[2] / math.max(d.Evals, 1) * 100))
+        end
+        return table.concat(lines, "\n")
+    end
+    Aim.Report = function()
+        return "[Auto Fire] current:\n" .. diagReport(Diag) .. (Aim.LastReport and ("\n[Auto Fire] previous:\n" .. Aim.LastReport) or "")
+    end
+    Aim.ResetDiag = function()
+        if Diag.Evals > 0 then Aim.LastReport = diagReport(Diag) end
+        table.clear(Diag.Counts)
+        Diag.Evals, Diag.Shots, Diag.MaxChance, Diag.Since, Diag.Warned = 0, 0, 0, nil, false
+        Diag.Chance, Diag.Geo = nil, nil
+    end
+
+    local function block(now, reason, solution)
+        Diag.Counts[reason] = (Diag.Counts[reason] or 0) + 1
+        Diag.Last = reason
+        if solution then
+            Diag.Chance, Diag.Geo, Diag.Health = solution.chance, solution.geometric, solution.health
+            Diag.Spoof, Diag.K = solution.spoof, solution.ctx and solution.ctx.K
+            Diag.Ping, Diag.ModelError = solution.ctx and solution.ctx.L - SA.ServerLead, Aim.ModelError
+            if solution.chance > Diag.MaxChance then Diag.MaxChance = solution.chance end
+        end
+        -- Цель видна, пистолет готов, а выстрела всё нет — один раз за раунд говорим почему
+        if reason == "cooldown" or reason == "pending" or reason == "tracking" or reason == "no_target" then return end
+        Diag.Since = Diag.Since or now
+        if not Diag.Warned and now - Diag.Since >= SA.DiagWarnAfter then
+            Diag.Warned = true
+            local text = REASONS[reason] or reason
+            if reason == "low_chance" then
+                text ..= string.format(" (best %.0f%%, need %.0f%%, health %.2f)",
+                    Diag.MaxChance * 100, SA.FireChance * 100, Diag.Health or 1)
+            end
+            ShowNotification("<font color=\"rgb(255, 165, 0)\">Auto Fire waiting </font><font color=\"rgb(220,220,220)\">" .. text .. "</font>", CONFIG.Colors.Text)
+        end
+    end
+
+    -- Auto Fire: оценка ~30 раз в секунду, выстрел только при шансе ≥ порога,
+    -- чистой линии и готовом (по серверу) кулдауне
+    local function autoFire(now)
+        if not State.Settings.AutoFireEnabled or now < Aim.NextAuto then return end
+        Aim.NextAuto = now + SA.AutoInterval
+        Diag.Evals += 1
+        if Aim.Pending then return block(now, "pending") end
+        if now < Aim.NextShot or not State.Settings.CanShootMurderer then return block(now, "cooldown") end
+        if not Aim.Target then return block(now, "no_target") end
+        if not Aim.TrackSince or now - Aim.TrackSince < SA.MinTrackTime then return block(now, "tracking") end
+        local character = LocalPlayer.Character
+        local myHum = character and character:FindFirstChildOfClass("Humanoid")
+        if not myHum or myHum.Health <= 0 then return block(now, "dead") end
+        local gun = character:FindFirstChild("Gun")
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        local stored = not gun and backpack and backpack:FindFirstChild("Gun")
+        if not gun and not stored then return block(now, "no_gun") end
+
+        local origin = Aim.SilentOrigin(character, gun or stored)
+        if not origin then return block(now, "no_origin") end
+        local solution = Aim.Solve(origin)
+        if not solution then return block(now, "no_solution") end
+        if solution.chance < SA.FireChance then return block(now, "low_chance", solution) end
+        local clear, why = Aim.LineClear(origin, solution.aim, solution.ctx)
+        if not clear then return block(now, why or "wall", solution) end
+
+        if stored then
+            -- Экипировка реплицируется раньше ремоута (один упорядоченный поток),
+            -- поэтому стреляем в том же кадре — задержка испортила бы упреждение
+            myHum:EquipTool(stored)
+            gun = character:FindFirstChild("Gun")
+            if not gun then return block(now, "equip") end
+            origin = Aim.SilentOrigin(character, gun)
+            solution = Aim.Solve(origin)
+            if not solution then return block(now, "no_solution") end
+            if solution.chance < SA.FireChance then return block(now, "low_chance", solution) end
+        end
+        Diag.Counts.fired = (Diag.Counts.fired or 0) + 1
+        Diag.Chance, Diag.Geo, Diag.Health = solution.chance, solution.geometric, solution.health
+        Diag.Shots += 1
+        Diag.Since = nil
+        State.Runtime.FireSheriffShot(gun, origin, solution, true)
+    end
+
+    Core.Connect(Workspace.ChildAdded, onTracer)
+    Core.Connect(RunService.Heartbeat, function()
+        local now = os.clock()
+        local character = LocalPlayer.Character
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        local armed = (character and character:FindFirstChild("Gun")) or (backpack and backpack:FindFirstChild("Gun"))
+        if not armed and not State.Settings.AutoFireEnabled then
+            if Aim.Target then resetTrack(nil) end
+            return
+        end
+        local ok, err = pcall(track, now)
+        if not ok then warn("[Sheriff Aim] " .. tostring(err)) return end
+        ok, err = pcall(selfCheck, now)
+        if not ok then warn("[Sheriff Aim] " .. tostring(err)) end
+        settlePending(now)
+        if armed then
+            ok, err = pcall(autoFire, now)
+            if not ok then warn("[Auto Fire] " .. tostring(err)) end
+        end
+    end)
+
+    Aim.SetAutoFire = function(enabled)
+        State.Settings.AutoFireEnabled = enabled == true
+        Aim.NextAuto = 0
+    end
+    Aim.SetResolver = function(enabled)
+        State.Settings.ResolverEnabled = enabled == true
+        Aim.Spoof, Aim.SuspectSince, Aim.CleanSince = false, nil, nil
+        table.clear(Aim.Suspects)
+    end
+end
+
+-- Общая отправка выстрела шерифа: ремоут, кулдаун, трассер, уведомление.
+-- solution — из SheriffAim.Solve; auto — вызов Auto Fire (свои уведомления)
+State.Runtime.FireSheriffShot = function(gun, origin, solution, auto, modeText, quiet)
+    local Aim = State.Runtime.SheriffAim
+    local remote = Aim.FindRemote(gun)
+    if not remote then return false, "Remote not found" end
+    local aim = solution.aim
+    State.Settings.CanShootMurderer = false
+    local info = auto and {t = os.clock(), chance = solution.chance, spoof = solution.spoof, target = Aim.Target} or nil
+    local ok, err = pcall(function()
+        remote:FireServer(CFrame.lookAt(origin, aim), CFrame.new(aim))
+    end)
+    if not ok then
+        State.Settings.CanShootMurderer = true
+        return false, err
+    end
+    Aim.RegisterShot(origin, info)
+    if info then
+        table.insert(Aim.Log, info)
+        if #Aim.Log > 60 then table.remove(Aim.Log, 1) end
+    end
+    if State.Settings.BulletTracersEnabled then
+        pcall(function()
+            for _ = 1, 4 do CreateTracer(origin, aim, 2) end
+        end)
+    end
+    if not quiet then
+        local label = auto and ("Auto Fire " .. math.floor(solution.chance * 100 + 0.5) .. "%") or (modeText or "Silent")
+        if solution.spoof then label ..= ", resolved" end
+        ShowNotification("<font color=\"rgb(168,228,160)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. label .. "] Cooldown: " .. State.Settings.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
+    end
+    Core.Tasks.delay(State.Settings.ShootCooldown, function()
+        State.Settings.CanShootMurderer = true
+        if not quiet and not auto then
+            ShowNotification("<font color=\"rgb(85, 255, 255)\">Ready </font><font color=\"rgb(220,220,220)\">You can shoot again</font>", CONFIG.Colors.Text)
+        end
+    end)
+    return true
+end
+
+shootMurderer = function(forceMagic, mode)
+    -- Режим задаёт бинд: Shoot Murderer — Silent, Wallbang — Magic.
+    -- forceMagic == true — тихий вызов из автофарма, всегда Magic
+    local useMode = forceMagic and "Magic" or (mode or "Silent")
+
+    -- Проверка кулдауна: свой флаг и серверный (по трассеру принятого выстрела) —
+    -- выстрел в ещё идущий серверный кулдаун сервер молча выбросит
+    if not State.Settings.CanShootMurderer or os.clock() < State.Runtime.SheriffAim.NextShot then
         if not forceMagic then
             ShowNotification("<font color=\"rgb(255, 165, 0)\">Wait </font><font color=\"rgb(220,220,220)\">Gun is on cooldown</font>", CONFIG.Colors.Text)
         end
@@ -7435,130 +8358,48 @@ shootMurderer = function(forceMagic)
         return
     end
 
-    local argsShootRemote
+    local Aim = State.Runtime.SheriffAim
+    local solution, origin
 
     if useMode == "Magic" then
-        -- === MAGIC MODE: Телепортация пули (текущая логика) ===
-        local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
-        local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + (State.Settings.ShootLead or 0.09)
-
-        local enemyVelocity = murdererHRP.AssemblyLinearVelocity
-        -- Интент-предикт: горизонталь по MoveDirection, вертикаль парабола + пол
-        local predictedPos = computeAimPoint(murderer.Character, murdererHRP, murdererHum, predictionTime)
-
-        -- Предпочтение прежнее (по ходу, если бежит; за спиной, если стоит; затем
-        -- с нашей стороны), но точка вылета берётся только с чистым путём до цели
-        local flatVelocity = Vector3.new(enemyVelocity.X, 0, enemyVelocity.Z)
+        -- === MAGIC MODE: пуля вылетает рядом с убийцей ===
+        -- Сначала точка прицела от нашей позиции, затем вылет с чистым путём до неё.
+        -- Первым пробуем вылет по оси движения: вдоль неё ошибка скорости/тайминга
+        -- не уводит луч с тела, остаётся только поворот
+        local probeOrigin = Aim.SilentOrigin(shooterChar, gun) or murdererHRP.Position + Vector3.new(0, 20, 0)
+        local first = Aim.Solve(probeOrigin)
+        local predictedPos = first and first.aim or computeAimPoint(murderer.Character, murdererHRP, murdererHum,
+            Aim.Ping() + CONFIG.SheriffAim.ServerLead)
+        local enemyVelocity = first and first.ctx.v0 or Vector3.new(murdererHRP.AssemblyLinearVelocity.X, 0, murdererHRP.AssemblyLinearVelocity.Z)
         local preferred = {}
-        if flatVelocity.Magnitude > 2 then table.insert(preferred, flatVelocity) end
+        if enemyVelocity.Magnitude > 2 then
+            table.insert(preferred, enemyVelocity)
+            table.insert(preferred, -enemyVelocity)
+        end
         table.insert(preferred, -murdererHRP.CFrame.LookVector)
         local myRoot = shooterChar:FindFirstChild("HumanoidRootPart")
         if myRoot then table.insert(preferred, myRoot.Position - predictedPos) end
-        local spawnPosition = State.Runtime.FindClearOrigin(predictedPos, murderer.Character, preferred, 4)
-        local targetPosition = predictedPos
-
-        argsShootRemote = {
-            [1] = CFrame.lookAt(spawnPosition, targetPosition),
-            [2] = CFrame.new(targetPosition)
-        }
+        origin = State.Runtime.FindClearOrigin(predictedPos, murderer.Character, preferred, 4)
+        solution = Aim.Solve(origin) or {aim = predictedPos, chance = 0}
     else
-        -- === SILENT MODE: Стрельба от дула пистолета ===
-        local rightHand = LocalPlayer.Character:FindFirstChild("RightHand")
-        local gunHandle = gun:FindFirstChild("Handle") or gun:FindFirstChild("GunBarrel")
-
-        if not rightHand then
+        -- === SILENT MODE: из точки вылета игры (GunRaycastAttachment) ===
+        -- Стена между нами и целью ловит пулю — это честный сайлент, вся ставка
+        -- на предикт. Без истории наблюдений — старый предикт по пингу
+        origin = Aim.SilentOrigin(shooterChar, gun)
+        if not origin then
             if not forceMagic then
-                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No RightHand</font>", nil)
+                ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">No shot origin</font>", nil)
             end
             return
         end
-
-        -- 1. ТОЧНАЯ ПОЗИЦИЯ ДУЛА
-        local muzzleCFrame
-        if gunHandle then
-            muzzleCFrame = gunHandle.CFrame
-        else
-            muzzleCFrame = rightHand.CFrame * CFrame.new(0, 0, -2)
-        end
-
-        local muzzlePosition = muzzleCFrame.Position
-
-        -- 2. ПРЕДИКЦИЯ: горизонталь по интенту, вертикаль парабола + пол
-        local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
-        local pingValue = tonumber(ping:match("%d+")) or 50
-        local predictionTime = (pingValue / 1000) + (State.Settings.ShootLead or 0.09)
-
-        local predictedPos = computeAimPoint(murderer.Character, murdererHRP, murdererHum, predictionTime)
-
-        -- 3. Чистый Silent: origin ВСЕГДА дуло, target — предсказанная точка на теле.
-        --    Луч origin→target идёт от пистолета; стена между вами ловит пулю — это
-        --    и есть честный сайлент. Никакого magic-origin/пробива стен: вся ставка
-        --    на точность предикта (predictAimPoint), а не на подмену источника.
-        argsShootRemote = {
-            [1] = CFrame.lookAt(muzzlePosition, predictedPos),
-            [2] = CFrame.new(predictedPos)
-        }
+        solution = Aim.Solve(origin) or {aim = computeAimPoint(murderer.Character, murdererHRP, murdererHum,
+            Aim.Ping() + CONFIG.SheriffAim.ServerLead), chance = 0}
     end
 
-
-    -- АКТИВИРУЕМ КУЛДАУН
-    State.Settings.CanShootMurderer = false
-
-    -- МГНОВЕННАЯ ОТПРАВКА на сервер
-    local success, err = pcall(function()
-        -- Оптимизированный поиск ремута
-        local remote = gun:FindFirstChild("Events") and gun.Events:FindFirstChild("Shoot")
-            or gun:FindFirstChild("KnifeServer") and gun.KnifeServer:FindFirstChild("ShootGun")
-
-        if not remote then
-            -- Fallback
-            for _, child in pairs(gun:GetDescendants()) do
-                if child:IsA("RemoteEvent") and (child.Name:lower():find("shoot") or child.Name:lower():find("fire")) then
-                    remote = child
-                    break
-                end
-            end
-        end
-
-        if remote then
-            remote:FireServer(unpack(argsShootRemote))
-        else
-            error("Remote not found")
-        end
-    end)
-
-    if success then
-        if not forceMagic then
-            local modeText = useMode == "Magic" and "Magic" or "Silent"
-            ShowNotification("<font color=\"rgb(168,228,160)\">Shot fired! </font><font color=\"rgb(220,220,220)\">[" .. modeText .. "] Cooldown: " .. State.Settings.ShootCooldown .. "s</font>", CONFIG.Colors.Text)
-        end
-
-        -- Bullet tracer (свой выстрел) — рисуем Beam между точкой выстрела и целью.
-        -- Используем те же 2 CFrame, что отправляем на сервер.
-        if State.Settings.BulletTracersEnabled then
-            pcall(function()
-                local startPos = argsShootRemote[1].Position
-                local endPos = argsShootRemote[2].Position
-                for _ = 1, 4 do
-                    CreateTracer(startPos, endPos, 2)
-                end
-            end)
-        end
-
-        -- ВОССТАНОВЛЕНИЕ КУЛДАУНА
-        Core.Tasks.delay(State.Settings.ShootCooldown, function()
-            State.Settings.CanShootMurderer = true
-            if not forceMagic then
-                ShowNotification("<font color=\"rgb(85, 255, 255)\">Ready </font><font color=\"rgb(220,220,220)\">You can shoot again</font>", CONFIG.Colors.Text)
-            end
-        end)
-    else
-        -- Если ошибка - сбрасываем кулдаун
-        State.Settings.CanShootMurderer = true
-        if not forceMagic then
-            ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
-        end
+    local modeText = useMode == "Magic" and "Magic" or "Silent"
+    local success, err = State.Runtime.FireSheriffShot(gun, origin, solution, false, modeText, forceMagic)
+    if not success and not forceMagic then
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Error </font><font color=\"rgb(220, 220, 220)\">" .. tostring(err) .. "</font>", nil)
     end
 end
 
@@ -9481,7 +10322,11 @@ local function HandleActionInput(input)
     end
 
     if input.KeyCode == State.Settings.Keybinds.ShootMurderer and State.Settings.Keybinds.ShootMurderer ~= Enum.KeyCode.Unknown then
-        pcall(function() shootMurderer() end)
+        pcall(function() shootMurderer(false, "Silent") end)
+    end
+
+    if input.KeyCode == State.Settings.Keybinds.Wallbang and State.Settings.Keybinds.Wallbang ~= Enum.KeyCode.Unknown then
+        pcall(function() shootMurderer(false, "Magic") end)
     end
 
     if input.KeyCode == State.Settings.Keybinds.PickupGun and State.Settings.Keybinds.PickupGun ~= Enum.KeyCode.Unknown then
@@ -10032,6 +10877,7 @@ Core.StopFeatures = function()
         {"Hitbox", DisableExtendedHitbox}, {"Pickup", DisableInstantPickup},
         {"VelocitySpoof", function() State.Runtime.SetVelocitySpoof(false) end},
         {"KillAura", function() ToggleKillAura(false) end},
+        {"AutoFire", function() State.Runtime.SheriffAim.SetAutoFire(false) end},
         {"CoinMuter", StopCoinMuter}, {"FriendViewer", StopFriendViewer},
         {"AntiTrap", function() State.Runtime.SetAntiTrap(false) end},
         {"BulletTracers", function() ToggleBulletTracers(false) end},
@@ -10145,6 +10991,8 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
         VelocitySpoofStrength = function(v) State.Settings.VelocitySpoofStrength = math.clamp(tonumber(v) or 150, 20, 500) end,
         VelocitySpoofSpeed = function(v) State.Settings.VelocitySpoofSpeed = math.clamp(tonumber(v) or CONFIG.DefaultWalkSpeed, 0, 20) end,
         SpawnAtPlayer = function(on) State.Settings.SpawnAtPlayer = on end,
+        AutoFire = function(on) State.Runtime.SheriffAim.SetAutoFire(on) end,
+        Resolver = function(on) State.Runtime.SheriffAim.SetResolver(on) end,
         KillAuraRange = function(v) State.Settings.KillAuraRange = v end,
         KillAuraStatic = function(on)
             State.Settings.KillAuraStatic = on
@@ -10337,12 +11185,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
                 StartFly(State.Settings.FlyType)
             end
         end,
-
-        ShootMurdererMode = function(value)
-            State.Settings.ShootMurdererMode = value
-        end,
-
-        ShootLead = function(v) State.Settings.ShootLead = math.clamp(v, 0, 0.2) end,
 
         FlySpeed = function(value)
             State.Settings.FlySpeed = value
@@ -10949,6 +11791,37 @@ do
 end
 
 do
+    local CombatTab = GUI.CreateTab("Combat")
+
+        CombatTab:CreateSection("MURDERER TOOLS")
+        CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
+        CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to closest target", "SpawnAtPlayer")
+
+        CombatTab:CreateSection("KILL AURA")
+        CombatTab:CreateKeybindButton("Kill Aura", "killaura", "KillAura")
+        CombatTab:CreateSlider("Kill Aura Range", "Kill distance in studs", 1, 20, State.Settings.KillAuraRange, "KillAuraRange", 0.5)
+        CombatTab:CreateToggle("Static Zone", "Disable circle animation", "KillAuraStatic", false)
+        CombatTab:CreateKeybindButton("Instant Kill All", "instantkillall", "InstantKillAll")
+
+        CombatTab:CreateSection("EXTENDED HITBOX")
+        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
+        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit", 10, 30, State.Settings.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
+
+        -- Режим выстрела — отдельным биндом: Shoot Murderer = Silent, Wallbang = Magic.
+        -- 4-й аргумент (подпись) старый закэшированный GUI.lua просто игнорирует
+        CombatTab:CreateSection("SHERIFF TOOLS", "right")
+        CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer", "Silent shot from your gun with movement lead")
+        CombatTab:CreateToggle("Auto Fire", "Shoots the murderer when a hit is likely", "AutoFire", false)
+        CombatTab:CreateToggle("Resolver", "Use only versus velocity spoofer", "Resolver", false)
+        CombatTab:CreateKeybindButton("Wallbang", "wallbang", "Wallbang", "Shot through walls from next to the murderer")
+        CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun", "Grabs the dropped gun from anywhere")
+        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", false)
+
+        CombatTab:CreateSection("PROTECTION", "right")
+        CombatTab:CreateToggle("Anti Trap", "Murderer traps don't slow you, murderer isn't notified", "AntiTrap", false)
+end
+
+do
     local AntiAimTab = GUI.CreateTab("Anti-Aim")
 
         AntiAimTab:CreateSection("DESYNC")
@@ -10997,34 +11870,6 @@ do
 end
 
 if State.Runtime.VisualsModule then State.Runtime.VisualsModule.BuildTabs() end
-
-do
-    local CombatTab = GUI.CreateTab("Combat")
-
-        CombatTab:CreateSection("MURDERER TOOLS")
-        CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
-        CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to closest target", "SpawnAtPlayer")
-
-        CombatTab:CreateSection("KILL AURA")
-        CombatTab:CreateKeybindButton("Kill Aura", "killaura", "KillAura")
-        CombatTab:CreateSlider("Kill Aura Range", "Kill distance in studs", 1, 20, State.Settings.KillAuraRange, "KillAuraRange", 0.5)
-        CombatTab:CreateToggle("Static Zone", "Disable circle animation", "KillAuraStatic", false)
-        CombatTab:CreateKeybindButton("Instant Kill All", "instantkillall", "InstantKillAll")
-
-        CombatTab:CreateSection("SHERIFF TOOLS", "right")
-        CombatTab:CreateDropdown("Shoot Mode", "Shooting method", {"Magic", "Silent"}, State.Settings.ShootMurdererMode or "Magic", "ShootMurdererMode")
-        CombatTab:CreateSlider("Shoot Lead", "Prediction lead over ping", 0, 0.2, State.Settings.ShootLead, "ShootLead", 0.01)
-        CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer")
-        CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun")
-        CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", false)
-
-        CombatTab:CreateSection("PROTECTION", "right")
-        CombatTab:CreateToggle("Anti Trap", "Murderer traps don't slow you, murderer isn't notified", "AntiTrap", false)
-
-        CombatTab:CreateSection("EXTENDED HITBOX", "right")
-        CombatTab:CreateToggle("Enable Extended Hitbox", "Makes all players easier to hit", "ExtendedHitbox")
-        CombatTab:CreateSlider("Hitbox Size", "Larger = easier to hit", 10, 30, State.Settings.ExtendedHitboxSize, "ExtendedHitboxSize", 1)
-end
 
 do
     local FarmTab = GUI.CreateTab("Farming")
@@ -11137,6 +11982,7 @@ do
             ExtendedHitbox = "ExtendedHitboxEnabled", InstantPickup = "InstantPickupEnabled", BulletTracers = "BulletTracersEnabled",
             FriendViewer = "FriendViewerEnabled", PingChams = "PingChamsEnabled", FakePosition = "FakePositionEnabled", FakeLag = "FakeLagEnabled",
             VelocitySpoof = "VelocitySpoofEnabled", AntiTrap = "AntiTrapEnabled",
+            AutoFire = "AutoFireEnabled", Resolver = "ResolverEnabled",
             Orbit = "OrbitEnabled", LoopFling = "LoopFlingEnabled", BlockPath = "BlockPathEnabled",
             HandleAutoRejoin = "AutoRejoinEnabled", HandleAutoReconnect = "AutoReconnectEnabled",
         }
