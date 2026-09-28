@@ -5633,6 +5633,12 @@ local function EnableNoClip()
     State.Settings.NoClipEnabled = true
 
     local NoClipObjects = {}
+    -- Исходный CanCollide каждой части до ноклипа. Выключение раньше ставило true
+    -- ВСЕМ частям: у R15 руки/ноги по умолчанию без коллизии, а в MM2 они на
+    -- физических суставах — упираясь в пол, вжимали тело в землю (особенно со
+    -- Spin), и помогало только снова включить ноклип
+    local originalCollide = setmetatable({}, {__mode = "k"})
+    State.Runtime.NoClipOriginal = originalCollide
     -- Персонаж, под который собран список. Пересобираем не только по
     -- CharacterAdded: флинг и прочие фичи могут подменить/дополнить части, а
     -- пустой список молча выключал ноклип навсегда.
@@ -5645,6 +5651,7 @@ local function EnableNoClip()
         for _, obj in ipairs(character:GetChildren()) do
             if obj:IsA("BasePart") then
                 table.insert(NoClipObjects, obj)
+                if originalCollide[obj] == nil then originalCollide[obj] = obj.CanCollide end
             end
         end
     end
@@ -5703,16 +5710,24 @@ local function DisableNoClip()
 
     if State.Runtime.NoClipObjects then
         local character = LocalPlayer.Character
+        local original = State.Runtime.NoClipOriginal or {}
         if character then
             for i = 1, #State.Runtime.NoClipObjects do
                 local part = State.Runtime.NoClipObjects[i]
                 if part and part.Parent then
-                    if part.Name ~= "HumanoidRootPart" then
-                        part.CanCollide = true
+                    -- Возвращаем как было; для неизвестной части — как у Humanoid
+                    -- по умолчанию: коллизия только у торса и головы (корень без
+                    -- снимка не трогаем — его вернёт снимок флинга ниже)
+                    local saved = original[part]
+                    if saved == nil and part.Name ~= "HumanoidRootPart" then
+                        saved = part.Name == "Head" or part.Name == "Torso"
+                            or part.Name == "UpperTorso" or part.Name == "LowerTorso"
                     end
+                    if saved ~= nil then part.CanCollide = saved end
                 end
             end
         end
+        State.Runtime.NoClipOriginal = nil
 
         table.clear(State.Runtime.NoClipObjects)
         State.Runtime.NoClipObjects = nil
@@ -5776,9 +5791,13 @@ local function startMotionFly(vehicle)
         local look = camera.CFrame.LookVector
         local move = humanoid.MoveDirection
         local body = root
-        if vehicle and humanoid.SeatPart then
-            -- В сиденье MoveDirection пустой: направление по WASD относительно камеры
-            body = humanoid.SeatPart.AssemblyRootPart or humanoid.SeatPart
+        if vehicle then
+            -- Vehicle Fly — полёт сидя (Sit-эмоция, сиденье): у сидящего гуманоида
+            -- MoveDirection нулевой, поэтому направление — по WASD относительно камеры.
+            -- В незаякоренном сиденье двигаем всю его сборку
+            local seat = humanoid.SeatPart
+            local seatRoot = seat and seat.AssemblyRootPart
+            if seatRoot and not seatRoot.Anchored then body = seatRoot end
             local forward = Vector3.new(look.X, 0, look.Z)
             local right = camera.CFrame.RightVector
             right = Vector3.new(right.X, 0, right.Z)
@@ -5801,7 +5820,7 @@ local function startMotionFly(vehicle)
         end
 
         body.AssemblyLinearVelocity = CONFIG.Fly.HoverVelocity
-        body.CFrame += Vector3.new(move.X, vertical, move.Z) * (dt * State.Settings.FlySpeed)
+        State.Runtime.MoveRoot(body, Vector3.new(move.X, vertical, move.Z) * (dt * State.Settings.FlySpeed))
     end)
 end
 
@@ -5987,7 +6006,7 @@ do
         local root = humanoid and humanoid.RootPart
         if not root or humanoid.Health <= 0 or humanoid.SeatPart or humanoid.PlatformStand or root.Anchored then return end
         local move = humanoid.MoveDirection
-        root.CFrame += Vector3.new(move.X, 0, move.Z) * (dt * value)
+        State.Runtime.MoveRoot(root, Vector3.new(move.X, 0, move.Z) * (dt * value))
     end)
 end
 
@@ -9249,6 +9268,19 @@ do
         end
     end
 
+    -- Сдвиг корня нашими фичами (Speed, Fly). Пока Desync держит подменённый CFrame
+    -- (Heartbeat → восстановление перед кадром/физикой), откат считается как
+    -- original · sent⁻¹ · текущий: сдвиг, добавленный к подменённому корню, при
+    -- откате поворачивался на угол Spin — Speed уводило в случайную сторону.
+    -- Поэтому двигаем и обе запомненные позы: откат вернёт original + delta.
+    State.Runtime.MoveRoot = function(root, delta)
+        if runtime.Root == root and runtime.Original and runtime.Sent then
+            runtime.Original += delta
+            runtime.Sent += delta
+        end
+        root.CFrame += delta
+    end
+
     -- Скорость, согласованная с отправляемой позицией. Другие клиенты тянут нас между
     -- пакетами по скорости: при удержании фейклага настоящая скорость уводила модель
     -- вперёд с откатом (дрожь) и заодно подсказывала упреждению, где мы на самом деле.
@@ -9366,7 +9398,13 @@ do
         end
     end
 
+    -- Флаг для скинченджера: пока копия активна, прозрачность наших частей ведём мы
+    local function setSpinFlag(on)
+        pcall(function() getgenv().VioliteLocalSpin = on or nil end)
+    end
+
     local function destroyLocalSpin()
+        setSpinFlag(false)
         unhideReal()
         if runtime.AvatarModel then pcall(function() runtime.AvatarModel:Destroy() end) end
         runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = nil, nil, 0
@@ -9374,9 +9412,35 @@ do
     end
 
     -- Все части, включая HumanoidRootPart: он невидим, но на нём сидят Magic Circle,
-    -- крылья и др. — без его копии эти ауры оставались бы на настоящем корне
+    -- крылья и др. — без его копии эти ауры оставались бы на настоящем корне.
+    -- Плюс дисплеи оружия (нож на спине, пистолет на поясе): игра держит их в
+    -- Workspace.WeaponDisplays на RigidConstraint к нашему торсу, скинченджер
+    -- кладёт туда же свои фейки и детали. Жёсткая связь = одна сборка с нашим
+    -- корнем — так находим все свои, не трогая чужие
     local function avatarSources(character)
-        return character:QueryDescendants("BasePart")
+        local sources = character:QueryDescendants("BasePart")
+        local root = character:FindFirstChild("HumanoidRootPart")
+        local displays = Workspace:FindFirstChild("WeaponDisplays")
+        if root and displays then
+            for _, part in ipairs(displays:GetDescendants()) do
+                if part:IsA("BasePart") and part.AssemblyRootPart == root then
+                    table.insert(sources, part)
+                end
+            end
+        end
+        return sources
+    end
+
+    -- Меш/текстура дисплеев: скинченджер меняет их на месте — копию надо пересобрать
+    local function displaySignature(character, sources)
+        local parts = {}
+        for _, part in ipairs(sources) do
+            if not part:IsDescendantOf(character) then
+                local mesh = part:FindFirstChildOfClass("SpecialMesh")
+                table.insert(parts, (mesh and mesh.MeshId .. mesh.TextureId) or (part:IsA("MeshPart") and part.MeshId .. part.TextureID) or part.Name)
+            end
+        end
+        return table.concat(parts, "|")
     end
 
     -- Группа коллизий, которая не сталкивается с персонажем (в MM2 — PlayerNoCollision).
@@ -9405,7 +9469,10 @@ do
             if ok and copy then
                 Core.Own(copy)
                 for _, d in ipairs(copy:GetDescendants()) do
-                    if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("BaseScript") or d:IsA("Sound") then
+                    -- Вложенные части — отдельные источники (детали скинов на дисплеях),
+                    -- в клоне родителя они были бы вторыми копиями без синхронизации
+                    if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("BaseScript") or d:IsA("Sound")
+                        or d:IsA("BasePart") then
                         pcall(function() d:Destroy() end)
                     end
                 end
@@ -9444,6 +9511,8 @@ do
         end) end
         model.Parent = Workspace.CurrentCamera
         runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = model, character, #sources
+        runtime.AvatarDisplays = displaySignature(character, sources)
+        setSpinFlag(true)
         -- Клонировали с включёнными эффектами (unhideReal до клонирования их вернул),
         -- теперь гасим их на настоящем теле
         runtime.AvatarAuraCount = #auraObjects(character)
@@ -9482,7 +9551,8 @@ do
             runtime.AvatarCheckAt = now + 0.5
             -- Сменился набор частей или аур (включили/выключили ауру) — пересобираем
             local sources = avatarSources(character)
-            if #sources ~= runtime.AvatarCount or #auraObjects(character) ~= runtime.AvatarAuraCount then
+            if #sources ~= runtime.AvatarCount or #auraObjects(character) ~= runtime.AvatarAuraCount
+                or displaySignature(character, sources) ~= runtime.AvatarDisplays then
                 buildLocalSpin(character, sources)
             end
         end
@@ -9495,6 +9565,7 @@ do
             if src.Parent then
                 copy.CFrame = shown * (inverse * src.CFrame)
                 copy.Transparency = src.Transparency
+                copy.Color = src.Color   -- хрома скинов перекрашивает части каждый кадр
                 copy.LocalTransparencyModifier = fade
                 runtime.AvatarHidden[src] = true
                 src.LocalTransparencyModifier = 1
