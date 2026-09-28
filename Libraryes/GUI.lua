@@ -3036,9 +3036,11 @@ return function(env)
                 return element
             end
 
-            function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey)
-                local row = addRow(ROW_H, title, "")
-                addRowText(row, title, nil, 136)
+            -- desc (необязательно) — подпись под названием, как у тоглов
+            function TabFunctions:CreateKeybindButton(title, emoteId, keybindKey, desc)
+                local hasDesc = desc ~= nil and desc ~= ""
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
+                addRowText(row, title, hasDesc and desc or nil, 136)
 
                 -- Geist secondary button
                 local bound = Settings.Keybinds and Settings.Keybinds[keybindKey]
