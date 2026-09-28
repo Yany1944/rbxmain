@@ -715,7 +715,7 @@ return function(env)
     local ACRYLIC_DISTANCE = 0.001
     local ACRYLIC_ALPHA = 0.98
 
-    -- Один DepthOfField на все стёкла (окно, уведомления): второй эффект
+    -- Один DepthOfField на все стёкла: второй эффект
     -- выключил бы первый. Ближнее поле мылит только то, что попало под
     -- стекло, поэтому общий эффект обслуживает любое число прямоугольников;
     -- включён, пока видно хоть одно стекло, и снимается с последним
@@ -756,10 +756,7 @@ return function(env)
         acrylicShared.Dof.Enabled = anyVisible
     end
 
-    -- opts.Inset — поджим стекла от краёв в пикселях (по умолчанию формула
-    -- Fluent под большое окно; мелким плашкам вроде тостов нужен свой)
-    local function attachAcrylic(target, opts)
-        opts = opts or {}
+    local function attachAcrylic(target)
         local Workspace = game:GetService("Workspace")
         if not Workspace.CurrentCamera then return nil end
 
@@ -799,7 +796,7 @@ return function(env)
             if not cam or not part.Parent or not target.Parent then return end
             -- Края стекла поджимаем, чтобы они не торчали из-под скруглений
             -- окна. Формула из Fluent: чем выше вьюпорт, тем больше запас.
-            local offset = opts.Inset or math.clamp(cam.ViewportSize.Y / 2560 * 48 + 8, 8, 56)
+            local offset = math.clamp(cam.ViewportSize.Y / 2560 * 48 + 8, 8, 56)
             local size = target.AbsoluteSize - Vector2.new(offset, offset)
             local pos = target.AbsolutePosition + Vector2.new(offset / 2, offset / 2)
             if size.X <= 0 or size.Y <= 0 then return end
@@ -820,10 +817,10 @@ return function(env)
             )
         end
 
-        local handle = { Visible = true, Faded = false }
+        local handle = { Visible = true }
         local conns = {}
         local function applyTransparency()
-            part.Transparency = (handle.Visible and not handle.Faded) and ACRYLIC_ALPHA or 1
+            part.Transparency = handle.Visible and ACRYLIC_ALPHA or 1
         end
         local function bindCamera()
             local cam = Workspace.CurrentCamera
@@ -852,12 +849,6 @@ return function(env)
             end)
             pcall(acrylicRefresh)
         end
-        -- Для плашек, которые проявляются: стекло гасится вместе с ними
-        -- (у Glass нет плавной прозрачности — переключаем на середине)
-        function handle.SetFade(alpha)
-            handle.Faded = alpha > 0.5
-            pcall(applyTransparency)
-        end
         function handle.Destroy()
             if not acrylicShared.Handles[handle] then return end
             acrylicShared.Handles[handle] = nil
@@ -865,18 +856,12 @@ return function(env)
             pcall(function() folder:Destroy() end)
             pcall(acrylicRefresh)
         end
-        -- Цель удалили (тост ушёл, окно закрыли) — стекло уходит следом
+        -- Окно удалили — стекло уходит следом
         table.insert(conns, target.Destroying:Connect(handle.Destroy))
 
         acrylicShared.Handles[handle] = true
         acrylicRefresh()
         return handle
-    end
-
-    -- Хосту (уведомления MainScript): то же стекло, что под окном
-    function GUI.AttachAcrylic(target, opts)
-        local ok, handle = pcall(attachAcrylic, target, opts)
-        return ok and handle or nil
     end
 
     ----------------------------------------------------------------
@@ -3558,7 +3543,7 @@ return function(env)
         end
         -- Эффекты живут в Lighting и в дереве камеры, сами вместе с ScreenGui
         -- они не уберутся: стекло надо снять и вернуть чужие DepthOfField
-        -- Стёкла уведомлений тоже снимаем: иначе они остались бы перед камерой
+        -- Все стёкла (не только окна) снимаем: иначе остались бы перед камерой
         local handles = {}
         for handle in pairs(acrylicShared.Handles) do handles[#handles + 1] = handle end
         for _, handle in ipairs(handles) do pcall(handle.Destroy) end

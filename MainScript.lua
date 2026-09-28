@@ -197,11 +197,10 @@ local CONFIG = {
             Radius = 10,
             ProgressHeight = 2,
             ProgressTransparency = 0.35,
-            -- Фон как у окна меню: цвет полотна и его прозрачность, под ним — то же
-            -- стекло с размытием (GUI.AttachAcrylic). Тема GUI обновляет оба поля
+            -- Фон как у окна меню: цвет полотна и его прозрачность (без размытия).
+            -- Тема GUI обновляет оба поля
             Background = Color3.fromRGB(0, 0, 0),      -- background-200 (полотно окна)
             BackgroundTransparency = 0.12,
-            AcrylicInset = 6,         -- поджим стекла от краёв: не торчит из-под скруглений
             Border = Color3.fromRGB(46, 46, 46),        -- gray-400
             Text = Color3.fromRGB(237, 237, 237),       -- gray-1000
             TextDark = Color3.fromRGB(143, 143, 143),   -- gray-700
@@ -240,6 +239,15 @@ local CONFIG = {
                 ["85,255,255"]  = Color3.fromRGB(82, 173, 250),
                 ["50,150,255"]  = Color3.fromRGB(82, 173, 250),
             },
+        },
+        -- Подбор выпавшего гана. Сервер засчитывает касание только через TouchInterest,
+        -- а он реплицируется на кадр позже самого GunDrop (замер: +3…8 мс). Касание до
+        -- него уходит впустую — прежняя версия брала ган лишь второй попыткой:
+        -- ~0.41 с против ~0.15 с (≈ один пинг) при старте от TouchInterest
+        GunPickup = {
+            TouchWait     = 1,      -- сек ждём появления TouchInterest у дропа
+            RetryInterval = 0.05,   -- пауза между повторными касаниями
+            Timeout       = 2,      -- сек до отказа, если сервер не выдаёт ган
         },
         -- Настройки Server Hop / Rejoin. Всё, что можно крутить, — только здесь.
         ServerHop = {
@@ -3038,18 +3046,6 @@ local function ShowNotification(richText, defaultColor)
             Plain = plain, Count = 1, Width = width,
         }
         table.insert(Notify.Items, item)
-
-        -- Размытие под карточкой — то же стекло, что под окном меню; гаснет вместе
-        -- с тостом, уходит при его удалении (GUI снимает стекло по Destroying)
-        if Notify.AttachAcrylic then
-            local acrylic = Notify.AttachAcrylic(card, { Inset = cfg.AcrylicInset })
-            if acrylic then
-                acrylic.SetFade(group.GroupTransparency)
-                Core.Connect(group:GetPropertyChangedSignal("GroupTransparency"), function()
-                    acrylic.SetFade(group.GroupTransparency)
-                end)
-            end
-        end
 
         local enter = TweenInfo.new(cfg.EnterTime, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
         Core.Tween(slot, enter, { Size = UDim2.new(0, width, 0, height) }):Play()
@@ -7585,10 +7581,17 @@ local function pickupGun(silent)
         return false
     end
 
-    -- Последовательность 0 → пауза → 1 оставлена как была: она рабочая
+    -- Касание засчитывается только через TouchInterest, а он приходит на кадр
+    -- позже самого GunDrop (см. CONFIG.GunPickup) — ждём его покадрово
+    local deadline = os.clock() + CONFIG.GunPickup.TouchWait
+    while gun.Parent and not gun:FindFirstChildOfClass("TouchTransmitter") and os.clock() < deadline do
+        task.wait()
+    end
+    if not gun.Parent then return false end
+
+    -- Сервер реагирует на начало касания: 0 и 1 шлём сразу, без паузы между ними
     pcall(function()
         firetouchinterest(hrp, gun, 0)
-        task.wait(0.1)
         firetouchinterest(hrp, gun, 1)
     end)
 
@@ -7636,13 +7639,18 @@ State.Runtime.TryInstantPickup = function(gun)
     State.Runtime.GunPickupBusy = true
     State.Runtime.GunPickupTried = gun
 
+    -- Первое касание — сразу после появления TouchInterest (ждёт pickupGun), дальше
+    -- частые повторы на случай потерянного пакета: раньше шаг был 0.25 с, и промах
+    -- первой попытки стоил четверть секунды гонки с живыми игроками
+    local cfg = CONFIG.GunPickup
     local success = false
-    for _ = 1, 5 do
+    local deadline = os.clock() + cfg.TouchWait + cfg.Timeout
+    while os.clock() < deadline do
         if not State.Settings.InstantPickupEnabled then break end
         if not gun.Parent or State.Runtime.CurrentGunDrop ~= gun then break end
 
         pickupGun(true)
-        task.wait(0.15)
+        task.wait(cfg.RetryInterval)
 
         if hasGunInInventory() then
             success = true
@@ -10355,7 +10363,6 @@ do
             kind.Color = tokens.IsLight and cfg.LightKindColors[name] or darkKinds[name]
         end
     end
-    Notify.AttachAcrylic = GUI.AttachAcrylic
     if GUI.GetThemeTokens and GUI.OnThemeChanged then
         applyNotificationTheme(GUI.GetThemeTokens())
         GUI.OnThemeChanged(applyNotificationTheme)
