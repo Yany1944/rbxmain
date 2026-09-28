@@ -180,9 +180,47 @@ local CONFIG = {
         FriendTracerNear = Color3.fromRGB(0, 255, 0),
         FriendTracerFar  = Color3.fromRGB(255, 0, 0),
         },
+        -- Тосты в стиле основного GUI (токены Vercel Geist, как в Libraryes/GUI.lua)
         Notification = {
-        Duration = 3,
-        FadeTime = 0.4
+            Duration = 3,             -- сек до закрытия (повтор того же текста перезапускает)
+            FadeTime = 0.22,          -- уход и схлопывание стопки
+            EnterTime = 0.28,
+            MaxVisible = 4,
+            TopOffset = 100,          -- ниже верхней панели Roblox и таймера раунда MM2
+            Gap = 8,
+            SlideOffset = 10,
+            MinWidth = 320, MaxWidth = 440,  -- минимум держит стопку ровной колонкой
+            MinHeight = 44,
+            PaddingX = 14, PaddingY = 11,
+            IconSize = 16, IconGap = 10,
+            TextSize = 15,
+            Radius = 10,
+            ProgressHeight = 2,
+            ProgressTransparency = 0.35,
+            Background = Color3.fromRGB(10, 10, 10),   -- background-100
+            BackgroundTransparency = 0.04,
+            Border = Color3.fromRGB(46, 46, 46),        -- gray-400
+            Text = Color3.fromRGB(237, 237, 237),       -- gray-1000
+            TextDark = Color3.fromRGB(143, 143, 143),   -- gray-700
+            Kinds = {
+                Success = {Icon = "check-circle-fill", Color = Color3.fromRGB(98, 193, 116)},   -- green-900
+                Error   = {Icon = "cross-circle-fill", Color = Color3.fromRGB(255, 97, 102)},   -- red-900
+                Warning = {Icon = "warning-fill",      Color = Color3.fromRGB(255, 153, 10)},   -- amber-800
+                Off     = {Icon = "stop-circle",       Color = Color3.fromRGB(143, 143, 143)},
+                Info    = {Icon = "information-fill",  Color = Color3.fromRGB(82, 173, 250)},   -- blue-900
+            },
+            -- Цвета, которыми размечен текст в вызовах, → палитра Geist
+            RichPalette = {
+                ["220,220,220"] = Color3.fromRGB(237, 237, 237),
+                ["255,85,85"]   = Color3.fromRGB(255, 97, 102),
+                ["168,228,160"] = Color3.fromRGB(98, 193, 116),
+                ["85,255,120"]  = Color3.fromRGB(98, 193, 116),
+                ["255,165,0"]   = Color3.fromRGB(255, 153, 10),
+                ["255,170,50"]  = Color3.fromRGB(255, 153, 10),
+                ["255,200,50"]  = Color3.fromRGB(255, 196, 64),
+                ["85,255,255"]  = Color3.fromRGB(82, 173, 250),
+                ["50,150,255"]  = Color3.fromRGB(82, 173, 250),
+            },
         },
         -- Настройки Server Hop / Rejoin. Всё, что можно крутить, — только здесь.
         ServerHop = {
@@ -2668,27 +2706,114 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 6: NOTIFICATION SYSTEM
 -- ══════════════════════════════════════════════════════════════════════════════
+-- Тосты в стиле основного GUI (Vercel Geist): тёмная карточка с обводкой, иконка
+-- типа из пака geist, BuilderSans 500, полоска таймера. Сигнатура прежняя —
+-- ShowNotification(richText, defaultColor): тип определяем по тексту, старые
+-- rgb-цвета из rich text переводим в палитру Geist (CONFIG.Notification.RichPalette).
+
+local Notify = {
+    Items = {},       -- активные тосты, старые первыми
+    Order = 0,
+    FontCache = nil,
+}
+
+function Notify.font(weight)
+    Notify.FontCache = Notify.FontCache or {}
+    if Notify.FontCache[weight] == nil then
+        local ok, face = pcall(function()
+            return Font.new("rbxasset://fonts/families/BuilderSans.json", weight, Enum.FontStyle.Normal)
+        end)
+        Notify.FontCache[weight] = ok and face or false
+    end
+    return Notify.FontCache[weight] or nil
+end
+
+-- Иконка из пака geist, который грузит основной GUI (кэш в getgenv); nil — пака нет
+function Notify.icon(name)
+    local ok, data = pcall(function()
+        local pack = getgenv().Violite_GeistIcons
+        local entry = pack and pack.Icons[name]
+        local sheet = entry and (pack.Spritesheets[tostring(entry.Image)] or pack.Spritesheets[entry.Image])
+        if type(sheet) ~= "string" then return nil end
+        return { Image = sheet, Offset = entry.ImageRectPosition, Size = entry.ImageRectSize }
+    end)
+    return ok and data or nil
+end
+
+function Notify.plain(richText)
+    return (tostring(richText or ""):gsub("<[^>]->", ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- Старые яркие цвета из вызовов → токены Geist; неизвестные оставляем как есть
+function Notify.restyle(richText)
+    local palette = CONFIG.Notification.RichPalette
+    return (tostring(richText or ""):gsub('color="rgb%(([%d%s,]+)%)"', function(rgb)
+        local key = rgb:gsub("%s", "")
+        local color = palette[key]
+        if not color then return nil end
+        return string.format('color="rgb(%d,%d,%d)"', math.round(color.R * 255), math.round(color.G * 255), math.round(color.B * 255))
+    end))
+end
+
+-- Тип по смыслу текста; для обычных сообщений иконку красим первым цветом из текста
+function Notify.kind(richText, defaultColor)
+    local plain = Notify.plain(richText)
+    local lower = plain:lower()
+    local kinds = CONFIG.Notification.Kinds
+    if lower:find("^error") or lower:find("failed") or lower:find("stopped:") or defaultColor == CONFIG.Colors.Red then
+        return kinds.Error
+    elseif lower:find("^warning") or lower:find("^wait") then
+        return kinds.Warning
+    elseif plain:find("%f[%w]OFF%f[%W]") or plain:find("OFF$") then
+        return kinds.Off
+    elseif plain:find("%f[%w]ON%f[%W]") or plain:find("ON$") or lower:find("^success") or lower:find("^ready")
+        or lower:find("^shot fired") or lower:find("picked up") then
+        return kinds.Success
+    end
+    local tint
+    local first = tostring(richText or ""):match('color="rgb%(([%d%s,]+)%)"')
+    if first then
+        local key = first:gsub("%s", "")
+        if key ~= "220,220,220" then
+            local color = CONFIG.Notification.RichPalette[key]
+            if color then
+                tint = color
+            else
+                local r, g, b = key:match("(%d+),(%d+),(%d+)")
+                if r then tint = Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b)) end
+            end
+        end
+    end
+    return { Icon = kinds.Info.Icon, Color = tint or kinds.Info.Color }
+end
 
 -- CreateNotificationUI() - Создание UI уведомлений
 local function CreateNotificationUI()
+    local parent = CoreGui
+    pcall(function()
+        if gethui then parent = gethui() end
+    end)
+    local cfg = CONFIG.Notification
     local notifGui = Core.New("ScreenGui")
     notifGui.Name = "MM2_Notifications"
     notifGui.ResetOnSpawn = false
     notifGui.DisplayOrder = 100
-    notifGui.Parent = CoreGui
+    notifGui.IgnoreGuiInset = true
+    notifGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    notifGui.Parent = parent
 
     local container = Core.New("Frame")
     container.Name = "NotificationContainer"
     container.BackgroundTransparency = 1
     container.AnchorPoint = Vector2.new(0.5, 0)
-    container.Position = UDim2.new(0.5, 0, 0, 80)
-    container.Size = UDim2.new(0, 340, 1, -100)
+    container.Position = UDim2.new(0.5, 0, 0, cfg.TopOffset)
+    container.Size = UDim2.new(0, cfg.MaxWidth, 1, -cfg.TopOffset)
     container.Parent = notifGui
 
     local list = Core.New("UIListLayout")
     list.FillDirection = Enum.FillDirection.Vertical
     list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 6)
+    list.Padding = UDim.new(0, cfg.Gap)
     list.HorizontalAlignment = Enum.HorizontalAlignment.Center
     list.VerticalAlignment = Enum.VerticalAlignment.Top
     list.Parent = container
@@ -2697,82 +2822,208 @@ local function CreateNotificationUI()
     State.Runtime.UIElements.NotificationContainer = container
 end
 
+-- Размер под текст: BuilderSans не поддерживается GetTextSize, поэтому меряем через
+-- GetTextBoundsAsync, а при ошибке — по Gotham того же кегля
+function Notify.measure(plain, maxTextWidth)
+    local cfg = CONFIG.Notification
+    local size
+    pcall(function()
+        local params = Instance.new("GetTextBoundsParams")
+        params.Text = plain
+        params.Font = Notify.font(Enum.FontWeight.Medium)
+        params.Size = cfg.TextSize
+        params.Width = maxTextWidth
+        size = game:GetService("TextService"):GetTextBoundsAsync(params)
+    end)
+    if not size then
+        size = game:GetService("TextService"):GetTextSize(plain, cfg.TextSize, Enum.Font.GothamMedium,
+            Vector2.new(maxTextWidth, 1000))
+    end
+    return size
+end
+
+function Notify.dismiss(item)
+    if item.Closing then return end
+    item.Closing = true
+    local cfg = CONFIG.Notification
+    for index, other in ipairs(Notify.Items) do
+        if other == item then table.remove(Notify.Items, index); break end
+    end
+    if item.Timer then item.Timer:Cancel() end
+    local out = TweenInfo.new(cfg.FadeTime, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+    Core.Tween(item.Group, out, { GroupTransparency = 1, Position = UDim2.new(0, 0, 0, -cfg.SlideOffset) }):Play()
+    -- Слот схлопывается следом — стопка съезжает плавно, а не прыжком
+    local collapse = Core.Tween(item.Slot, TweenInfo.new(cfg.FadeTime, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
+        { Size = UDim2.new(0, item.Width, 0, 0) })
+    collapse:Play()
+    Core.Tasks.spawn(function()
+        collapse.Completed:Wait()
+        if item.Slot and item.Slot.Parent then item.Slot:Destroy() end
+    end)
+end
+
+-- Полоска таймера и отложенное закрытие; повторный вызов перезапускает отсчёт
+function Notify.arm(item)
+    local cfg = CONFIG.Notification
+    item.Serial = (item.Serial or 0) + 1
+    local serial = item.Serial
+    if item.Timer then item.Timer:Cancel() end
+    item.Progress.Size = UDim2.new(1, 0, 0, cfg.ProgressHeight)
+    item.Timer = Core.Tween(item.Progress, TweenInfo.new(cfg.Duration, Enum.EasingStyle.Linear),
+        { Size = UDim2.new(0, 0, 0, cfg.ProgressHeight) })
+    item.Timer:Play()
+    Core.Tasks.delay(cfg.Duration, function()
+        if item.Serial == serial then Notify.dismiss(item) end
+    end)
+end
+
 -- ShowNotification() - Показ уведомления
 local function ShowNotification(richText, defaultColor)
     if not State.Settings.NotificationsEnabled then return end
 
     Core.Tasks.spawn(function()
-        if not State.Runtime.UIElements.NotificationGui then
+        if not State.Runtime.UIElements.NotificationGui or not State.Runtime.UIElements.NotificationGui.Parent then
             CreateNotificationUI()
         end
-
         local container = State.Runtime.UIElements.NotificationContainer
         if not container then return end
+        local cfg = CONFIG.Notification
+        local text = Notify.restyle(richText)
+        local plain = Notify.plain(richText)
 
-        local notifFrame = Core.New("Frame")
-        notifFrame.Name = "NotificationItem"
-        notifFrame.BackgroundColor3 = CONFIG.Colors.Section
-        notifFrame.BackgroundTransparency = 0.1
-        notifFrame.Size = UDim2.new(1, 0, 0, 40)
-        notifFrame.Parent = container
+        -- Тот же текст уже на экране — счётчик вместо дубля
+        for _, item in ipairs(Notify.Items) do
+            if item.Plain == plain and not item.Closing then
+                item.Count += 1
+                item.Badge.Text = "×" .. item.Count
+                item.Badge.Visible = true
+                Notify.arm(item)
+                return
+            end
+        end
+        while #Notify.Items >= cfg.MaxVisible do
+            Notify.dismiss(Notify.Items[1])
+        end
 
-        local corner = Core.New("UICorner")
-        corner.CornerRadius = UDim.new(0, 8)
-        corner.Parent = notifFrame
+        local kind = Notify.kind(richText, defaultColor)
+        local badgeRoom = 30
+        local chrome = cfg.PaddingX * 2 + cfg.IconSize + cfg.IconGap + badgeRoom
+        local bounds = Notify.measure(plain, cfg.MaxWidth - chrome)
+        local width = math.clamp(math.ceil(bounds.X) + chrome, cfg.MinWidth, cfg.MaxWidth)
+        local height = math.max(cfg.MinHeight, math.ceil(bounds.Y) + cfg.PaddingY * 2)
 
-        local stroke = Core.New("UIStroke")
-        stroke.Thickness = 1
-        stroke.Color = CONFIG.Colors.Stroke
-        stroke.Transparency = 0.4
-        stroke.Parent = notifFrame
+        Notify.Order += 1
+        local slot = Core.New("Frame", {
+            Name = "NotificationItem",
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, width, 0, 0),
+            LayoutOrder = -Notify.Order, -- новые сверху
+        }, container)
 
-        local label = Core.New("TextLabel")
-        label.BackgroundTransparency = 1
-        label.RichText = true
-        label.Text = richText or ""
-        label.Font = Enum.Font.GothamBold
-        label.TextSize = 16
-        label.TextColor3 = defaultColor or Color3.fromRGB(255, 255, 255)
-        label.TextTransparency = 1
-        label.TextXAlignment = Enum.TextXAlignment.Center
-        label.Size = UDim2.new(1, -20, 1, 0)
-        label.Position = UDim2.new(0, 10, 0, 0)
-        label.Parent = notifFrame
+        -- CanvasGroup гасит карточку целиком: фон, обводку, текст и иконку одним tween
+        local group = Core.New("CanvasGroup", {
+            BackgroundTransparency = 1,
+            GroupTransparency = 1,
+            Position = UDim2.new(0, 0, 0, -cfg.SlideOffset),
+            Size = UDim2.new(1, 0, 0, height),
+        }, slot)
+        -- Карточка на 1px внутри группы — обводка рисуется наружу и иначе обрежется
+        local card = Core.New("Frame", {
+            BackgroundColor3 = cfg.Background,
+            BackgroundTransparency = cfg.BackgroundTransparency,
+            BorderSizePixel = 0,
+            Position = UDim2.new(0, 1, 0, 1),
+            Size = UDim2.new(1, -2, 1, -2),
+        }, group)
+        Core.New("UICorner", { CornerRadius = UDim.new(0, cfg.Radius) }, card)
+        Core.New("UIStroke", {
+            Color = cfg.Border,
+            Thickness = 1,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        }, card)
 
-        notifFrame.AnchorPoint = Vector2.new(0.5, 0)
-        notifFrame.Position = UDim2.new(0.5, 0, 0, -50)
-        notifFrame.BackgroundTransparency = 1
+        local iconHolder = Core.New("Frame", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, cfg.PaddingX - 1, 0.5, 0),
+            Size = UDim2.new(0, cfg.IconSize, 0, cfg.IconSize),
+        }, card)
+        local sprite = Notify.icon(kind.Icon)
+        if sprite then
+            Core.New("ImageLabel", {
+                BackgroundTransparency = 1,
+                Image = sprite.Image,
+                ImageRectOffset = sprite.Offset,
+                ImageRectSize = sprite.Size,
+                ImageColor3 = kind.Color,
+                Size = UDim2.new(1, 0, 1, 0),
+            }, iconHolder)
+        else
+            -- Пак ещё не загружен (GUI не открывался) — цветная точка того же типа
+            local dot = Core.New("Frame", {
+                BackgroundColor3 = kind.Color,
+                BorderSizePixel = 0,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, 8, 0, 8),
+            }, iconHolder)
+            Core.New("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
+        end
 
-        Core.Tween(
-            notifFrame,
-            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-            { Position = UDim2.new(0.5, 0, 0, 0),
-              BackgroundTransparency = 0.1 }
-        ):Play()
+        local textX = cfg.PaddingX - 1 + cfg.IconSize + cfg.IconGap
+        local label = Core.New("TextLabel", {
+            BackgroundTransparency = 1,
+            RichText = true,
+            Text = text,
+            TextSize = cfg.TextSize,
+            TextColor3 = cfg.Text,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Position = UDim2.new(0, textX, 0, 0),
+            Size = UDim2.new(1, -(textX + cfg.PaddingX + badgeRoom - 4), 1, 0),
+        }, card)
+        local medium = Notify.font(Enum.FontWeight.Medium)
+        if medium then label.FontFace = medium else label.Font = Enum.Font.GothamMedium end
 
-        Core.Tween(
-            label,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { TextTransparency = 0 }
-        ):Play()
+        local badge = Core.New("TextLabel", {
+            BackgroundTransparency = 1,
+            Visible = false,
+            Text = "×1",
+            TextSize = cfg.TextSize - 2,
+            TextColor3 = cfg.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -cfg.PaddingX, 0.5, 0),
+            Size = UDim2.new(0, badgeRoom, 0, 18),
+        }, card)
+        local regular = Notify.font(Enum.FontWeight.Regular)
+        if regular then badge.FontFace = regular else badge.Font = Enum.Font.Gotham end
 
-        task.wait(CONFIG.Notification.Duration)
+        local track = Core.New("Frame", {
+            BackgroundTransparency = 1,
+            ClipsDescendants = true,
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.new(0, cfg.Radius, 1, 0),
+            Size = UDim2.new(1, -cfg.Radius * 2, 0, cfg.ProgressHeight),
+        }, card)
+        local progress = Core.New("Frame", {
+            BackgroundColor3 = kind.Color,
+            BackgroundTransparency = cfg.ProgressTransparency,
+            BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, cfg.ProgressHeight),
+        }, track)
 
-        local fadeOut = Core.Tween(
-            notifFrame,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, -50) }
-        )
-        fadeOut:Play()
+        local item = {
+            Slot = slot, Group = group, Progress = progress, Badge = badge,
+            Plain = plain, Count = 1, Width = width,
+        }
+        table.insert(Notify.Items, item)
 
-        Core.Tween(
-            label,
-            TweenInfo.new(CONFIG.Notification.FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { TextTransparency = 1 }
-        ):Play()
-
-        fadeOut.Completed:Wait()
-        notifFrame:Destroy()
+        local enter = TweenInfo.new(cfg.EnterTime, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        Core.Tween(slot, enter, { Size = UDim2.new(0, width, 0, height) }):Play()
+        Core.Tween(group, enter, { GroupTransparency = 0, Position = UDim2.new(0, 0, 0, 0) }):Play()
+        Notify.arm(item)
     end)
 end
 
