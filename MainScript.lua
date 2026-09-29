@@ -10929,7 +10929,6 @@ do
     local FakeCosmetics = {
         hl = nil,
         kb = nil,
-        Remote = {},   -- [Player] = {Player, Data, Headless, Korblox, Connection}
     }
 
     -- Headless на любом персонаже: прячем голову и её декали, помним исходную прозрачность.
@@ -11140,72 +11139,8 @@ do
         end)
     end
 
-    -- Синхронизация с пользователями скрипта: skinchanger приносит через relay {h, k}
-    -- чужого игрока и зовёт провайдер cosmetics. Вешаем то же самое на его персонажа
-    local function clearRemote(player)
-        local entry = FakeCosmetics.Remote[player]
-        if not entry then return end
-        FakeCosmetics.Remote[player] = nil
-        if entry.Connection then entry.Connection:Disconnect() end
-        if entry.Headless then entry.Headless.Cleanup() end
-        if entry.Korblox then entry.Korblox.Cleanup() end
-    end
-
-    local function dressRemote(entry)
-        if FakeCosmetics.Remote[entry.Player] ~= entry then return end
-        local character = entry.Player.Character
-        local hl, kb = entry.Headless, entry.Korblox
-        if hl and (not hl.Alive or hl.Character ~= character or not entry.Data.h) then hl.Cleanup(); entry.Headless = nil end
-        if kb and (not kb.Alive or kb.Character ~= character or not entry.Data.k) then kb.Cleanup(); entry.Korblox = nil end
-        if not character or not character.Parent then return end
-        if entry.Data.h and not entry.Headless then entry.Headless = startHeadless(character) end
-        if entry.Data.k and not entry.Korblox then entry.Korblox = startKorblox(character) end
-    end
-
-    local function applyRemote(player, data)
-        if typeof(player) ~= "Instance" or not player:IsA("Player") or player == LocalPlayer then return end
-        local headless = type(data) == "table" and data.h == true
-        local korblox = type(data) == "table" and data.k == true
-        if not headless and not korblox then clearRemote(player); return end
-        local entry = FakeCosmetics.Remote[player]
-        if not entry then
-            entry = { Player = player }
-            FakeCosmetics.Remote[player] = entry
-            entry.Connection = Core.Connect(player.CharacterAdded, function()
-                task.defer(dressRemote, entry)
-            end)
-        end
-        entry.Data = { h = headless, k = korblox }
-        dressRemote(entry)
-    end
-
-    local lookProvider = {
-        Export = function()
-            local headless, korblox = State.Settings.FakeHeadless == true, State.Settings.FakeKorblox == true
-            return (headless or korblox) and { h = headless, k = korblox } or nil
-        end,
-        Apply = applyRemote,
-    }
-    pcall(function()
-        local env = getgenv()
-        env.LookSync = env.LookSync or { Providers = {} }
-        env.LookSync.Providers.cosmetics = lookProvider
-    end)
-    Core.Connect(Players.PlayerRemoving, clearRemote)
-
-    local function StopLookSync()
-        pcall(function()
-            local registry = getgenv().LookSync
-            if registry and registry.Providers.cosmetics == lookProvider then registry.Providers.cosmetics = nil end
-        end)
-        local players = {}
-        for player in pairs(FakeCosmetics.Remote) do players[#players + 1] = player end
-        for _, player in ipairs(players) do clearRemote(player) end
-    end
-
     State.Runtime.ApplyFakeHeadless = ApplyFakeHeadless
     State.Runtime.ApplyFakeKorblox = ApplyFakeKorblox
-    State.Runtime.StopLookSync = StopLookSync
 end
 
 -- Все функции уже объявлены: ошибка одной системы не пропускает остальные.
@@ -11231,7 +11166,6 @@ Core.StopFeatures = function()
         {"CoinTracer", RemoveCoinTracer},
         {"Headless", function() State.Runtime.ApplyFakeHeadless(false) end},
         {"Korblox", function() State.Runtime.ApplyFakeKorblox(false) end},
-        {"LookSync", function() if State.Runtime.StopLookSync then State.Runtime.StopLookSync() end end},
         {"UI optimization", Core.Movement.DisableUIOnly},
     }) do
         Core.Try(entry[1], entry[2])
