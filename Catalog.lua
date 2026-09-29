@@ -1,5 +1,5 @@
--- LocalCatalog v9. Client-only. Personalized browsing, makeup and resizable UI.
--- RightControl toggles the window. No place remotes, purchases or bundles.
+-- LocalCatalog v10. Client-only. Personalized browsing, makeup, bundles, body parts and resizable UI.
+-- RightControl toggles the window. No place remotes or purchases: bundles and bodies are applied locally.
 if not game:IsLoaded() then game.Loaded:Wait() end
 local env=getgenv and getgenv() or _G
 local carry,carryVisible
@@ -23,12 +23,13 @@ local OUTFITS='LocalCatalog-outfits.json'
 local FAVORITES='LocalCatalog-favorites.json'
 local SETTINGS='LocalCatalog-settings.json'
 local app={Alive=true,Items={},Desired={},Hidden={},Cache={},Connections={},Busy=false,
-    Version=9,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,HeadOriginal=nil,
+    Version=10,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,
     Window={Width=1100,Height=736,Scale=1}}
 env.LocalCatalog=app
 -- These gates survive reloads so an old in-flight request cannot overlap a new instance.
 env.LocalCatalogNetwork=env.LocalCatalogNetwork or {Search={Next=0},Avatar={Next=0},Metadata={}}
 local network=env.LocalCatalogNetwork
+network.Bundles=network.Bundles or {}
 local function limited(err)
     local s=string.lower(tostring(err))
     return s:find('429',1,true) or s:find('too many requests',1,true) or s:find('rate limit',1,true)
@@ -105,6 +106,17 @@ local clothing={[2]='ShirtGraphic',[11]='Shirt',[12]='Pants',[18]='Decal'}
 local makeup={[88]='Face',[89]='Lip',[90]='Eye'}
 local accessory={[8]=true,[41]=true,[42]=true,[43]=true,[44]=true,[45]=true,[46]=true,[47]=true,
     [64]=true,[65]=true,[66]=true,[67]=true,[68]=true,[69]=true,[70]=true,[71]=true,[72]=true,[76]=true,[77]=true}
+-- Части тела: тип ассета -> поле HumanoidDescription. Классическая и динамическая голова — один слот
+local bodySlots={[17]='Head',[79]='Head',[27]='Torso',[28]='RightArm',[29]='LeftArm',[30]='LeftLeg',[31]='RightLeg'}
+local slotParts={Head={'Head'},Torso={'UpperTorso','LowerTorso'},LeftArm={'LeftUpperArm','LeftLowerArm','LeftHand'},
+    RightArm={'RightUpperArm','RightLowerArm','RightHand'},LeftLeg={'LeftUpperLeg','LeftLowerLeg','LeftFoot'},
+    RightLeg={'RightUpperLeg','RightLowerLeg','RightFoot'}}
+-- Анимации из паков и динамических голов; по каким слотам Animate раскладывать — решает сам ассет
+local animationKinds={[48]=true,[50]=true,[51]=true,[52]=true,[53]=true,[54]=true,[55]=true,[78]=true}
+local function supportedKind(kind)
+    return accessory[kind] or clothing[kind] or makeup[kind] or bodySlots[kind] or animationKinds[kind]
+end
+local restoreBody,restoreAnimations
 local function isCosmetic(o)
     return o:IsA('Accessory') or o:IsA('Shirt') or o:IsA('Pants') or o:IsA('ShirtGraphic')
 end
@@ -119,50 +131,23 @@ local function restoreHidden(predicate,ctx)
     for o,parent in pairs(ctx.Hidden) do if predicate(o,parent) then table.insert(restore,{o,parent}) end end
     for _,v in ipairs(restore) do
         ctx.Hidden[v[1]]=nil
-        if v[2] and v[2].Parent then pcall(function() v[1].Parent=v[2] end) else v[1]:Destroy() end
-    end
-end
-local function remapHeadReferences(ch,fromHead,toHead)
-    if not ch or not fromHead or not toHead then return end
-    for _,o in ipairs(fromHead:GetChildren()) do
-        if o:GetAttribute('LocalCatalogMakeup') then o.Parent=toHead end
-    end
-    for _,o in ipairs(ch:QueryDescendants('JointInstance, WeldConstraint')) do
-        if o:IsA('JointInstance') then
-            if o.Part0==fromHead then o.Part0=toHead end
-            if o.Part1==fromHead then o.Part1=toHead end
-        elseif o:IsA('WeldConstraint') then
-            if o.Part0==fromHead then o.Part0=toHead end
-            if o.Part1==fromHead then o.Part1=toHead end
+        local parent=v[2]
+        -- Родитель — исходная часть тела, которую сейчас заменяет примерка: возвращаем в замену
+        local body=ctx.Body
+        if parent and not parent.Parent and body and body.Parts[parent.Name] and body.Parts[parent.Name].Original==parent then
+            parent=body.Parts[parent.Name].Clone or parent
         end
+        if parent and parent.Parent then pcall(function() v[1].Parent=parent end) else v[1]:Destroy() end
     end
 end
-local function restoreHead(ctx)
-    ctx=ctx or app
-    local original=ctx.HeadOriginal
-    if not original then return end
-    local ch=ctx.HeadCharacter
-    if ch and ch.Parent then
-        local currentHead=ch:FindFirstChild('Head')
-        if currentHead and currentHead~=original then
-            original.CFrame=currentHead.CFrame
-            remapHeadReferences(ch,currentHead,original)
-            original.Parent=ch
-            currentHead:Destroy()
-        elseif not original.Parent then
-            original.Parent=ch
-        end
-    elseif not original.Parent then
-        original:Destroy()
-    end
-    ctx.HeadOriginal=nil; ctx.HeadCharacter=nil
-end
+-- Части тела возвращает restoreBody, анимации — restoreAnimations; здесь только свои объекты
 local function destroyItem(id,ctx)
     ctx=ctx or app
     local item=ctx.Items[id]
     if item then
-        if item.Kind==79 then restoreHead(ctx)
-        elseif item.Object and item.Object.Parent then item.Object:Destroy() end
+        if item.Slot then
+            if item.R6Mesh and item.Object and item.Object.Parent then item.Object:Destroy() end
+        elseif not item.Animation and item.Object and item.Object.Parent then item.Object:Destroy() end
         ctx.Items[id]=nil
     end
 end
@@ -170,15 +155,14 @@ local function clearVisuals()
     if app.CloseDialogs then app.CloseDialogs() end
     if app.EditingId and app.CloseTransform then app.CloseTransform(false,true) end
     local ids={}; for id in pairs(app.Items) do table.insert(ids,id) end
-    -- Restore a custom head last so head-bound accessory welds can be remapped cleanly.
-    table.sort(ids,function(a,b) return (app.Items[a] and app.Items[a].Kind==79) and false or (app.Items[b] and app.Items[b].Kind==79) end)
     for _,id in ipairs(ids) do destroyItem(id) end
-    restoreHead()
+    restoreBody(app)
+    restoreAnimations(app)
     restoreHidden(function() return true end)
 end
 local function hideOriginal(ch,ctx)
     ctx=ctx or app
-    local added={}; for _,it in pairs(ctx.Items) do added[it.Object]=true end
+    local added={}; for _,it in pairs(ctx.Items) do if it.Object then added[it.Object]=true end end
     for _,o in ipairs(ch:GetChildren()) do if isCosmetic(o) and not added[o] then hide(o,ctx) end end
     local head=ch:FindFirstChild('Head')
     if head then for _,o in ipairs(head:GetChildren()) do
@@ -305,7 +289,8 @@ local function bodyContext(ch,ctx)
     ctx=ctx or app
     local h=ch:FindFirstChildOfClass('Humanoid')
     local d=h:GetAppliedDescription()
-    for _,it in pairs(ctx.Items) do if it.Kind==79 then d.Head=it.Id; break end end
+    -- Примеренные части тела: под них садятся аксессуары и собирается следующая часть
+    for _,it in pairs(ctx.Items) do if it.Slot then d[it.Slot]=it.Id end end
     for prop,name in pairs(scaleValues) do local v=h:FindFirstChild(name); if v then d[prop]=v.Value end end
     local key={h.RigType.Name}
     for _,prop in ipairs(bodyProperties) do table.insert(key,tostring(d[prop])) end
@@ -386,14 +371,6 @@ local function loadFittedWearable(id,kind,description,rig,active)
         if not ok then if chosen then chosen:Destroy() end; error(err,0) end
         return chosen,fit
     end
-    if kind==79 then
-        description.Head=id
-        local model=apiCall(network.Avatar,function() return Players:CreateHumanoidModelFromDescriptionAsync(description,rig) end,active,0.35)
-        local head=model:FindFirstChild('Head')
-        if head then head.Parent=nil end; model:Destroy()
-        assert(head and head:IsA('MeshPart'),'Roblox did not return a Dynamic Head')
-        return head
-    end
     local objects=game:GetObjects('rbxassetid://'..string.format('%.0f',id))
     local chosen
     for _,root in ipairs(objects) do
@@ -406,30 +383,11 @@ local function loadFittedWearable(id,kind,description,rig,active)
     return chosen
 end
 
-local function attachDynamicHead(head,ch,ctx)
-    ctx=ctx or app
-    assert(head and head:IsA('MeshPart'),'Invalid Dynamic Head')
-    local currentHead=ch:FindFirstChild('Head')
-    assert(currentHead and currentHead:IsA('BasePart'),'Character has no head')
-    if not ctx.HeadOriginal then
-        ctx.HeadOriginal=currentHead
-        ctx.HeadCharacter=ch
-        currentHead.Parent=nil
-    end
-    local original=ctx.HeadOriginal
-    head.Name='Head'
-    head.CFrame=original.CFrame
-    head.Anchored=false; head.CanCollide=false; head.CanTouch=false; head.Massless=true
-    head.Parent=ch
-    remapHeadReferences(ch,original,head)
-    return head
-end
-
--- Посадка зависит от тела: шаблоны аксессуаров, макияжа и голов кэшируем по телу,
+-- Посадка зависит от тела: шаблоны аксессуаров и макияжа кэшируем по телу,
 -- чтобы свой персонаж и синхронизированные чужие не вытесняли шаблоны друг друга
 local function cacheKey(id,bodyKey)
     local info=network.Metadata[id]
-    if info and (accessory[info.Kind] or makeup[info.Kind] or info.Kind==79) then return string.format('%.0f',id)..'|'..bodyKey end
+    if info and (accessory[info.Kind] or makeup[info.Kind]) then return string.format('%.0f',id)..'|'..bodyKey end
     return id
 end
 -- Общая примерка для любого персонажа: ctx — app или контекст чужого игрока,
@@ -437,14 +395,14 @@ end
 local function wearOn(ctx,ch,id,hint,active)
     local description,bodyKey,rig=bodyContext(ch,ctx)
     local cached=app.Cache[cacheKey(id,bodyKey)]
-    if cached and (accessory[cached.Kind] or makeup[cached.Kind] or cached.Kind==79) and cached.BodyKey~=bodyKey then
+    if cached and (accessory[cached.Kind] or makeup[cached.Kind]) and cached.BodyKey~=bodyKey then
         cached=nil
     end
     if not cached then
         local chosen,fit,info
         local ok,err=pcall(function()
             info=itemMetadata(id,hint,active)
-            assert(info.Kind==79 or accessory[info.Kind] or clothing[info.Kind] or makeup[info.Kind],'Unsupported item type. Body parts and bundles are excluded')
+            assert(accessory[info.Kind] or clothing[info.Kind] or makeup[info.Kind],'Unsupported item type')
             chosen,fit=loadFittedWearable(id,info.Kind,description,rig,active)
             for _,scriptObject in ipairs(chosen:QueryDescendants('LuaSourceContainer')) do scriptObject:Destroy() end
             assert(active(),'Operation cancelled')
@@ -469,12 +427,7 @@ local function wearOn(ctx,ch,id,hint,active)
     local chosen=cached.Template:Clone()
     local weld,base
     local ok,err=pcall(function()
-        if kind==79 then
-            local remove={}
-            for key,item in pairs(owned) do if item.Kind==79 and key~=id then table.insert(remove,key) end end
-            for _,key in ipairs(remove) do destroyItem(key,ctx); owned[key]=nil end
-            attachDynamicHead(chosen,ch,ctx)
-        elseif makeup[kind] then
+        if makeup[kind] then
             local head=ch:FindFirstChild('Head')
             assert(head and head:IsA('MeshPart') and head:FindFirstChildOfClass('WrapTarget'),'Makeup requires a compatible MeshPart head with WrapTarget')
             chosen:SetAttribute('LocalCatalogMakeup',true)
@@ -518,27 +471,534 @@ local function wearOn(ctx,ch,id,hint,active)
     return it,cached
 end
 
-function app.WearAsync(rawId,expectedRevision,hint)
-    local id=type(rawId)=='number' and rawId or tonumber(tostring(rawId):match('^%s*(%d+)%s*$') or tostring(rawId):match('/catalog/(%d+)'))
-    assert(id and id>0 and id%1==0,'Enter an asset ID or a catalog link')
-    local ch=current(); local rev=expectedRevision or app.Revision
-    assert(valid(rev,ch),'Operation cancelled')
-    if app.Items[id] and app.Items[id].Object.Parent then return 'Item is already equipped' end
-
-    local it,cached=wearOn(app,ch,id,hint,function() return valid(rev,ch) end)
-    local previous=app.Desired[id] and app.Desired[id].Transform
-    app.Desired[id]={Id=id,Name=cached.Name,Kind=it.Kind,LayerOrder=it.LayerOrder}
-    if it.Weld and not cached.Layered then app.SetTransform(id,previous or defaultTransform()) end
-    refresh(); return 'Equipped: '..cached.Name
-end
-function app.Remove(id)
-    if app.EditingId==id and app.CloseTransform then app.CloseTransform(false) end
-    local item=app.Items[id] or app.Desired[id]; if not item then return end
-    destroyItem(id); app.Desired[id]=nil
-    if clothing[item.Kind] and not (app.HideOriginal and item.Kind~=18) then
-        restoreHidden(function(o) return o:IsA(clothing[item.Kind]) end)
+-- Системы тела, анимаций и бандлов живут в одном блоке: у главного чанка лимит в 200 локалей
+local wearBody,bundleDetails
+do
+    -- ══════════════════════════════════════════════════════════════════════════════
+    -- Части тела
+    -- ══════════════════════════════════════════════════════════════════════════════
+    -- Делаем то же, что ApplyDescription на сервере: части из модели Roblox встают на место
+    -- исходных. Свои суставы (Motor6D или AnimationConstraint после AvatarJointUpgrade),
+    -- аттачменты игры и макияж переезжают в новую часть, ссылки на старую перепривязываются
+    -- по пути. Исходные части держим вне персонажа, чтобы вернуть их без загрузки
+    local function isJoint(o)
+        return o:IsA('JointInstance') or o:IsA('Constraint') or o:IsA('WeldConstraint')
     end
-    refresh(); message('Removed: '..item.Name)
+    -- Переносится служебное, чего нет у новой части; внешний вид (меш, текстура, лицо, клетка) — новый
+    local function carried(o,dest)
+        if isJoint(o) or o:GetAttribute('LocalCatalogMakeup') then return true end
+        if o:IsA('DataModelMesh') or o:IsA('SurfaceAppearance') or o:IsA('WrapTarget') or o:IsA('Decal') or o:IsA('FaceControls') then return false end
+        return dest:FindFirstChild(o.Name)==nil
+    end
+    -- Ссылка на объект внутри заменённой части -> объект по тому же пути в замене
+    local function resolveRef(map,ref)
+        if typeof(ref)~='Instance' then return ref end
+        local part=ref:IsA('BasePart') and ref or ref:FindFirstAncestorWhichIsA('BasePart')
+        local target=part and map[part]
+        if not target then return ref end
+        if ref==part then return target end
+        local path={}; local o=ref
+        while o and o~=part do table.insert(path,1,o.Name); o=o.Parent end
+        for _,name in ipairs(path) do target=target and target:FindFirstChild(name) end
+        return target or ref
+    end
+    local refProperties={'Part0','Part1','Attachment0','Attachment1'}
+    local function remapObject(map,o)
+        for _,prop in ipairs(refProperties) do
+            pcall(function()
+                local value=o[prop]
+                local resolved=resolveRef(map,value)
+                if resolved~=value then o[prop]=resolved end
+            end)
+        end
+    end
+    local function remapAll(ch,map)
+        for _,o in ipairs(ch:QueryDescendants('JointInstance, Constraint, WeldConstraint')) do remapObject(map,o) end
+    end
+    -- Motor6D берут смещения из риг-аттачментов, аксессуары — из одноимённого аттачмента части.
+    -- Свои примерки пересчитываем с их трансформацией
+    local function fixRig(ctx,ch,touched)
+        for _,m in ipairs(ch:QueryDescendants('Motor6D')) do
+            if touched[m.Part0] or touched[m.Part1] then
+                local a0=m.Part0 and m.Part0:FindFirstChild(m.Name..'RigAttachment')
+                local a1=m.Part1 and m.Part1:FindFirstChild(m.Name..'RigAttachment')
+                if a0 and a1 and a0:IsA('Attachment') and a1:IsA('Attachment') then m.C0=a0.CFrame; m.C1=a1.CFrame end
+            end
+        end
+        local own={}
+        for _,it in pairs(ctx.Items) do
+            if it.Weld and it.BaseC1 and it.Object and it.Object.Parent and touched[it.Weld.Part1] then
+                own[it.Object]=true
+                local handle=it.Object:FindFirstChild('Handle')
+                local a=handle and handle:FindFirstChildOfClass('Attachment')
+                local target=a and it.Weld.Part1:FindFirstChild(a.Name)
+                if target and target:IsA('Attachment') then
+                    it.BaseC1=target.CFrame
+                    pcall(transformItem,it,it.Transform)
+                end
+            end
+        end
+        for _,acc in ipairs(ch:GetChildren()) do
+            local handle=acc:IsA('Accessory') and not own[acc] and acc:FindFirstChild('Handle')
+            local weld=handle and handle:FindFirstChild('AccessoryWeld')
+            local a=handle and handle:FindFirstChildOfClass('Attachment')
+            if weld and weld:IsA('Weld') and a and touched[weld.Part1] then
+                local target=weld.Part1:FindFirstChild(a.Name)
+                if target and target:IsA('Attachment') then weld.C1=target.CFrame end
+            end
+        end
+    end
+    local function bodyState(ctx,ch)
+        local body=ctx.Body
+        if body and body.Character~=ch then restoreBody(ctx); body=nil end
+        if not body then
+            local h=ch:FindFirstChildOfClass('Humanoid')
+            local root=ch:FindFirstChild('HumanoidRootPart')
+            local ra=root and root:FindFirstChild('RootRigAttachment')
+            body={Character=ch,Parts={},Map={},Meshes={},Connections={},Humanoid=h,RootAttachment=ra,
+                HipHeight=h and h.HipHeight,RootCF=ra and ra:IsA('Attachment') and ra.CFrame or nil}
+            ctx.Body=body
+        end
+        return body
+    end
+    -- Сервер пересобрал тело (ApplyDescription, смена масштаба): старые замены устарели,
+    -- владелец контекста одевает персонажа заново
+    local function invalidateBody(ctx,body)
+        if body.Invalid or ctx.Body~=body then return end
+        body.Invalid=true
+        task.delay(0.3,function()
+            if ctx.Body==body and ctx.OnBodyInvalid then ctx.OnBodyInvalid(body.Character) end
+        end)
+    end
+    local function watchBody(ctx,ch,body)
+        if body.Watching then return end
+        body.Watching=true
+        local function track(signal,fn) table.insert(body.Connections,signal:Connect(fn)) end
+        -- Суставы, созданные позже (хват оружия, аксессуары с сервера), могут ссылаться на исходные части
+        track(ch.DescendantAdded,function(o)
+            if isJoint(o) then task.defer(function() if ctx.Body==body and o.Parent then remapObject(body.Map,o) end end) end
+        end)
+        track(ch.ChildAdded,function(o)
+            local entry=o:IsA('BasePart') and body.Parts[o.Name]
+            if entry and o~=entry.Clone and o~=entry.Original then invalidateBody(ctx,body) end
+        end)
+        if body.Humanoid then
+            for _,v in ipairs(body.Humanoid:GetChildren()) do
+                if v:IsA('NumberValue') then track(v.Changed,function() invalidateBody(ctx,body) end) end
+            end
+        end
+    end
+    -- Новое в спрятанной исходной части (сервер кладёт туда хват, эффекты) переносим в замену
+    local function forwardToClone(ctx,ch,body,entry,o)
+        task.defer(function()
+            if ctx.Body~=body or not entry.Clone or o.Parent~=entry.Original or not carried(o,entry.Clone) then return end
+            table.insert(entry.Moved,{Object=o,Parent=entry.Original})
+            o.Parent=entry.Clone
+            remapObject(body.Map,o)
+            for _,d in ipairs(o:QueryDescendants('JointInstance, Constraint, WeldConstraint')) do remapObject(body.Map,d) end
+            fixRig(ctx,ch,{[entry.Clone]=true})
+        end)
+    end
+    local function swapParts(ctx,ch,parts,hipHeight,rootCF)
+        local body=bodyState(ctx,ch)
+        local map,touched,retired={},{},{}
+        for name,new in pairs(parts) do
+            local old=ch:FindFirstChild(name)
+            if old and old:IsA('BasePart') then
+                local entry=body.Parts[name]
+                if not entry then
+                    entry={Original=old,Moved={}}
+                    body.Parts[name]=entry
+                    table.insert(body.Connections,old.ChildAdded:Connect(function(o) forwardToClone(ctx,ch,body,entry,o) end))
+                    -- BodyColors может докрасить исходную часть уже после примерки
+                    table.insert(body.Connections,old:GetPropertyChangedSignal('Color'):Connect(function()
+                        if ctx.Body==body and entry.Clone then entry.Clone.Color=old.Color end
+                    end))
+                end
+                new.Anchored=false; new.CanCollide=old.CanCollide; new.CanTouch=old.CanTouch; new.CanQuery=old.CanQuery
+                new.Massless=old.Massless; new.CollisionGroup=old.CollisionGroup
+                new.CFrame=old.CFrame
+                -- Цвет — с исходной части: игры вроде MM2 красят тело через BodyColors,
+                -- и GetAppliedDescription отдаёт чёрные цвета, как и собранная по нему модель
+                new.Color=entry.Original.Color
+                for _,o in ipairs(old:GetChildren()) do
+                    if carried(o,new) then
+                        if old==entry.Original then table.insert(entry.Moved,{Object=o,Parent=old}) end
+                        o.Parent=new
+                    elseif o:IsA('Attachment') then
+                        -- Вложенные аттачменты суставов (JointRotation) создаёт апгрейд рига, у новой части их нет
+                        local same=new:FindFirstChild(o.Name)
+                        if same then for _,sub in ipairs(o:GetChildren()) do
+                            if not same:FindFirstChild(sub.Name) then
+                                if old==entry.Original then table.insert(entry.Moved,{Object=sub,Parent=o}) end
+                                sub.Parent=same
+                            end
+                        end end
+                    end
+                end
+                map[old]=new; touched[new]=true
+                if old~=entry.Original then table.insert(retired,old) end
+                entry.Clone=new
+                body.Map[entry.Original]=new
+            else
+                new:Destroy()
+            end
+        end
+        for old,new in pairs(map) do old.Parent=nil; new.Parent=ch end
+        remapAll(ch,map)
+        for _,old in ipairs(retired) do old:Destroy() end
+        fixRig(ctx,ch,touched)
+        if hipHeight and body.Humanoid then body.Humanoid.HipHeight=hipHeight end
+        if rootCF and body.RootAttachment then body.RootAttachment.CFrame=rootCF end
+        watchBody(ctx,ch,body)
+    end
+    restoreBody=function(ctx)
+        local body=ctx.Body
+        if not body then return end
+        ctx.Body=nil
+        for _,c in ipairs(body.Connections) do c:Disconnect() end
+        for _,m in ipairs(body.Meshes) do if m.Parent then m:Destroy() end end
+        restoreHidden(function(o) return o:IsA('CharacterMesh') end,ctx)
+        local ch=body.Character
+        local alive=ch and ch.Parent~=nil
+        local map,touched,clones,replaced={},{},{},false
+        for name,entry in pairs(body.Parts) do
+            local clone,original=entry.Clone,entry.Original
+            local serverPart=false
+            if alive then for _,o in ipairs(ch:GetChildren()) do
+                if o.Name==name and o:IsA('BasePart') and o~=clone and o~=original then serverPart=true end
+            end end
+            replaced=replaced or serverPart
+            if alive and not serverPart and clone and clone.Parent==ch then
+                original.CFrame=clone.CFrame
+                for _,rec in ipairs(entry.Moved) do
+                    if rec.Object.Parent and rec.Parent then pcall(function() rec.Object.Parent=rec.Parent end) end
+                end
+                for _,o in ipairs(clone:GetChildren()) do
+                    if isJoint(o) or o:GetAttribute('LocalCatalogMakeup') then o.Parent=original end
+                end
+                map[clone]=original; touched[original]=true
+            end
+            if clone then table.insert(clones,clone) end
+        end
+        if alive then
+            for clone,original in pairs(map) do clone.Parent=nil; original.Parent=ch end
+            remapAll(ch,map)
+            fixRig(ctx,ch,touched)
+            -- Сервер уже выставил своё тело — его высоту бёдер не трогаем
+            if not replaced then
+                if body.Humanoid and body.HipHeight then body.Humanoid.HipHeight=body.HipHeight end
+                if body.RootAttachment and body.RootCF then body.RootAttachment.CFrame=body.RootCF end
+            end
+        end
+        for _,clone in ipairs(clones) do clone:Destroy() end
+    end
+    -- Надеть части тела пачкой: одна модель Roblox на все слоты, как у ApplyDescription.
+    -- entries = {{Id,Kind,Name}}; на R6 руки/ноги/торс — это CharacterMesh, голова — часть
+    wearBody=function(ctx,ch,entries,active)
+        local humanoid=ch:FindFirstChildOfClass('Humanoid')
+        assert(humanoid,'Character is still loading')
+        local description,_,rig=bodyContext(ch,ctx)
+        local r6=rig==Enum.HumanoidRigType.R6
+        local slots={}
+        for _,e in ipairs(entries) do
+            local slot=bodySlots[e.Kind]
+            assert(slot,'Not a body part')
+            slots[slot]=e; description[slot]=e.Id
+        end
+        local keyParts={'body',rig.Name}
+        for _,prop in ipairs(bodyProperties) do table.insert(keyParts,tostring(description[prop])) end
+        local names={}; for slot in pairs(slots) do table.insert(names,slot) end; table.sort(names)
+        table.insert(keyParts,table.concat(names,','))
+        local key=table.concat(keyParts,':')
+        local cached=app.Cache[key]
+        if not cached then
+            local model,template
+            local ok,err=pcall(function()
+                model=apiCall(network.Avatar,function() return Players:CreateHumanoidModelFromDescriptionAsync(description,rig) end,active,0.35)
+                template=Instance.new('Model')
+                for slot in pairs(slots) do
+                    if r6 and slot~='Head' then
+                        for _,m in ipairs(model:GetChildren()) do
+                            if m:IsA('CharacterMesh') and m.BodyPart==Enum.BodyPart[slot] then m.Parent=template end
+                        end
+                    else
+                        for _,name in ipairs(slotParts[slot]) do
+                            local part=model:FindFirstChild(name)
+                            assert(part and part:IsA('BasePart'),'Roblox did not return '..name)
+                            part.Parent=template
+                        end
+                    end
+                end
+                for _,o in ipairs(template:QueryDescendants('JointInstance, Constraint, WeldConstraint, LuaSourceContainer')) do o:Destroy() end
+                local root=model:FindFirstChild('HumanoidRootPart')
+                local ra=root and root:FindFirstChild('RootRigAttachment')
+                local h=model:FindFirstChildOfClass('Humanoid')
+                template.Archivable=true
+                cached={Template=template,Kind='Body',BodyKey=key,HipHeight=h and h.HipHeight,RootCF=ra and ra:IsA('Attachment') and ra.CFrame or nil}
+            end)
+            if model then model:Destroy() end
+            if not ok then if template then template:Destroy() end; description:Destroy(); error(err,0) end
+            app.Cache[key]=cached
+        end
+        description:Destroy()
+        assert(active(),'Operation cancelled')
+
+        -- Прежние части в тех же слотах заменяются новыми
+        for id,item in pairs(ctx.Items) do
+            if item.Slot and slots[item.Slot] and slots[item.Slot].Id~=id then
+                destroyItem(id,ctx)
+                if ctx.Desired then ctx.Desired[id]=nil end
+            end
+        end
+        local clone=cached.Template:Clone()
+        local parts,meshes={},{}
+        for _,o in ipairs(clone:GetChildren()) do
+            if o:IsA('BasePart') then parts[o.Name]=o; o.Parent=nil
+            elseif o:IsA('CharacterMesh') then meshes[o.BodyPart.Name]=o end
+        end
+        local body=bodyState(ctx,ch)
+        if r6 then for slot in pairs(slots) do if slot~='Head' then
+            for _,o in ipairs(ch:GetChildren()) do
+                if o:IsA('CharacterMesh') and o.BodyPart==Enum.BodyPart[slot] and not table.find(body.Meshes,o) then hide(o,ctx) end
+            end
+            local mesh=meshes[slot]
+            if mesh then mesh.Parent=ch; table.insert(body.Meshes,mesh) end
+        end end end
+        if next(parts) then swapParts(ctx,ch,parts,not r6 and cached.HipHeight or nil,not r6 and cached.RootCF or nil) end
+        watchBody(ctx,ch,body)
+        clone:Destroy()
+        local items={}
+        for slot,e in pairs(slots) do
+            local limbMesh=r6 and slot~='Head'
+            local it={Id=e.Id,Name=e.Name,Kind=e.Kind,Slot=slot,R6Mesh=limbMesh or nil,
+                Object=limbMesh and meshes[slot] or ch:FindFirstChild(slotParts[slot][1])}
+            ctx.Items[e.Id]=it; table.insert(items,it)
+        end
+        return items
+    end
+
+    -- ══════════════════════════════════════════════════════════════════════════════
+    -- Анимации (паки, настроение динамической головы)
+    -- ══════════════════════════════════════════════════════════════════════════════
+    -- Скрипт Animate персонажа слушает свои StringValue: меняем их содержимое, и он сам
+    -- перезагружает набор. Анимации своего персонажа реплицирует Animator — их видят все,
+    -- поэтому чужим персонажам паки не применяем
+    local function animationTemplate(id,info)
+        local cached=app.Cache[id]
+        if cached then return cached end
+        local objects=game:GetObjects('rbxassetid://'..string.format('%.0f',id))
+        local chosen
+        for _,root in ipairs(objects) do
+            if not chosen and #root:QueryDescendants('Animation')>0 then chosen=root else root:Destroy() end
+        end
+        assert(chosen,'Roblox did not return animations for this ID')
+        for _,s in ipairs(chosen:QueryDescendants('LuaSourceContainer')) do s:Destroy() end
+        chosen.Archivable=true
+        cached={Template=chosen,Kind=info.Kind,Name=info.Name}
+        app.Cache[id]=cached
+        return cached
+    end
+    local function applyAnimationSets(ch,it,template)
+        local animate=ch:FindFirstChild('Animate')
+        assert(animate,'Character has no Animate script')
+        app.AnimOriginals=app.AnimOriginals or {}
+        local sets=template:IsA('StringValue') and {template} or template:GetChildren()
+        local applied=0
+        for _,value in ipairs(sets) do
+            local slot=value:IsA('StringValue') and animate:FindFirstChild(value.Name)
+            if slot and slot:IsA('StringValue') then
+                local saved=app.AnimOriginals[value.Name]
+                if not saved or saved.Slot~=slot then
+                    saved={Slot=slot,Children=slot:GetChildren()}
+                    app.AnimOriginals[value.Name]=saved
+                    for _,c in ipairs(saved.Children) do c.Parent=nil end
+                else
+                    slot:ClearAllChildren()
+                end
+                for _,c in ipairs(value:GetChildren()) do c:Clone().Parent=slot end
+                applied+=1
+            end
+        end
+        assert(applied>0,'This animation does not fit the character')
+    end
+    restoreAnimations=function(ctx)
+        if ctx~=app or not app.AnimOriginals then return end
+        for _,saved in pairs(app.AnimOriginals) do
+            if saved.Slot.Parent then
+                saved.Slot:ClearAllChildren()
+                for _,c in ipairs(saved.Children) do c.Parent=saved.Slot end
+            else
+                for _,c in ipairs(saved.Children) do c:Destroy() end
+            end
+        end
+        app.AnimOriginals=nil
+    end
+    -- Все надетые анимации заново поверх исходного Animate: снятие одной не ломает остальные
+    local function reapplyAnimations(ch)
+        restoreAnimations(app)
+        local ids={}
+        for id,it in pairs(app.Items) do if it.Animation then table.insert(ids,id) end end
+        table.sort(ids)
+        for _,id in ipairs(ids) do
+            local cached=app.Cache[id]
+            if cached then pcall(applyAnimationSets,ch,app.Items[id],cached.Template) end
+        end
+    end
+    local function wearAnimation(ch,id,info)
+        local cached=animationTemplate(id,info)
+        for key,item in pairs(app.Items) do
+            if item.Animation and item.Kind==info.Kind and key~=id then app.Items[key]=nil; app.Desired[key]=nil end
+        end
+        app.Items[id]=nil
+        reapplyAnimations(ch)
+        local it={Id=id,Name=cached.Name,Kind=info.Kind,Animation=true}
+        applyAnimationSets(ch,it,cached.Template)
+        app.Items[id]=it
+        return it
+    end
+
+    -- Примерка любого поддерживаемого ассета: части тела, анимации, аксессуары, одежда, макияж
+    local function wearAny(ctx,ch,id,hint,active)
+        local info=itemMetadata(id,hint,active)
+        assert(supportedKind(info.Kind),'Unsupported item type')
+        if bodySlots[info.Kind] then
+            return wearBody(ctx,ch,{{Id=id,Kind=info.Kind,Name=info.Name}},active)[1],{Name=info.Name}
+        end
+        if animationKinds[info.Kind] then
+            assert(ctx==app,'Animations are applied only to your character')
+            return wearAnimation(ch,id,info),{Name=info.Name}
+        end
+        return wearOn(ctx,ch,id,hint,active)
+    end
+
+    function app.WearAsync(rawId,expectedRevision,hint)
+        local id=type(rawId)=='number' and rawId or tonumber(tostring(rawId):match('^%s*(%d+)%s*$') or tostring(rawId):match('/catalog/(%d+)'))
+        assert(id and id>0 and id%1==0,'Enter an asset ID or a catalog link')
+        local ch=current(); local rev=expectedRevision or app.Revision
+        assert(valid(rev,ch),'Operation cancelled')
+        local existing=app.Items[id]
+        if existing and (not existing.Object or existing.Object.Parent) then return 'Item is already equipped' end
+
+        local it,cached=wearAny(app,ch,id,hint,function() return valid(rev,ch) end)
+        local previous=app.Desired[id] and app.Desired[id].Transform
+        app.Desired[id]={Id=id,Name=cached.Name,Kind=it.Kind,LayerOrder=it.LayerOrder}
+        if it.Weld and not cached.Layered then app.SetTransform(id,previous or defaultTransform()) end
+        refresh(); return 'Equipped: '..cached.Name
+    end
+    -- Несколько частей тела одной сборкой (бандлы, сохранённые образы)
+    function app.WearBodyAsync(entries,expectedRevision)
+        local ch=current(); local rev=expectedRevision or app.Revision
+        assert(valid(rev,ch),'Operation cancelled')
+        local items=wearBody(app,ch,entries,function() return valid(rev,ch) end)
+        for _,it in ipairs(items) do app.Desired[it.Id]={Id=it.Id,Name=it.Name,Kind=it.Kind} end
+        refresh()
+        return items
+    end
+    -- Снять один предмет или список. Часть тела снимается откатом тела и повторной сборкой
+    -- оставшихся частей, поэтому вызов может ждать сеть — зовём из run()
+    function app.Remove(target,expectedRevision)
+        local ids=type(target)=='table' and target or {target}
+        local names,bodyChanged,animationChanged={},false,false
+        for _,id in ipairs(ids) do
+            if app.EditingId==id and app.CloseTransform then app.CloseTransform(false) end
+            local item=app.Items[id] or app.Desired[id]
+            if item then
+                local live=app.Items[id]
+                if live and live.Slot then bodyChanged=true elseif live and live.Animation then animationChanged=true end
+                destroyItem(id); app.Desired[id]=nil
+                if clothing[item.Kind] and not (app.HideOriginal and item.Kind~=18) then
+                    restoreHidden(function(o) return o:IsA(clothing[item.Kind]) end)
+                end
+                table.insert(names,item.Name)
+            end
+        end
+        local ch=player.Character
+        if animationChanged and ch then reapplyAnimations(ch) end
+        if bodyChanged then
+            local remaining={}
+            for id,it in pairs(app.Items) do if it.Slot then table.insert(remaining,{Id=id,Kind=it.Kind,Name=it.Name}) end end
+            for _,e in ipairs(remaining) do app.Items[e.Id]=nil end
+            restoreBody(app)
+            if #remaining>0 and ch then
+                local rev=expectedRevision or app.Revision
+                local ok,err=pcall(wearBody,app,ch,remaining,function() return valid(rev,ch) end)
+                if not ok then refresh(); error(err,0) end
+            end
+        end
+        refresh()
+        if #names>0 then message('Removed: '..table.concat(names,', ')) end
+    end
+
+    -- ══════════════════════════════════════════════════════════════════════════════
+    -- Бандлы
+    -- ══════════════════════════════════════════════════════════════════════════════
+    -- Как TryBundle оригинального каталога: надеваются ассеты из BundledItems (части тела,
+    -- голова, аксессуары, обувь, анимации); UserOutfit и неподдерживаемое пропускаем
+    bundleDetails=function(id,hint,active)
+        local cached=network.Bundles[id]
+        if cached then return cached end
+        local details=(type(hint)=='table' and type(hint.BundledItems)=='table') and hint
+            or apiCall(network.Avatar,function() return AES:GetItemDetails(id,Enum.AvatarItemType.Bundle) end,active,0.35)
+        local assets={}
+        for _,entry in ipairs(details.BundledItems or {}) do
+            local assetId=tonumber(entry.Id)
+            local kind=entry.Type=='Asset' and kindFromHint({AssetType=entry.AssetType})
+            if assetId and kind and supportedKind(kind) then
+                local name=safeText(entry.Name or ('ID '..string.format('%.0f',assetId)))
+                table.insert(assets,{Id=assetId,Kind=kind,Name=name,AssetType=entry.AssetType})
+                network.Metadata[assetId]=network.Metadata[assetId] or {Kind=kind,Name=name}
+            end
+        end
+        local result={Id=id,Name=safeText(details.Name or ('Bundle '..string.format('%.0f',id))),Assets=assets}
+        network.Bundles[id]=result
+        return result
+    end
+    function app.BundleWorn(id)
+        local bundle=network.Bundles[id]
+        if not bundle or #bundle.Assets==0 then return false end
+        for _,a in ipairs(bundle.Assets) do if not app.Items[a.Id] then return false end end
+        return true
+    end
+    function app.WearBundleAsync(rawId,expectedRevision,hint)
+        local id=type(rawId)=='number' and rawId or tonumber(tostring(rawId):match('^%s*(%d+)%s*$') or tostring(rawId):match('bundles?/(%d+)'))
+        assert(id and id>0 and id%1==0,'Enter a bundle ID or a bundle link')
+        local ch=current(); local rev=expectedRevision or app.Revision
+        local function active() return valid(rev,ch) end
+        assert(active(),'Operation cancelled')
+        local bundle=bundleDetails(id,hint,active)
+        assert(#bundle.Assets>0,'This bundle has no items that can be worn')
+        local body,rest,failed={},{},{}
+        for _,a in ipairs(bundle.Assets) do
+            if bodySlots[a.Kind] then table.insert(body,{Id=a.Id,Kind=a.Kind,Name=a.Name}) else table.insert(rest,a) end
+        end
+        -- Сначала тело: аксессуары бандла садятся уже на его части
+        if #body>0 then
+            local ok,err=pcall(app.WearBodyAsync,body,rev)
+            if not ok then
+                if not active() then error(err,0) end
+                for _,a in ipairs(body) do table.insert(failed,a.Name) end
+            end
+        end
+        for _,a in ipairs(rest) do
+            assert(active(),'Operation cancelled')
+            local ok=pcall(app.WearAsync,a.Id,rev,{Name=a.Name,AssetType=a.AssetType})
+            if not ok then
+                if not active() then error('Operation cancelled',0) end
+                table.insert(failed,a.Name)
+            end
+        end
+        refresh()
+        if #failed>0 then return 'Equipped '..bundle.Name..'. Not loaded: '..table.concat(failed,', ') end
+        return 'Equipped: '..bundle.Name
+    end
+    function app.RemoveBundle(id,expectedRevision)
+        local bundle=network.Bundles[id]
+        if not bundle then return end
+        local ids={}
+        for _,a in ipairs(bundle.Assets) do if app.Items[a.Id] or app.Desired[a.Id] then table.insert(ids,a.Id) end end
+        app.Remove(ids,expectedRevision)
+    end
 end
 function app.MoveMakeupLayer(id,direction)
     local ordered={}
@@ -749,13 +1209,28 @@ local function applyOutfit(data,rev)
     local failed,hints={},{}
     for _,item in ipairs(data.Items or {}) do if item.Id then hints[item.Id]=item end end
     if data.HideOriginal then app.SetHideOriginal(true) end
+    local function active() return app.Alive and app.Revision==rev end
     for _,id in ipairs(data.AssetIds) do
-        if not app.Alive or app.Revision~=rev then return nil end
         if not app.Desired[id] then
             local hint=hints[id] or {}
             app.Desired[id]={Id=id,Name=hint.Name or ('ID '..string.format('%.0f',id)),Kind=kindFromHint(hint),LayerOrder=hint.LayerOrder,
                 Transform=data.Transforms and data.Transforms[string.format('%.0f',id)]}
         end
+    end
+    -- Части тела — одной сборкой и до аксессуаров, чтобы те сели уже на новое тело
+    local body,rest={},{}
+    for _,id in ipairs(data.AssetIds) do
+        if not active() then return nil end
+        local ok,info=pcall(itemMetadata,id,hints[id],active)
+        if ok and bodySlots[info.Kind] then table.insert(body,{Id=id,Kind=info.Kind,Name=info.Name}) else table.insert(rest,id) end
+    end
+    if #body>0 then
+        local ok=pcall(app.WearBodyAsync,body,rev)
+        if not active() then return nil end
+        if not ok then for _,e in ipairs(body) do table.insert(failed,string.format('%.0f',e.Id)) end end
+    end
+    for _,id in ipairs(rest) do
+        if not active() then return nil end
         local ok=pcall(function()
             app.WearAsync(id,rev,hints[id])
             local transform=data.Transforms and data.Transforms[string.format('%.0f',id)]
@@ -768,18 +1243,19 @@ local function applyOutfit(data,rev)
     return failed
 end
 -- One generation per spawn: old downloads and delayed callbacks cannot dress a new character.
-function app.HandleCharacterAdded(ch)
+-- keep=true — тот же персонаж пересобран сервером: образ надеваем заново независимо от настройки
+function app.HandleCharacterAdded(ch,keep)
     if not app.Alive then return end
     app.Revision+=1
     local rev=app.Revision
     clearVisuals(); app.Busy=false
-    if not app.KeepOnRespawn then
+    if not app.KeepOnRespawn and not keep then
         app.Desired={}; app.HideOriginal=false; app.Restoring=false
         refresh(); message('Respawn: original appearance kept'); return
     end
     local outfit=app.ExportOutfit()
     if #outfit.AssetIds==0 and not outfit.HideOriginal then app.Restoring=false; refresh(); return end
-    app.Restoring=true; refresh(); message('Respawn: waiting for appearance...')
+    app.Restoring=true; refresh(); message(keep and 'Body changed by the game: re-applying outfit...' or 'Respawn: waiting for appearance...')
     task.spawn(function()
         local started=os.clock()
         while valid(rev,ch) and (not ch.Parent or not ch:FindFirstChildOfClass('Humanoid') or not ch:FindFirstChild('Head')) do
@@ -798,8 +1274,11 @@ function app.HandleCharacterAdded(ch)
         app.Restoring=false; refresh()
         if not ok then message('Could not restore outfit. Click Retry',true)
         elseif failed and #failed>0 then message('Could not equip: '..table.concat(failed,', ')..'. Click Retry',true)
-        else message('Outfit restored after respawn') end
+        else message(keep and 'Outfit re-applied' or 'Outfit restored after respawn') end
     end)
+end
+app.OnBodyInvalid=function(ch)
+    if app.Alive and ch==player.Character then app.HandleCharacterAdded(ch,true) end
 end
 local C={Bg=Color3.fromRGB(28,29,32),Surface=Color3.fromRGB(36,38,41),Card=Color3.fromRGB(47,49,53),
     Muted=Color3.fromRGB(170,174,182),Text=Color3.fromRGB(245,246,248),Accent=Color3.fromRGB(65,111,85),
@@ -900,8 +1379,12 @@ local wearableTypes=table.clone(collectibleAccessories)
 for _,v in ipairs(allClothes) do table.insert(wearableTypes,v) end
 for _,v in ipairs({'EyeMakeup','LipMakeup','FaceMakeup','Face'}) do table.insert(wearableTypes,v) end
 local handheld=table.clone(layered); table.insert(handheld,'ShoulderAccessory')
-local function sub(name,types,keyword,free) return {Name=name,Types=types,Keyword=keyword,Free=free} end
--- Catalog Avatar Creator's wearable hierarchy, with body/bundle categories excluded.
+-- Поиск бандлов: AssetTypes пустой, BundleTypes задан — как в оригинальном каталоге.
+-- Sort — сортировка оригинала по умолчанию (части тела — по избранному)
+local function sub(name,types,keyword,free,bundleTypes,sort)
+    return {Name=name,Types=types or {},Keyword=keyword,Free=free,BundleTypes=bundleTypes,Sort=sort}
+end
+-- Catalog Avatar Creator's wearable hierarchy; Body merges its Characters, Body and Anim Packs sections.
 local categories={
     {Name='Accessories',Sub={
         sub('All',rigid),sub('Free',rigid,nil,true),sub('Hats',{'Hat'}),sub('Face',{'FaceAccessory'}),
@@ -916,12 +1399,19 @@ local categories={
         sub('T-shirts',{'TShirtAccessory'}),sub('Pants',{'PantsAccessory'}),sub('Jackets',{'JacketAccessory'}),
         sub('Shirts',{'ShirtAccessory'}),sub('Sweaters',{'SweaterAccessory'}),sub('Shorts',{'ShortsAccessory'}),
         sub('Dresses / skirts',{'DressSkirtAccessory'}),sub('Shoes',{'LeftShoeAccessory','RightShoeAccessory'})}},
+    {Name='Body',Sub={
+        sub('Characters',nil,nil,false,{'BodyParts'}),sub('Free',nil,nil,true,{'BodyParts'}),sub('Faces',nil,nil,false,{'DynamicHead'}),
+        sub('Heads',{'Head','DynamicHead'},nil,false,nil,'MostFavorited'),sub('Torso',{'Torso'},nil,false,nil,'MostFavorited'),
+        sub('Arms',{'LeftArm','RightArm'},nil,false,nil,'MostFavorited'),sub('Legs',{'LeftLeg','RightLeg'},nil,false,nil,'MostFavorited'),
+        sub('Anim Packs',nil,nil,false,{'Animations'})}},
     {Name='Makeup',Sub={sub('All',makeupTypes),sub('Eyes',{'EyeMakeup'}),sub('Lips',{'LipMakeup'}),
         sub('Face',{'FaceMakeup'}),sub('Eyelashes',{'EyelashAccessory'}),sub('Eyebrows',{'EyebrowAccessory'})}},
     {Name='Collectibles',Sub={sub('All',wearableTypes),sub('Accessories',collectibleAccessories)}},
     {Name='Saved',SavedRoot=true},
 }
-for _,entry in ipairs(categories[5].Sub) do entry.SalesTypeFilter='Collectibles' end
+for _,cat in ipairs(categories) do
+    if cat.Name=='Collectibles' then for _,entry in ipairs(cat.Sub) do entry.SalesTypeFilter='Collectibles' end end
+end
 app.Categories=categories
 local category,subcategory=1,1
 local savedSection='Outfits'
@@ -940,6 +1430,8 @@ local function favoritePlacement(item)
     local subName=selected and selected.Name or nil
     local assetName=avatarTypeName(item.AssetType)
     if table.find(makeupTypes,assetName) then return 'Makeup',assetName end
+    local bodyFavoriteSub={Head='Heads',DynamicHead='Heads',Torso='Torso',LeftArm='Arms',RightArm='Arms',LeftLeg='Legs',RightLeg='Legs'}
+    if bodyFavoriteSub[assetName] then return 'Body',bodyFavoriteSub[assetName] end
     if group=='Collectibles' then
         if table.find(allClothes,assetName) then return 'Clothing',clothingFavoriteSub[assetName] end
         if assetName=='HairAccessory' then return 'Hair',nil end
@@ -1324,23 +1816,34 @@ filterMatch=function(name,id)
     local term=fold(query.Text):match('^%s*(.-)%s*$')
     return term=='' or fold(name):find(term,1,true)~=nil or tostring(id or ''):find(term,1,true)~=nil
 end
+-- Ключ карточки: число — ассет, 'b'..id — бандл (id ассетов и бандлов пересекаются)
 local function renderItemCard(item,group,subName)
     local id=tonumber(item.Id)
-    if cardButtons[id] then return end
-    local card=make('Frame',{Name='Item_'..string.format('%.0f',id),LayoutOrder=resultCount,BackgroundColor3=C.Card,BorderSizePixel=0},results)
+    local isBundle=item.ItemType=='Bundle'
+    local key=isBundle and 'b'..string.format('%.0f',id) or id
+    if cardButtons[key] then return end
+    -- Состав бандла приходит в выдаче поиска: запоминаем его без запроса, чтобы знать, надет ли он
+    if isBundle and type(item.BundledItems)=='table' then pcall(bundleDetails,id,item,function() return app.Alive end) end
+    local card=make('Frame',{Name=(isBundle and 'Bundle_' or 'Item_')..string.format('%.0f',id),LayoutOrder=resultCount,BackgroundColor3=C.Card,BorderSizePixel=0},results)
     corner(card); resultCount+=1
-    make('ImageLabel',{Image='rbxthumb://type=Asset&id='..string.format('%.0f',id)..'&w=150&h=150',Size=UDim2.fromOffset(126,120),Position=UDim2.fromOffset(27,3),BackgroundTransparency=1},card)
-    local fav=button('',138,7,34,34,function() toggleFavorite(item,group,subName) end,card)
-    fav.Name='Favorite'; favoriteButtons[id]=fav
-    make('ImageLabel',{Name='Star',Image='rbxassetid://7537715511',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(23,23),BackgroundTransparency=1,ImageColor3=C.Muted,ScaleType=Enum.ScaleType.Fit},fav)
+    make('ImageLabel',{Image='rbxthumb://type='..(isBundle and 'BundleThumbnail' or 'Asset')..'&id='..string.format('%.0f',id)..'&w=150&h=150',Size=UDim2.fromOffset(126,120),Position=UDim2.fromOffset(27,3),BackgroundTransparency=1},card)
+    if not isBundle then
+        local fav=button('',138,7,34,34,function() toggleFavorite(item,group,subName) end,card)
+        fav.Name='Favorite'; favoriteButtons[id]=fav
+        make('ImageLabel',{Name='Star',Image='rbxassetid://7537715511',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(23,23),BackgroundTransparency=1,ImageColor3=C.Muted,ScaleType=Enum.ScaleType.Fit},fav)
+    end
     local name=label(item.Name,10,125,160,41,card,17); name.TextTruncate=Enum.TextTruncate.AtEnd
     local b=button('Try on',10,171,160,32,function()
         run(function(rev)
-            if app.Items[id] then app.Remove(id); return 'Item removed' end
+            if isBundle then
+                if app.BundleWorn(id) then app.RemoveBundle(id,rev); return 'Bundle removed' end
+                return app.WearBundleAsync(id,rev,item)
+            end
+            if app.Items[id] then app.Remove(id,rev); return 'Item removed' end
             return app.WearAsync(id,rev,{Name=item.Name,AssetType=item.AssetType})
         end)
     end,card,true)
-    b.Name='Wear'; cardButtons[id]=b
+    b.Name='Wear'; cardButtons[key]=b
 end
 renderSavedItems=function(group)
     clearResults(); pages=nil; app.SearchBusy=false
@@ -1361,7 +1864,8 @@ renderSavedItems=function(group)
 end
 local function refreshCards()
     for id,b in pairs(cardButtons) do
-        local worn=app.Items[id]~=nil
+        local worn
+        if type(id)=='string' then worn=app.BundleWorn(tonumber(id:sub(2))) else worn=app.Items[id]~=nil end
         b.Text=worn and 'Remove' or 'Try on'
         b.BackgroundColor3=worn and C.Green or C.Accent
         b.Active=not app.Busy and not app.Restoring
@@ -1379,7 +1883,9 @@ local function refreshCards()
 end
 local function renderPage()
     for _,item in ipairs(pages:GetCurrentPage()) do
-        if item.ItemType=='Asset' and not cardButtons[item.Id] then
+        if item.ItemType=='Bundle' then
+            renderItemCard(item)
+        elseif item.ItemType=='Asset' and not cardButtons[item.Id] then
             local group,subName=favoritePlacement(item)
             renderItemCard(item,group,subName)
         end
@@ -1401,7 +1907,8 @@ function app.BuildCatalogParams(selected,keyword,options)
     if options.PersonalizedResults and p.SearchKeyword=='' and options.CreatorName=='' and options.SortType=='Relevance' then
         p.IncludeOffSale=false
     end
-    p.SortType=Enum.CatalogSortType[options.SortType]
+    -- Части тела оригинал по умолчанию сортирует по избранному
+    p.SortType=Enum.CatalogSortType[(selected.Sort and options.SortType=='Relevance') and selected.Sort or options.SortType]
     p.SortAggregation=Enum.CatalogSortAggregation[options.SortAggregation]
     p.CreatorType=Enum.CreatorTypeFilter[options.CreatorType]
     p.CreatorName=options.CreatorName
@@ -1410,11 +1917,13 @@ function app.BuildCatalogParams(selected,keyword,options)
     p.SalesTypeFilter=Enum.SalesTypeFilter[selected.SalesTypeFilter or 'All']
     local types={}; for _,name in ipairs(selected.Types) do table.insert(types,Enum.AvatarAssetType[name]) end
     p.AssetTypes=types
+    local bundles={}; for _,name in ipairs(selected.BundleTypes or {}) do table.insert(bundles,Enum.BundleType[name]) end
+    p.BundleTypes=bundles
     return p
 end
 local function catalogPages(selected,keyword,active,options)
     local p=app.BuildCatalogParams(selected,keyword,options)
-    local key=Http:JSONEncode({selected.Types,p.SearchKeyword,p.SortType.Name,p.SortAggregation.Name,
+    local key=Http:JSONEncode({selected.Types,selected.BundleTypes or {},p.SearchKeyword,p.SortType.Name,p.SortAggregation.Name,
         p.CreatorType.Name,p.CreatorName,p.IncludeOffSale,p.MinPrice,p.MaxPrice,p.SalesTypeFilter.Name})
     local entry=searchCache[key]
     if not entry or os.clock()-entry.Time>120 then
@@ -1510,7 +2019,7 @@ renderCategories=function()
             savedSection='Favorites'; query.Text=''; renderCategories(); search()
         end,2)
         if savedSection=='Favorites' then
-            for i,group in ipairs({'All','Accessories','Hair','Clothing','Makeup'}) do
+            for i,group in ipairs({'All','Accessories','Hair','Clothing','Body','Makeup'}) do
                 chip('FavoritesGroup_'..i,group,math.clamp(utf8.len(group)*8+24,70,124),savedGroup==group,function()
                     savedGroup=group; renderCategories(); search()
                 end,i+2)
@@ -1565,8 +2074,9 @@ redraw=function()
             Position=UDim2.fromOffset(3,5),Size=UDim2.fromOffset(50,50),BackgroundTransparency=1},row)
         local n=label(it.Name,60,5,201,41,row,16); n.TextTruncate=Enum.TextTruncate.AtEnd
         if not app.Items[it.Id] then n.TextColor3=C.Muted end
+        -- Снятие части тела пересобирает тело и ждёт сеть — через run
         button('Remove',186,53,74,30,function()
-            if not app.Busy and not app.Restoring then app.Remove(it.Id) end
+            run(function(rev) app.Remove(it.Id,rev); return 'Removed: '..it.Name end)
         end,row).TextSize=16
         local equipped=app.Items[it.Id]
         if equipped and equipped.Weld and not equipped.Layered then
@@ -1610,12 +2120,18 @@ updateControls=function()
     hideButton.BackgroundColor3=app.HideOriginal and C.Green or C.Card
     refreshCards()
 end
-local assetId=input('Asset ID or roblox.com/catalog/... link',20,650,596,38)
+local assetId=input('Asset ID, catalog or bundle link',20,650,596,38)
 assetId.Name='AssetIdInput'
-local wearId=button('Try ID',626,650,150,38,function() run(function(rev) return app.WearAsync(assetId.Text,rev) end) end,nil,true)
+-- Ссылка вида roblox.com/bundles/<id> — бандл, всё остальное — ассет
+function app.WearFromInput(text,rev)
+    local bundleId=tostring(text):lower():match('bundles?/(%d+)')
+    if bundleId then return app.WearBundleAsync(tonumber(bundleId),rev) end
+    return app.WearAsync(text,rev)
+end
+local wearId=button('Try ID',626,650,150,38,function() run(function(rev) return app.WearFromInput(assetId.Text,rev) end) end,nil,true)
 wearId.Name='WearId'
 assetId.FocusLost:Connect(function(enter)
-    if enter then run(function(rev) return app.WearAsync(assetId.Text,rev) end) end
+    if enter then run(function(rev) return app.WearFromInput(assetId.Text,rev) end) end
 end)
 label('Right Ctrl',720,15,150,26,nil,16).TextColor3=C.Muted
 status=label('Choose a category or search for an item.',22,696,1056,26,nil,17)
@@ -1984,6 +2500,8 @@ function app.ExportSync()
     for _,id in ipairs(outfit.AssetIds) do
         if #items>=SYNC_MAX_ITEMS then break end
         local d=app.Desired[id]
+        -- Анимации своего персонажа и так видны всем через Animator
+        if d and d.Kind and animationKinds[d.Kind] then continue end
         local entry={id,d and d.LayerOrder or 0}
         local t=d and d.Transform
         if t then
@@ -2004,10 +2522,8 @@ local function remoteValid(ctx,rev,ch)
 end
 local function clearRemoteVisuals(ctx)
     local ids={}; for id in pairs(ctx.Items) do table.insert(ids,id) end
-    -- Голову возвращаем последней, как и у своего персонажа
-    table.sort(ids,function(a,b) return (ctx.Items[a] and ctx.Items[a].Kind==79) and false or (ctx.Items[b] and ctx.Items[b].Kind==79) end)
     for _,id in ipairs(ids) do destroyItem(id,ctx) end
-    restoreHead(ctx)
+    restoreBody(ctx)
     restoreHidden(function() return true end,ctx)
 end
 -- Одно поколение на спавн и на версию образа: устаревшие загрузки не одевают новый персонаж
@@ -2027,7 +2543,18 @@ local function dressRemote(ctx)
         if not remoteValid(ctx,rev,ch) then return end
         if data.x then pcall(hideOriginal,ch,ctx) end
         local active=function() return remoteValid(ctx,rev,ch) end
+        -- Тип проверяем сами (MarketplaceService), тело собираем одной моделью до аксессуаров
+        local body,rest={},{}
         for _,entry in ipairs(data.i) do
+            if not active() then return end
+            local ok,info=pcall(itemMetadata,entry[1],nil,active)
+            if ok and supportedKind(info.Kind) then
+                if bodySlots[info.Kind] then table.insert(body,{Id=entry[1],Kind=info.Kind,Name=info.Name})
+                elseif not animationKinds[info.Kind] then table.insert(rest,entry) end
+            end
+        end
+        if #body>0 then pcall(wearBody,ctx,ch,body,active) end
+        for _,entry in ipairs(rest) do
             if not active() then return end
             local id,order,tf=entry[1],entry[2],entry[3]
             local ok,it=pcall(wearOn,ctx,ch,id,{LayerOrder=order>0 and order or nil},active)
@@ -2067,6 +2594,7 @@ function app.ApplyRemote(target,data)
     local ctx=app.Remote[target]
     if not ctx then
         ctx={Player=target,Items={},Hidden={},Revision=0,Alive=true,Connections={}}
+        ctx.OnBodyInvalid=function() if ctx.Alive then dressRemote(ctx) end end
         app.Remote[target]=ctx
         table.insert(ctx.Connections,connect(target.CharacterAdded,function() task.defer(dressRemote,ctx) end))
         -- Внешность с сервера догрузилась после нашей примерки — одеваем заново
