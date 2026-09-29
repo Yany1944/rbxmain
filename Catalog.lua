@@ -1,4 +1,4 @@
--- LocalCatalog v10. Client-only. Personalized browsing, makeup, bundles, body parts and resizable UI.
+-- LocalCatalog v11. Client-only. Personalized browsing, makeup, bundles, body parts and resizable UI.
 -- RightControl toggles the window. No place remotes or purchases: bundles and bodies are applied locally.
 if not game:IsLoaded() then game.Loaded:Wait() end
 local env=getgenv and getgenv() or _G
@@ -23,7 +23,7 @@ local OUTFITS='LocalCatalog-outfits.json'
 local FAVORITES='LocalCatalog-favorites.json'
 local SETTINGS='LocalCatalog-settings.json'
 local app={Alive=true,Items={},Desired={},Hidden={},Cache={},Connections={},Busy=false,
-    Version=10,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,
+    Version=11,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,
     Window={Width=1100,Height=736,Scale=1}}
 env.LocalCatalog=app
 -- These gates survive reloads so an old in-flight request cannot overlap a new instance.
@@ -132,11 +132,6 @@ local function restoreHidden(predicate,ctx)
     for _,v in ipairs(restore) do
         ctx.Hidden[v[1]]=nil
         local parent=v[2]
-        -- Родитель — исходная часть тела, которую сейчас заменяет примерка: возвращаем в замену
-        local body=ctx.Body
-        if parent and not parent.Parent and body and body.Parts[parent.Name] and body.Parts[parent.Name].Original==parent then
-            parent=body.Parts[parent.Name].Clone or parent
-        end
         if parent and parent.Parent then pcall(function() v[1].Parent=parent end) else v[1]:Destroy() end
     end
 end
@@ -477,44 +472,28 @@ do
     -- ══════════════════════════════════════════════════════════════════════════════
     -- Части тела
     -- ══════════════════════════════════════════════════════════════════════════════
-    -- Делаем то же, что ApplyDescription на сервере: части из модели Roblox встают на место
-    -- исходных. Свои суставы (Motor6D или AnimationConstraint после AvatarJointUpgrade),
-    -- аттачменты игры и макияж переезжают в новую часть, ссылки на старую перепривязываются
-    -- по пути. Исходные части держим вне персонажа, чтобы вернуть их без загрузки
-    local function isJoint(o)
-        return o:IsA('JointInstance') or o:IsA('Constraint') or o:IsA('WeldConstraint')
+    -- Реальные части персонажа никогда не меняют Parent. Хват тула (RightGrip) создаёт
+    -- Humanoid владельца и реплицирует на сервер, но после локального Parent=nil и возврата
+    -- клиент перестаёт реплицировать новое внутри части: сервер не видит хвата, ручка падает
+    -- в пустоту и тул сгорает на FallenPartsDestroyHeight (проверено в MM2 вторым аккаунтом).
+    -- Поэтому новое тело надеваем прямо на исходные части: меш и текстура — MeshPart:ApplyMesh,
+    -- размер, прозрачность и аттачменты — с модели Roblox, клетка, лицо и SurfaceAppearance —
+    -- копиями. Суставы, хват оружия, дисплеи скинов и аксессуары остаются на своих частях
+    -- и садятся уже по новой форме
+    local function near(a,b)
+        if typeof(a)=='CFrame' then
+            return (a.Position-b.Position).Magnitude<1e-3 and a.LookVector:Dot(b.LookVector)>0.9999 and a.UpVector:Dot(b.UpVector)>0.9999
+        elseif typeof(a)=='Vector3' then return (a-b).Magnitude<1e-3 end
+        return math.abs(a-b)<1e-3
     end
-    -- Переносится служебное, чего нет у новой части; внешний вид (меш, текстура, лицо, клетка) — новый
-    local function carried(o,dest)
-        if isJoint(o) or o:GetAttribute('LocalCatalogMakeup') then return true end
-        if o:IsA('DataModelMesh') or o:IsA('SurfaceAppearance') or o:IsA('WrapTarget') or o:IsA('Decal') or o:IsA('FaceControls') then return false end
-        return dest:FindFirstChild(o.Name)==nil
+    -- Внешний вид части; макияж (свой и серверный) остаётся на голове
+    local appearanceClasses={'DataModelMesh','SurfaceAppearance','WrapTarget','Decal','FaceControls','Bone'}
+    local function isAppearance(o)
+        if o:GetAttribute('LocalCatalogMakeup') or o:FindFirstChildOfClass('WrapTextureTransfer') then return false end
+        for _,class in ipairs(appearanceClasses) do if o:IsA(class) then return true end end
+        return false
     end
-    -- Ссылка на объект внутри заменённой части -> объект по тому же пути в замене
-    local function resolveRef(map,ref)
-        if typeof(ref)~='Instance' then return ref end
-        local part=ref:IsA('BasePart') and ref or ref:FindFirstAncestorWhichIsA('BasePart')
-        local target=part and map[part]
-        if not target then return ref end
-        if ref==part then return target end
-        local path={}; local o=ref
-        while o and o~=part do table.insert(path,1,o.Name); o=o.Parent end
-        for _,name in ipairs(path) do target=target and target:FindFirstChild(name) end
-        return target or ref
-    end
-    local refProperties={'Part0','Part1','Attachment0','Attachment1'}
-    local function remapObject(map,o)
-        for _,prop in ipairs(refProperties) do
-            pcall(function()
-                local value=o[prop]
-                local resolved=resolveRef(map,value)
-                if resolved~=value then o[prop]=resolved end
-            end)
-        end
-    end
-    local function remapAll(ch,map)
-        for _,o in ipairs(ch:QueryDescendants('JointInstance, Constraint, WeldConstraint')) do remapObject(map,o) end
-    end
+    local function isRigPoint(o) return o:IsA('Attachment') and not o:IsA('Bone') end
     -- Motor6D берут смещения из риг-аттачментов, аксессуары — из одноимённого аттачмента части.
     -- Свои примерки пересчитываем с их трансформацией
     local function fixRig(ctx,ch,touched)
@@ -555,13 +534,13 @@ do
             local h=ch:FindFirstChildOfClass('Humanoid')
             local root=ch:FindFirstChild('HumanoidRootPart')
             local ra=root and root:FindFirstChild('RootRigAttachment')
-            body={Character=ch,Parts={},Map={},Meshes={},Connections={},Humanoid=h,RootAttachment=ra,
+            body={Character=ch,Parts={},Meshes={},Connections={},Humanoid=h,RootAttachment=ra,
                 HipHeight=h and h.HipHeight,RootCF=ra and ra:IsA('Attachment') and ra.CFrame or nil}
             ctx.Body=body
         end
         return body
     end
-    -- Сервер пересобрал тело (ApplyDescription, смена масштаба): старые замены устарели,
+    -- Сервер пересобрал тело (ApplyDescription, смена масштаба): примерка устарела,
     -- владелец контекста одевает персонажа заново
     local function invalidateBody(ctx,body)
         if body.Invalid or ctx.Body~=body then return end
@@ -574,13 +553,9 @@ do
         if body.Watching then return end
         body.Watching=true
         local function track(signal,fn) table.insert(body.Connections,signal:Connect(fn)) end
-        -- Суставы, созданные позже (хват оружия, аксессуары с сервера), могут ссылаться на исходные части
-        track(ch.DescendantAdded,function(o)
-            if isJoint(o) then task.defer(function() if ctx.Body==body and o.Parent then remapObject(body.Map,o) end end) end
-        end)
         track(ch.ChildAdded,function(o)
             local entry=o:IsA('BasePart') and body.Parts[o.Name]
-            if entry and o~=entry.Clone and o~=entry.Original then invalidateBody(ctx,body) end
+            if entry and o~=entry.Part then invalidateBody(ctx,body) end
         end)
         if body.Humanoid then
             for _,v in ipairs(body.Humanoid:GetChildren()) do
@@ -588,68 +563,132 @@ do
             end
         end
     end
-    -- Новое в спрятанной исходной части (сервер кладёт туда хват, эффекты) переносим в замену
-    local function forwardToClone(ctx,ch,body,entry,o)
-        task.defer(function()
-            if ctx.Body~=body or not entry.Clone or o.Parent~=entry.Original or not carried(o,entry.Clone) then return end
-            table.insert(entry.Moved,{Object=o,Parent=entry.Original})
-            o.Parent=entry.Clone
-            remapObject(body.Map,o)
-            for _,d in ipairs(o:QueryDescendants('JointInstance, Constraint, WeldConstraint')) do remapObject(body.Map,d) end
-            fixRig(ctx,ch,{[entry.Clone]=true})
-        end)
+    -- Откат одной части. Что успел поменять сервер, не трогаем — его значение новее нашего
+    local function revertPart(entry)
+        local p=entry.Part
+        for _,c in ipairs(entry.Connections) do c:Disconnect() end
+        entry.Connections={}
+        for _,o in ipairs(entry.Added) do if o.Parent then o:Destroy() end end
+        local alive=p.Parent~=nil
+        for o,parent in pairs(entry.Hidden) do
+            if alive then pcall(function() o.Parent=parent end) else o:Destroy() end
+        end
+        if entry.Backup then
+            if alive and entry.MeshId and p.MeshId==entry.MeshId then
+                pcall(function() p:ApplyMesh(entry.Backup); p.TextureID=entry.TextureID end)
+            end
+            entry.Backup:Destroy()
+        end
+        if not alive then return end
+        if entry.AppliedSize and near(p.Size,entry.AppliedSize) then p.Size=entry.Size end
+        if entry.AppliedTransparency and near(p.Transparency,entry.AppliedTransparency) then p.Transparency=entry.Transparency end
+        for a,rec in pairs(entry.Attachments) do
+            if a.Parent==p and near(a.CFrame,rec.Applied) then a.CFrame=rec.Original end
+        end
     end
-    local function swapParts(ctx,ch,parts,hipHeight,rootCF)
-        local body=bodyState(ctx,ch)
-        local map,touched,retired={},{},{}
-        for name,new in pairs(parts) do
-            local old=ch:FindFirstChild(name)
-            if old and old:IsA('BasePart') then
-                local entry=body.Parts[name]
-                if not entry then
-                    entry={Original=old,Moved={}}
-                    body.Parts[name]=entry
-                    table.insert(body.Connections,old.ChildAdded:Connect(function(o) forwardToClone(ctx,ch,body,entry,o) end))
-                    -- BodyColors может докрасить исходную часть уже после примерки
-                    table.insert(body.Connections,old:GetPropertyChangedSignal('Color'):Connect(function()
-                        if ctx.Body==body and entry.Clone then entry.Clone.Color=old.Color end
-                    end))
-                end
-                new.Anchored=false; new.CanCollide=old.CanCollide; new.CanTouch=old.CanTouch; new.CanQuery=old.CanQuery
-                new.Massless=old.Massless; new.CollisionGroup=old.CollisionGroup
-                new.CFrame=old.CFrame
-                -- Цвет — с исходной части: игры вроде MM2 красят тело через BodyColors,
-                -- и GetAppliedDescription отдаёт чёрные цвета, как и собранная по нему модель
-                new.Color=entry.Original.Color
-                for _,o in ipairs(old:GetChildren()) do
-                    if carried(o,new) then
-                        if old==entry.Original then table.insert(entry.Moved,{Object=o,Parent=old}) end
-                        o.Parent=new
-                    elseif o:IsA('Attachment') then
-                        -- Вложенные аттачменты суставов (JointRotation) создаёт апгрейд рига, у новой части их нет
-                        local same=new:FindFirstChild(o.Name)
-                        if same then for _,sub in ipairs(o:GetChildren()) do
-                            if not same:FindFirstChild(sub.Name) then
-                                if old==entry.Original then table.insert(entry.Moved,{Object=sub,Parent=o}) end
-                                sub.Parent=same
-                            end
-                        end end
-                    end
-                end
-                map[old]=new; touched[new]=true
-                if old~=entry.Original then table.insert(retired,old) end
-                entry.Clone=new
-                body.Map[entry.Original]=new
-            else
-                new:Destroy()
+    -- Одна часть: запись заводим до изменений, чтобы откатить и недоделанную
+    local function applyPart(body,real,new)
+        local entry={Part=real,Size=real.Size,Transparency=real.Transparency,Attachments={},Hidden={},Added={},Connections={}}
+        body.Parts[real.Name]=entry
+        if new:IsA('MeshPart') and real:IsA('MeshPart') then
+            entry.Backup=Instance.new('MeshPart')
+            entry.Backup:ApplyMesh(real)
+            entry.TextureID=real.TextureID
+            real:ApplyMesh(new)
+            real.TextureID=new.TextureID
+            entry.MeshId=real.MeshId; entry.AppliedTexture=real.TextureID
+        end
+        -- Классическая голова донора несёт лицо из описания — оставляем своё; динамическая
+        -- и headless лица не имеют — прячем
+        entry.KeepFace=real.Name=='Head' and new:FindFirstChildWhichIsA('Decal')~=nil
+        for _,o in ipairs(real:GetChildren()) do
+            if isAppearance(o) and not (entry.KeepFace and o:IsA('Decal')) then entry.Hidden[o]=real; o.Parent=nil end
+        end
+        if new:IsA('MeshPart') and not real:IsA('MeshPart') and new.MeshSize.Magnitude>0 then
+            -- Часть без MeshPart (голова R6, старые риги): меш донора через FileMesh
+            table.insert(entry.Added,make('SpecialMesh',{MeshType=Enum.MeshType.FileMesh,MeshId=new.MeshId,
+                TextureId=new.TextureID,Scale=new.Size/new.MeshSize},real))
+        end
+        for _,o in ipairs(new:GetChildren()) do
+            if isAppearance(o) and not (entry.KeepFace and o:IsA('Decal')) then
+                local c=o:Clone(); c.Parent=real; table.insert(entry.Added,c)
             end
         end
-        for old,new in pairs(map) do old.Parent=nil; new.Parent=ch end
-        remapAll(ch,map)
-        for _,old in ipairs(retired) do old:Destroy() end
+        -- Риг и аксессуары — по аттачментам донора; аттачменты игры (пояс, ножны дисплеев)
+        -- растягиваем вместе с частью
+        local ratio=new.Size/real.Size
+        for _,a in ipairs(real:GetChildren()) do
+            if isRigPoint(a) then
+                local src=new:FindFirstChild(a.Name)
+                local cf=(src and isRigPoint(src)) and src.CFrame or CFrame.new(a.CFrame.Position*ratio)*a.CFrame.Rotation
+                entry.Attachments[a]={Original=a.CFrame,Applied=cf}
+                a.CFrame=cf
+            end
+        end
+        for _,src in ipairs(new:GetChildren()) do
+            if isRigPoint(src) and not real:FindFirstChild(src.Name) then
+                local c=src:Clone(); c:ClearAllChildren(); c.Parent=real; table.insert(entry.Added,c)
+            end
+        end
+        -- Прозрачность только повышаем: часть, спрятанную другой функцией (Headless/Korblox
+        -- MainScript, невидимость игры), не показываем; прозрачные куски донора (голень Korblox) держим
+        real.Size=new.Size; entry.AppliedSize=real.Size
+        entry.MinTransparency=new.Transparency
+        real.Transparency=math.max(real.Transparency,new.Transparency); entry.AppliedTransparency=real.Transparency
+        return entry
+    end
+    local function watchPart(ctx,body,entry)
+        local p=entry.Part
+        local function track(signal,fn) table.insert(entry.Connections,signal:Connect(fn)) end
+        -- Сервер сменил меш на месте или убрал часть — одеваем заново;
+        -- чей-то локальный скрипт сбросил только текстуру — возвращаем свою
+        track(p.AncestryChanged,function() if not p.Parent then invalidateBody(ctx,body) end end)
+        if entry.MeshId then
+            track(p:GetPropertyChangedSignal('MeshId'),function()
+                if ctx.Body==body and p.MeshId~=entry.MeshId then invalidateBody(ctx,body) end
+            end)
+            track(p:GetPropertyChangedSignal('TextureID'),function()
+                if ctx.Body==body and p.MeshId==entry.MeshId and p.TextureID~=entry.AppliedTexture then p.TextureID=entry.AppliedTexture end
+            end)
+        end
+        track(p:GetPropertyChangedSignal('Transparency'),function()
+            if ctx.Body==body and p.Transparency<entry.MinTransparency-1e-3 then p.Transparency=entry.MinTransparency end
+        end)
+        -- Новое в части: внешний вид с сервера прячем под примеркой, аттачменты игры растягиваем
+        track(p.ChildAdded,function(o)
+            task.defer(function()
+                if ctx.Body~=body or o.Parent~=p or table.find(entry.Added,o) or entry.Attachments[o] then return end
+                if isAppearance(o) and not (entry.KeepFace and o:IsA('Decal')) then
+                    entry.Hidden[o]=p; o.Parent=nil
+                elseif isRigPoint(o) then
+                    local cf=CFrame.new(o.CFrame.Position*entry.AppliedSize/entry.Size)*o.CFrame.Rotation
+                    entry.Attachments[o]={Original=o.CFrame,Applied=cf}; o.CFrame=cf
+                end
+            end)
+        end)
+    end
+    local function applyParts(ctx,ch,parts,hipHeight,rootCF)
+        -- Несовместимую сборку отвергаем до изменений: половина тела хуже отказа
+        for name,new in pairs(parts) do
+            local real=ch:FindFirstChild(name)
+            if real and real:IsA('MeshPart') and not new:IsA('MeshPart') then error('Roblox returned an incompatible '..name,0) end
+        end
+        local body=bodyState(ctx,ch)
+        local touched={}
+        for name,new in pairs(parts) do
+            local real=ch:FindFirstChild(name)
+            if real and real:IsA('BasePart') then
+                if body.Parts[name] then revertPart(body.Parts[name]) end
+                local ok,result=pcall(applyPart,body,real,new)
+                touched[real]=true
+                if not ok then new:Destroy(); fixRig(ctx,ch,touched); error(result,0) end
+                watchPart(ctx,body,result)
+            end
+            new:Destroy()
+        end
         fixRig(ctx,ch,touched)
-        if hipHeight and body.Humanoid then body.Humanoid.HipHeight=hipHeight end
-        if rootCF and body.RootAttachment then body.RootAttachment.CFrame=rootCF end
+        if hipHeight and body.Humanoid then body.Humanoid.HipHeight=hipHeight; body.AppliedHip=body.Humanoid.HipHeight end
+        if rootCF and body.RootAttachment then body.RootAttachment.CFrame=rootCF; body.AppliedRoot=rootCF end
         watchBody(ctx,ch,body)
     end
     restoreBody=function(ctx)
@@ -659,39 +698,16 @@ do
         for _,c in ipairs(body.Connections) do c:Disconnect() end
         for _,m in ipairs(body.Meshes) do if m.Parent then m:Destroy() end end
         restoreHidden(function(o) return o:IsA('CharacterMesh') end,ctx)
+        local touched={}
+        for _,entry in pairs(body.Parts) do revertPart(entry); touched[entry.Part]=true end
         local ch=body.Character
-        local alive=ch and ch.Parent~=nil
-        local map,touched,clones,replaced={},{},{},false
-        for name,entry in pairs(body.Parts) do
-            local clone,original=entry.Clone,entry.Original
-            local serverPart=false
-            if alive then for _,o in ipairs(ch:GetChildren()) do
-                if o.Name==name and o:IsA('BasePart') and o~=clone and o~=original then serverPart=true end
-            end end
-            replaced=replaced or serverPart
-            if alive and not serverPart and clone and clone.Parent==ch then
-                original.CFrame=clone.CFrame
-                for _,rec in ipairs(entry.Moved) do
-                    if rec.Object.Parent and rec.Parent then pcall(function() rec.Object.Parent=rec.Parent end) end
-                end
-                for _,o in ipairs(clone:GetChildren()) do
-                    if isJoint(o) or o:GetAttribute('LocalCatalogMakeup') then o.Parent=original end
-                end
-                map[clone]=original; touched[original]=true
-            end
-            if clone then table.insert(clones,clone) end
-        end
-        if alive then
-            for clone,original in pairs(map) do clone.Parent=nil; original.Parent=ch end
-            remapAll(ch,map)
+        if ch and ch.Parent then
             fixRig(ctx,ch,touched)
-            -- Сервер уже выставил своё тело — его высоту бёдер не трогаем
-            if not replaced then
-                if body.Humanoid and body.HipHeight then body.Humanoid.HipHeight=body.HipHeight end
-                if body.RootAttachment and body.RootCF then body.RootAttachment.CFrame=body.RootCF end
-            end
+            -- Высоту бёдер и корень, выставленные сервером после примерки, не трогаем
+            local h,ra=body.Humanoid,body.RootAttachment
+            if h and body.AppliedHip and near(h.HipHeight,body.AppliedHip) then h.HipHeight=body.HipHeight end
+            if ra and body.AppliedRoot and near(ra.CFrame,body.AppliedRoot) then ra.CFrame=body.RootCF end
         end
-        for _,clone in ipairs(clones) do clone:Destroy() end
     end
     -- Надеть части тела пачкой: одна модель Roblox на все слоты, как у ApplyDescription.
     -- entries = {{Id,Kind,Name}}; на R6 руки/ноги/торс — это CharacterMesh, голова — часть
@@ -765,7 +781,7 @@ do
             local mesh=meshes[slot]
             if mesh then mesh.Parent=ch; table.insert(body.Meshes,mesh) end
         end end end
-        if next(parts) then swapParts(ctx,ch,parts,not r6 and cached.HipHeight or nil,not r6 and cached.RootCF or nil) end
+        if next(parts) then applyParts(ctx,ch,parts,not r6 and cached.HipHeight or nil,not r6 and cached.RootCF or nil) end
         watchBody(ctx,ch,body)
         clone:Destroy()
         local items={}
