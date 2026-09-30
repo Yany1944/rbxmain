@@ -330,6 +330,12 @@ local CONFIG = {
             TweenRate = 20,        -- 1/с, плавность смены (≈0.15 с до цели)
             BindName = "Violite_AspectRatio",
         },
+        -- Плавный зум при ViewClip: в режиме Invisicam PlayerModule не гоняет пружину
+        -- ZoomController (она вызывается только из Poppercam) — повторяем её поверх камеры
+        ViewClipZoom = {
+            Stiffness = 4.5,       -- = ZOOM_STIFFNESS из ZoomController, та же «мягкость»
+            BindName = "Violite_ViewClipZoom",
+        },
         -- Выстрел шерифа (Shoot Murderer / Wallbang / Auto Fire / Resolver).
         -- Замеры на двух аккаунтах (пинг ~235 мс у обоих):
         --   • сервер MM2 бьёт лучом origin→target без лаг-компенсации, засчитывает
@@ -2972,7 +2978,7 @@ do
         end
         if not bound then
             bound = pcall(function()
-                RunService:BindToRenderStep(AR.BindName, Enum.RenderPriority.Camera.Value + 1, step)
+                RunService:BindToRenderStep(AR.BindName, Enum.RenderPriority.Camera.Value + 2, step)
             end)
             if not bound then
                 State.Settings.AspectRatioEnabled = false
@@ -9945,16 +9951,71 @@ end
 -- БЛОК 16: VIEW CLIP & TELEPORT
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- EnableViewClip() - DevCameraOcclusionMode.Invisicam
-function Core.Movement.EnableViewClip()
-    State.Settings.ViewClipEnabled = true
-    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
-end
+-- Пружина зума для Invisicam. Та же критически задемпфированная пружина, что
+-- ConstrainedSpring:Step в ZoomController. Двигаем камеру только вдоль взгляда,
+-- поэтому поворот (его CameraModule берёт из Camera.CFrame) не страдает
+do
+    local VZ = CONFIG.ViewClipZoom
+    local bound = false
+    local zoomX, zoomV = nil, 0
 
--- DisableViewClip() - DevCameraOcclusionMode.Zoom
-function Core.Movement.DisableViewClip()
-    State.Settings.ViewClipEnabled = false
-    LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+    local function step(dt)
+        local camera = Workspace.CurrentCamera
+        if not camera or camera.CameraType ~= Enum.CameraType.Custom then
+            zoomX, zoomV = nil, 0
+            return
+        end
+        local cf = camera.CFrame
+        local look = cf.LookVector
+        -- Дистанция по оси взгляда, а не модуль: при shift-lock камера смещена вбок от Focus
+        local goal = (camera.Focus.Position - cf.Position):Dot(look)
+        if goal ~= goal or goal <= 0 then
+            zoomX, zoomV = nil, 0
+            return
+        end
+        if not zoomX then
+            zoomX, zoomV = goal, 0
+            return
+        end
+        local f = VZ.Stiffness * 2 * math.pi
+        local offset = goal - zoomX
+        local s = f * dt
+        local decay = math.exp(-s)
+        zoomX = goal + (zoomV * dt - offset * (s + 1)) * decay
+        zoomV = ((offset * f - zoomV) * s + zoomV) * decay
+        camera.CFrame = cf + look * (goal - zoomX)
+    end
+
+    local function unbind()
+        if bound then
+            pcall(function() RunService:UnbindFromRenderStep(VZ.BindName) end)
+            bound = false
+        end
+        zoomX, zoomV = nil, 0
+    end
+
+    local function bind()
+        if bound then return end
+        -- Camera+1: после CameraModule, до Aspect Ratio (Camera+2), который сжимает матрицу
+        bound = pcall(function()
+            RunService:BindToRenderStep(VZ.BindName, Enum.RenderPriority.Camera.Value + 1, step)
+        end)
+        if not bound then warn("[Violite] ViewClip: BindToRenderStep недоступен, зум без сглаживания") end
+    end
+
+    -- EnableViewClip() - DevCameraOcclusionMode.Invisicam + своя пружина зума
+    function Core.Movement.EnableViewClip()
+        State.Settings.ViewClipEnabled = true
+        LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+        bind()
+    end
+
+    -- DisableViewClip() - DevCameraOcclusionMode.Zoom (пружину снова ведёт Poppercam)
+    function Core.Movement.DisableViewClip()
+        State.Settings.ViewClipEnabled = false
+        LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+        unbind()
+    end
 end
 
 -- TeleportToMouse() - TP на mouse.Hit.Position
@@ -11155,6 +11216,7 @@ Core.StopFeatures = function()
         {"Fly", function() State.Settings.FlyToggleOn = false; State.Settings.FlyBindMode = "Toggle"; StopFly(true) end},
         {"Speed", function() State.Settings.SpeedEnabled = false; State.Settings.SpeedBindMode = "Toggle" end},
         {"AspectRatio", function() Core.Movement.SetAspectRatio(false, true) end},
+        {"ViewClip", function() if State.Settings.ViewClipEnabled then Core.Movement.DisableViewClip() end end},
         {"NoClip", DisableNoClip}, {"AntiFling", DisableAntiFling},
         {"Hitbox", DisableExtendedHitbox}, {"Pickup", DisableInstantPickup},
         {"VelocitySpoof", function() State.Runtime.SetVelocitySpoof(false) end},
