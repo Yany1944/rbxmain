@@ -2667,11 +2667,11 @@ do
     app.QueuePortrait=queuePortrait
     function app.DropPortrait() if portraitCache then portraitCache:Destroy(); portraitCache=nil end end
     if portraitSource() then queuePortrait() end
+    connect(player.CharacterAdded,function(ch)
+        -- После спавна внешность и образ каталога догружаются — снимаем, когда всё на месте
+        task.delay(3,function() if ch==player.Character then queuePortrait() end end)
+    end)
 end
-connect(player.CharacterAdded,function(ch)
-    -- После спавна внешность и образ каталога догружаются — снимаем, когда всё на месте
-    task.delay(3,function() if ch==player.Character then queuePortrait() end end)
-end)
 -- ══════════════════════════════════════════════════════════════════════════════
 -- Синхронизация образа с пользователями скрипта
 -- ══════════════════════════════════════════════════════════════════════════════
