@@ -403,6 +403,13 @@ local CONFIG = {
                 TeleportSpeed = 150,   -- studs/s: быстрее — телепорт, окно сбрасываем
             },
         },
+        -- Образ из LocalCatalog на экране итогов раунда (ScoreboardModule)
+        CatalogPortrait = {
+            Screens = {"Scoreboard", "Scoreboard_Phone"},  -- ScreenGui экрана итогов: ПК и телефон/планшет
+            IconName = "PlayerIcon",                        -- ImageLabel, куда игра ставит _G.PlayerIcons[name]
+            CatalogPoll = 1,                                -- сек: каталог мог загрузиться, перезагрузиться или выгрузиться
+            RefreshDelay = 0.3,                             -- сек: склеиваем серию PortraitChanged в одну пересборку
+        },
 	}
 
 local Players = game:GetService("Players")
@@ -474,6 +481,7 @@ local State = {
         InnocentESP = false,
         NotificationsEnabled = false,
         AvatarDisplayEnabled = false,
+        CatalogPortrait = false,
         JumpPower = 50,
         MaxCameraZoom = 15,
         CameraFOV = 70,
@@ -3614,6 +3622,124 @@ local function SetAvatarDisplayVisibility(on)
     local gui = State.Runtime.UIElements.AvatarDisplayGui
     if gui then
         gui.Enabled = on and true or false
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- CATALOG PORTRAIT — образ из LocalCatalog на экране итогов раунда
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ScoreboardModule ставит в PlayerIcon серверную миниатюру AvatarBust по userId
+-- (_G.PlayerIcons), а про локальный образ сервер не знает. Поверх своей миниатюры
+-- кладём ViewportFrame из LocalCatalog.CreatePortrait (кадр как у RCC), оригинал
+-- только прячем прозрачностью. Нет образа или каталога — остаётся оригинал.
+do
+    local Portrait = {Enabled = false, Icons = {}, Overlays = {}, Connections = {}}
+    State.Runtime.CatalogPortrait = Portrait
+    local idPattern = "%f[%d]" .. LocalPlayer.UserId .. "%f[%D]"
+
+    local function getCatalog()
+        local ok, env = pcall(getgenv)
+        local catalog = ok and env and env.LocalCatalog
+        if catalog and catalog.Alive and catalog.CreatePortrait and catalog.IsOutfitActive then return catalog end
+    end
+
+    local function removeOverlay(label)
+        local overlay = Portrait.Overlays[label]
+        if not overlay then return end
+        Portrait.Overlays[label] = nil
+        pcall(function() overlay.View:Destroy() end)
+        pcall(function() label.ImageTransparency = overlay.Transparency end)
+    end
+
+    local function refreshIcon(label)
+        if not Portrait.Enabled or not label.Parent or not string.find(label.Image, idPattern) then removeOverlay(label); return end
+        local catalog = getCatalog()
+        if not catalog or not catalog.IsOutfitActive() then removeOverlay(label); return end
+        local ok, view = pcall(catalog.CreatePortrait)
+        if not ok or not view then removeOverlay(label); return end
+        local old = Portrait.Overlays[label]
+        if old then pcall(function() old.View:Destroy() end) end
+        view.ZIndex = label.ZIndex
+        view.Parent = label
+        Portrait.Overlays[label] = {View = view, Transparency = old and old.Transparency or label.ImageTransparency}
+        Core.Remember(label, "ImageTransparency")
+        label.ImageTransparency = 1
+    end
+
+    local function refreshAll()
+        for label in pairs(Portrait.Icons) do refreshIcon(label) end
+    end
+
+    -- Серия PortraitChanged (надел несколько вещей подряд) → одна пересборка
+    local function scheduleRefresh()
+        if Portrait.Pending then return end
+        Portrait.Pending = true
+        Core.Tasks.delay(CONFIG.CatalogPortrait.RefreshDelay, function()
+            Portrait.Pending = false
+            if Portrait.Enabled then refreshAll() end
+        end)
+    end
+
+    local function watchIcon(label)
+        if Portrait.Icons[label] or not label:IsA("ImageLabel") or label.Name ~= CONFIG.CatalogPortrait.IconName then return end
+        Portrait.Icons[label] = true
+        table.insert(Portrait.Connections, Core.Connect(label:GetPropertyChangedSignal("Image"), function() refreshIcon(label) end))
+        table.insert(Portrait.Connections, Core.Connect(label.Destroying, function()
+            removeOverlay(label); Portrait.Icons[label] = nil
+        end))
+        refreshIcon(label)
+    end
+
+    local function watchScreen(screen)
+        if not screen:IsA("ScreenGui") or not table.find(CONFIG.CatalogPortrait.Screens, screen.Name) then return end
+        for _, descendant in ipairs(screen:GetDescendants()) do watchIcon(descendant) end
+        table.insert(Portrait.Connections, Core.Connect(screen.DescendantAdded, watchIcon))
+        -- Итоги показывают включением ScreenGui; Image может остаться прежним (та же миниатюра),
+        -- а образ за раунд смениться — пересобираем при каждом показе
+        table.insert(Portrait.Connections, Core.Connect(screen:GetPropertyChangedSignal("Enabled"), function()
+            if screen.Enabled then refreshAll() end
+        end))
+    end
+
+    -- Каталог грузится, перезагружается и выгружается независимо от MainScript
+    local function bindCatalog()
+        local catalog = getCatalog()
+        if catalog == Portrait.Catalog then return false end
+        if Portrait.CatalogConnection then Portrait.CatalogConnection:Disconnect(); Portrait.CatalogConnection = nil end
+        Portrait.Catalog = catalog
+        if catalog and catalog.PortraitChanged then
+            Portrait.CatalogConnection = Core.Connect(catalog.PortraitChanged, scheduleRefresh)
+        end
+        return true
+    end
+
+    function State.Runtime.SetCatalogPortrait(on)
+        State.Settings.CatalogPortrait = on and true or false
+        if on and not Portrait.Enabled then
+            Portrait.Enabled = true
+            local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+            if playerGui then
+                for _, screen in ipairs(playerGui:GetChildren()) do watchScreen(screen) end
+                table.insert(Portrait.Connections, Core.Connect(playerGui.ChildAdded, watchScreen))
+            end
+            Portrait.Poll = Core.Tasks.spawn(function()
+                while Portrait.Enabled do
+                    if bindCatalog() then refreshAll() end
+                    task.wait(CONFIG.CatalogPortrait.CatalogPoll)
+                end
+            end)
+        elseif not on and Portrait.Enabled then
+            Portrait.Enabled = false
+            if Portrait.Poll then Core.Tasks.cancel(Portrait.Poll); Portrait.Poll = nil end
+            for _, connection in ipairs(Portrait.Connections) do connection:Disconnect() end
+            table.clear(Portrait.Connections)
+            if Portrait.CatalogConnection then Portrait.CatalogConnection:Disconnect(); Portrait.CatalogConnection = nil end
+            Portrait.Catalog = nil
+            local labels = {}
+            for label in pairs(Portrait.Overlays) do table.insert(labels, label) end
+            for _, label in ipairs(labels) do removeOverlay(label) end
+            table.clear(Portrait.Icons)
+        end
     end
 end
 
@@ -11223,6 +11349,7 @@ Core.StopFeatures = function()
         {"KillAura", function() ToggleKillAura(false) end},
         {"AutoFire", function() State.Runtime.SheriffAim.SetAutoFire(false) end},
         {"CoinMuter", StopCoinMuter}, {"FriendViewer", StopFriendViewer},
+        {"CatalogPortrait", function() State.Runtime.SetCatalogPortrait(false) end},
         {"AntiTrap", function() State.Runtime.SetAntiTrap(false) end},
         {"BulletTracers", function() ToggleBulletTracers(false) end},
         {"CoinTracer", RemoveCoinTracer},
@@ -11281,6 +11408,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.Settings.AvatarDisplayEnabled = on
             SetAvatarDisplayVisibility(on)
         end,
+        CatalogPortrait = function(on) State.Runtime.SetCatalogPortrait(on) end,
 
         -- ESP
         GunESP = function(on) State.Settings.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
@@ -12227,6 +12355,7 @@ do
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
         VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
+        VisualsTab:CreateToggle("Catalog Portrait", "Show your LocalCatalog look on the round-end screen", "CatalogPortrait", false)
         VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
         VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
@@ -12419,6 +12548,7 @@ end)
 CreateNotificationUI()
 CreateAvatarUI()
 SetAvatarDisplayVisibility(State.Settings.AvatarDisplayEnabled)
+if State.Settings.CatalogPortrait then State.Runtime.SetCatalogPortrait(true) end
 -- ApplyCharacterSettings()/ApplyFOV при старте убраны намеренно: без
 -- автозагрузочного конфига скорость/прыжок/зум/FOV остаются ванильными
 SetupGunTracking()

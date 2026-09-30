@@ -26,6 +26,9 @@ local app={Alive=true,Items={},Desired={},Hidden={},Cache={},Connections={},Busy
     Version=11,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,
     Window={Width=1100,Height=736,Scale=1}}
 env.LocalCatalog=app
+-- Внешним модулям (портрет в MM2): образ или персонаж изменились — пора пересобрать картинку
+local portraitSignal=Instance.new('BindableEvent')
+app.PortraitChanged=portraitSignal.Event
 -- These gates survive reloads so an old in-flight request cannot overlap a new instance.
 env.LocalCatalogNetwork=env.LocalCatalogNetwork or {Search={Next=0},Avatar={Next=0},Metadata={}}
 local network=env.LocalCatalogNetwork
@@ -83,6 +86,8 @@ local function refresh()
     if redraw then redraw() end
     if updateControls then updateControls() end
     if app.RequestPreview then app.RequestPreview() end
+    if app.QueuePortrait then app.QueuePortrait() end
+    portraitSignal:Fire()
 end
 local function connect(signal,fn)
     local c=signal:Connect(fn); table.insert(app.Connections,c); return c
@@ -2500,6 +2505,174 @@ connect(player.CharacterAppearanceLoaded,function(ch)
     end
 end)
 -- ══════════════════════════════════════════════════════════════════════════════
+-- Портрет: бюст в кадре rbxthumb AvatarBust, собранный локально
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Сервер не знает о локальном образе, поэтому миниатюру повторяем во ViewportFrame.
+-- Камера — CameraUtility.SetupCamera пакета Thumbnailing (RCC): экстенты головы и её аксессуаров,
+-- подбородок как нижняя граница, нейтральная поза. Числа откалиброваны по настоящим AvatarBust
+-- (Debuggers/portrait_lab.lua, IoU силуэта ~0.92); свет — лучшее приближение RCC в VPF.
+-- Внутри do: главный чанк каталога близок к лимиту 200 локалей, наружу — только поля app
+do
+    local PORTRAIT={Fov=66,ExtentScale=1.9465,TargetDrop=0.359,CameraPitch=6.6,
+        Ambient=Color3.fromRGB(212,212,212),LightColor=Color3.fromRGB(254,254,254),LightAzimuth=-60.5,LightElevation=49.3}
+    function app.IsOutfitActive() return app.Alive and (next(app.Desired)~=nil or app.HideOriginal==true) end
+    -- Суставы R15 бывают Motor6D и AnimationConstraint (апгрейд суставов аватара): {joint,part0,part1,c0,c1}
+    local function portraitJoints(m)
+        local list={}
+        for _,j in ipairs(m:GetDescendants()) do
+            if j:IsA('Motor6D') and j.Part0 and j.Part1 then table.insert(list,{j,j.Part0,j.Part1,j.C0,j.C1})
+            elseif j:IsA('AnimationConstraint') and j.Attachment0 and j.Attachment1
+                and j.Attachment0.Parent:IsA('BasePart') and j.Attachment1.Parent:IsA('BasePart') then
+                table.insert(list,{j,j.Attachment0.Parent,j.Attachment1.Parent,j.Attachment0.CFrame,j.Attachment1.CFrame})
+            end
+        end
+        return list
+    end
+    -- CharacterUtility.CalculateHeadExtents: голова + аксессуары на её точках крепления, низ не ниже подбородка
+    local function portraitHeadExtents(m,target)
+        local head=m.Head
+        local inv=target:Inverse()
+        local lo,hi=Vector3.one*math.huge,-Vector3.one*math.huge
+        local function add(part,clamp,yMin)
+            local h=part.Size/2
+            for x=-1,1,2 do for y=-1,1,2 do for z=-1,1,2 do
+                local c=part.CFrame*Vector3.new(x*h.X,y*h.Y,z*h.Z)
+                if clamp then local t=clamp:PointToObjectSpace(c); c=clamp*Vector3.new(t.X,math.max(yMin,t.Y),t.Z) end
+                c=inv*c; lo=lo:Min(c); hi=hi:Max(c)
+            end end end
+        end
+        add(head)
+        local points={}
+        for _,a in ipairs(head:GetChildren()) do if a:IsA('Attachment') then points[a.Name]=true end end
+        for _,acc in ipairs(m:GetChildren()) do
+            local handle=acc:IsA('Accoutrement') and acc:FindFirstChild('Handle')
+            if handle and handle:IsA('BasePart') then
+                local a=handle:FindFirstChildWhichIsA('Attachment')
+                if not a or points[a.Name] then add(handle,head.CFrame,-head.Size.Y/2) end
+            end
+        end
+        return lo,hi
+    end
+    -- Живой R15-персонаж, с которого можно снять портрет (мёртвый разваливается на части)
+    local function portraitSource()
+        local ch=player.Character
+        local hum=ch and ch:FindFirstChildOfClass('Humanoid')
+        if hum and hum.Health>0 and hum.RigType==Enum.HumanoidRigType.R15 and ch:FindFirstChild('Head') and ch:FindFirstChild('HumanoidRootPart') then return ch end
+    end
+    -- ViewportFrame с бюстом персонажа как он выглядит сейчас (с локальным образом), или nil.
+    -- WorldModel не шагает анимации, поэтому нейтральную позу собираем прямой кинематикой,
+    -- а аксессуары возвращаем на снятые в клоне смещения от частей тела.
+    local function buildPortrait()
+        local ch=portraitSource()
+        if not ch then return nil end
+        local archivable=ch.Archivable
+        ch.Archivable=true
+        local ok,clone=pcall(function() return ch:Clone() end)
+        ch.Archivable=archivable
+        if not ok or not clone then return nil end
+        local built,view=pcall(function()
+            for _,o in ipairs(clone:QueryDescendants('LuaSourceContainer,Sound,Tool,ForceField,BillboardGui,Highlight')) do o:Destroy() end
+            local joints=portraitJoints(clone)
+            local placed={}
+            for _,j in ipairs(joints) do placed[j[2]]=true; placed[j[3]]=true end
+            local links={}
+            for _,d in ipairs(clone:GetDescendants()) do
+                local a,b
+                if d:IsA('RigidConstraint') then a=d.Attachment0 and d.Attachment0.Parent; b=d.Attachment1 and d.Attachment1.Parent
+                elseif d:IsA('WeldConstraint') or (d:IsA('JointInstance') and not d:IsA('Motor6D')) then a,b=d.Part0,d.Part1 end
+                if a and b and a:IsA('BasePart') and b:IsA('BasePart') then table.insert(links,{a,b}) end
+            end
+            -- Цепочки креплений (хэндл → часть тела) в текущей позе клона: смещение сохраняется при смене позы
+            local attached,progress={},true
+            while progress do
+                progress=false
+                for _,l in ipairs(links) do
+                    local a,b=l[1],l[2]
+                    if placed[a] and not placed[b] then placed[b]=true; table.insert(attached,{b,a,a.CFrame:ToObjectSpace(b.CFrame)}); progress=true
+                    elseif placed[b] and not placed[a] then placed[a]=true; table.insert(attached,{a,b,b.CFrame:ToObjectSpace(a.CFrame)}); progress=true end
+                end
+            end
+            for _,p in ipairs(clone:QueryDescendants('BasePart')) do
+                p.Anchored=true; p.CanCollide=false; p.CanTouch=false; p.CanQuery=false
+            end
+            clone:FindFirstChildOfClass('Humanoid').DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None
+            local root=clone.HumanoidRootPart
+            root.CFrame=CFrame.new()
+            local solved={[root]=true}
+            progress=true
+            while progress do
+                progress=false
+                for _,j in ipairs(joints) do
+                    if solved[j[2]] and not solved[j[3]] then
+                        j[1].Transform=CFrame.new()
+                        j[3].CFrame=j[2].CFrame*j[4]*j[5]:Inverse(); solved[j[3]]=true; progress=true
+                    end
+                end
+            end
+            for _,a in ipairs(attached) do a[1].CFrame=a[2].CFrame*a[3] end
+            -- Цель — FaceFrontAttachment, взгляд спроецирован на горизонталь (CFrameUtility.CalculateTargetCFrame)
+            local head=clone.Head
+            local face=head:FindFirstChild('FaceFrontAttachment')
+            local base=face and face.WorldCFrame or head.CFrame
+            local look=math.abs(base.LookVector.Y)>0.9 and base.UpVector or base.LookVector
+            local target=CFrame.lookAt(base.Position,base.Position+Vector3.new(look.X,0,look.Z).Unit)
+            local lo,hi=portraitHeadExtents(clone,target)
+            local distance=math.max(hi.X-lo.X,hi.Y-lo.Y)/2*PORTRAIT.ExtentScale/math.tan(math.rad(PORTRAIT.Fov)/2)
+            local focus=target+target.Rotation*((lo+hi)/2)-Vector3.new(0,PORTRAIT.TargetDrop*(hi.Y-lo.Y),0)
+            local camera=make('Camera',{Name='PortraitCamera',FieldOfView=PORTRAIT.Fov},nil)
+            camera.CFrame=CFrame.lookAt(focus*(CFrame.fromEulerAnglesXYZ(math.rad(PORTRAIT.CameraPitch),0,0).LookVector*distance),focus.Position)
+            local az,el=math.rad(PORTRAIT.LightAzimuth),math.rad(PORTRAIT.LightElevation)
+            local v=make('ViewportFrame',{Name='CatalogPortrait',Size=UDim2.fromScale(1,1),BackgroundTransparency=1,
+                Ambient=PORTRAIT.Ambient,LightColor=PORTRAIT.LightColor,
+                LightDirection=-Vector3.new(math.cos(el)*math.sin(az),math.sin(el),math.cos(el)*math.cos(az))},nil)
+            clone.Parent=make('WorldModel',{Name='PortraitWorld'},v)
+            camera.Parent=v; v.CurrentCamera=camera
+            return v
+        end)
+        if built then return view end
+        clone:Destroy()
+        return nil
+    end
+    -- Портрет готовится заранее, пока персонаж жив: к итогам раунда он может быть мёртв или ещё не заспавнен
+    local portraitCache,portraitQueued
+    local function updatePortrait()
+        if not app.Alive then return end
+        local view=buildPortrait()
+        if view then
+            if portraitCache then portraitCache:Destroy() end
+            portraitCache=view; portraitSignal:Fire()
+        end
+    end
+    local function queuePortrait()
+        if portraitQueued then return end
+        portraitQueued=true
+        task.delay(0.5,function() portraitQueued=false; updatePortrait() end)
+    end
+    -- Копия готового портрета; с живого персонажа — свежая. nil — портрета нет (R6, не загрузился)
+    function app.CreatePortrait()
+        if not app.Alive then return nil end
+        if portraitSource() then
+            local view=buildPortrait()
+            if view then
+                if portraitCache then portraitCache:Destroy() end
+                portraitCache=view
+            end
+        end
+        if not portraitCache then return nil end
+        -- Clone не переназначает CurrentCamera на камеру копии — иначе копия смотрит камерой кэша
+        local copy=portraitCache:Clone()
+        copy.CurrentCamera=copy:FindFirstChild('PortraitCamera')
+        return copy
+    end
+    app.QueuePortrait=queuePortrait
+    function app.DropPortrait() if portraitCache then portraitCache:Destroy(); portraitCache=nil end end
+    if portraitSource() then queuePortrait() end
+end
+connect(player.CharacterAdded,function(ch)
+    -- После спавна внешность и образ каталога догружаются — снимаем, когда всё на месте
+    task.delay(3,function() if ch==player.Character then queuePortrait() end end)
+end)
+-- ══════════════════════════════════════════════════════════════════════════════
 -- Синхронизация образа с пользователями скрипта
 -- ══════════════════════════════════════════════════════════════════════════════
 -- Транспорт — relay скинченджера: он берёт ExportSync у провайдера catalog в
@@ -2640,6 +2813,8 @@ function app.Unload()
     for _,v in pairs(app.Cache) do v.Template:Destroy() end
     app.Cache={}; if modalGui then modalGui:Destroy() end; gui:Destroy()
     if env.LocalCatalog==app then env.LocalCatalog=nil end
+    portraitSignal:Fire(); portraitSignal:Destroy()
+    if app.DropPortrait then app.DropPortrait() end
 end
 refresh(); search()
 if carry and (#carry.AssetIds>0 or carry.HideOriginal) then
