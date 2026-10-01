@@ -481,7 +481,6 @@ local State = {
         InnocentESP = false,
         NotificationsEnabled = false,
         AvatarDisplayEnabled = false,
-        CatalogPortrait = false,
         JumpPower = 50,
         MaxCameraZoom = 15,
         CameraFOV = 70,
@@ -3723,8 +3722,8 @@ do
         return true
     end
 
+    -- Без тогла: работает всегда, пока жив MainScript; без каталога или образа просто остаётся оригинал
     function State.Runtime.SetCatalogPortrait(on)
-        State.Settings.CatalogPortrait = on and true or false
         if on and not Portrait.Enabled then
             Portrait.Enabled = true
             local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -11418,7 +11417,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.Settings.AvatarDisplayEnabled = on
             SetAvatarDisplayVisibility(on)
         end,
-        CatalogPortrait = function(on) State.Runtime.SetCatalogPortrait(on) end,
 
         -- ESP
         GunESP = function(on) State.Settings.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
@@ -12365,7 +12363,6 @@ do
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
         VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
-        VisualsTab:CreateToggle("Catalog Portrait", "Show your LocalCatalog look on the round-end screen", "CatalogPortrait", false)
         VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
         VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
@@ -12558,7 +12555,7 @@ end)
 CreateNotificationUI()
 CreateAvatarUI()
 SetAvatarDisplayVisibility(State.Settings.AvatarDisplayEnabled)
-if State.Settings.CatalogPortrait then State.Runtime.SetCatalogPortrait(true) end
+State.Runtime.SetCatalogPortrait(true)
 -- ApplyCharacterSettings()/ApplyFOV при старте убраны намеренно: без
 -- автозагрузочного конфига скорость/прыжок/зум/FOV остаются ванильными
 SetupGunTracking()
