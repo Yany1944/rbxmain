@@ -153,11 +153,14 @@ local startupOk, startupError = xpcall(function()
 -- ══════════════════════════════════════════════════════════════════════════════
 
 local CONFIG = {
+        -- Адреса модулей нужны только вне бандла (в бандле модули уже внутри)
+--#dev
         Modules = {
             Visuals = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Visuals.lua",
             Optimization = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Optimization.lua",
             Movement = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Movement.lua",
         },
+--#end
         HideKey = Enum.KeyCode.Insert,
         Colors = {
         Background = Color3.fromRGB(25, 25, 30),
@@ -300,6 +303,10 @@ local CONFIG = {
             -- Чамсы Chaos: сколько секунд наблюдатель дорисовывает нас по поддельной
             -- скорости (замер: 1500 studs/s → скачки до ~40 studs ≈ 1/40 с)
             ChaosChamsLead   = 1 / 40,
+            -- Чамсы без подмены поворота (Fake Lag, Jitter): стоя призрак сходится с
+            -- телом и растворяется, как пинг-чамс при остановке. Studs между призраком
+            -- и настоящим корнем: до первого порога невидим, от второго — виден полностью
+            ChamsMerge       = {0.25, 1.25},
         },
         -- Fake Lag: удержание отправляемой позиции, отдельно от Desync.
         -- Длина каждого удержания — случайная между Min и Max Delay, разброс задаёт
@@ -666,7 +673,12 @@ if queue_on_teleport then
         -- Проверяем PlaceId
         if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
             local success, err = pcall(function()
+                -- Сборщик меняет строку: в релизе грузим лоадер с ключом (Junkie), а не
+                -- открытый исходник — иначе после телепорта скрипт шёл бы в обход ключа
+--#dev
                 loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
+--#end
+--#release                 loadstring(game:HttpGet("__VIOLITE_LOADER_URL__", true))()
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -1467,11 +1479,28 @@ do
         local parts = {}
         if not char then return parts end
         for _, d in ipairs(char:QueryDescendants("BasePart")) do
-            if d.Name ~= "HumanoidRootPart" then
+            -- Layered-одежда (WrapLayer: кофты, штаны, обувь) деформируется движком
+            -- по телу только внутри персонажа; клон её хэндла — недеформированный меш
+            -- в позе манекена, не следующий за анимацией. Силуэт даёт тело под ней
+            if d.Name ~= "HumanoidRootPart" and not d:FindFirstChildWhichIsA("WrapLayer") then
                 table.insert(parts, d)
             end
         end
         return parts
+    end
+
+    -- Видимость десинк-чамса (0..1). Подмена поворота (Spin, Chaos, наклон Pitch)
+    -- видна и на месте — такой призрак показываем всегда. У Fake Lag и Jitter
+    -- поворот настоящий: стоя призрак совпадает с телом — растворяем его
+    function PingChams.desyncVisibility(frame, root)
+        local pitch = CONFIG.Desync.Pitches[State.Settings.FakePositionPitch] or 0
+        if State.Settings.FakePositionEnabled and (State.Settings.FakePositionMode ~= "Jitter" or pitch ~= 0) then
+            return 1
+        end
+        if not frame or not root then return 1 end
+        local merge = CONFIG.Desync.ChamsMerge
+        local distance = (frame.Position - root.Position).Magnitude
+        return math.clamp((distance - merge[1]) / (merge[2] - merge[1]), 0, 1)
     end
 
     function PingChams.getRootPart(char)
@@ -1781,7 +1810,11 @@ local function StartPingChams()
                 end
                 local speed = math.max(speedMeas, speedIntent)
 
-                local transPast  = desync and 0.55 or math.clamp(0.9 - math.min(speed / 16, 1) * 0.65, 0.2, 1)
+                -- RenderStepped видит настоящий корень (подмена снята), призрак сверяем с ним.
+                -- Раньше при десинке прозрачность была постоянной 0.55 — с Fake Lag призрак
+                -- не растворялся на остановке, хотя совпадал с телом
+                local visibility = desync and PingChams.desyncVisibility(State.Runtime.PingChamsSmoothFrame, lpRoot) or 1
+                local transPast  = desync and 1 - 0.45 * visibility or math.clamp(0.9 - math.min(speed / 16, 1) * 0.65, 0.2, 1)
                 local nowFadeT   = tick()
                 local dt         = math.max(0.0001, nowFadeT - (State.Runtime.PingChamsTransparencyTime or nowFadeT))
                 State.Runtime.PingChamsTransparency = (State.Runtime.PingChamsTransparency or transPast) + (transPast - (State.Runtime.PingChamsTransparency or transPast)) * math.clamp(dt * 5.0, 0.05, 0.5)
@@ -1811,7 +1844,7 @@ local function StartPingChams()
 
                     local nowTT   = tick()
                     local dtTT    = math.max(0.0001, nowTT - (State.Runtime.PingChamsTextTime or nowTT))
-                    local targetTT = desync and 0 or 1 - math.clamp((speed - 14) / 1, 0, 1)
+                    local targetTT = desync and 1 - visibility or 1 - math.clamp((speed - 14) / 1, 0, 1)
                     State.Runtime.PingChamsTextTransparency = (State.Runtime.PingChamsTextTransparency or targetTT) + (targetTT - (State.Runtime.PingChamsTextTransparency or targetTT)) * math.clamp(dtTT * 3, 0.03, 0.25)
                     State.Runtime.PingChamsTextTime = nowTT
                     lbl.TextTransparency      = State.Runtime.PingChamsTextTransparency
@@ -9496,14 +9529,15 @@ do
     -- Персонажа не трогаем вовсе: замеры — наклон корня (Pitch Up/Down) Humanoid
     -- принимал за опрокидывание (FallingDown, персонаж падал и не бежал), а у R15 в
     -- MM2 корень связан с телом AnimationConstraint, который решает физика, — поворот
-    -- сустава до отрисовки не доходит. Поэтому показываем локальную копию: клоны
-    -- частей без суставов и коллизий раскладываются каждый кадр по позе настоящих
-    -- частей (анимации сохраняются) и поворачиваются вокруг корня, а настоящие части
-    -- скрываются только у нас через LocalTransparencyModifier.
+    -- сустава до отрисовки не доходит. Поэтому показываем локальную копию-риг без
+    -- коллизий: каждый кадр она повторяет позу настоящих частей (анимации сохраняются)
+    -- и поворачивается вокруг корня, а настоящие части скрываются только у нас через
+    -- LocalTransparencyModifier.
     -- Ауры Visuals (эффекты внутри частей, атрибут StandaloneVFX_Owner) клонируются
     -- вместе с частями и едут с копией; на настоящем теле их эффекты на это время
     -- выключаем — LocalTransparencyModifier частицы и лучи не прячет, была бы вторая аура
     runtime.AvatarMap, runtime.AvatarHidden, runtime.AvatarEffects = {}, {}, {}
+    runtime.AvatarFlat, runtime.AvatarJoints = {}, {}
     runtime.AvatarCount, runtime.AvatarAuraCount, runtime.AvatarCheckAt = 0, 0, 0
     runtime.AvatarRebuildAt = nil
 
@@ -9598,7 +9632,10 @@ do
         unhideReal()
         if runtime.AvatarModel then pcall(function() runtime.AvatarModel:Destroy() end) end
         runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = nil, nil, 0
+        runtime.AvatarRoot = nil
         table.clear(runtime.AvatarMap)
+        table.clear(runtime.AvatarFlat)
+        table.clear(runtime.AvatarJoints)
     end
 
     -- Все части, включая HumanoidRootPart: он невидим, но на нём сидят Magic Circle,
@@ -9648,69 +9685,188 @@ do
         return found
     end
 
+    local function setupCopyPart(part, group, anchored)
+        part.Anchored = anchored
+        part.CanCollide = false
+        part.CanQuery = false
+        part.CanTouch = false
+        part.Massless = true
+        if group then part.CollisionGroup = group end
+    end
+
+    -- Отдельная заякоренная копия части (дисплеи оружия вне персонажа); её CFrame
+    -- ставится каждый кадр напрямую
+    local function flatCopy(src, group, parent)
+        -- Метим эффекты, чтобы найти их пары в клоне; метки сразу снимаем
+        local effects = sourceEffects(src)
+        for i, effect in ipairs(effects) do pcall(function() effect:SetAttribute(FX_TAG, i) end) end
+        local ok, copy = pcall(function() return src:Clone() end)
+        for _, effect in ipairs(effects) do pcall(function() effect:SetAttribute(FX_TAG, nil) end) end
+        if not ok or not copy then return nil end
+        Core.Own(copy)
+        for _, d in ipairs(copy:GetDescendants()) do
+            local index = d:GetAttribute(FX_TAG)
+            if index then
+                d:SetAttribute(FX_TAG, nil)
+                if effects[index] then pcall(trackEffect, effects[index], d) end
+            end
+        end
+        for _, d in ipairs(copy:GetDescendants()) do
+            -- Вложенные части — отдельные источники (детали скинов на дисплеях),
+            -- в клоне родителя они были бы вторыми копиями без синхронизации
+            if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("BaseScript") or d:IsA("Sound")
+                or d:IsA("BasePart") then
+                pcall(function() d:Destroy() end)
+            end
+        end
+        setupCopyPart(copy, group, true)
+        copy.Parent = parent
+        return copy
+    end
+
+    -- Копия персонажа — клон целиком, с суставами. Layered-одежда (WrapLayer: кофты,
+    -- штаны, обувь) деформируется движком только в риге с Humanoid и скиннится по
+    -- суставам. Замеры: у клонов отдельных частей без суставов она не рисовалась вовсе
+    -- (вместо кофты — классическая рубашка под ней), а при расстановке частей по одной
+    -- через CFrame растягивалась к месту сборки. Ссылки суставов и креплений внутри
+    -- модели клон переназначает сам; AnimationConstraint (их решает физика) заменяем
+    -- кинематическими Motor6D: корень заякорен, позу переносим через Transform.
+    -- Одежда, цвета тела и Humanoid приходят вместе с клоном.
+    -- Замер: Humanoid принудительно включает торсу копии CanCollide/CanQuery —
+    -- торс внутри нашего тела давал Climbing ↔ Running и падение. Поэтому Humanoid
+    -- остаётся только при группе без столкновений с персонажем
+    local SRC_TAG = "VioliteSpinSrc"
+    local function rigCopy(character, root, group, parent)
+        local parts = character:QueryDescendants("BasePart")
+        local effects = {}
+        for i, part in ipairs(parts) do
+            pcall(function() part:SetAttribute(SRC_TAG, i) end)
+            for _, effect in ipairs(sourceEffects(part)) do
+                table.insert(effects, effect)
+                pcall(function() effect:SetAttribute(FX_TAG, #effects) end)
+            end
+        end
+        local archivable = character.Archivable
+        pcall(function() character.Archivable = true end)
+        local ok, clone = pcall(function() return character:Clone() end)
+        pcall(function() character.Archivable = archivable end)
+        for _, part in ipairs(parts) do pcall(function() part:SetAttribute(SRC_TAG, nil) end) end
+        for _, effect in ipairs(effects) do pcall(function() effect:SetAttribute(FX_TAG, nil) end) end
+        if not ok or not clone then return nil end
+
+        local map = {}
+        for _, d in ipairs(clone:GetDescendants()) do
+            local index = d:GetAttribute(FX_TAG)
+            if index then
+                d:SetAttribute(FX_TAG, nil)
+                if effects[index] then pcall(trackEffect, effects[index], d) end
+            end
+            local id = d:IsA("BasePart") and d:GetAttribute(SRC_TAG)
+            if id then
+                d:SetAttribute(SRC_TAG, nil)
+                if parts[id] then map[parts[id]] = d end
+            end
+        end
+        local copyRoot = map[root]
+        if not copyRoot then pcall(function() clone:Destroy() end); return nil end
+
+        local function inside(object) return object ~= nil and object:IsDescendantOf(clone) end
+        local motors = {}
+        for _, d in ipairs(clone:GetDescendants()) do
+            pcall(function()
+                if d:IsA("LuaSourceContainer") or d:IsA("Sound") or d:IsA("Animator") or d:IsA("ForceField") then
+                    d:Destroy()
+                elseif (d:IsA("BillboardGui") or d:IsA("Highlight")) and d:GetAttribute("StandaloneVFX_Owner") == nil then
+                    -- ESP-подсветка и таблички висели бы на копии вторым экземпляром
+                    d:Destroy()
+                elseif d:IsA("AnimationConstraint") then
+                    local a0, a1 = d.Attachment0, d.Attachment1
+                    local p0 = inside(a0) and a0:FindFirstAncestorWhichIsA("BasePart")
+                    local p1 = inside(a1) and a1:FindFirstAncestorWhichIsA("BasePart")
+                    if p0 and p1 then
+                        local motor = Instance.new("Motor6D")
+                        motor.Name = d.Name
+                        motor.Part0, motor.Part1 = p0, p1
+                        motor.C0 = p0.CFrame:ToObjectSpace(a0.WorldCFrame)
+                        motor.C1 = p1.CFrame:ToObjectSpace(a1.WorldCFrame)
+                        motor.Parent = p1
+                        table.insert(motors, motor)
+                    end
+                    d:Destroy()
+                elseif d:IsA("JointInstance") or d:IsA("WeldConstraint") then
+                    -- Связь с чем-то вне клона (сиденье, чужая деталь) склеила бы копию
+                    -- с настоящей сборкой — такие убираем
+                    if not inside(d.Part0) or not inside(d.Part1) then
+                        d:Destroy()
+                    elseif d:IsA("Motor6D") then
+                        table.insert(motors, d)
+                    end
+                elseif d:IsA("Constraint") then
+                    -- RigidConstraint держит аксессуары; шарниры и пружины решала бы физика
+                    if not d:IsA("RigidConstraint") or not inside(d.Attachment0) or not inside(d.Attachment1) then
+                        d:Destroy()
+                    end
+                end
+            end)
+        end
+        for _, part in ipairs(clone:QueryDescendants("BasePart")) do
+            setupCopyPart(part, group, part == copyRoot)
+        end
+        local humanoid = clone:FindFirstChildOfClass("Humanoid")
+        if humanoid then pcall(function()
+            if not group then humanoid:Destroy(); return end
+            humanoid.EvaluateStateMachine = false
+            humanoid.RequiresNeck = false
+            humanoid.BreakJointsOnDeath = false
+            humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+            humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+        end) end
+        Core.Own(clone)
+        clone.Name = "Body"
+        clone.Parent = parent
+
+        local srcOf = {}
+        for src, copy in pairs(map) do srcOf[copy] = src end
+        local joints = {}
+        for _, motor in ipairs(motors) do
+            local s0, s1 = srcOf[motor.Part0], srcOf[motor.Part1]
+            if s0 and s1 then
+                table.insert(joints, {Motor = motor, Src0 = s0, Src1 = s1, InvC0 = motor.C0:Inverse(), C1 = motor.C1})
+            end
+        end
+        return map, copyRoot, joints
+    end
+
     local function buildLocalSpin(character, sources)
         destroyLocalSpin()
         local root = character:FindFirstChild("HumanoidRootPart")
         local group = root and noCollisionGroup(root)
         local model = Core.New("Model")
         model.Name = "VioliteLocalSpin"
-        for _, src in ipairs(sources) do
-            -- Метим эффекты, чтобы найти их пары в клоне; метки сразу снимаем
-            local effects = sourceEffects(src)
-            for i, effect in ipairs(effects) do pcall(function() effect:SetAttribute(FX_TAG, i) end) end
-            local ok, copy = pcall(function() return src:Clone() end)
-            for _, effect in ipairs(effects) do pcall(function() effect:SetAttribute(FX_TAG, nil) end) end
-            if ok and copy then
-                Core.Own(copy)
-                for _, d in ipairs(copy:GetDescendants()) do
-                    local index = d:GetAttribute(FX_TAG)
-                    if index then
-                        d:SetAttribute(FX_TAG, nil)
-                        if effects[index] then pcall(trackEffect, effects[index], d) end
-                    end
-                end
-                for _, d in ipairs(copy:GetDescendants()) do
-                    -- Вложенные части — отдельные источники (детали скинов на дисплеях),
-                    -- в клоне родителя они были бы вторыми копиями без синхронизации
-                    if d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("BaseScript") or d:IsA("Sound")
-                        or d:IsA("BasePart") then
-                        pcall(function() d:Destroy() end)
-                    end
-                end
-                copy.Anchored = true
-                copy.CanCollide = false
-                copy.CanQuery = false
-                copy.CanTouch = false
-                copy.Massless = true
-                if group then copy.CollisionGroup = group end
-                copy.Parent = model
-                runtime.AvatarMap[src] = copy
-            end
-        end
-        -- Одежда (Shirt/Pants/ShirtGraphic) и цвета тела — объекты модели, на части их
-        -- накладывает Humanoid. Без него копия была «голой»: кладём копии одежды и
-        -- неактивный Humanoid (без машины состояний, ника и полоски здоровья).
-        -- Замер: Humanoid принудительно включает торсу копии CanCollide/CanQuery —
-        -- заякоренный торс внутри нашего тела давал Climbing ↔ Running и падение.
-        -- Поэтому Humanoid — только если есть группа без столкновений с персонажем
-        local realHumanoid = character:FindFirstChildOfClass("Humanoid")
-        for _, item in ipairs(character:GetChildren()) do
-            if item:IsA("Clothing") or item:IsA("ShirtGraphic") or item:IsA("BodyColors") then
-                local ok, copy = pcall(function() return item:Clone() end)
-                if ok and copy then Core.Own(copy).Parent = model end
-            end
-        end
-        if group then pcall(function()
-            local humanoid = Core.New("Humanoid")
-            humanoid.EvaluateStateMachine = false
-            humanoid.RequiresNeck = false
-            humanoid.BreakJointsOnDeath = false
-            humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-            humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
-            if realHumanoid then humanoid.RigType = realHumanoid.RigType end
-            humanoid.Parent = model
-        end) end
         model.Parent = Workspace.CurrentCamera
+        local map, copyRoot, joints
+        if root then map, copyRoot, joints = rigCopy(character, root, group, model) end
+        runtime.AvatarRoot = copyRoot
+        for _, joint in ipairs(joints or {}) do table.insert(runtime.AvatarJoints, joint) end
+        for src, copy in pairs(map or {}) do
+            runtime.AvatarMap[src] = copy
+            -- Часть не держится суставами за корень копии (крепление удалили или его
+            -- не было) — ставим её напрямую, как отдельную копию
+            if copy ~= copyRoot and copy.AssemblyRootPart ~= copyRoot then
+                copy.Anchored = true
+                runtime.AvatarFlat[src] = copy
+            end
+        end
+        -- Дисплеи и всё, что не попало в клон (не Archivable), — отдельными копиями
+        for _, src in ipairs(sources) do
+            if not runtime.AvatarMap[src] then
+                local copy = flatCopy(src, group, model)
+                if copy then
+                    runtime.AvatarMap[src] = copy
+                    runtime.AvatarFlat[src] = copy
+                end
+            end
+        end
         runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = model, character, #sources
         runtime.AvatarDisplays = displaySignature(character, sources)
         runtime.AvatarFxCount = effectCount(sources)
@@ -9764,9 +9920,19 @@ do
         local rootFrame = root.CFrame
         local shown = CFrame.new(rootFrame.Position) * composeRotation(rootFrame, angle)
         local inverse = rootFrame:Inverse()
+        -- Корень двигает всю сборку копии; суставы повторяют относительную позу
+        -- настоящих частей: p1 = p0 · C0 · T · C1⁻¹  ⇒  T = C0⁻¹ · (p0⁻¹ · p1) · C1
+        if runtime.AvatarRoot then runtime.AvatarRoot.CFrame = shown end
+        for _, joint in ipairs(runtime.AvatarJoints) do
+            if joint.Src0.Parent and joint.Src1.Parent then
+                joint.Motor.Transform = joint.InvC0 * joint.Src0.CFrame:ToObjectSpace(joint.Src1.CFrame) * joint.C1
+            end
+        end
+        for src, copy in pairs(runtime.AvatarFlat) do
+            if src.Parent then copy.CFrame = shown * (inverse * src.CFrame) end
+        end
         for src, copy in pairs(runtime.AvatarMap) do
             if src.Parent then
-                copy.CFrame = shown * (inverse * src.CFrame)
                 copy.Transparency = src.Transparency
                 copy.Color = src.Color   -- хрома скинов перекрашивает части каждый кадр
                 copy.LocalTransparencyModifier = fade
@@ -11370,7 +11536,16 @@ Core.StopFeatures = function()
     end
 end
 
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
+-- GUI, как и все наши модули, приходит из ядра бандла (Kernel.Require): в собранном
+-- файле нет загрузок своего кода по сети — перехватывать и подменять нечего.
+-- В автономном запуске вне бандла ядра нет — тогда тянем GUI с CDN (dev-ветка).
+--#dev
+local GUIFactory = Kernel and Kernel.Require("GUI")
+    or loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()
+--#end
+--#release local GUIFactory = Kernel.Require("GUI")
+local GUI = GUIFactory({
+    Kernel = Kernel,
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -11734,6 +11909,18 @@ do
 end
 
 Core.CleanupGUI = GUI.Cleanup
+-- Рубильник ядра: сервер отозвал доступ / бан / нет связи → полная выгрузка.
+-- Вырезать это мало: такая же проверка живёт в GUI и в петлях фич
+-- И обратно: пользователь выгрузил скрипт сам — гасим продление сессии ядра,
+-- иначе поток продления жил бы до конца игры
+if Kernel then
+    Kernel.OnKill(function() pcall(Core.Shutdown) end)
+    local shutdown = Core.Shutdown
+    Core.Shutdown = function(...)
+        shutdown(...)
+        pcall(Kernel.Stop)
+    end
+end
 GUI.Init()
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -11750,10 +11937,16 @@ do
         }
         for _,entry in ipairs({{"Visuals", "VisualsModule"}, {"Optimization", "OptimizationModule"}, {"Movement", "MovementModule"}}) do
             local ok, result = pcall(function()
-                local source = game:HttpGet(CONFIG.Modules[entry[1]], true)
-                local chunk, compileError = loadstring(source)
-                assert(chunk, compileError)
-                local factory = chunk()
+                -- В бандле модуль уже внутри — берём фабрику из ядра; вне бандла тянем с CDN
+                local factory = Kernel and Kernel.Require(entry[1])
+                --#dev
+                if not factory then
+                    local source = game:HttpGet(CONFIG.Modules[entry[1]], true)
+                    local chunk, compileError = loadstring(source)
+                    assert(chunk, compileError)
+                    factory = chunk()
+                end
+                --#end
                 assert(type(factory) == "function", "Invalid module factory")
                 return factory(context)
             end)
@@ -12568,6 +12761,10 @@ StartRoleChecking()
 
 
 
+--#dev
+-- Отладочный доступ к внутренностям (только dev-сборка; в release вырезается)
+pcall(function() getgenv().VioDbg = {State = State, GUI = GUI, Core = Core, CONFIG = CONFIG, Kernel = Kernel} end)
+--#end
 end, debug.traceback)
 if not startupOk then
     Core.Shutdown()
