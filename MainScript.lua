@@ -481,7 +481,6 @@ local State = {
         InnocentESP = false,
         NotificationsEnabled = false,
         AvatarDisplayEnabled = false,
-        CatalogPortrait = false,
         JumpPower = 50,
         MaxCameraZoom = 15,
         CameraFOV = 70,
@@ -3651,15 +3650,25 @@ do
         pcall(function() label.ImageTransparency = overlay.Transparency end)
     end
 
+    local function backdropColor(label)
+        local node = label
+        while node and node:IsA("GuiObject") do
+            if node.BackgroundTransparency < 1 then return node.BackgroundColor3 end
+            node = node.Parent
+        end
+        return Color3.new(0, 0, 0)
+    end
+
     local function refreshIcon(label)
         if not Portrait.Enabled or not label.Parent or not string.find(label.Image, idPattern) then removeOverlay(label); return end
         local catalog = getCatalog()
         if not catalog or not catalog.IsOutfitActive() then removeOverlay(label); return end
-        local ok, view = pcall(catalog.CreatePortrait)
+        -- Края силуэта во ViewportFrame смешиваются с его BackgroundColor3 даже при прозрачном фоне:
+        -- передаём цвет того, что реально лежит под иконкой, иначе вокруг аватара светлая обводка
+        local ok, view = pcall(catalog.CreatePortrait, {Background = backdropColor(label), ZIndex = label.ZIndex})
         if not ok or not view then removeOverlay(label); return end
         local old = Portrait.Overlays[label]
         if old then pcall(function() old.View:Destroy() end) end
-        view.ZIndex = label.ZIndex
         view.Parent = label
         Portrait.Overlays[label] = {View = view, Transparency = old and old.Transparency or label.ImageTransparency}
         Core.Remember(label, "ImageTransparency")
@@ -3713,8 +3722,8 @@ do
         return true
     end
 
+    -- Без тогла: работает всегда, пока жив MainScript; без каталога или образа просто остаётся оригинал
     function State.Runtime.SetCatalogPortrait(on)
-        State.Settings.CatalogPortrait = on and true or false
         if on and not Portrait.Enabled then
             Portrait.Enabled = true
             local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -11408,7 +11417,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.Settings.AvatarDisplayEnabled = on
             SetAvatarDisplayVisibility(on)
         end,
-        CatalogPortrait = function(on) State.Runtime.SetCatalogPortrait(on) end,
 
         -- ESP
         GunESP = function(on) State.Settings.GunESP = on UpdateGunESPVisibility() UpdateTrapESPVisibility() end,
@@ -12355,7 +12363,6 @@ do
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
         VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
-        VisualsTab:CreateToggle("Catalog Portrait", "Show your LocalCatalog look on the round-end screen", "CatalogPortrait", false)
         VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
         VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
@@ -12548,7 +12555,7 @@ end)
 CreateNotificationUI()
 CreateAvatarUI()
 SetAvatarDisplayVisibility(State.Settings.AvatarDisplayEnabled)
-if State.Settings.CatalogPortrait then State.Runtime.SetCatalogPortrait(true) end
+State.Runtime.SetCatalogPortrait(true)
 -- ApplyCharacterSettings()/ApplyFOV при старте убраны намеренно: без
 -- автозагрузочного конфига скорость/прыжок/зум/FOV остаются ванильными
 SetupGunTracking()
