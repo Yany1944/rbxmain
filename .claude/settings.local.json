@@ -6,7 +6,13 @@
       "Bash(grep -E \"\\(== [0-9]|= [0-9]{3,}|Color3.fromRGB\\\\\\([0-9]+\\)\")",
       "Bash(ls \"D:\\\\Tools\\\\123\\\\rbxmain\")",
       "Read(//d/Tools/123/**)",
-      "Bash(dir D:\\\\Tools\\\\lua\\\\rbxmain)"
+      "Bash(dir D:\\\\Tools\\\\lua\\\\rbxmain)",
+      "Bash(git check-ignore *)",
+      "Bash(grep -n \"^local \\\\|^do$\\\\|^end\\\\b\\\\|^return\" skinchanger.lua)",
+      "WebFetch(domain:docs.jnkie.com)",
+      "Bash(cat /c/Users/Admin/.claude/projects/D--Tools-lua-rbxmain/memory/skin-sync-relay.md; ls /d/Tools/lua/rbxmain/Relay; cd /d/Tools/lua/rbxmain && sed -n 22880,22910p skinchanger.lua | cut -c1-140)",
+      "Bash(awk 'NR>6 && /^}/ {print NR; exit}' skinchanger.lua)",
+      "Bash(grep -n \"^local [A-Z_]*_DATA\\\\|^local [A-Z_]* = {$\" skinchanger.lua)"
     ]
   }
 }

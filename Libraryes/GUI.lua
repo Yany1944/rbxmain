@@ -1369,6 +1369,24 @@ return function(env)
             Parent = footer
         })
 
+        -- Строка статуса для вкладок спавнера («Saved», «12 given»)
+        local statusLabel = Create("TextLabel", {
+            Text = "",
+            Font = FONT.Mono,
+            TextSize = TS.Status,
+            TextColor3 = T.TextDark,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            BackgroundTransparency = 1,
+            -- правее блока пинга (220) и левее подсказки клавиши (196 от правого края)
+            Position = UDim2.new(0, EDGE + 230, 0, 0),
+            Size = UDim2.new(1, -(EDGE + 230 + 210), 1, 0),
+            Parent = footer
+        })
+        function GUI.SetStatus(text)
+            statusLabel.Text = text or ""
+        end
+
         Create("TextLabel", {
             Text = "Toggle: " .. CONFIG.HideKey.Name,
             Font = FONT.Mono,
@@ -1496,8 +1514,17 @@ return function(env)
         -- ПОИСК: фильтрация строк, скрытие пустых секций
         ----------------------------------------------------------------
 
+        -- Подписчики поиска: вкладки с собственной вёрсткой (сетка скинов) фильтруют себя сами
+        local searchSubscribers = {}
+        function GUI.OnSearch(fn)
+            table.insert(searchSubscribers, fn)
+        end
+
         local function applySearch(query)
             local q = query:lower()
+            for _, fn in ipairs(searchSubscribers) do
+                pcall(fn, q)
+            end
             for _, sec in ipairs(sections) do
                 local anyVisible = false
                 local firstShown = true
@@ -1514,7 +1541,10 @@ return function(env)
                         firstShown = false
                     end
                 end
-                (sec.holder or sec.frame).Visible = anyVisible
+                -- Секция-хост (CreateHost) строк не имеет — её фильтрует подписчик
+                if #sec.rows > 0 then
+                    (sec.holder or sec.frame).Visible = anyVisible
+                end
             end
         end
 
@@ -1549,6 +1579,13 @@ return function(env)
             misc     = "box",
             shop     = "coins",
             debug    = "bug",
+            -- вкладки спавнера
+            skins    = "grid-square",
+            effects  = "sparkles",
+            fx       = "sparkles",
+            trade    = "arrow-left-right",
+            trades   = "arrow-left-right",
+            cases    = "box",
         }
 
         local function makeTabIcon(tabName, parent)
@@ -2270,7 +2307,8 @@ return function(env)
         -- ВНУТРЕННИЙ КОНСТРУКТОР ТАБА + TabFunctions
         ----------------------------------------------------------------
 
-        local function CreateTab(name)
+        -- fullWidth: одна колонка на всю ширину (вкладки skinchanger с сеткой/хостами)
+        local function CreateTab(name, fullWidth)
             local tabBtn = Create("TextButton", {
                 Text = "",
                 BackgroundColor3 = G.Gray200,
@@ -2308,7 +2346,8 @@ return function(env)
                 Name = name .. "PageLeft",
                 BackgroundTransparency = 1,
                 Position = UDim2.new(0, 0, 0, 0),
-                Size = UDim2.new(0.5, -COL_GAP / 2, 1, 0),
+                Size = fullWidth and UDim2.new(1, 0, 1, 0)
+                    or UDim2.new(0.5, -COL_GAP / 2, 1, 0),
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 ScrollBarThickness = 0,
                 BorderSizePixel = 0,
@@ -2333,7 +2372,8 @@ return function(env)
                 leftPage.CanvasSize = UDim2.new(0, 0, 0,
                     leftLayout.AbsoluteContentSize.Y + PAGE_PAD * 2 + 20)
             end)
-            AttachCustomScrollbar(leftPage, pageHolder, UDim.new(0.5, -COL_GAP / 2 + 4))
+            AttachCustomScrollbar(leftPage, pageHolder,
+                fullWidth and UDim.new(1, 4) or UDim.new(0.5, -COL_GAP / 2 + 4))
 
             local rightPage = Create("ScrollingFrame", {
                 Name = name .. "PageRight",
@@ -2343,6 +2383,7 @@ return function(env)
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 ScrollBarThickness = 0,
                 BorderSizePixel = 0,
+                Visible = not fullWidth,
                 Parent = pageHolder
             })
             local rightLayout = Create("UIListLayout", {
@@ -2647,6 +2688,25 @@ return function(env)
                     currentPage = leftPage
                 end
                 currentSectionData = newSection(title)
+            end
+
+            -- Пустой фрейм в карточке под собственную вёрстку (сетка скинов, списки).
+            -- height = nil — высота по содержимому
+            function TabFunctions:CreateHost(height, title)
+                if title ~= nil then
+                    currentSectionData = newSection(title)
+                end
+                local data = ensureSection()
+                data.order = data.order + 1
+                local host = Create("Frame", {
+                    Name = "Host",
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, height or 0),
+                    AutomaticSize = (height == nil) and Enum.AutomaticSize.Y or nil,
+                    LayoutOrder = data.order,
+                    Parent = data.frame
+                })
+                return host
             end
 
             function TabFunctions:CreateToggle(title, desc, handlerKey, default, keybindKey)
@@ -3629,8 +3689,31 @@ return function(env)
         return true
     end
 
+    -- Ядро бандла (env.Kernel): без живой сессии окно не строится, а когда сессия
+    -- умирает (рубильник, бан, нет связи) — закрывается само. Проверка живёт здесь,
+    -- а не только в ядре: вырезать её в одном месте мало
+    local Kernel = env.Kernel
+    local function sessionAlive()
+        if not Kernel then return true end
+        local ok, alive = pcall(Kernel.Check)
+        return ok and alive == true
+    end
+
     function GUI.Init()
+        if not sessionAlive() then return false end
         CreateUI()
+        if Kernel then
+            task.spawn(function()
+                while State.UIElements.MainGui do
+                    task.wait(2 + math.random())
+                    if not sessionAlive() then
+                        pcall(GUI.Cleanup)
+                        break
+                    end
+                end
+            end)
+        end
+        return true
     end
 
     function GUI.Cleanup()
@@ -3659,6 +3742,12 @@ return function(env)
             State.UIElements.Blur = nil
         end
     end
+
+    -- Токены для контента вкладок спавнера: тот же шрифт, кегли и цвета, что у рамки окна
+    GUI.Theme = {
+        T = T, G = G, FONT = FONT, TS = TS,
+        R_CTRL = R_CTRL, R_SM = R_SM, CTRL_H = CTRL_H, STROKE_W = STROKE_W,
+    }
 
     return GUI
 end
