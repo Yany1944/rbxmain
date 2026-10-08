@@ -81,3 +81,47 @@ Relay-сервер для игроков при этом остаётся пуб
 
 Все `/api/*`, кроме `login` и `mfa`, без валидной сессии отвечают `401`, и фронт на это
 перекидывает на `index.html`.
+
+## Деплой: push в `main` → панель обновляется сама
+
+Сервер раз в 30 секунд забирает ветку `main` с GitHub, а Caddy раздаёт `/opt/rbxmain/admin-panel`.
+Секретов и ключей от сервера в GitHub нет: сервер сам скачивает обновления, а не GitHub заходит на сервер.
+Код из репозитория на сервере не выполняется, там только `git fetch` и `git reset`.
+
+Установка на сервере (один раз):
+
+```bash
+cat > /etc/systemd/system/relay-admin-pull.service <<'UNIT'
+[Unit]
+Description=Pull Relay Admin panel from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/rbxmain
+ExecStart=/usr/bin/git fetch --depth 1 --quiet origin main
+ExecStart=/usr/bin/git reset --hard --quiet FETCH_HEAD
+UNIT
+
+cat > /etc/systemd/system/relay-admin-pull.timer <<'UNIT'
+[Unit]
+Description=Pull Relay Admin panel every 30 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now relay-admin-pull.timer
+```
+
+В блок панели в `/etc/caddy/Caddyfile` стоит добавить `header Cache-Control no-cache`, иначе браузер
+может показывать старые CSS/JS до Ctrl+F5.
+
+Проверка: `systemctl list-timers relay-admin-pull.timer` и `journalctl -u relay-admin-pull -n 20`.
