@@ -19,8 +19,21 @@ Assets/LICENSE.txt
 # Bundle build artifacts and secrets (never commit)
 /build/secrets.json
 /build/*.lua
+/build/*.manifest.json
 
 !/admin-panel/README.md
 
 # Owner-only local tools (never publish)
 /OwnerTools.lua
+
+# Dev bundle built by build-dev.bat
+/Violite.dev.lua
+
+!/build/KEY-LOADER.md
+
+# Control service private state; kept outside the deploy checkout in production.
+/.local/
+/control-server/*.sqlite*
+/control-server/config.json
+/control-server/FIRST-LOGIN.txt
+!/control-server/README.md
