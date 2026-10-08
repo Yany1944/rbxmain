@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Дашборд · Relay Admin</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><svg class="icon"><use href="#i-logo"/></svg></div>
+        <div>
+          <div class="brand-name">Relay Admin</div>
+          <div class="brand-sub">aeza · production</div>
+        </div>
+      </div>
+
+      <div class="nav-label">Обзор</div>
+      <a class="nav-item is-active" href="dashboard.html"><svg class="icon"><use href="#i-grid"/></svg>Дашборд</a>
+
+      <div class="nav-label">Управление</div>
+      <button class="nav-item" aria-disabled="true"><svg class="icon"><use href="#i-users"/></svg>Пиры<span class="tag">скоро</span></button>
+      <button class="nav-item" aria-disabled="true"><svg class="icon"><use href="#i-list"/></svg>Логи<span class="tag">скоро</span></button>
+      <button class="nav-item" aria-disabled="true"><svg class="icon"><use href="#i-settings"/></svg>Настройки<span class="tag">скоро</span></button>
+
+      <div class="sidebar-foot">
+        <div class="user-chip">
+          <div class="avatar">A</div>
+          <div class="who"><b>admin</b><span>Владелец · 2FA</span></div>
+        </div>
+        <!-- TODO(backend): POST /api/auth/logout, затем редирект -->
+        <a class="nav-item" href="index.html"><svg class="icon"><use href="#i-logout"/></svg>Выйти</a>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="btn btn-ghost menu-btn" id="menuBtn" aria-label="Меню"><svg class="icon"><use href="#i-menu"/></svg></button>
+        <div class="crumbs"><span class="hide-sm">Relay</span><span class="hide-sm">/</span><b>Дашборд</b></div>
+        <div class="spacer"></div>
+        <span class="pill hide-sm"><span class="dot"></span>Relay онлайн</span>
+        <!-- Сессия живёт 15 минут без активности — так же стоит настроить и на бэкенде -->
+        <span class="pill" title="Сессия завершится без активности"><svg class="icon"><use href="#i-clock"/></svg><span class="mono" id="sessionLeft">15:00</span></span>
+      </header>
+
+      <main class="content">
+        <div class="page-head reveal" style="--i:0">
+          <div>
+            <h1>Дашборд</h1>
+            <p>Состояние relay-сервера синхронизации образов</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="seg" id="range">
+              <span class="seg-thumb"></span>
+              <button data-range="1h">1ч</button>
+              <button data-range="24h" class="is-active">24ч</button>
+              <button data-range="7d">7д</button>
+            </div>
+            <button class="btn" id="refresh"><svg class="icon"><use href="#i-refresh"/></svg><span class="hide-sm">Обновить</span></button>
+          </div>
+        </div>
+
+        <!-- TODO(backend): GET /api/stats?range=24h -->
+        <section class="kpis">
+          <div class="card kpi reveal" style="--i:1">
+            <div class="kpi-top">Пиров онлайн<svg class="icon"><use href="#i-users"/></svg></div>
+            <div class="kpi-value" data-kpi="peers">0</div>
+            <div class="kpi-foot"><span class="delta up"><svg class="icon" style="width:12px;height:12px"><use href="#i-up"/></svg>12.4%</span>к вчера</div>
+            <svg class="spark" data-spark="peers" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="card kpi reveal" style="--i:2">
+            <div class="kpi-top">Синхронизаций / мин<svg class="icon"><use href="#i-zap"/></svg></div>
+            <div class="kpi-value" data-kpi="syncs">0</div>
+            <div class="kpi-foot"><span class="delta up"><svg class="icon" style="width:12px;height:12px"><use href="#i-up"/></svg>4.1%</span>к вчера</div>
+            <svg class="spark" data-spark="syncs" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="card kpi reveal" style="--i:3">
+            <div class="kpi-top">Задержка p95<svg class="icon"><use href="#i-activity"/></svg></div>
+            <div class="kpi-value" data-kpi="latency" data-suffix=" мс">0</div>
+            <div class="kpi-foot"><span class="delta down"><svg class="icon" style="width:12px;height:12px"><use href="#i-up"/></svg>3 мс</span>к вчера</div>
+            <svg class="spark" data-spark="latency" preserveAspectRatio="none"></svg>
+          </div>
+          <div class="card kpi reveal" style="--i:4">
+            <div class="kpi-top">Аптайм<svg class="icon"><use href="#i-server"/></svg></div>
+            <div class="kpi-value" data-kpi="uptime" data-decimals="2" data-suffix="%">0</div>
+            <div class="kpi-foot"><span class="mono" id="uptimeSince">14д 6ч 32м</span>без перезапуска</div>
+            <svg class="spark" data-spark="uptime" preserveAspectRatio="none"></svg>
+          </div>
+        </section>
+
+        <section class="grid-2">
+          <div class="card reveal" style="--i:5">
+            <div class="card-head">
+              <div><h2>Трафик relay</h2><div class="sub">Сообщения в минуту</div></div>
+              <div class="legend">
+                <span><i style="background:var(--accent)"></i>Сегодня</span>
+                <span class="hide-sm"><i style="background:#4a4a55"></i>Вчера</span>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="chart-wrap" id="chartWrap">
+                <svg class="chart" id="chart"></svg>
+                <div class="tooltip" id="tooltip"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TODO(backend): GET /api/server -->
+          <div class="card reveal" style="--i:6">
+            <div class="card-head">
+              <div><h2>Сервер</h2><div class="sub">Ресурсы VPS</div></div>
+              <span class="pill"><span class="dot"></span>OK</span>
+            </div>
+            <div class="card-body meters">
+              <div><div class="meter-row"><span>CPU</span><span data-meter-val="cpu">0%</span></div><div class="meter" data-meter="cpu"><i></i></div></div>
+              <div><div class="meter-row"><span>Память</span><span data-meter-val="ram">0%</span></div><div class="meter" data-meter="ram"><i></i></div></div>
+              <div><div class="meter-row"><span>Диск</span><span data-meter-val="disk">0%</span></div><div class="meter" data-meter="disk"><i></i></div></div>
+              <div><div class="meter-row"><span>Сеть</span><span data-meter-val="net">0%</span></div><div class="meter" data-meter="net"><i></i></div></div>
+              <dl class="kv">
+                <dt>Хост</dt><dd>relay-01</dd>
+                <dt>Версия relay</dt><dd>v1.4.2</dd>
+                <dt>WebSocket</dt><dd>wss · 443</dd>
+                <dt>Нагрузка</dt><dd id="loadAvg">0.42 0.38 0.31</dd>
+              </dl>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid-2">
+          <!-- TODO(backend): GET /api/peers?limit=6 -->
+          <div class="card reveal" style="--i:7">
+            <div class="card-head">
+              <div><h2>Активные пиры</h2><div class="sub">Последние подключения</div></div>
+              <button class="btn btn-ghost" data-soon>Все<svg class="icon"><use href="#i-arrow"/></svg></button>
+            </div>
+            <div class="table-scroll">
+              <table class="table">
+                <thead><tr><th>Игрок</th><th>Сервер</th><th>Статус</th><th class="num">Предметов</th><th class="num">Пинг</th></tr></thead>
+                <tbody id="peers"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TODO(backend): WebSocket /api/events — поток событий -->
+          <div class="card reveal" style="--i:8">
+            <div class="card-head">
+              <div><h2>События</h2><div class="sub">В реальном времени</div></div>
+              <span class="pill"><span class="dot"></span>live</span>
+            </div>
+            <ul class="feed" id="feed"></ul>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="assets/common.js"></script>
+  <script src="assets/dashboard.js"></script>
+</body>
+</html>
