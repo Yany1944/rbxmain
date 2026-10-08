@@ -11171,118 +11171,6 @@ local function HandleAutoReconnect(enabled)
     end
 end
 -- ══════════════════════════════════════════════════════════════════════════════
--- СВОДКА СЕССИИ (инфо-блок в сайдбаре GUI)
--- ══════════════════════════════════════════════════════════════════════════════
-
-State.Runtime.Session = {
-    Version    = "2.2",
-    -- База (StartCoins + StartedAt) НЕ ставится при загрузке: счётчик монет в
-    -- шопе догружается/дощёлкивает с нуля, и раннее чтение дало бы ложную базу,
-    -- из-за которой Coins/h подскакивал. База фиксируется в EnsureBaseline, когда
-    -- баланс стабилизировался. Включение автофарма делает сброс (MarkFarmStart).
-    StartedAt  = nil,
-    StartCoins = nil,
-    _pending   = nil,   -- кандидат в базу, ждём стабилизации
-}
-
--- Разделитель тысяч: 26292 → 26,292
-function State.Runtime.Session.FormatThousands(n)
-    local s = tostring(math.floor(n))
-    local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-    return (out:gsub("^,", ""))
-end
-
--- Баланс монет аккаунта. Витрина шопа существует и когда шоп закрыт.
--- Только читает значение, базу не трогает.
-function State.Runtime.Session.ReadCoins()
-    local ok, value = pcall(function()
-        local label = LocalPlayer.PlayerGui
-            .CrossPlatform.Shop.Medium.Title.Coins.Container.Amount
-        return tonumber((tostring(label.Text):gsub(",", "")))
-    end)
-    if ok and type(value) == "number" then
-        return value
-    end
-    return nil
-end
-
--- База фиксируется, только когда баланс совпал в двух чтениях подряд — то есть
--- данные догрузились и счётчик перестал дощёлкивать. Так загрузка/анимация не
--- засчитывается в фарм. StartedAt стартует тем же моментом, что и StartCoins.
-function State.Runtime.Session.EnsureBaseline(coins)
-    if State.Runtime.Session.StartCoins then return end
-    if State.Runtime.Session._pending == coins then
-        State.Runtime.Session.StartCoins = coins
-        State.Runtime.Session.StartedAt = tick()
-        State.Runtime.Session._pending = nil
-    else
-        State.Runtime.Session._pending = coins
-    end
-end
-
--- Сброс сессии: точка отсчёта Coins/h переезжает на текущий момент.
--- Вызывается при включении автофарма (монеты к этому времени уже загружены)
-function State.Runtime.Session.MarkFarmStart()
-    State.Runtime.Session.StartedAt = tick()
-    State.Runtime.Session.StartCoins = State.Runtime.Session.ReadCoins() or 0
-    State.Runtime.Session._pending = nil
-end
-
-function State.Runtime.Session.GetCoinsText()
-    local coins = State.Runtime.Session.ReadCoins()
-    if not coins then return nil end
-    return State.Runtime.Session.FormatThousands(coins)
-end
-
-function State.Runtime.Session.GetRateText()
-    local coins = State.Runtime.Session.ReadCoins()
-    if not coins then return nil end           -- монеты ещё не загрузились
-    State.Runtime.Session.EnsureBaseline(coins)
-    if not State.Runtime.Session.StartCoins then return "—" end   -- база стабилизируется
-    -- Защита от ложной базы. Витрина шопа при загрузке отдаёт placeholder-баланс
-    -- (напр. ~43k), который держится пару чтений подряд и попадает в базу. Когда
-    -- подгружается реальный (меньший) баланс, gained уходит в минус и Coins/h
-    -- скатывается в -2kk/ч. Любое падение баланса ниже базы = база была ложной
-    -- (либо игрок реально потратил монеты) — пересобираем базу от текущего
-    -- значения и начинаем отсчёт заново.
-    if coins < State.Runtime.Session.StartCoins then
-        State.Runtime.Session.StartCoins = coins
-        State.Runtime.Session.StartedAt = tick()
-        return State.Runtime.Session.FormatThousands(0)
-    end
-    -- Считаем сразу: до первой монеты gained = 0 → показываем 0, с первой
-    -- монетой пошёл счёт. Знаменатель зажат снизу до 1с, чтобы не делить на ~0.
-    local hours = (tick() - State.Runtime.Session.StartedAt) / 3600
-    if hours < (1 / 3600) then hours = 1 / 3600 end
-    local gained = coins - State.Runtime.Session.StartCoins
-    return State.Runtime.Session.FormatThousands(gained / hours)
-end
-
--- Роль: сперва серверные данные, затем предмет в руках/рюкзаке
-function State.Runtime.Session.GetRole()
-    local name = LocalPlayer and LocalPlayer.Name
-    if name and State.Cache.PlayerData then
-        local data = State.Cache.PlayerData[name]
-        if data and type(data.Role) == "string" and data.Role ~= "" then
-            return data.Role
-        end
-    end
-    local ok, role = pcall(function()
-        local char = LocalPlayer.Character
-        local bp = LocalPlayer:FindFirstChild("Backpack")
-        local function has(item)
-            return (char and char:FindFirstChild(item) ~= nil)
-                or (bp and bp:FindFirstChild(item) ~= nil)
-        end
-        if has("Knife") then return "Murderer" end
-        if has("Gun") then return "Sheriff" end
-        return "Innocent"
-    end)
-    if ok then return role end
-    return nil
-end
-
--- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК: FAKE COSMETICS (HEADLESS & KORBLOX)
 -- ══════════════════════════════════════════════════════════════════════════════
 
@@ -11668,7 +11556,6 @@ local GUI = GUIFactory({
             if on then
                 State.Cache.CoinBlacklist = {}
                 State.Runtime.StartSessionCoins = GetCollectedCoinsCount()
-                State.Runtime.Session.MarkFarmStart()   -- точка отсчёта Coins/h
                 ShowNotification("Auto Farm: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
                 StartAutoFarm()
             else
@@ -11856,12 +11743,6 @@ local GUI = GUIFactory({
         AutoLoadOnTeleport = function(on)
             State.Settings.AutoLoadOnTeleport = on
         end,
-
-        -- ── Сводка для инфо-блока в сайдбаре ─────────────────────────────
-        GetCoins        = function() return State.Runtime.Session.GetCoinsText() end,
-        GetCoinsPerHour = function() return State.Runtime.Session.GetRateText() end,
-        GetVersion      = function() return State.Runtime.Session.Version end,
-        GetRole         = function() return State.Runtime.Session.GetRole() end,
     }, {__index = function(_, key)
         if State.Runtime.VisualsModule and State.Runtime.VisualsModule.Handlers[key] then
             local handler = State.Runtime.VisualsModule.Handlers[key]

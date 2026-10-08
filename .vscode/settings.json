@@ -4,6 +4,13 @@
         "getconnections",
         "getfpscap",
         "setfpscap",
-        "getfenv"
+        "getfenv",
+        "gethui",
+        "isfile",
+        "readfile",
+        "writefile",
+        "makefolder",
+        "isfolder",
+        "setclipboard"
     ]
 }

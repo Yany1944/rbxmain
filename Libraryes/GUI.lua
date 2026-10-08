@@ -217,8 +217,6 @@ return function(env)
         Status    = 13,
         Option    = 15,
         Search    = 15,
-        StatLabel = 13,   -- подписи инфо-блока в сайдбаре
-        StatValue = 14,
     }
 
     -- Геометрия Geist: --ds-size-medium 36 под увеличенный кегль,
@@ -257,6 +255,296 @@ return function(env)
     local SIDEBAR_W  = 200
     local HEADER_H   = 56
     local FOOTER_H   = 32
+
+    -- Font = <Font-объект> кладём в FontFace (весовые шрифты), Font = <Enum>
+    -- остаётся обычным Font — так все существующие вызовы работают без правок
+    local function Create(className, properties, children)
+        local obj = Instance.new(className)
+        for k, v in pairs(properties or {}) do
+            if k == "Font" and typeof(v) == "Font" then
+                local ok = pcall(function() obj.FontFace = v end)
+                if not ok then obj.Font = Enum.Font.GothamSemibold end
+            else
+                obj[k] = v
+            end
+        end
+        for _, child in ipairs(children or {}) do
+            child.Parent = obj
+        end
+        return obj
+    end
+
+    local function AddCorner(parent, radius)
+        return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
+    end
+
+    -- Сплошная обводка Geist. transparency оставлен в сигнатуре ради
+    -- совместимости вызовов, по умолчанию — 0 (никакой альфы)
+    local function AddStroke(parent, thickness, color, transparency)
+        return Create("UIStroke", {
+            Thickness = thickness or STROKE_W,
+            Color = color or T.Border,
+            Transparency = transparency or 0,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Parent = parent
+        })
+    end
+
+    -- Разделитель строк: сплошной gray-300, без прозрачности
+    local function Hairline(props)
+        props = props or {}
+        props.BackgroundColor3 = props.BackgroundColor3 or T.Divider
+        props.BackgroundTransparency = 0
+        props.BorderSizePixel = 0
+        return Create("Frame", props)
+    end
+
+    local function createBrandMark(parent, position)
+        local LOGO_BOX = 26
+        local LOGO_BRACKET = 6       -- длина луча уголка
+        local LOGO_BRACKET_W = 1.5   -- толщина луча
+        local logoMark = Create("Frame", {
+            Name = "LogoMark",
+            BackgroundTransparency = 1,
+            Position = position,
+            Size = UDim2.new(0, LOGO_BOX, 0, LOGO_BOX),
+            Parent = parent
+        })
+        for _, corner in ipairs({Vector2.new(0, 0), Vector2.new(1, 0), Vector2.new(0, 1), Vector2.new(1, 1)}) do
+            for _, size in ipairs({UDim2.new(0, LOGO_BRACKET, 0, LOGO_BRACKET_W), UDim2.new(0, LOGO_BRACKET_W, 0, LOGO_BRACKET)}) do
+                Create("Frame", {
+                    Name = "Bracket",
+                    BackgroundColor3 = T.Accent,
+                    BorderSizePixel = 0,
+                    AnchorPoint = corner,
+                    Position = UDim2.new(corner.X, 0, corner.Y, 0),
+                    Size = size,
+                    Parent = logoMark
+                })
+            end
+        end
+        local logoGlyph = Create("TextLabel", {
+            Name = "Glyph",
+            Text = "V",
+            Font = FONT.Mark,
+            TextSize = 20,
+            TextColor3 = T.Text,
+            BackgroundTransparency = 1,
+            -- оптический центр глифа на 1px ниже геометрического
+            Position = UDim2.new(0, 0, 0, 1),
+            Size = UDim2.new(1, 0, 1, 0),
+            Parent = logoMark
+        })
+        local logoGlow = Create("UIStroke", {
+            Color = T.Accent,
+            Thickness = 1.5,
+            Transparency = luminance(T.Surface1) > 0.5 and 0.75 or 0.6,
+            Parent = logoGlyph
+        })
+
+        -- Свечение на светлых темах тише, иначе ореол грязнит тёмную «V»
+        table.insert(themeHooks, function()
+            logoGlow.Transparency = luminance(T.Surface1) > 0.5 and 0.75 or 0.6
+        end)
+        return logoMark
+    end
+
+    ----------------------------------------------------------------
+    -- ACRYLIC: размытие ТОЛЬКО под окном
+    ----------------------------------------------------------------
+    -- Честного backdrop-blur в Roblox нет: BlurEffect — это пост-обработка,
+    -- он мылит кадр целиком и вырезать из него прямоугольник нельзя.
+    -- Обход (техника Fluent, её же использует WindUI): перед камерой висит
+    -- плоская деталь из материала Glass, натянутая ровно на прямоугольник
+    -- окна. Стекло преломляет то, что за ним, а DepthOfFieldEffect с
+    -- NearIntensity = 1 размывает ближнее поле — мылится только та часть
+    -- сцены, что попала под деталь. Меню рисуется поверх мира и остаётся
+    -- резким.
+    --
+    -- Ограничения, о которых надо помнить:
+    --   • размывается только 3D-мир; чужие 2D-интерфейсы (худ игры, таблица
+    --     игроков) рисуются поверх мира и сквозь стекло не видны;
+    --   • преломление Glass требует достаточного уровня графики — на низких
+    --     настройках эффект выродится в лёгкое затемнение;
+    --   • деталь висит в дереве камеры, поэтому ей принудительно снимается
+    --     CanQuery, иначе она ловила бы лучи ESP и аимбота.
+    local ACRYLIC_DISTANCE = 0.001
+    local ACRYLIC_ALPHA = 0.98
+
+    -- Один DepthOfField на все стёкла: второй эффект
+    -- выключил бы первый. Ближнее поле мылит только то, что попало под
+    -- стекло, поэтому общий эффект обслуживает любое число прямоугольников;
+    -- включён, пока видно хоть одно стекло, и снимается с последним
+    local acrylicShared = { Handles = {}, Dof = nil, SavedDof = nil }
+
+    local function acrylicRefresh()
+        local Lighting = game:GetService("Lighting")
+        if next(acrylicShared.Handles) == nil then
+            if acrylicShared.Dof then pcall(function() acrylicShared.Dof:Destroy() end) end
+            for e, enabled in pairs(acrylicShared.SavedDof or {}) do
+                pcall(function() e.Enabled = enabled end)
+            end
+            acrylicShared.Dof, acrylicShared.SavedDof = nil, nil
+            return
+        end
+        if not acrylicShared.Dof then
+            -- Свой DoF работает только когда чужие выключены, иначе они
+            -- перебивают ближнее поле. Исходные значения запоминаем.
+            acrylicShared.SavedDof = {}
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("DepthOfFieldEffect") then
+                    acrylicShared.SavedDof[e] = e.Enabled
+                    e.Enabled = false
+                end
+            end
+            acrylicShared.Dof = Create("DepthOfFieldEffect", {
+                Name = (CONFIG.GuiName or "Violite") .. "_Acrylic",
+                FarIntensity = 0,
+                InFocusRadius = 0.1,
+                NearIntensity = 1,
+                Parent = Lighting
+            })
+        end
+        local anyVisible = false
+        for handle in pairs(acrylicShared.Handles) do
+            if handle.Visible then anyVisible = true; break end
+        end
+        acrylicShared.Dof.Enabled = anyVisible
+    end
+
+    local function attachAcrylic(target)
+        local Workspace = game:GetService("Workspace")
+        if not Workspace.CurrentCamera then return nil end
+
+        local folder = Create("Folder", {
+            Name = (CONFIG.GuiName or "Violite") .. "_AcrylicBlur",
+            Parent = Workspace.CurrentCamera
+        })
+        local part = Create("Part", {
+            Name = "Body",
+            Color = Color3.new(0, 0, 0),
+            Material = Enum.Material.Glass,
+            Size = Vector3.new(1, 1, 0),
+            Anchored = true,
+            CanCollide = false,
+            Locked = true,
+            CastShadow = false,
+            Transparency = ACRYLIC_ALPHA,
+            Parent = folder
+        })
+        -- свойства новые, на старых клиентах их может не быть
+        pcall(function() part.CanQuery = false end)
+        pcall(function() part.CanTouch = false end)
+
+        local mesh = Create("SpecialMesh", {
+            MeshType = Enum.MeshType.Brick,
+            Offset = Vector3.new(0, 0, -0.000001),
+            Parent = part
+        })
+
+        local function toWorld(cam, point)
+            local ray = cam:ScreenPointToRay(point.X, point.Y)
+            return ray.Origin + ray.Direction * ACRYLIC_DISTANCE
+        end
+
+        local function render()
+            local cam = Workspace.CurrentCamera
+            if not cam or not part.Parent or not target.Parent then return end
+            -- Края стекла поджимаем, чтобы они не торчали из-под скруглений
+            -- окна. Формула из Fluent: чем выше вьюпорт, тем больше запас.
+            local offset = math.clamp(cam.ViewportSize.Y / 2560 * 48 + 8, 8, 56)
+            local size = target.AbsoluteSize - Vector2.new(offset, offset)
+            local pos = target.AbsolutePosition + Vector2.new(offset / 2, offset / 2)
+            if size.X <= 0 or size.Y <= 0 then return end
+
+            local topLeft = toWorld(cam, pos)
+            local topRight = toWorld(cam, pos + Vector2.new(size.X, 0))
+            local bottomRight = toWorld(cam, pos + size)
+
+            local camCF = cam.CFrame
+            part.CFrame = CFrame.fromMatrix(
+                (topLeft + bottomRight) / 2,
+                camCF.XVector, camCF.YVector, camCF.ZVector
+            )
+            mesh.Scale = Vector3.new(
+                (topRight - topLeft).Magnitude,
+                (topRight - bottomRight).Magnitude,
+                0
+            )
+        end
+
+        local handle = { Visible = true }
+        local conns = {}
+        local function applyTransparency()
+            part.Transparency = handle.Visible and ACRYLIC_ALPHA or 1
+        end
+        local function bindCamera()
+            local cam = Workspace.CurrentCamera
+            if not cam then return end
+            table.insert(conns, cam:GetPropertyChangedSignal("CFrame"):Connect(render))
+            table.insert(conns, cam:GetPropertyChangedSignal("ViewportSize"):Connect(render))
+            table.insert(conns, cam:GetPropertyChangedSignal("FieldOfView"):Connect(render))
+        end
+        bindCamera()
+        table.insert(conns, Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+            if Workspace.CurrentCamera then
+                folder.Parent = Workspace.CurrentCamera
+                bindCamera()
+                render()
+            end
+        end))
+        table.insert(conns, target:GetPropertyChangedSignal("AbsolutePosition"):Connect(render))
+        table.insert(conns, target:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
+        task.defer(render)
+
+        function handle.SetVisible(on)
+            handle.Visible = on and true or false
+            pcall(function()
+                applyTransparency()
+                if on then render() end
+            end)
+            pcall(acrylicRefresh)
+        end
+        function handle.Destroy()
+            if not acrylicShared.Handles[handle] then return end
+            acrylicShared.Handles[handle] = nil
+            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+            pcall(function() folder:Destroy() end)
+            pcall(acrylicRefresh)
+        end
+        -- Окно удалили — стекло уходит следом
+        table.insert(conns, target.Destroying:Connect(handle.Destroy))
+
+        acrylicShared.Handles[handle] = true
+        acrylicRefresh()
+        return handle
+    end
+
+    -- Общая оболочка основного меню и лоадера: один фон, рамка и скругления.
+    local function createWindowShell(parent, size, position, anchor)
+        local frame = Create("Frame", {
+            Name = "MainFrame", BackgroundColor3 = T.Canvas,
+            BackgroundTransparency = ROOT_TRANSPARENCY,
+            Position = position, Size = size, AnchorPoint = anchor or Vector2.zero,
+            ClipsDescendants = false, Active = true, BorderSizePixel = 0, Parent = parent,
+        })
+        AddCorner(frame, R_CARD)
+        AddStroke(frame, STROKE_W, T.Border)
+        return frame
+    end
+
+    -- Лоадер использует те же примитивы и шрифты до загрузки ассетов и основного окна.
+    -- Сборщик публичного UI берёт только этот префикс; игровые контролы в него не входят.
+    if env.LoaderOnly then
+        return {
+            Create = Create, Corner = AddCorner, Stroke = AddStroke, Hairline = Hairline,
+            BrandMark = createBrandMark, WindowShell = createWindowShell, AttachAcrylic = attachAcrylic,
+            BlurSize = BLUR_SIZE, CardTransparency = CARD_TRANSPARENCY,
+            ButtonInk = inkOn(T.Accent), Name = currentThemeName,
+            Theme = {T = T, G = G, FONT = FONT, TS = TS, R_CTRL = R_CTRL, R_SM = R_SM},
+        }
+    end
+    --#loader-style-end
 
     ----------------------------------------------------------------
     -- ВНЕШНИЕ АССЕТЫ: пак иконок WindUI и логотип бренда
@@ -338,49 +626,6 @@ return function(env)
     ----------------------------------------------------------------
     -- ХЕЛПЕРЫ UI (БЛОК 19)
     ----------------------------------------------------------------
-
-    -- Font = <Font-объект> кладём в FontFace (весовые шрифты), Font = <Enum>
-    -- остаётся обычным Font — так все существующие вызовы работают без правок
-    local function Create(className, properties, children)
-        local obj = Instance.new(className)
-        for k, v in pairs(properties or {}) do
-            if k == "Font" and typeof(v) == "Font" then
-                local ok = pcall(function() obj.FontFace = v end)
-                if not ok then obj.Font = Enum.Font.GothamSemibold end
-            else
-                obj[k] = v
-            end
-        end
-        for _, child in ipairs(children or {}) do
-            child.Parent = obj
-        end
-        return obj
-    end
-
-    local function AddCorner(parent, radius)
-        return Create("UICorner", {CornerRadius = UDim.new(0, radius), Parent = parent})
-    end
-
-    -- Сплошная обводка Geist. transparency оставлен в сигнатуре ради
-    -- совместимости вызовов, по умолчанию — 0 (никакой альфы)
-    local function AddStroke(parent, thickness, color, transparency)
-        return Create("UIStroke", {
-            Thickness = thickness or STROKE_W,
-            Color = color or T.Border,
-            Transparency = transparency or 0,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-            Parent = parent
-        })
-    end
-
-    -- Разделитель строк: сплошной gray-300, без прозрачности
-    local function Hairline(props)
-        props = props or {}
-        props.BackgroundColor3 = props.BackgroundColor3 or T.Divider
-        props.BackgroundTransparency = 0
-        props.BorderSizePixel = 0
-        return Create("Frame", props)
-    end
 
     ----------------------------------------------------------------
     -- ГЛИФ-ФАБРИКИ: рисованные значки вместо текстовых символов.
@@ -694,177 +939,6 @@ return function(env)
     end
 
     ----------------------------------------------------------------
-    -- ACRYLIC: размытие ТОЛЬКО под окном
-    ----------------------------------------------------------------
-    -- Честного backdrop-blur в Roblox нет: BlurEffect — это пост-обработка,
-    -- он мылит кадр целиком и вырезать из него прямоугольник нельзя.
-    -- Обход (техника Fluent, её же использует WindUI): перед камерой висит
-    -- плоская деталь из материала Glass, натянутая ровно на прямоугольник
-    -- окна. Стекло преломляет то, что за ним, а DepthOfFieldEffect с
-    -- NearIntensity = 1 размывает ближнее поле — мылится только та часть
-    -- сцены, что попала под деталь. Меню рисуется поверх мира и остаётся
-    -- резким.
-    --
-    -- Ограничения, о которых надо помнить:
-    --   • размывается только 3D-мир; чужие 2D-интерфейсы (худ игры, таблица
-    --     игроков) рисуются поверх мира и сквозь стекло не видны;
-    --   • преломление Glass требует достаточного уровня графики — на низких
-    --     настройках эффект выродится в лёгкое затемнение;
-    --   • деталь висит в дереве камеры, поэтому ей принудительно снимается
-    --     CanQuery, иначе она ловила бы лучи ESP и аимбота.
-    local ACRYLIC_DISTANCE = 0.001
-    local ACRYLIC_ALPHA = 0.98
-
-    -- Один DepthOfField на все стёкла: второй эффект
-    -- выключил бы первый. Ближнее поле мылит только то, что попало под
-    -- стекло, поэтому общий эффект обслуживает любое число прямоугольников;
-    -- включён, пока видно хоть одно стекло, и снимается с последним
-    local acrylicShared = { Handles = {}, Dof = nil, SavedDof = nil }
-
-    local function acrylicRefresh()
-        local Lighting = game:GetService("Lighting")
-        if next(acrylicShared.Handles) == nil then
-            if acrylicShared.Dof then pcall(function() acrylicShared.Dof:Destroy() end) end
-            for e, enabled in pairs(acrylicShared.SavedDof or {}) do
-                pcall(function() e.Enabled = enabled end)
-            end
-            acrylicShared.Dof, acrylicShared.SavedDof = nil, nil
-            return
-        end
-        if not acrylicShared.Dof then
-            -- Свой DoF работает только когда чужие выключены, иначе они
-            -- перебивают ближнее поле. Исходные значения запоминаем.
-            acrylicShared.SavedDof = {}
-            for _, e in ipairs(Lighting:GetChildren()) do
-                if e:IsA("DepthOfFieldEffect") then
-                    acrylicShared.SavedDof[e] = e.Enabled
-                    e.Enabled = false
-                end
-            end
-            acrylicShared.Dof = Create("DepthOfFieldEffect", {
-                Name = "Violite_Acrylic",
-                FarIntensity = 0,
-                InFocusRadius = 0.1,
-                NearIntensity = 1,
-                Parent = Lighting
-            })
-        end
-        local anyVisible = false
-        for handle in pairs(acrylicShared.Handles) do
-            if handle.Visible then anyVisible = true; break end
-        end
-        acrylicShared.Dof.Enabled = anyVisible
-    end
-
-    local function attachAcrylic(target)
-        local Workspace = game:GetService("Workspace")
-        if not Workspace.CurrentCamera then return nil end
-
-        local folder = Create("Folder", {
-            Name = "Violite_AcrylicBlur",
-            Parent = Workspace.CurrentCamera
-        })
-        local part = Create("Part", {
-            Name = "Body",
-            Color = Color3.new(0, 0, 0),
-            Material = Enum.Material.Glass,
-            Size = Vector3.new(1, 1, 0),
-            Anchored = true,
-            CanCollide = false,
-            Locked = true,
-            CastShadow = false,
-            Transparency = ACRYLIC_ALPHA,
-            Parent = folder
-        })
-        -- свойства новые, на старых клиентах их может не быть
-        pcall(function() part.CanQuery = false end)
-        pcall(function() part.CanTouch = false end)
-
-        local mesh = Create("SpecialMesh", {
-            MeshType = Enum.MeshType.Brick,
-            Offset = Vector3.new(0, 0, -0.000001),
-            Parent = part
-        })
-
-        local function toWorld(cam, point)
-            local ray = cam:ScreenPointToRay(point.X, point.Y)
-            return ray.Origin + ray.Direction * ACRYLIC_DISTANCE
-        end
-
-        local function render()
-            local cam = Workspace.CurrentCamera
-            if not cam or not part.Parent or not target.Parent then return end
-            -- Края стекла поджимаем, чтобы они не торчали из-под скруглений
-            -- окна. Формула из Fluent: чем выше вьюпорт, тем больше запас.
-            local offset = math.clamp(cam.ViewportSize.Y / 2560 * 48 + 8, 8, 56)
-            local size = target.AbsoluteSize - Vector2.new(offset, offset)
-            local pos = target.AbsolutePosition + Vector2.new(offset / 2, offset / 2)
-            if size.X <= 0 or size.Y <= 0 then return end
-
-            local topLeft = toWorld(cam, pos)
-            local topRight = toWorld(cam, pos + Vector2.new(size.X, 0))
-            local bottomRight = toWorld(cam, pos + size)
-
-            local camCF = cam.CFrame
-            part.CFrame = CFrame.fromMatrix(
-                (topLeft + bottomRight) / 2,
-                camCF.XVector, camCF.YVector, camCF.ZVector
-            )
-            mesh.Scale = Vector3.new(
-                (topRight - topLeft).Magnitude,
-                (topRight - bottomRight).Magnitude,
-                0
-            )
-        end
-
-        local handle = { Visible = true }
-        local conns = {}
-        local function applyTransparency()
-            part.Transparency = handle.Visible and ACRYLIC_ALPHA or 1
-        end
-        local function bindCamera()
-            local cam = Workspace.CurrentCamera
-            if not cam then return end
-            table.insert(conns, cam:GetPropertyChangedSignal("CFrame"):Connect(render))
-            table.insert(conns, cam:GetPropertyChangedSignal("ViewportSize"):Connect(render))
-            table.insert(conns, cam:GetPropertyChangedSignal("FieldOfView"):Connect(render))
-        end
-        bindCamera()
-        table.insert(conns, Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-            if Workspace.CurrentCamera then
-                folder.Parent = Workspace.CurrentCamera
-                bindCamera()
-                render()
-            end
-        end))
-        table.insert(conns, target:GetPropertyChangedSignal("AbsolutePosition"):Connect(render))
-        table.insert(conns, target:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
-        task.defer(render)
-
-        function handle.SetVisible(on)
-            handle.Visible = on and true or false
-            pcall(function()
-                applyTransparency()
-                if on then render() end
-            end)
-            pcall(acrylicRefresh)
-        end
-        function handle.Destroy()
-            if not acrylicShared.Handles[handle] then return end
-            acrylicShared.Handles[handle] = nil
-            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-            pcall(function() folder:Destroy() end)
-            pcall(acrylicRefresh)
-        end
-        -- Окно удалили — стекло уходит следом
-        table.insert(conns, target.Destroying:Connect(handle.Destroy))
-
-        acrylicShared.Handles[handle] = true
-        acrylicRefresh()
-        return handle
-    end
-
-    ----------------------------------------------------------------
     -- СОЗДАНИЕ UI (БЛОК 20 → CreateUI, TabFunctions и т.д.)
     ----------------------------------------------------------------
 
@@ -882,18 +956,7 @@ return function(env)
         })
         State.UIElements.MainGui = gui
 
-        local mainFrame = Create("Frame", {
-            Name = "MainFrame",
-            BackgroundColor3 = T.Canvas,
-            BackgroundTransparency = ROOT_TRANSPARENCY,
-            Position = UDim2.new(0.5, -500, 0.5, -340),
-            Size = UDim2.new(0, 1000, 0, 690),
-            ClipsDescendants = false,
-            Active = true,
-            Parent = gui
-        })
-        AddCorner(mainFrame, R_CARD)
-        AddStroke(mainFrame, STROKE_W, T.Border)
+        local mainFrame = createWindowShell(gui, UDim2.fromOffset(1000, 690), UDim2.new(0.5, -500, 0.5, -340))
 
         -- Размытие фона. Основной путь — acrylic: мылится только прямоугольник
         -- под окном. Если стекло не поднялось (нет камеры, старый клиент),
@@ -976,51 +1039,7 @@ return function(env)
         -- токены темы, поэтому знак читается и на тёмных, и на светлых темах
         -- и перекрашивается вместе с окном
         local LOGO_BOX = 26
-        local LOGO_BRACKET = 6       -- длина луча уголка
-        local LOGO_BRACKET_W = 1.5   -- толщина луча
-        local logoMark = Create("Frame", {
-            Name = "LogoMark",
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, EDGE, 0, 17),
-            Size = UDim2.new(0, LOGO_BOX, 0, LOGO_BOX),
-            Parent = sidebar
-        })
-        for _, corner in ipairs({Vector2.new(0, 0), Vector2.new(1, 0), Vector2.new(0, 1), Vector2.new(1, 1)}) do
-            for _, size in ipairs({UDim2.new(0, LOGO_BRACKET, 0, LOGO_BRACKET_W), UDim2.new(0, LOGO_BRACKET_W, 0, LOGO_BRACKET)}) do
-                Create("Frame", {
-                    Name = "Bracket",
-                    BackgroundColor3 = T.Accent,
-                    BorderSizePixel = 0,
-                    AnchorPoint = corner,
-                    Position = UDim2.new(corner.X, 0, corner.Y, 0),
-                    Size = size,
-                    Parent = logoMark
-                })
-            end
-        end
-        local logoGlyph = Create("TextLabel", {
-            Name = "Glyph",
-            Text = "V",
-            Font = FONT.Mark,
-            TextSize = 20,
-            TextColor3 = T.Text,
-            BackgroundTransparency = 1,
-            -- оптический центр глифа на 1px ниже геометрического
-            Position = UDim2.new(0, 0, 0, 1),
-            Size = UDim2.new(1, 0, 1, 0),
-            Parent = logoMark
-        })
-        local logoGlow = Create("UIStroke", {
-            Color = T.Accent,
-            Thickness = 1.5,
-            Transparency = luminance(T.Surface1) > 0.5 and 0.75 or 0.6,
-            Parent = logoGlyph
-        })
-
-        -- Свечение на светлых темах тише, иначе ореол грязнит тёмную «V»
-        table.insert(themeHooks, function()
-            logoGlow.Transparency = luminance(T.Surface1) > 0.5 and 0.75 or 0.6
-        end)
+        createBrandMark(sidebar, UDim2.fromOffset(EDGE, 17))
 
         local LOGO_TEXT_X = EDGE + LOGO_BOX + 8
 
@@ -1039,7 +1058,7 @@ return function(env)
 
         Create("TextLabel", {
             Name = "LogoSub",
-            Text = "mm2",
+            Text = "Murder Mystery 2",
             Font = FONT.Body,
             TextSize = TS.LogoSub,
             TextColor3 = T.TextDark,
@@ -1050,18 +1069,8 @@ return function(env)
             Parent = sidebar
         })
 
-        -- Инфо-блок внизу сайдбара: COINS / NAME / COINS PER HOUR / ROLE /
-        -- VERSION. Высота = 5 строк + подпись + отступы
-        local STAT_ROW_H = 22
-        local STAT_KEYS = {"Name", "Role", "Coins", "CoinsPerHour", "Version"}
-        local STAT_TITLES = {
-            Name = "NAME", Role = "ROLE", Coins = "COINS",
-            CoinsPerHour = "COINS/H", Version = "VER",
-        }
-        local STATS_TOGGLE_H = 16          -- полоска сворачивания снизу блока
-        local STATS_ROWS_H = #STAT_KEYS * STAT_ROW_H + 12
-        local STATS_H = STATS_ROWS_H + STATS_TOGGLE_H
-        local SIDEBAR_BOTTOM = STATS_H + 30   -- блок + строка подписи
+        -- Внизу сайдбара — только строка подписи; навигация занимает всё остальное
+        local SIDEBAR_BOTTOM = 30
 
         local navScroll = Create("ScrollingFrame", {
             Name = "NavScroll",
@@ -1082,124 +1091,6 @@ return function(env)
         navLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
             navScroll.CanvasSize = UDim2.new(0, 0, 0, navLayout.AbsoluteContentSize.Y + 4)
         end)
-
-        -- Сводка сессии: подпись слева, значение справа. Значения тянутся из
-        -- Handlers (если MainScript их отдаёт) либо ставятся через GUI.SetStat
-        local statValues = {}
-
-        local statsFrame = Create("Frame", {
-            Name = "Stats",
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, EDGE, 1, -(STATS_H + 32)),
-            Size = UDim2.new(0, SIDEBAR_W - EDGE * 2, 0, STATS_H),
-            Parent = sidebar
-        })
-
-        Hairline({
-            Name = "StatsSep",
-            BackgroundColor3 = T.Border,
-            Position = UDim2.new(0, 0, 0, 0),
-            Size = UDim2.new(1, 0, 0, 1),
-            Parent = statsFrame
-        })
-
-        local statsRows = Create("Frame", {
-            Name = "Rows",
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 0, 0, 0),
-            Size = UDim2.new(1, 0, 0, STATS_ROWS_H),
-            Parent = statsFrame
-        })
-
-        -- Сворачивание — полосой под блоком, во всю его ширину
-        local statsToggle = Create("TextButton", {
-            Name = "StatsToggle",
-            Text = "",
-            BackgroundColor3 = G.Gray200,
-            BackgroundTransparency = 1,
-            AnchorPoint = Vector2.new(0, 1),
-            Position = UDim2.new(0, 0, 1, 0),
-            Size = UDim2.new(1, 0, 0, STATS_TOGGLE_H),
-            AutoButtonColor = false,
-            ZIndex = 3,
-            Parent = statsFrame
-        })
-        AddCorner(statsToggle, R_SM)
-        local statsChev, statsChevA, statsChevB = glyphChevron(statsToggle)
-        -- шеврон по центру полосы, а не у правого края
-        statsChev.AnchorPoint = Vector2.new(0.5, 0.5)
-        statsChev.Position = UDim2.new(0.5, 0, 0.5, 0)
-
-        local statsHidden = getgenv().Violite_StatsHidden == true
-        local function applyStatsHidden()
-            statsRows.Visible = not statsHidden
-            -- свёрнутый блок: шеврон смотрит вверх, полоса прижимается к низу
-            statsChevA.Rotation = statsHidden and 45 or -45
-            statsChevB.Rotation = statsHidden and -45 or 45
-            statsFrame.Size = UDim2.new(0, SIDEBAR_W - EDGE * 2, 0,
-                statsHidden and STATS_TOGGLE_H or STATS_H)
-            statsFrame.Position = UDim2.new(0, EDGE, 1,
-                -((statsHidden and STATS_TOGGLE_H or STATS_H) + 30))
-        end
-
-        statsToggle.MouseButton1Click:Connect(function()
-            statsHidden = not statsHidden
-            getgenv().Violite_StatsHidden = statsHidden
-            applyStatsHidden()
-        end)
-        statsToggle.MouseEnter:Connect(function()
-            TweenService:Create(statsToggle, TweenInfo.new(0.12), {BackgroundTransparency = 0}):Play()
-        end)
-        statsToggle.MouseLeave:Connect(function()
-            TweenService:Create(statsToggle, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
-        end)
-
-        for i, key in ipairs(STAT_KEYS) do
-            local y = 12 + (i - 1) * STAT_ROW_H
-            Create("TextLabel", {
-                Name = key .. "Label",
-                Text = STAT_TITLES[key],
-                Font = FONT.Body,
-                TextSize = TS.StatLabel,
-                TextColor3 = T.TextDark,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 0, 0, y),
-                Size = UDim2.new(0.62, 0, 0, STAT_ROW_H),
-                Parent = statsRows
-            })
-            statValues[key] = Create("TextLabel", {
-                Name = key .. "Value",
-                Text = "—",
-                Font = FONT.Bold,
-                TextSize = TS.StatValue,
-                TextColor3 = T.Text,
-                TextXAlignment = Enum.TextXAlignment.Right,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0.62, 0, 0, y),
-                Size = UDim2.new(0.38, 0, 0, STAT_ROW_H),
-                Parent = statsRows
-            })
-        end
-
-        applyStatsHidden()
-
-        -- Публичный сеттер: MainScript может пушить значения напрямую
-        function GUI.SetStat(key, value)
-            local label = statValues[key]
-            if label then
-                label.Text = (value == nil or value == "") and "—" or tostring(value)
-            end
-        end
-
-        -- Программное скрытие/показ блока
-        function GUI.SetStatsVisible(on)
-            statsHidden = not on
-            getgenv().Violite_StatsHidden = statsHidden
-            applyStatsHidden()
-        end
 
         -- Личная подпись внизу сайдбара — переехала из заголовка старой версии
         Create("TextLabel", {
@@ -1404,28 +1295,12 @@ return function(env)
             Parent = footer
         })
 
-        -- Раз в секунду обновляем пинг и сводку; цикл умирает вместе с gui
+        -- Раз в секунду обновляем пинг; цикл умирает вместе с gui
         task.spawn(function()
             while gui and gui.Parent do
                 pcall(function()
                     local ms = probePingMs()
                     pingLabel.Text = ms and string.format("Ping: %d ms", ms) or "Ping: -- ms"
-
-                    -- Сводка в сайдбаре. Handlers необязательны: чего нет —
-                    -- остаётся прочерк, ставить можно и через GUI.SetStat
-                    local function pull(handlerName)
-                        local fn = Handlers[handlerName]
-                        if not fn then return nil end
-                        local ok, res = pcall(fn)
-                        if ok and res ~= nil and res ~= "" then return tostring(res) end
-                        return nil
-                    end
-
-                    GUI.SetStat("Name", LocalPlayer and LocalPlayer.Name or nil)
-                    GUI.SetStat("Coins", pull("GetCoins"))
-                    GUI.SetStat("CoinsPerHour", pull("GetCoinsPerHour"))
-                    GUI.SetStat("Role", pull("GetRole"))
-                    GUI.SetStat("Version", CONFIG.Version or pull("GetVersion"))
                 end)
                 task.wait(1)
             end

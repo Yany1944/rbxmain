@@ -8,7 +8,7 @@
 local PHRASES = {
     "Best scrpt",
     "Top dev",      -- ✅ ИЗМЕНЕНО: "#1dev" → "Topdev"
-    "for mm2"
+    "for Murder Mystery 2"
 }
 
 local MIN_INTERVAL = 2
@@ -18,7 +18,7 @@ local MAX_INTERVAL = 2.5
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-print("🎬 MM2 Pet Name - No Numbers Mode")
+print("🎬 Murder Mystery 2 Pet Name - No Numbers Mode")
 
 local RenamePetRemote = ReplicatedStorage:FindFirstChild("Remotes")
 if RenamePetRemote then

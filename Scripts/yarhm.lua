@@ -5108,11 +5108,11 @@ local function IJIOJM_routine() -- Script: StarterGui.YARHM.Murder Mystery 2
 
 
 	if not game.ReplicatedStorage:WaitForChild("Remotes", 5) then
-		fu.dialog("Not MM2", "Looks like this game isn't MM2. Do you want to load the module anyway?", {"Load", "No"})
+		fu.dialog("Not Murder Mystery 2", "Looks like this game isn't Murder Mystery 2. Do you want to load the module anyway?", {"Load", "No"})
 
 		if fu.waitfordialog() == "No" then
 			fu.closedialog()
-			fu.notification("MM2 will not be loaded until you rejoin.", Color3.fromRGB(255, 0, 0), "x")
+			fu.notification("Murder Mystery 2 will not be loaded until you rejoin.", Color3.fromRGB(255, 0, 0), "x")
 			return
 		end	
 		fu.closedialog()
@@ -5852,7 +5852,7 @@ local function IJIOJM_routine() -- Script: StarterGui.YARHM.Murder Mystery 2
 					repeat
 						task.wait(0.1)
 						local murderer = findMurderer() or findSheriffThatsNotMe()
-						if not murderer then warn("[YARHM] > MM2 Autoshoot - No murderer.") continue end
+						if not murderer then warn("[YARHM] > Murder Mystery 2 Autoshoot - No murderer.") continue end
 						local murdererPosition = murderer.Character.HumanoidRootPart.Position
 						local characterRootPart = localplayer.Character.HumanoidRootPart
 						local rayDirection = (murdererPosition - characterRootPart.Position).Unit * 50
