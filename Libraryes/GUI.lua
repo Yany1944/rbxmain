@@ -868,13 +868,16 @@ return function(env)
     -- СОЗДАНИЕ UI (БЛОК 20 → CreateUI, TabFunctions и т.д.)
     ----------------------------------------------------------------
 
+    -- Имя окна: у второго окна (OwnerTools) своё, иначе оно снесло бы главное
+    local GUI_NAME = CONFIG.GuiName or "MM2_ESP_UI"
+
     local function CreateUI()
         for _, child in ipairs(CoreGui:GetChildren()) do
-            if child.Name == "MM2_ESP_UI" then child:Destroy() end
+            if child.Name == GUI_NAME then child:Destroy() end
         end
 
         local gui = Create("ScreenGui", {
-            Name = "MM2_ESP_UI",
+            Name = GUI_NAME,
             Parent = CoreGui
         })
         State.UIElements.MainGui = gui
@@ -906,10 +909,11 @@ return function(env)
         if not acrylic then
             pcall(function()
                 local Lighting = game:GetService("Lighting")
-                local old = Lighting:FindFirstChild("Violite_Blur")
+                local blurName = GUI_NAME == "MM2_ESP_UI" and "Violite_Blur" or (GUI_NAME .. "_Blur")
+                local old = Lighting:FindFirstChild(blurName)
                 if old then old:Destroy() end
                 blurEffect = Create("BlurEffect", {
-                    Name = "Violite_Blur",
+                    Name = blurName,
                     Size = 0,
                     Parent = Lighting
                 })

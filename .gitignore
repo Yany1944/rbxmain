@@ -21,3 +21,6 @@ Assets/LICENSE.txt
 /build/*.lua
 
 !/admin-panel/README.md
+
+# Owner-only local tools (never publish)
+/OwnerTools.lua

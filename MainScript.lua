@@ -9624,7 +9624,8 @@ do
 
     -- Флаг для скинченджера: пока копия активна, прозрачность наших частей ведём мы
     local function setSpinFlag(on)
-        pcall(function() getgenv().VioliteLocalSpin = on or nil end)
+        -- В бандле — общий канал ядра; вне бандла (dev без ядра) флаг некому читать
+        if Kernel then Kernel.Shared.LocalSpin = on or nil end
     end
 
     local function destroyLocalSpin()
@@ -11914,10 +11915,17 @@ Core.CleanupGUI = GUI.Cleanup
 -- И обратно: пользователь выгрузил скрипт сам — гасим продление сессии ядра,
 -- иначе поток продления жил бы до конца игры
 if Kernel then
+    -- Фабрика окна для OwnerTools (своё окно владельца); наружу — только при роли owner
+    Kernel.ExposeDev("GUIFactory", GUIFactory)
     Kernel.OnKill(function() pcall(Core.Shutdown) end)
     local shutdown = Core.Shutdown
     Core.Shutdown = function(...)
+        -- Ссылку берём до выгрузки: она может очистить State.Runtime
+        local spawner = State.Runtime and State.Runtime.SpawnerModule
+        if State.Runtime then State.Runtime.SpawnerModule = nil end
         shutdown(...)
+        -- Спавнер выгружается вместе с MainScript (визуал скинов, синхронизация)
+        if spawner then pcall(spawner.Destroy) end
         pcall(Kernel.Stop)
     end
 end
@@ -12175,6 +12183,19 @@ local ConfigManager = (function()
     ------------------------------------------------------------------
 
     -- defaults = true собирает «пустой» конфиг: дефолты контролов вместо текущих
+    -- Расширения конфига: модули бандла (спавнер) кладут своё состояние в __ext[имя].
+    -- Export() → значение для JSON, Import(значение) применяет его при загрузке
+    local extensions = {}
+
+    local function exportExtensions()
+        local out = {}
+        for name, ext in pairs(extensions) do
+            local ok, value = pcall(ext.Export)
+            if ok and value ~= nil then out[name] = value end
+        end
+        return next(out) and out or nil
+    end
+
     local function buildPayload(defaults, autoload)
         local elements = {}
         for flag, element in pairs(GUI.GetElements()) do
@@ -12199,6 +12220,8 @@ local ConfigManager = (function()
                 OrbitTilt = defaults and customDefaults.OrbitTilt or State.Settings.OrbitTilt,
             },
             __elements = elements,
+            -- «Пустой» конфиг (defaults) состояния модулей не несёт
+            __ext      = not defaults and exportExtensions() or nil,
         }
     end
 
@@ -12264,6 +12287,15 @@ local ConfigManager = (function()
                 if not ok then table.insert(errors, item.flag .. ": " .. tostring(err)) end
             end
         end
+        -- Модуль, чьих данных в конфиге нет (старый файл), не трогаем
+        if type(data.__ext) == "table" then
+            for name, ext in pairs(extensions) do
+                if data.__ext[name] ~= nil then
+                    local ok, err = pcall(ext.Import, data.__ext[name])
+                    if not ok then table.insert(errors, name .. ": " .. tostring(err)) end
+                end
+            end
+        end
         if #errors > 0 then return false, table.concat(errors, "; ") end
         return true
     end
@@ -12273,6 +12305,13 @@ local ConfigManager = (function()
     ------------------------------------------------------------------
 
     local ConfigManager = {
+        RegisterExtension = function(name, ext)
+            if type(name) == "string" and type(ext) == "table"
+                and type(ext.Export) == "function" and type(ext.Import) == "function" then
+                extensions[name] = ext
+            end
+        end,
+
         List = function()
             return listConfigs()
         end,
@@ -12656,6 +12695,21 @@ do
         if State.Runtime.OptimizationModule then State.Runtime.OptimizationModule.BuildSection(UtilityTab) end
 end
 
+-- ── Спавнер скинов — модуль бандла: его вкладки (Skins, Effects, Cases) живут в этом
+-- же окне, а пресет (выданные скины и эффекты) — в общем конфиге. Отдельно от
+-- MainScript он не запускается: нет ни своего окна, ни точки входа
+if Kernel then
+    local ok, err = pcall(function()
+        local spawner = Kernel.Require("Skinchanger")
+        spawner.Build({GUI = GUI, RegisterConfig = ConfigManager.RegisterExtension})
+        State.Runtime.SpawnerModule = spawner
+    end)
+    if not ok then
+        warn("[Violite] Skinchanger: " .. tostring(err))
+        ShowNotification("Skinchanger failed to load", CONFIG.Colors.Accent)
+    end
+end
+
 -- ── Подключение системы конфигов: все вкладки построены, реестр флагов полон.
 -- pcall на случай закэшированной старой версии GUI.lua без конфиг-API
 pcall(function()
@@ -12763,7 +12817,7 @@ StartRoleChecking()
 
 --#dev
 -- Отладочный доступ к внутренностям (только dev-сборка; в release вырезается)
-pcall(function() getgenv().VioDbg = {State = State, GUI = GUI, Core = Core, CONFIG = CONFIG, Kernel = Kernel} end)
+pcall(function() getgenv().VioDbg = {State = State, GUI = GUI, Core = Core, CONFIG = CONFIG, Kernel = Kernel, ConfigManager = ConfigManager} end)
 --#end
 end, debug.traceback)
 if not startupOk then
