@@ -19,3 +19,5 @@ Assets/LICENSE.txt
 # Bundle build artifacts and secrets (never commit)
 /build/secrets.json
 /build/*.lua
+
+!/admin-panel/README.md
