@@ -15,3 +15,4 @@ docs/refactor-audit.md
 docs/refactor-validation.md
 Assets/LICENSE.txt
 /Relay
+!/admin-panel/README.md
