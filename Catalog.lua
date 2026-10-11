@@ -159,6 +159,7 @@ local function clearVisuals()
     for _,id in ipairs(ids) do destroyItem(id) end
     restoreBody(app)
     restoreAnimations(app)
+    if app.RestoreColors then app.RestoreColors(app) end
     restoreHidden(function() return true end)
 end
 local function hideOriginal(ch,ctx)
@@ -193,11 +194,18 @@ function app.ExportOutfit()
             transforms[string.format('%.0f',id)]={Position=table.clone(t.Position),Rotation=table.clone(t.Rotation),Scale=table.clone(t.Scale)}
         end
     end
-    return {Version=4,AssetIds=ids,Items=items,HideOriginal=app.HideOriginal,Transforms=transforms}
+    -- Цвета тела — hex по слотам, масштаб — значения HumanoidDescription; nil, если не менялись
+    local colors
+    if app.BodyColors and next(app.BodyColors) then
+        colors={}; for slot,color in pairs(app.BodyColors) do colors[slot]=color:ToHex() end
+    end
+    return {Version=5,AssetIds=ids,Items=items,HideOriginal=app.HideOriginal,Transforms=transforms,
+        BodyColors=colors,Scales=app.Scales and table.clone(app.Scales) or nil}
 end
 function app.Reset()
     app.Revision+=1
     app.Desired={}; app.HideOriginal=false; app.Restoring=false; app.Busy=false
+    app.BodyColors=nil; app.Scales=nil
     clearVisuals(); refresh(); message('Original appearance restored')
 end
 local function attach(acc,ch,fit)
@@ -293,6 +301,8 @@ local function bodyContext(ch,ctx)
     -- Примеренные части тела: под них садятся аксессуары и собирается следующая часть
     for _,it in pairs(ctx.Items) do if it.Slot then d[it.Slot]=it.Id end end
     for prop,name in pairs(scaleValues) do local v=h:FindFirstChild(name); if v then d[prop]=v.Value end end
+    -- Масштаб из вкладки Body > Scale: под него собираются и тело, и посадка аксессуаров
+    if ctx.Scales then for prop,v in pairs(ctx.Scales) do d[prop]=v end end
     local key={h.RigType.Name}
     for _,prop in ipairs(bodyProperties) do table.insert(key,tostring(d[prop])) end
     d:SetAccessories({},true)
@@ -728,9 +738,12 @@ do
             assert(slot,'Not a body part')
             slots[slot]=e; description[slot]=e.Id
         end
+        -- Свой масштаб: с модели берём все части, а не только надетые — родные тоже меняют размер
+        local build=table.clone(slots)
+        if ctx.Scales and not r6 then for slot in pairs(slotParts) do build[slot]=build[slot] or true end end
         local keyParts={'body',rig.Name}
         for _,prop in ipairs(bodyProperties) do table.insert(keyParts,tostring(description[prop])) end
-        local names={}; for slot in pairs(slots) do table.insert(names,slot) end; table.sort(names)
+        local names={}; for slot in pairs(build) do table.insert(names,slot) end; table.sort(names)
         table.insert(keyParts,table.concat(names,','))
         local key=table.concat(keyParts,':')
         local cached=app.Cache[key]
@@ -739,7 +752,7 @@ do
             local ok,err=pcall(function()
                 model=apiCall(network.Avatar,function() return Players:CreateHumanoidModelFromDescriptionAsync(description,rig) end,active,0.35)
                 template=Instance.new('Model')
-                for slot in pairs(slots) do
+                for slot in pairs(build) do
                     if r6 and slot~='Head' then
                         for _,m in ipairs(model:GetChildren()) do
                             if m:IsA('CharacterMesh') and m.BodyPart==Enum.BodyPart[slot] then m.Parent=template end
@@ -942,7 +955,7 @@ do
             for id,it in pairs(app.Items) do if it.Slot then table.insert(remaining,{Id=id,Kind=it.Kind,Name=it.Name}) end end
             for _,e in ipairs(remaining) do app.Items[e.Id]=nil end
             restoreBody(app)
-            if #remaining>0 and ch then
+            if (#remaining>0 or app.Scales) and ch then
                 local rev=expectedRevision or app.Revision
                 local ok,err=pcall(wearBody,app,ch,remaining,function() return valid(rev,ch) end)
                 if not ok then refresh(); error(err,0) end
@@ -1074,7 +1087,8 @@ local function writeDocument(path,data)
 end
 local function saveSettings()
     if type(writefile)=='function' then
-        local ok=pcall(writeDocument,SETTINGS,{KeepOnRespawn=app.KeepOnRespawn,Window=app.Window})
+        local ok=pcall(writeDocument,SETTINGS,{KeepOnRespawn=app.KeepOnRespawn,Window=app.Window,StaticFace=app.StaticFace==true,
+            AdvancedColors=app.AdvancedColors==true,CustomColors=app.CustomColors or {}})
         return ok
     end
     return false
@@ -1083,6 +1097,9 @@ if type(readfile)=='function' then
     pcall(function()
         local s=readDocument(SETTINGS)
         if s and type(s.KeepOnRespawn)=='boolean' then app.KeepOnRespawn=s.KeepOnRespawn end
+        if s and type(s.StaticFace)=='boolean' then app.StaticFace=s.StaticFace end
+        if s and type(s.AdvancedColors)=='boolean' then app.AdvancedColors=s.AdvancedColors end
+        if s and type(s.CustomColors)=='table' then app.CustomColors=s.CustomColors end
         if s and type(s.Window)=='table' then
             for field,bounds in pairs({Width={1000,1900},Height={680,1100},Scale={0.6,1.6}}) do
                 local n=tonumber(s.Window[field])
@@ -1140,6 +1157,8 @@ local function normalizeSavedOutfit(entry,index)
     end
     if data.Items~=nil and type(data.Items)~='table' then return nil end
     if data.Transforms~=nil and type(data.Transforms)~='table' then return nil end
+    if data.BodyColors~=nil and type(data.BodyColors)~='table' then return nil end
+    if data.Scales~=nil and type(data.Scales)~='table' then return nil end
     for _,transform in pairs(data.Transforms or {}) do
         if type(transform)~='table' or not pcall(normalizedTransform,transform) then return nil end
     end
@@ -1231,6 +1250,9 @@ local function applyOutfit(data,rev)
     local failed,hints={},{}
     for _,item in ipairs(data.Items or {}) do if item.Id then hints[item.Id]=item end end
     if data.HideOriginal then app.SetHideOriginal(true) end
+    -- Образ целиком описывает тело: чего в нём нет — того нет и на персонаже
+    app.Scales=app.NormalizeScales(data.Scales)
+    app.BodyColors=app.NormalizeColors(data.BodyColors)
     local function active() return app.Alive and app.Revision==rev end
     for _,id in ipairs(data.AssetIds) do
         if not app.Desired[id] then
@@ -1246,11 +1268,15 @@ local function applyOutfit(data,rev)
         local ok,info=pcall(itemMetadata,id,hints[id],active)
         if ok and bodySlots[info.Kind] then table.insert(body,{Id=id,Kind=info.Kind,Name=info.Name}) else table.insert(rest,id) end
     end
-    if #body>0 then
+    if #body>0 or app.Scales then
         local ok=pcall(app.WearBodyAsync,body,rev)
         if not active() then return nil end
-        if not ok then for _,e in ipairs(body) do table.insert(failed,string.format('%.0f',e.Id)) end end
+        if not ok then
+            for _,e in ipairs(body) do table.insert(failed,string.format('%.0f',e.Id)) end
+            if #body==0 then table.insert(failed,'scale') end
+        end
     end
+    if app.BodyColors then pcall(app.ApplyColors,app,player.Character) end
     for _,id in ipairs(rest) do
         if not active() then return nil end
         local ok=pcall(function()
@@ -1276,7 +1302,7 @@ function app.HandleCharacterAdded(ch,keep)
         refresh(); message('Respawn: original appearance kept'); return
     end
     local outfit=app.ExportOutfit()
-    if #outfit.AssetIds==0 and not outfit.HideOriginal then app.Restoring=false; refresh(); return end
+    if #outfit.AssetIds==0 and not outfit.HideOriginal and not outfit.BodyColors and not outfit.Scales then app.Restoring=false; refresh(); return end
     app.Restoring=true; refresh(); message(keep and 'Body changed by the game: re-applying outfit...' or 'Respawn: waiting for appearance...')
     task.spawn(function()
         local started=os.clock()
@@ -1302,6 +1328,370 @@ end
 app.OnBodyInvalid=function(ch)
     if app.Alive and ch==player.Character then app.HandleCharacterAdded(ch,true) end
 end
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Цвета тела, масштаб, анимация лица (вкладка Body: Colors / Scale / Faces)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Отдельная функция: у главного чанка почти исчерпан лимит регистров, наружу — только поля app
+;(function()
+    -- Слоты в порядке редактора аватара Roblox; части R6 называются иначе
+    local COLOR_SLOTS={'Head','Torso','LeftArm','RightArm','LeftLeg','RightLeg'}
+    local R6_PARTS={Head={'Head'},Torso={'Torso'},LeftArm={'Left Arm'},RightArm={'Right Arm'},LeftLeg={'Left Leg'},RightLeg={'Right Leg'}}
+    -- Шкалы HumanoidDescription; Rule — ключ в AvatarRules.Scales. Глубина следует за шириной,
+    -- как в редакторе Roblox (отдельного ползунка у неё нет)
+    local SCALES={
+        {Key='HeightScale',Rule='Height',Name='Height',Min=0.9,Max=1.05,Default=1},
+        {Key='WidthScale',Rule='Width',Name='Width',Min=0.7,Max=1,Default=1},
+        {Key='HeadScale',Rule='Head',Name='Head',Min=0.95,Max=1,Default=1},
+        {Key='ProportionScale',Rule='Proportion',Name='Proportions',Min=0,Max=1,Default=0},
+        {Key='BodyTypeScale',Rule='BodyType',Name='Body type',Min=0,Max=1,Default=0},
+    }
+    -- Стандартная палитра — 30 тонов редактора Roblox в порядке CAC (снято с CAC);
+    -- остальное — через Advanced colors (пипетка и своя палитра)
+    local STANDARD_PALETTE={'5a4c42','7c5c46','af9483','cc8e69','eab892','564236','694028','bc9b5d','c7ac78','d7c59a',
+        '957977','a34b4b','da867a','ffc9c9','ff98dc','74869d','527cae','80bbdc','b1a7ff','a75e9b',
+        '008f9c','5b9a4c','7c9c6b','a1c48c','e29b40','f5cd30','f8d96d','635f62','cdcdcd','f8f8f8'}
+    local MAX_CUSTOM_COLORS=60
+    app.ColorSlots=COLOR_SLOTS
+    app.ScaleSpecs=SCALES
+
+    -- Правила аватара: диапазоны шкал и официальная палитра цветов кожи
+    task.spawn(function()
+        local ok,rules=pcall(AES.GetAvatarRules,AES)
+        if not ok or type(rules)~='table' or not app.Alive then return end
+        app.AvatarRules=rules
+        if app.OnAvatarRules then app.OnAvatarRules() end
+    end)
+    function app.ScaleBounds(spec)
+        local r=app.AvatarRules and app.AvatarRules.Scales and app.AvatarRules.Scales[spec.Rule]
+        local lo,hi=tonumber(r and r.Min),tonumber(r and r.Max)
+        local step=tonumber(r and r.Increment)
+        if not lo or not hi or lo>hi then lo,hi=spec.Min,spec.Max end
+        return lo,hi,(step and step>0) and step or 0.01
+    end
+    function app.Palette()
+        local list={}
+        for _,hex in ipairs(STANDARD_PALETTE) do table.insert(list,Color3.fromHex(hex)) end
+        return list
+    end
+    -- Своя палитра (Advanced colors): hex-строки в настройках, новые — в начале
+    local custom={}
+    for _,hex in ipairs(type(app.CustomColors)=='table' and app.CustomColors or {}) do
+        if type(hex)=='string' and hex:match('^%x%x%x%x%x%x$') and not table.find(custom,hex:lower()) and #custom<MAX_CUSTOM_COLORS then
+            table.insert(custom,hex:lower())
+        end
+    end
+    app.CustomColors=custom
+    function app.SaveCustomColor(color)
+        assert(typeof(color)=='Color3','Invalid color')
+        local hex=color:ToHex():lower()
+        local at=table.find(app.CustomColors,hex)
+        if at then table.remove(app.CustomColors,at) end
+        table.insert(app.CustomColors,1,hex)
+        while #app.CustomColors>MAX_CUSTOM_COLORS do table.remove(app.CustomColors) end
+        local persisted=saveSettings()
+        refresh()
+        return 'Color saved: #'..hex:upper()..(persisted and '' or ' (this session only)')
+    end
+    function app.RemoveCustomColor(hex)
+        local at=table.find(app.CustomColors,(tostring(hex):lower():gsub('#','')))
+        assert(at,'Color is not in your palette')
+        table.remove(app.CustomColors,at)
+        saveSettings(); refresh()
+        return 'Color removed: #'..tostring(hex):upper()
+    end
+
+    -- Нормализация (свои сохранения и данные чужих пиров): nil — «не менялось»
+    function app.NormalizeScales(raw)
+        if type(raw)~='table' then return nil end
+        local out,any={},false
+        for _,spec in ipairs(SCALES) do
+            local v=tonumber(raw[spec.Key])
+            if v and v==v and math.abs(v)~=math.huge then
+                local lo,hi,step=app.ScaleBounds(spec)
+                out[spec.Key]=math.clamp(math.floor(v/step+0.5)*step,lo,hi); any=true
+            end
+        end
+        if not any then return nil end
+        -- Недостающие шкалы — по умолчанию Roblox, глубина — вслед за шириной
+        for _,spec in ipairs(SCALES) do if out[spec.Key]==nil then out[spec.Key]=spec.Default end end
+        out.DepthScale=out.WidthScale
+        return out
+    end
+    function app.NormalizeColors(raw)
+        if type(raw)~='table' then return nil end
+        local out,any={},false
+        for _,slot in ipairs(COLOR_SLOTS) do
+            local v=raw[slot]
+            if typeof(v)=='Color3' then out[slot]=v; any=true
+            elseif type(v)=='string' then
+                local hex=v:gsub('^#','')
+                if hex:match('^%x%x%x%x%x%x$') then out[slot]=Color3.fromHex(hex); any=true end
+            end
+        end
+        return any and out or nil
+    end
+
+    -- ── Цвета ──────────────────────────────────────────────────────────────────
+    -- Красим части персонажа на месте. Игра перекрасила (BodyColors, ApplyDescription) —
+    -- запоминаем её цвет как исходный и возвращаем свой
+    local function colorParts(ch,slot)
+        local h=ch:FindFirstChildOfClass('Humanoid')
+        local names=(h and h.RigType==Enum.HumanoidRigType.R6) and R6_PARTS[slot] or slotParts[slot]
+        local parts={}
+        for _,name in ipairs(names or {}) do
+            local p=ch:FindFirstChild(name)
+            if p and p:IsA('BasePart') then table.insert(parts,p) end
+        end
+        return parts
+    end
+    local function sameColor(a,b)
+        return math.abs(a.R-b.R)<0.004 and math.abs(a.G-b.G)<0.004 and math.abs(a.B-b.B)<0.004
+    end
+    function app.RestoreColors(ctx)
+        ctx=ctx or app
+        local state=ctx.ColorState
+        if not state then return end
+        ctx.ColorState=nil
+        for _,c in ipairs(state.Connections) do c:Disconnect() end
+        for p,rec in pairs(state.Parts) do
+            if p.Parent and sameColor(p.Color,rec.Applied) then p.Color=rec.Original end
+        end
+    end
+    function app.ApplyColors(ctx,ch)
+        ctx=ctx or app
+        app.RestoreColors(ctx)
+        if not ch or not ctx.BodyColors then return end
+        local state={Character=ch,Parts={},Connections={}}
+        ctx.ColorState=state
+        for slot,color in pairs(ctx.BodyColors) do
+            for _,p in ipairs(colorParts(ch,slot)) do
+                local rec={Original=p.Color}
+                p.Color=color
+                rec.Applied=p.Color   -- цвет части хранится в 8 битах: сравниваем с прочитанным
+                state.Parts[p]=rec
+                table.insert(state.Connections,p:GetPropertyChangedSignal('Color'):Connect(function()
+                    if ctx.ColorState~=state or sameColor(p.Color,rec.Applied) then return end
+                    rec.Original=p.Color; p.Color=rec.Applied
+                end))
+            end
+        end
+    end
+    -- slot = 'All', ключ из COLOR_SLOTS или список ключей (несколько выбранных частей)
+    function app.SetBodyColor(slot,color)
+        assert(typeof(color)=='Color3','Invalid color')
+        local ch=current()
+        local list=slot=='All' and COLOR_SLOTS or (type(slot)=='table' and slot or {slot})
+        assert(#list>0,'Select a body part first')
+        local colors=app.BodyColors and table.clone(app.BodyColors) or {}
+        for _,s in ipairs(list) do
+            assert(table.find(COLOR_SLOTS,s),'Unknown body part')
+            colors[s]=color
+        end
+        app.BodyColors=colors
+        app.ApplyColors(app,ch)
+        refresh()
+        return 'Color applied: #'..color:ToHex():upper()
+    end
+    function app.ResetBodyColors()
+        app.BodyColors=nil
+        app.RestoreColors(app)
+        refresh()
+        return 'Body colors restored'
+    end
+    -- Текущий цвет слота: свой выбор или цвет персонажа
+    function app.SlotColor(slot)
+        if slot=='All' then slot='Head' end
+        if app.BodyColors and app.BodyColors[slot] then return app.BodyColors[slot] end
+        local ch=player.Character
+        local part=ch and colorParts(ch,slot)[1]
+        return part and part.Color or nil
+    end
+
+    -- ── Масштаб ────────────────────────────────────────────────────────────────
+    -- Значения шкал: свои или серверные (NumberValue в Humanoid)
+    function app.CurrentScales()
+        local out={}
+        local ch=player.Character
+        local h=ch and ch:FindFirstChildOfClass('Humanoid')
+        for _,spec in ipairs(SCALES) do
+            local v=app.Scales and app.Scales[spec.Key]
+            if v==nil and h then
+                local value=h:FindFirstChild(scaleValues[spec.Key])
+                v=value and value:IsA('NumberValue') and value.Value or nil
+            end
+            out[spec.Key]=v or spec.Default
+        end
+        return out
+    end
+    -- Пересборка тела под текущий масштаб: части тела из примерки и родные — одной моделью.
+    -- Аксессуары (свои и игры) пересаживает fixRig по новым аттачментам
+    local function rebuildBody(ch,rev)
+        local entries={}
+        for id,it in pairs(app.Items) do if it.Slot then table.insert(entries,{Id=id,Kind=it.Kind,Name=it.Name}) end end
+        restoreBody(app)
+        if #entries>0 or app.Scales then
+            wearBody(app,ch,entries,function() return valid(rev,ch) end)
+        end
+        if app.BodyColors then app.ApplyColors(app,ch) end
+    end
+    function app.SetScalesAsync(values,expectedRevision)
+        local ch=current(); local rev=expectedRevision or app.Revision
+        assert(valid(rev,ch),'Operation cancelled')
+        local h=ch:FindFirstChildOfClass('Humanoid')
+        assert(h.RigType==Enum.HumanoidRigType.R15,'Scaling is available only for R15 avatars')
+        local merged=app.CurrentScales()
+        for key,v in pairs(values or {}) do merged[key]=v end
+        local previous=app.Scales
+        app.Scales=app.NormalizeScales(merged)
+        local ok,err=pcall(rebuildBody,ch,rev)
+        if not ok then
+            app.Scales=previous
+            if valid(rev,ch) then pcall(rebuildBody,ch,rev) end
+            refresh(); error(err,0)
+        end
+        refresh()
+        return 'Scale applied'
+    end
+    function app.ResetScalesAsync(expectedRevision)
+        local ch=current(); local rev=expectedRevision or app.Revision
+        if not app.Scales then return 'Scale is already original' end
+        app.Scales=nil
+        rebuildBody(ch,rev)
+        refresh()
+        return 'Original scale restored'
+    end
+
+    -- ── Анимация лица ──────────────────────────────────────────────────────────
+    -- Мимику динамической головы движок подаёт в отрисовку из всех треков с каналами лица:
+    -- mood-трек (выражение) и обычные анимации тела — стандартный idle Roblox моргает и водит
+    -- глазами. Ни запись в свойства FaceControls, ни приоритеты треков это не перекрывают
+    -- (проверено вживую). Static, как StaticFacialAnimation в CAC: снимаем с головы FaceControls —
+    -- без него аниматору нечем двигать лицо, голова показывает своё базовое выражение.
+    -- Тело анимируется как обычно. Локально: другие игроки видят анимации своего клиента
+    app.StaticFace=app.StaticFace==true
+    local parked={}          -- {FC, Head, Entry}: снятые FaceControls, новые — в конце
+    local headConnection
+    local function headTryOn(head)
+        local body=app.Body
+        local entry=body and body.Parts.Head
+        return entry and entry.Part==head and entry or nil
+    end
+    local function park(fc,head)
+        local entry=headTryOn(head)
+        -- Клон из примерки головы помним вместе с её записью: после отката примерки он лишний
+        table.insert(parked,{FC=fc,Head=head,Entry=entry and table.find(entry.Added,fc) and entry or nil})
+        fc.Parent=nil
+    end
+    local function parkAll(head)
+        if not head then return end
+        for _,o in ipairs(head:GetChildren()) do if o:IsA('FaceControls') then park(o,head) end end
+    end
+    -- Возврат: свежие первыми. Оригинал головы под активной примеркой отдаём системе тела
+    -- (вернётся при откате), клон уже снятой примерки выбрасываем
+    local function unparkAll()
+        local list=parked; parked={}
+        for i=#list,1,-1 do
+            local rec=list[i]
+            local fc,head=rec.FC,rec.Head
+            local entry=headTryOn(head)
+            if not head.Parent then
+                -- персонаж ушёл вместе с головой
+            elseif rec.Entry and rec.Entry~=entry then
+                fc:Destroy()
+            elseif entry and not rec.Entry then
+                entry.Hidden[fc]=head
+            elseif not head:FindFirstChildOfClass('FaceControls') then
+                pcall(function() fc.Parent=head end)
+            end
+        end
+    end
+    local function bindHead(ch)
+        if headConnection then headConnection:Disconnect(); headConnection=nil end
+        local head=ch and ch:FindFirstChild('Head')
+        if not head then return end
+        -- Новая голова из примерки или с сервера приносит свой FaceControls — тоже снимаем
+        -- Parent внутри ChildAdded менять нельзя (Roblox отменяет) — снимаем следующим тиком
+        headConnection=connect(head.ChildAdded,function(o)
+            if not o:IsA('FaceControls') then return end
+            task.defer(function()
+                if app.StaticFace and app.Alive and o.Parent==head then park(o,head) end
+            end)
+        end)
+        if app.StaticFace then parkAll(head) end
+    end
+    local frozen=setmetatable({},{__mode='k'})
+    local faceConnection
+    -- Сравниваем по числу: Animate и пак пишут один id как rbxassetid:// и как .../asset/?id=
+    local function assetNumber(id) return tostring(id or ''):match('(%d+)%s*$') end
+    local function moodIds(ch)
+        local ids={}
+        local animate=ch and ch:FindFirstChild('Animate')
+        local mood=animate and animate:FindFirstChild('mood')
+        if mood then for _,a in ipairs(mood:GetDescendants()) do
+            local n=a:IsA('Animation') and assetNumber(a.AnimationId)
+            if n then ids[n]=true end
+        end end
+        return ids
+    end
+    local function animatorOf(ch)
+        local h=ch and ch:FindFirstChildOfClass('Humanoid')
+        return h and h:FindFirstChildOfClass('Animator')
+    end
+    function app.ApplyFacialAnimation()
+        local ch=player.Character
+        local animator=animatorOf(ch)
+        if not animator then return end
+        local ids=moodIds(ch)
+        for _,t in ipairs(animator:GetPlayingAnimationTracks()) do
+            local n=t.Animation and assetNumber(t.Animation.AnimationId)
+            local isFace=n and ids[n]
+            if isFace and app.StaticFace and app.Alive then
+                -- Mood дополнительно замираем: его кадр реплицируется и другим игрокам.
+                -- Скорость — сразу; TimePosition у ещё не загруженного трека падает, поэтому отдельно
+                if not frozen[t] then frozen[t]=t.Speed~=0 and t.Speed or 1 end
+                if t.Speed~=0 then pcall(t.AdjustSpeed,t,0) end
+                if t.Length>0 and t.TimePosition~=0 then pcall(function() t.TimePosition=0 end) end
+            elseif frozen[t] then
+                pcall(t.AdjustSpeed,t,frozen[t]); frozen[t]=nil
+            end
+        end
+    end
+    function app.SetStaticFace(value)
+        app.StaticFace=value==true
+        saveSettings()
+        local ch=player.Character
+        if app.StaticFace then parkAll(ch and ch:FindFirstChild('Head')) else unparkAll() end
+        app.ApplyFacialAnimation()
+        refresh()
+        return app.StaticFace and 'Facial animation off: static face' or 'Facial animation on'
+    end
+    -- Выгрузка: лицо снова анимировано
+    function app.ReleaseFace()
+        unparkAll()
+        if headConnection then headConnection:Disconnect(); headConnection=nil end
+        for t,speed in pairs(frozen) do pcall(t.AdjustSpeed,t,speed); frozen[t]=nil end
+        if faceConnection then faceConnection:Disconnect(); faceConnection=nil end
+    end
+    -- Animate перезапускает mood (смена пака, головы, респавн) — ловим каждый новый трек
+    local function bindFace(ch)
+        if faceConnection then faceConnection:Disconnect(); faceConnection=nil end
+        -- Снятое с прошлого персонажа ушло вместе с ним
+        parked={}
+        if not ch then return end
+        task.spawn(function()
+            local h=ch:WaitForChild('Humanoid',10)
+            local animator=h and h:WaitForChild('Animator',10)
+            if not animator or not app.Alive or player.Character~=ch then return end
+            faceConnection=connect(animator.AnimationPlayed,function()
+                if app.StaticFace then task.defer(app.ApplyFacialAnimation) end
+            end)
+            bindHead(ch)
+            app.ApplyFacialAnimation()
+        end)
+    end
+    connect(player.CharacterAdded,bindFace)
+    bindFace(player.Character)
+end)()
 local C={Bg=Color3.fromRGB(28,29,32),Surface=Color3.fromRGB(36,38,41),Card=Color3.fromRGB(47,49,53),
     Muted=Color3.fromRGB(170,174,182),Text=Color3.fromRGB(245,246,248),Accent=Color3.fromRGB(65,111,85),
     Green=Color3.fromRGB(58,111,82),Border=Color3.fromRGB(67,70,76)}
@@ -1459,7 +1849,9 @@ local categories={
         sub('T-shirts',{'TShirtAccessory'}),sub('Pants',{'PantsAccessory'}),sub('Jackets',{'JacketAccessory'}),
         sub('Shirts',{'ShirtAccessory'}),sub('Sweaters',{'SweaterAccessory'}),sub('Shorts',{'ShortsAccessory'}),
         sub('Dresses / skirts',{'DressSkirtAccessory'}),sub('Shoes',{'LeftShoeAccessory','RightShoeAccessory'})}},
+    -- Colors и Scale — панели вместо выдачи (Panel), как в CAC; у Faces — переключатель мимики
     {Name='Body',Sub={
+        {Name='Colors',Types={},Panel='Colors'},{Name='Scale',Types={},Panel='Scale'},
         sub('Characters',nil,nil,false,{'BodyParts'}),sub('Free',nil,nil,true,{'BodyParts'}),sub('Faces',nil,nil,false,{'DynamicHead'}),
         sub('Heads',{'Head','DynamicHead'},nil,false,nil,'MostFavorited'),sub('Torso',{'Torso'},nil,false,nil,'MostFavorited'),
         sub('Arms',{'LeftArm','RightArm'},nil,false,nil,'MostFavorited'),sub('Legs',{'LeftLeg','RightLeg'},nil,false,nil,'MostFavorited'),
@@ -1471,6 +1863,7 @@ local categories={
 }
 for _,cat in ipairs(categories) do
     if cat.Name=='Collectibles' then for _,entry in ipairs(cat.Sub) do entry.SalesTypeFilter='Collectibles' end end
+    if cat.Name=='Body' then for _,entry in ipairs(cat.Sub) do if entry.Name=='Faces' then entry.FaceToggle=true end end end
 end
 app.Categories=categories
 local category,subcategory=1,1
@@ -1536,7 +1929,8 @@ local pages,resultCount,searchSerial=nil,0,0
 local cardButtons={}
 local favoriteButtons={}
 local function clearResults()
-    for _,o in ipairs(results:GetChildren()) do if o:IsA('Frame') then o:Destroy() end end
+    -- Карточки бывают Frame и TextButton (плитка импорта) — убираем любые
+    for _,o in ipairs(results:GetChildren()) do if o:IsA('GuiObject') then o:Destroy() end end
     resultCount=0; cardButtons={}; favoriteButtons={}; results.CanvasPosition=Vector2.zero
 end
 local renderSavedOutfits,renderSavedItems,renderCategories,filterMatch,search
@@ -1717,36 +2111,322 @@ local function outfitItems(data)
 end
 local function equipSavedOutfit(entry)
     run(function(rev)
-        clearVisuals(); app.Desired={}; app.HideOriginal=false
+        clearVisuals(); app.Desired={}; app.HideOriginal=false; app.BodyColors=nil; app.Scales=nil
         local failed=applyOutfit(entry.Data,rev)
         return failed and #failed==0 and ('Outfit equipped: '..entry.Name) or ('Some outfit items could not load: '..table.concat(failed or {},', '))
     end)
 end
-local function openOutfitPreview(entry)
-    clearModal(); modalShade.Visible=true
-    local f=make('Frame',{AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(620,590),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
-    make('UIScale',{Scale=scale.Scale},f)
-    corner(f,14); make('UIStroke',{Color=C.Border,Thickness=1},f)
-    local t=modalLabel(f,entry.Name,22,14,500,34,26); t.Font=Enum.Font.SourceSansBold
-    modalButton(f,'X',558,14,40,34,clearModal,false)
-    modalLabel(f,'Equip this saved outfit?',22,53,560,28,18).TextColor3=C.Muted
-    local list=make('ScrollingFrame',{Position=UDim2.fromOffset(22,92),Size=UDim2.fromOffset(576,404),BackgroundColor3=C.Surface,BorderSizePixel=0,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4},f)
-    corner(list); make('UIListLayout',{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},list); make('UIPadding',{PaddingTop=UDim.new(0,8),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,8)},list)
-    local items=outfitItems(entry.Data)
-    if #items==0 then
-        local none=modalLabel(list,'This outfit contains no added items.',8,8,530,52,18); none.Size=UDim2.new(1,-16,0,52); none.TextColor3=C.Muted
-    else
-        for i,item in ipairs(items) do
-            local row=make('Frame',{Size=UDim2.new(1,-8,0,66),LayoutOrder=i,BackgroundColor3=C.Card,BorderSizePixel=0},list); corner(row)
-            make('ImageLabel',{Image='rbxthumb://type=Asset&id='..string.format('%.0f',item.Id)..'&w=150&h=150',Position=UDim2.fromOffset(7,7),Size=UDim2.fromOffset(52,52),BackgroundTransparency=1},row)
-            local n=modalLabel(row,item.Name,70,8,460,28,17); n.TextTruncate=Enum.TextTruncate.AtEnd
-            local idLabel=modalLabel(row,'ID: '..string.format('%.0f',item.Id),70,35,460,22,15); idLabel.TextColor3=C.Muted
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Сохранённые образы: общие элементы плиток, коды обмена, окна Open / Manage / Share / Import
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Отдельная функция: у главного чанка почти исчерпан лимит регистров, наружу — только поля app
+;(function()
+    local SHARE_PREFIX='VCO1'
+    local SHARE_MAX_ITEMS=200
+    local DANGER=Color3.fromRGB(255,156,157)
+
+    -- ── Общие элементы плиток ─────────────────────────────────────────────────
+    function app.OutfitThumb(id,size,x,y,parent)
+        return make('ImageLabel',{Image='rbxthumb://type=Asset&id='..string.format('%.0f',id)..'&w=150&h=150',
+            Size=UDim2.fromOffset(size,size),Position=UDim2.fromOffset(x,y),BackgroundTransparency=1,ScaleType=Enum.ScaleType.Fit},parent)
+    end
+    -- Подпись образа: предметы и признаки своего тела
+    function app.DescribeOutfit(d)
+        local count=#(d.AssetIds or {})
+        local parts={count==1 and '1 item' or (count..' items')}
+        if type(d.BodyColors)=='table' and next(d.BodyColors) then table.insert(parts,'body colors') end
+        if type(d.Scales)=='table' and next(d.Scales) then table.insert(parts,'scale') end
+        if d.HideOriginal then table.insert(parts,'originals hidden') end
+        return table.concat(parts,'  ·  ')
+    end
+    -- Точки цветов тела (до 6 слотов), прижаты к правому краю parent
+    function app.OutfitColorDots(d,parent,x,y)
+        if type(d.BodyColors)~='table' then return end
+        local i=0
+        for _,slot in ipairs(app.ColorSlots or {}) do
+            local hex=d.BodyColors[slot]
+            local ok,color=pcall(Color3.fromHex,tostring(hex or ''))
+            if hex and ok then
+                local dot=make('Frame',{Size=UDim2.fromOffset(12,12),Position=UDim2.new(1,x-i*15,0,y),AnchorPoint=Vector2.new(1,0),BackgroundColor3=color,BorderSizePixel=0,ZIndex=3},parent)
+                corner(dot,6); make('UIStroke',{Color=C.Bg,Thickness=1.5},dot)
+                i+=1
+            end
         end
     end
-    local originalText=entry.Data.HideOriginal and 'Original items will be hidden.' or 'Original items will remain visible.'
-    modalLabel(f,originalText,22,503,360,24,15).TextColor3=C.Muted
-    modalButton(f,'Cancel',391,510,95,48,clearModal,false)
-    modalButton(f,'Equip',497,510,101,48,function() clearModal(); equipSavedOutfit(entry) end,true)
+    -- Полка превью: до max миниатюр, при избытке последняя ячейка — «+N»
+    function app.OutfitShelf(d,parent,size,step,max)
+        local ids=d.AssetIds or {}
+        local slots=#ids>max and max-1 or #ids
+        for j=1,slots do app.OutfitThumb(ids[j],size,7+(j-1)*step,7,parent) end
+        if #ids>max then
+            local more=label('+'..(#ids-slots),7+slots*step,7,size,size,parent,18)
+            more.TextXAlignment=Enum.TextXAlignment.Center; more.TextColor3=C.Muted
+        elseif #ids==0 then
+            local none=label('Body only',0,0,10,10,parent,15)
+            none.Size=UDim2.fromScale(1,1); none.TextXAlignment=Enum.TextXAlignment.Center; none.TextColor3=C.Muted
+        end
+        app.OutfitColorDots(d,parent,-6,6)
+    end
+    -- Ровная подсветка плитки: обводка внутрь (в старых клиентах — внешняя)
+    function app.TileStroke(tile)
+        local stroke=make('UIStroke',{Color=C.Border,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},tile)
+        pcall(function() stroke.BorderStrokePosition=Enum.BorderStrokePosition.Inner end)
+        tile.MouseEnter:Connect(function() stroke.Color=C.Green; stroke.Thickness=2 end)
+        tile.MouseLeave:Connect(function() stroke.Color=C.Border; stroke.Thickness=1 end)
+        return stroke
+    end
+
+    -- ── Код обмена ────────────────────────────────────────────────────────────
+    -- VCO1.<base64url(JSON)>.<adler32>: ID — строками (большие числа JSON может исказить),
+    -- контрольная сумма ловит обрезанный при копировании код
+    local B64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    local B64_INDEX={}
+    for i=1,64 do B64_INDEX[B64:byte(i)]=i-1 end
+    local function base64Encode(s)
+        local out={}
+        for i=1,#s,3 do
+            local a,b,c=s:byte(i,i+2)
+            local n=a*65536+(b or 0)*256+(c or 0)
+            local chars=b and (c and 4 or 3) or 2
+            for k=1,chars do
+                local v=math.floor(n/64^(4-k))%64
+                table.insert(out,B64:sub(v+1,v+1))
+            end
+        end
+        return table.concat(out)
+    end
+    local function base64Decode(s)
+        local out={}
+        for i=1,#s,4 do
+            local n,count=0,0
+            for k=0,3 do
+                local ch=s:byte(i+k)
+                if ch then
+                    local v=B64_INDEX[ch]
+                    if not v then error('Code contains invalid characters',0) end
+                    n=n*64+v; count+=1
+                else n=n*64 end
+            end
+            if count<2 then error('Code is incomplete',0) end
+            local bytes={math.floor(n/65536)%256,math.floor(n/256)%256,n%256}
+            for k=1,count-1 do table.insert(out,string.char(bytes[k])) end
+        end
+        return table.concat(out)
+    end
+    local function adler32(s)
+        local a,b=1,0
+        for i=1,#s do a=(a+s:byte(i))%65521; b=(b+a)%65521 end
+        return string.format('%08x',b*65536+a)
+    end
+    function app.EncodeOutfit(entry)
+        local d=entry.Data or {}
+        local orders={}
+        for _,item in ipairs(d.Items or {}) do if item.Id and item.LayerOrder then orders[item.Id]=item.LayerOrder end end
+        local ids,layer={},{}
+        for i,id in ipairs(d.AssetIds or {}) do
+            ids[i]=string.format('%.0f',id)
+            layer[i]=orders[id] or 0
+        end
+        local payload={n=entry.Name,a=ids,o=layer,x=d.HideOriginal==true or nil,t=d.Transforms,c=d.BodyColors,s=d.Scales}
+        local json=Http:JSONEncode(payload)
+        return SHARE_PREFIX..'.'..base64Encode(json)..'.'..adler32(json)
+    end
+    -- Разбор кода: возвращает {Name, Data} в формате сохранённого образа или ошибку
+    function app.DecodeOutfit(code)
+        local text=tostring(code or ''):gsub('%s','')
+        local prefix,body,sum=text:match('^(%w+)%.([%w%-_]+)%.(%x+)$')
+        -- Начало от нашего кода, но формат сломан — его обрезали при копировании
+        assert(prefix or not text:find('^'..SHARE_PREFIX..'%.'),'The code is damaged or incomplete — copy it again')
+        assert(prefix,'This is not an outfit code')
+        assert(prefix==SHARE_PREFIX,'This outfit code is from a newer version of the catalog')
+        local json=base64Decode(body)
+        assert(adler32(json)==sum:lower(),'The code is damaged or incomplete — copy it again')
+        local ok,payload=pcall(Http.JSONDecode,Http,json)
+        assert(ok and type(payload)=='table' and type(payload.a)=='table','The code is damaged or incomplete')
+        assert(#payload.a<=SHARE_MAX_ITEMS,'This outfit has too many items')
+        local ids,items={},{}
+        for i,raw in ipairs(payload.a) do
+            local id=tonumber(raw)
+            assert(id and id>0 and id%1==0 and id<2^53,'The code contains an invalid item')
+            if not table.find(ids,id) then
+                table.insert(ids,id)
+                local order=type(payload.o)=='table' and tonumber(payload.o[i]) or 0
+                table.insert(items,{Id=id,Name='ID '..string.format('%.0f',id),LayerOrder=(order and order>0) and math.floor(order) or nil})
+            end
+        end
+        -- Цвета и масштаб — через ту же нормализацию, что и свои; обратно в формат сохранения
+        local colors=app.NormalizeColors(payload.c)
+        local hex
+        if colors then hex={}; for slot,color in pairs(colors) do hex[slot]=color:ToHex() end end
+        local transforms
+        if type(payload.t)=='table' then
+            transforms={}
+            for key,t in pairs(payload.t) do
+                if type(key)=='string' and table.find(ids,tonumber(key)) and pcall(normalizedTransform,t) then transforms[key]=normalizedTransform(t) end
+            end
+        end
+        local data={Version=5,AssetIds=ids,Items=items,HideOriginal=payload.x==true,Transforms=transforms,
+            BodyColors=hex,Scales=app.NormalizeScales(payload.s)}
+        local name=safeText(payload.n or 'Shared outfit')
+        assert(normalizeSavedOutfit({Id='import',Name=name,Data=data},1),'The code is damaged or incomplete')
+        assert(#ids>0 or data.BodyColors or data.Scales or data.HideOriginal,'This outfit is empty')
+        return {Name=name,Data=data}
+    end
+    -- Имя без повторов: «Образ», «Образ (2)», ...
+    local function uniqueName(name)
+        local taken={}
+        for _,entry in ipairs(SavedOutfits) do taken[entry.Name]=true end
+        if not taken[name] then return name end
+        for i=2,999 do
+            local candidate=name..' ('..i..')'
+            if not taken[candidate] then return candidate end
+        end
+        return name
+    end
+    function app.ImportOutfit(code,name)
+        local decoded=app.DecodeOutfit(code)
+        local entry=app.SaveOutfit(uniqueName(safeText(name or decoded.Name)),decoded.Data)
+        return entry
+    end
+
+    -- ── Каркас окон ───────────────────────────────────────────────────────────
+    local function dialog(name,w,h,titleText,subtitle)
+        clearModal(); modalShade.Visible=true
+        local f=make('Frame',{Name=name,AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(w,h),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
+        make('UIScale',{Scale=scale.Scale},f); corner(f,16); make('UIStroke',{Color=C.Border,Thickness=1},f)
+        local t=modalLabel(f,titleText,24,16,w-110,34,26); t.Font=Enum.Font.SourceSansBold; t.TextTruncate=Enum.TextTruncate.AtEnd; t.TextWrapped=false
+        if subtitle then
+            local s=modalLabel(f,subtitle,24,50,w-48,24,16); s.TextColor3=C.Muted; s.TextTruncate=Enum.TextTruncate.AtEnd; s.TextWrapped=false
+        end
+        modalButton(f,'X',w-62,18,38,32,clearModal).Name='Close'
+        return f
+    end
+    local function codeBox(parent,x,y,w,h,text,editable)
+        local box=make('TextBox',{Name='Code',Text=text or '',PlaceholderText='Paste an outfit code (VCO1...)',Position=UDim2.fromOffset(x,y),Size=UDim2.fromOffset(w,h),
+            BackgroundColor3=C.Surface,TextColor3=C.Text,PlaceholderColor3=C.Muted,Font=Enum.Font.Code,TextSize=15,ClearTextOnFocus=false,
+            MultiLine=true,TextWrapped=true,TextEditable=editable~=false,TextXAlignment=Enum.TextXAlignment.Left,
+            TextYAlignment=Enum.TextYAlignment.Top,ClipsDescendants=true,BorderSizePixel=0},parent)
+        corner(box,10); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,12),PaddingTop=UDim.new(0,10),PaddingBottom=UDim.new(0,10)},box)
+        return box
+    end
+    -- Текст ошибки без «Catalog:123: »
+    local function cleanError(err) return (tostring(err):gsub('^[^:]*:%d+: ','')) end
+    local function copyText(text)
+        local fn=(type(setclipboard)=='function' and setclipboard) or (type(toclipboard)=='function' and toclipboard)
+        if not fn then return false end
+        return (pcall(fn,text))
+    end
+
+    -- ── Share ─────────────────────────────────────────────────────────────────
+    function app.OpenShareDialog(entry)
+        local ok,code=pcall(app.EncodeOutfit,entry)
+        if not ok then message(code,true); return end
+        local f=dialog('ShareOutfit',560,372,'Share outfit',entry.Name)
+        local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,86),Size=UDim2.fromOffset(512,60),BackgroundColor3=C.Surface,BorderSizePixel=0},f)
+        corner(shelf,10); app.OutfitShelf(entry.Data,shelf,46,50,9)
+        modalLabel(f,'Send this code to a friend. They can add the outfit in Saved > Import outfit.',24,156,512,24,16).TextColor3=C.Muted
+        local box=codeBox(f,24,186,512,96,code,false)
+        local size=modalLabel(f,#code..' characters  ·  '..app.DescribeOutfit(entry.Data),24,290,300,22,14)
+        size.TextColor3=C.Muted; size.TextTruncate=Enum.TextTruncate.AtEnd; size.TextWrapped=false
+        local copy
+        copy=modalButton(f,'Copy code',336,316,200,40,function()
+            if copyText(code) then
+                copy.Text='Copied!'; message('Outfit code copied: '..entry.Name)
+            else
+                -- Без setclipboard: выделяем код, остаётся Ctrl+C
+                pcall(function() box:CaptureFocus(); box.SelectionStart=1; box.CursorPosition=#code+1 end)
+                message('Your executor cannot copy. Select the code and press Ctrl+C',true)
+            end
+        end,true)
+        copy.Name='CopyCode'
+        modalButton(f,'Done',220,316,106,40,clearModal).Name='Done'
+    end
+
+    -- ── Import ────────────────────────────────────────────────────────────────
+    function app.OpenImportDialog()
+        local f=dialog('ImportOutfit',560,420,'Import outfit','Paste a code someone shared with you.')
+        local box=codeBox(f,24,86,512,96,'',true)
+        local preview=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,194),Size=UDim2.fromOffset(512,60),BackgroundColor3=C.Surface,BorderSizePixel=0},f)
+        corner(preview,10)
+        local status=modalLabel(f,'',24,262,512,22,15)
+        status.TextTruncate=Enum.TextTruncate.AtEnd; status.TextWrapped=false
+        local nameBox=make('TextBox',{Name='OutfitName',Text='',PlaceholderText='Outfit name',Position=UDim2.fromOffset(24,296),Size=UDim2.fromOffset(512,38),
+            BackgroundColor3=C.Surface,TextColor3=C.Text,PlaceholderColor3=C.Muted,Font=Enum.Font.SourceSans,TextSize=18,ClearTextOnFocus=false,
+            TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},f)
+        corner(nameBox); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,10)},nameBox)
+        local add=modalButton(f,'Add to Saved',336,358,200,40,nil,true)
+        add.Name='AddOutfit'
+        modalButton(f,'Cancel',220,358,106,40,clearModal).Name='Cancel'
+        local decoded
+        local function update()
+            for _,o in ipairs(preview:GetChildren()) do if not o:IsA('UICorner') then o:Destroy() end end
+            decoded=nil
+            if box.Text:gsub('%s','')=='' then
+                status.Text='The outfit preview will appear here.'; status.TextColor3=C.Muted
+            else
+                local ok,result=pcall(app.DecodeOutfit,box.Text)
+                if ok then
+                    decoded=result
+                    app.OutfitShelf(result.Data,preview,46,50,9)
+                    status.Text=result.Name..'  ·  '..app.DescribeOutfit(result.Data); status.TextColor3=C.Text
+                    if nameBox.Text=='' or nameBox:GetAttribute('Auto') then nameBox.Text=result.Name; nameBox:SetAttribute('Auto',true) end
+                else
+                    status.Text=cleanError(result); status.TextColor3=DANGER
+                end
+            end
+            add.BackgroundColor3=decoded and C.Accent or C.Card
+            add.AutoButtonColor=decoded~=nil
+        end
+        nameBox:GetPropertyChangedSignal('Text'):Connect(function()
+            if decoded and nameBox.Text~=decoded.Name then nameBox:SetAttribute('Auto',nil) end
+        end)
+        box:GetPropertyChangedSignal('Text'):Connect(update)
+        add.Activated:Connect(function()
+            if not decoded then message('Paste a valid outfit code first',true); return end
+            local name=nameBox.Text:match('^%s*(.-)%s*$')
+            local ok,result=pcall(app.ImportOutfit,box.Text,name~='' and name or decoded.Name)
+            if not ok then message(cleanError(result),true); return end
+            clearModal()
+            message('Outfit added: '..result.Name)
+            if categories[category].SavedRoot and savedSection=='Outfits' then renderSavedOutfits() end
+        end)
+        update()
+        task.defer(function() pcall(function() box:CaptureFocus() end) end)
+    end
+end)()
+local function openOutfitPreview(entry)
+    local items=outfitItems(entry.Data)
+    clearModal(); modalShade.Visible=true
+    local W=640
+    local f=make('Frame',{Name='OutfitPreview',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(W,560),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
+    make('UIScale',{Scale=scale.Scale},f); corner(f,16); make('UIStroke',{Color=C.Border,Thickness=1},f)
+    local t=modalLabel(f,entry.Name,24,16,W-110,34,26); t.Font=Enum.Font.SourceSansBold; t.TextTruncate=Enum.TextTruncate.AtEnd; t.TextWrapped=false
+    local sub=modalLabel(f,app.DescribeOutfit(entry.Data),24,50,W-48,24,16); sub.TextColor3=C.Muted
+    modalButton(f,'X',W-62,18,38,32,clearModal).Name='Close'
+    -- Предметы плитками: миниатюра на подложке, имя, ID
+    local grid=make('ScrollingFrame',{Name='Items',Position=UDim2.fromOffset(20,86),Size=UDim2.fromOffset(W-40,390),BackgroundTransparency=1,BorderSizePixel=0,
+        CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4},f)
+    make('UIGridLayout',{CellSize=UDim2.new(1/4,-12,0,150),CellPadding=UDim2.fromOffset(12,12),SortOrder=Enum.SortOrder.LayoutOrder},grid)
+    make('UIPadding',{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,10),PaddingBottom=UDim.new(0,8)},grid)
+    for i,item in ipairs(items) do
+        local cell=make('Frame',{Name='Item_'..i,LayoutOrder=i,BackgroundColor3=C.Card,BorderSizePixel=0},grid)
+        corner(cell,12)
+        local shelf=make('Frame',{Position=UDim2.fromOffset(8,8),Size=UDim2.new(1,-16,0,84),BackgroundColor3=C.Surface,BorderSizePixel=0},cell)
+        corner(shelf,10)
+        local img=app.OutfitThumb(item.Id,76,0,4,shelf)
+        img.AnchorPoint=Vector2.new(0.5,0); img.Position=UDim2.new(0.5,0,0,4)
+        local n=modalLabel(cell,item.Name,10,98,10,22,15); n.Size=UDim2.new(1,-20,0,22); n.TextTruncate=Enum.TextTruncate.AtEnd; n.TextWrapped=false
+        local id=modalLabel(cell,'ID '..string.format('%.0f',item.Id),10,120,10,20,13); id.Size=UDim2.new(1,-20,0,20); id.TextColor3=C.Muted
+    end
+    if #items==0 then
+        local none=modalLabel(f,'This outfit changes only the body: colors, scale or hidden originals.',24,200,W-48,60,18)
+        none.TextXAlignment=Enum.TextXAlignment.Center; none.TextColor3=C.Muted
+    end
+    local footer=modalLabel(f,entry.Data.HideOriginal and 'Original items will be hidden.' or 'Original items stay visible.',24,500,300,40,15)
+    footer.TextColor3=C.Muted
+    app.OutfitColorDots(entry.Data,f,-(24+216+12),514)
+    modalButton(f,'Cancel',W-24-216,496,100,44,clearModal).Name='Cancel'
+    modalButton(f,'Equip',W-24-108,496,108,44,function() clearModal(); equipSavedOutfit(entry) end,true).Name='Equip'
 end
 local function confirmOverwrite(entry,data)
     if app.Busy or app.Restoring then message('Please wait for the current item to finish loading'); return end
@@ -1761,72 +2441,220 @@ local function confirmOverwrite(entry,data)
 end
 local function openOutfitActions(entry)
     clearModal(); modalShade.Visible=true
-    local f=make('Frame',{Name='OutfitActions',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(470,288),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
-    make('UIScale',{Scale=scale.Scale},f); corner(f,14); make('UIStroke',{Color=C.Border,Thickness=1},f)
-    modalLabel(f,entry.Name,20,16,368,36,24).TextTruncate=Enum.TextTruncate.AtEnd
-    modalButton(f,'X',410,18,38,32,clearModal)
-    modalButton(f,'Overwrite with current outfit',20,76,430,48,function() confirmOverwrite(entry) end,true).Name='OverwriteOutfit'
-    modalButton(f,'Rename',20,138,430,48,function()
+    local W=500
+    local f=make('Frame',{Name='OutfitActions',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(W,416),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
+    make('UIScale',{Scale=scale.Scale},f); corner(f,16); make('UIStroke',{Color=C.Border,Thickness=1},f)
+    local t=modalLabel(f,entry.Name,24,16,W-110,34,26); t.Font=Enum.Font.SourceSansBold; t.TextTruncate=Enum.TextTruncate.AtEnd; t.TextWrapped=false
+    local sub=modalLabel(f,app.DescribeOutfit(entry.Data),24,50,W-48,24,16); sub.TextColor3=C.Muted
+    modalButton(f,'X',W-62,18,38,32,clearModal).Name='Close'
+    local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,86),Size=UDim2.fromOffset(W-48,60),BackgroundColor3=C.Surface,BorderSizePixel=0},f)
+    corner(shelf,10); app.OutfitShelf(entry.Data,shelf,46,50,9)
+    -- Действия: поделиться — главное, удаление — внизу и красным
+    modalButton(f,'Share outfit',24,162,W-48,46,function() app.OpenShareDialog(entry) end,true).Name='ShareOutfit'
+    modalButton(f,'Overwrite with current outfit',24,218,W-48,46,function() confirmOverwrite(entry) end).Name='OverwriteOutfit'
+    modalButton(f,'Rename',24,274,W-48,46,function()
         openNameDialog('Rename outfit',entry.Name,function(name)
             local ok,err=pcall(app.RenameOutfit,entry.Id,name)
             if not ok then message(err,true) end
             renderSavedOutfits()
         end)
     end).Name='RenameOutfit'
-    modalButton(f,'Delete outfit',20,212,430,44,function()
+    local delete=modalButton(f,'Delete outfit',24,346,W-48,46,function()
         openConfirmDialog('Delete outfit?',''..entry.Name..' will be removed from your saved outfits.','Delete',function()
             local ok,err=pcall(app.DeleteOutfit,entry.Id)
             if not ok then message(err,true) end
             renderSavedOutfits()
         end)
-    end).Name='DeleteOutfit'
+    end)
+    delete.Name='DeleteOutfit'; delete.TextColor3=Color3.fromRGB(255,156,157); delete.BackgroundColor3=C.Surface
 end
+-- Плитки как в окне сохранения: полка превью, точки цветов тела, имя, подпись, Open / Manage.
+-- Первая плитка — импорт образа по коду
 renderSavedOutfits=function()
     clearResults(); pages=nil; app.SearchBusy=false
     query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Search saved items...'; searchButton.Text='Search'
-    empty.Visible=#SavedOutfits==0
-    empty.Text='No saved outfits yet.\nCreate a look and click Save.'
+    local import=make('TextButton',{Name='ImportOutfit',Text='',AutoButtonColor=false,LayoutOrder=0,BackgroundColor3=C.Surface,BorderSizePixel=0},results)
+    corner(import,12); app.TileStroke(import)
+    local plus=make('Frame',{AnchorPoint=Vector2.new(0.5,0),Position=UDim2.new(0.5,0,0,44),Size=UDim2.fromOffset(56,56),BackgroundColor3=C.Card,BorderSizePixel=0},import)
+    corner(plus,28)
+    local sign=label('+',0,0,56,56,plus,36); sign.TextXAlignment=Enum.TextXAlignment.Center; sign.Font=Enum.Font.SourceSansBold
+    local it=label('Import outfit',0,112,180,26,import,18); it.Size=UDim2.new(1,0,0,26); it.TextXAlignment=Enum.TextXAlignment.Center; it.Font=Enum.Font.SourceSansSemibold
+    local ih=label('Paste a code someone shared',0,138,180,22,import,14); ih.Size=UDim2.new(1,0,0,22); ih.TextXAlignment=Enum.TextXAlignment.Center; ih.TextColor3=C.Muted
+    import.Activated:Connect(function() app.OpenImportDialog() end)
     for index,entry in ipairs(SavedOutfits) do
         if filterMatch(entry.Name) then
-        local card=make('Frame',{Name='SavedOutfit',LayoutOrder=index,BackgroundColor3=C.Card,BorderSizePixel=0},results); corner(card); resultCount+=1
-        local items=outfitItems(entry.Data)
-        for j=1,math.min(3,#items) do
-            make('ImageLabel',{Image='rbxthumb://type=Asset&id='..string.format('%.0f',items[j].Id)..'&w=150&h=150',Size=UDim2.fromOffset(48,48),Position=UDim2.fromOffset(9+(j-1)*53,10),BackgroundTransparency=1},card)
+            local card=make('Frame',{Name='SavedOutfit',LayoutOrder=index,BackgroundColor3=C.Card,BorderSizePixel=0,Active=true},results)
+            corner(card,12); resultCount+=1
+            local stroke=make('UIStroke',{Color=C.Border,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},card)
+            pcall(function() stroke.BorderStrokePosition=Enum.BorderStrokePosition.Inner end)
+            card.MouseEnter:Connect(function() stroke.Color=C.Green; stroke.Thickness=2 end)
+            card.MouseLeave:Connect(function() stroke.Color=C.Border; stroke.Thickness=1 end)
+            local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(8,8),Size=UDim2.new(1,-16,0,60),BackgroundColor3=C.Surface,BorderSizePixel=0},card)
+            corner(shelf,10); app.OutfitShelf(entry.Data,shelf,46,50,3)
+            local n=label(entry.Name,10,74,160,24,card,18); n.Size=UDim2.new(1,-20,0,24)
+            n.TextTruncate=Enum.TextTruncate.AtEnd; n.TextWrapped=false; n.Font=Enum.Font.SourceSansSemibold
+            local m=label(app.DescribeOutfit(entry.Data),10,98,160,20,card,14); m.Size=UDim2.new(1,-20,0,20)
+            m.TextColor3=C.Muted; m.TextTruncate=Enum.TextTruncate.AtEnd; m.TextWrapped=false
+            card:SetAttribute('OutfitId',entry.Id)
+            local open=button('Open',8,130,0,34,function() openOutfitPreview(entry) end,card,true)
+            open.Name='PreviewOutfit'; open.Size=UDim2.new(1,-16,0,34)
+            local manage=button('Manage',8,170,0,32,function() openOutfitActions(entry) end,card)
+            manage.Name='ManageOutfit'; manage.Size=UDim2.new(1,-16,0,32); manage.BackgroundColor3=C.Surface; manage.TextSize=17
         end
-        if #items==0 then modalLabel(card,'Empty outfit',12,18,156,34,16).TextColor3=C.Muted end
-        local n=label(entry.Name,10,66,160,39,card,17); n.TextTruncate=Enum.TextTruncate.AtEnd; n.Font=Enum.Font.SourceSansSemibold
-        local count=label('Items: '..#items,10,107,160,22,card,15); count.TextColor3=C.Muted
-        card:SetAttribute('OutfitId',entry.Id)
-        button('Open',10,136,160,30,function() openOutfitPreview(entry) end,card,true).Name='PreviewOutfit'
-        button('Manage',10,173,160,28,function() openOutfitActions(entry) end,card).Name='ManageOutfit'
     end
-        end
-    empty.Visible=resultCount==0
+    empty.Visible=resultCount==0 and #SavedOutfits>0
+    empty.Text='No outfits match your search.'
     moreButton.Text='Saved outfits: '..resultCount; moreButton.Active=false; moreButton.AutoButtonColor=false
 end
+-- Окно сохранения: сверху текущий образ (превью + имя + «Save as new»), ниже — плитки
+-- сохранённых образов для перезаписи. Подтверждение — прямо на плитке, без второго окна
 local function openSaveDialog(data)
-    local function createNew()
-        openNameDialog('Save outfit','Outfit '..tostring(#SavedOutfits+1),function(name)
-            local ok,err=pcall(app.SaveOutfit,name,data)
-            if not ok then message(err,true); return end
-            message('Saved: '..name)
-            if categories[category].SavedRoot and savedSection=='Outfits' then renderSavedOutfits() end
+    -- Высота под содержимое: 1–2 ряда плиток, дальше — выглядывающий третий ряд как подсказка прокрутки
+    local rows=math.max(1,math.ceil(#SavedOutfits/3))
+    local W,H=740,302+math.min(rows,2)*176+(rows>2 and 64 or 0)
+    local thumb,describe,colorDots=app.OutfitThumb,app.DescribeOutfit,app.OutfitColorDots
+
+    clearModal(); modalShade.Visible=true
+    local f=make('Frame',{Name='SaveOutfitDialog',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(W,H),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
+    make('UIScale',{Scale=scale.Scale},f); corner(f,16); make('UIStroke',{Color=C.Border,Thickness=1},f)
+    local title=modalLabel(f,'Save outfit',24,16,500,34,26); title.Font=Enum.Font.SourceSansBold
+    modalLabel(f,'Keep your current look as a new outfit or replace one you saved before.',24,50,600,24,16).TextColor3=C.Muted
+    modalButton(f,'X',W-62,18,38,32,clearModal).Name='Close'
+
+    -- ── Текущий образ ────────────────────────────────────────────────────────
+    local current=make('Frame',{Name='CurrentOutfit',Position=UDim2.fromOffset(24,88),Size=UDim2.fromOffset(W-48,136),BackgroundColor3=C.Surface,BorderSizePixel=0},f)
+    corner(current,12)
+    local heading=modalLabel(current,'Current look',16,10,300,24,18); heading.Font=Enum.Font.SourceSansSemibold
+    local meta=modalLabel(current,describe(data),16,10,W-48-32,24,15)
+    meta.TextXAlignment=Enum.TextXAlignment.Right; meta.TextColor3=C.Muted
+    local strip=make('Frame',{Name='Items',Position=UDim2.fromOffset(16,40),Size=UDim2.fromOffset(W-48-32,48),BackgroundTransparency=1},current)
+    local ids=data.AssetIds or {}
+    local shown=math.min(#ids,10)
+    for j=1,shown do
+        local cell=make('Frame',{Position=UDim2.fromOffset((j-1)*54,0),Size=UDim2.fromOffset(48,48),BackgroundColor3=C.Card,BorderSizePixel=0},strip)
+        corner(cell,8); thumb(ids[j],44,2,2,cell)
+    end
+    if #ids>shown then
+        local more=modalLabel(strip,'+'..(#ids-shown),shown*54,0,48,48,17)
+        more.TextXAlignment=Enum.TextXAlignment.Center; more.TextColor3=C.Muted
+    elseif #ids==0 then
+        modalLabel(strip,'No catalog items — body colors and scale only',0,12,500,24,15).TextColor3=C.Muted
+    end
+    colorDots(data,current,-16,44)
+    local nameBox=make('TextBox',{Name='OutfitName',Text='Outfit '..tostring(#SavedOutfits+1),PlaceholderText='Outfit name',
+        Position=UDim2.fromOffset(16,94),Size=UDim2.fromOffset(W-48-32-178,32),BackgroundColor3=C.Card,TextColor3=C.Text,
+        PlaceholderColor3=C.Muted,Font=Enum.Font.SourceSans,TextSize=18,ClearTextOnFocus=false,TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},current)
+    corner(nameBox); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,10)},nameBox)
+    local saving=false
+    local function saveNew()
+        if saving then return end
+        local ok,err=pcall(app.SaveOutfit,nameBox.Text,data)
+        if not ok then message(err,true); return end
+        saving=true
+        clearModal()
+        message('Saved: '..err.Name)
+        if categories[category].SavedRoot and savedSection=='Outfits' then renderSavedOutfits() end
+    end
+    local saveButton=modalButton(current,'Save as new',W-48-16-170,94,170,32,saveNew,true)
+    saveButton.Name='CreateNew'
+    nameBox.FocusLost:Connect(function(enter) if enter then saveNew() end end)
+
+    -- ── Перезапись сохранённого ──────────────────────────────────────────────
+    local section=modalLabel(f,'Replace a saved outfit',24,240,300,28,19); section.Font=Enum.Font.SourceSansSemibold
+    local total=modalLabel(f,#SavedOutfits..' saved',218,240,120,28,15); total.TextColor3=C.Muted
+    local filter=make('TextBox',{Name='Filter',Text='',PlaceholderText='Search outfits...',Position=UDim2.fromOffset(W-24-230,238),Size=UDim2.fromOffset(230,32),
+        BackgroundColor3=C.Surface,TextColor3=C.Text,PlaceholderColor3=C.Muted,Font=Enum.Font.SourceSans,TextSize=17,ClearTextOnFocus=false,
+        TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},f)
+    corner(filter); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,10)},filter)
+    local grid=make('ScrollingFrame',{Name='Outfits',Position=UDim2.fromOffset(20,276),Size=UDim2.fromOffset(W-40,H-276-16),CanvasSize=UDim2.new(),
+        AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4,BackgroundTransparency=1,BorderSizePixel=0},f)
+    make('UIGridLayout',{CellSize=UDim2.new(1/3,-12,0,164),CellPadding=UDim2.fromOffset(12,12),SortOrder=Enum.SortOrder.LayoutOrder},grid)
+    -- Список обрезает всё за своими краями: отступ со всех сторон, чтобы обводка крайних плиток
+    -- не срезалась (справа — ещё и место под полосу прокрутки)
+    make('UIPadding',{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,10),PaddingBottom=UDim.new(0,8)},grid)
+    local emptyGrid=modalLabel(f,'',24,330,W-48,60,17)
+    emptyGrid.TextXAlignment=Enum.TextXAlignment.Center; emptyGrid.TextColor3=C.Muted
+
+    local confirming
+    local function tile(entry,index)
+        local d=entry.Data or {}
+        local items=outfitItems(d)
+        local t=make('TextButton',{Name='Overwrite_'..index,Text='',AutoButtonColor=false,LayoutOrder=index,BackgroundColor3=C.Card,BorderSizePixel=0},grid)
+        corner(t,12)
+        local stroke=make('UIStroke',{Color=C.Border,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},t)
+        -- Обводка внутрь плитки — ровная по скруглению; в старых клиентах свойства нет, останется внешняя
+        pcall(function() stroke.BorderStrokePosition=Enum.BorderStrokePosition.Inner end)
+        -- Превью: до четырёх предметов на подложке, остаток — «+N»
+        local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(10,10),Size=UDim2.new(1,-20,0,60),BackgroundColor3=C.Surface,BorderSizePixel=0},t)
+        corner(shelf,10)
+        local slots=#items>4 and 3 or #items
+        for j=1,slots do thumb(items[j].Id,46,7+(j-1)*50,7,shelf) end
+        if #items>4 then
+            local more=modalLabel(shelf,'+'..(#items-3),7+3*50,7,46,46,18)
+            more.TextXAlignment=Enum.TextXAlignment.Center; more.TextColor3=C.Muted
+        elseif #items==0 then
+            local e=modalLabel(shelf,'Body only',0,0,10,60,15)
+            e.Size=UDim2.fromScale(1,1); e.TextXAlignment=Enum.TextXAlignment.Center; e.TextColor3=C.Muted
+        end
+        colorDots(d,shelf,-6,6)
+        local name=modalLabel(t,entry.Name,12,78,10,24,18)
+        name.Size=UDim2.new(1,-24,0,24); name.Font=Enum.Font.SourceSansSemibold; name.TextTruncate=Enum.TextTruncate.AtEnd; name.TextWrapped=false
+        local info=modalLabel(t,describe(d),12,101,10,20,14)
+        info.Size=UDim2.new(1,-24,0,20); info.TextColor3=C.Muted; info.TextTruncate=Enum.TextTruncate.AtEnd; info.TextWrapped=false
+        local pill=make('TextLabel',{Name='Action',Text='Replace',AnchorPoint=Vector2.new(1,1),Position=UDim2.new(1,-10,1,-10),Size=UDim2.fromOffset(92,28),
+            BackgroundColor3=C.Surface,TextColor3=C.Text,Font=Enum.Font.SourceSansSemibold,TextSize=16,BorderSizePixel=0},t)
+        corner(pill,14)
+        local function hover(on)
+            if confirming==t then return end
+            stroke.Color=on and C.Green or C.Border; stroke.Thickness=on and 2 or 1
+            pill.BackgroundColor3=on and C.Green or C.Surface
+        end
+        t.MouseEnter:Connect(function() hover(true) end)
+        t.MouseLeave:Connect(function() hover(false) end)
+        -- Подтверждение поверх плитки; в каждый момент — только на одной
+        t.Activated:Connect(function()
+            if confirming==t then return end
+            if app.Busy or app.Restoring then message('Please wait for the current item to finish loading'); return end
+            if confirming and confirming.Parent then
+                local old=confirming:FindFirstChild('Confirm'); if old then old:Destroy() end
+            end
+            confirming=t
+            stroke.Color=C.Green; stroke.Thickness=2
+            local overlay=make('Frame',{Name='Confirm',Size=UDim2.fromScale(1,1),BackgroundColor3=C.Bg,BackgroundTransparency=0.06,BorderSizePixel=0,ZIndex=5,Active=true},t)
+            corner(overlay,12)
+            local q=modalLabel(overlay,'Replace "'..entry.Name..'" with your current look?',12,14,10,60,17)
+            q.Size=UDim2.new(1,-24,0,62); q.ZIndex=6; q.TextXAlignment=Enum.TextXAlignment.Center
+            local note=modalLabel(overlay,'The name stays the same.',12,76,10,20,14)
+            note.Size=UDim2.new(1,-24,0,20); note.ZIndex=6; note.TextColor3=C.Muted; note.TextXAlignment=Enum.TextXAlignment.Center
+            local cancel=modalButton(overlay,'Cancel',0,0,10,32,function()
+                overlay:Destroy(); confirming=nil; hover(false)
+            end)
+            cancel.Name='Cancel'; cancel.ZIndex=6; cancel.AnchorPoint=Vector2.new(0,1)
+            cancel.Position=UDim2.new(0,12,1,-12); cancel.Size=UDim2.new(0.5,-18,0,32)
+            local replace=modalButton(overlay,'Replace',0,0,10,32,function()
+                local ok,err=pcall(app.OverwriteOutfit,entry.Id,data)
+                if not ok then message(err,true); return end
+                clearModal()
+                message('Outfit updated: '..entry.Name)
+                if categories[category].SavedRoot and savedSection=='Outfits' then renderSavedOutfits() end
+            end,true)
+            replace.Name='Confirm'; replace.ZIndex=6; replace.AnchorPoint=Vector2.new(1,1)
+            replace.Position=UDim2.new(1,-12,1,-12); replace.Size=UDim2.new(0.5,-18,0,32)
         end)
     end
-    if #SavedOutfits==0 then createNew(); return end
-    clearModal(); modalShade.Visible=true
-    local f=make('Frame',{Name='SaveOutfitDialog',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(510,440),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
-    make('UIScale',{Scale=scale.Scale},f); corner(f,14); make('UIStroke',{Color=C.Border,Thickness=1},f)
-    modalLabel(f,'Save current outfit',20,16,420,36,24)
-    modalButton(f,'X',452,18,38,32,clearModal)
-    modalButton(f,'Create a new outfit',20,72,470,44,createNew,true).Name='CreateNew'
-    modalLabel(f,'Or choose an outfit to overwrite:',20,133,470,28,18).TextColor3=C.Muted
-    local list=make('ScrollingFrame',{Name='Outfits',Position=UDim2.fromOffset(20,172),Size=UDim2.fromOffset(470,246),CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4,BackgroundTransparency=1,BorderSizePixel=0},f)
-    make('UIListLayout',{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},list)
-    for i,entry in ipairs(SavedOutfits) do
-        local b=modalButton(list,entry.Name,0,0,458,46,function() confirmOverwrite(entry,data) end)
-        b.Name='Overwrite_'..i; b.LayoutOrder=i; b.TextTruncate=Enum.TextTruncate.AtEnd
+    local function render()
+        for _,o in ipairs(grid:GetChildren()) do if o:IsA('GuiObject') then o:Destroy() end end
+        confirming=nil
+        local needle=filter.Text:lower()
+        local shownCount=0
+        for i,entry in ipairs(SavedOutfits) do
+            if needle=='' or entry.Name:lower():find(needle,1,true) then tile(entry,i); shownCount+=1 end
+        end
+        emptyGrid.Visible=shownCount==0
+        emptyGrid.Text=#SavedOutfits==0 and 'No saved outfits yet.\nYour first one will appear here.' or 'No outfits match your search.'
     end
+    filter:GetPropertyChangedSignal('Text'):Connect(render)
+    render()
 end
 local function removeFavorite(id)
     id=tonumber(id)
@@ -2022,6 +2850,14 @@ end
 search=function()
     searchSerial+=1; local token=searchSerial
     local cat=categories[category]
+    local panelSub=cat and not cat.SavedRoot and cat.Sub[subcategory] or nil
+    if app.ShowBodyPanel then app.ShowBodyPanel(panelSub) end
+    if panelSub and panelSub.Panel then
+        -- Панель Body (Colors/Scale): выдачи нет, прерываем начатый поиск
+        clearResults(); pages=nil; app.SearchBusy=false; searchButton.Text='Search'
+        empty.Visible=false; refresh()
+        return
+    end
     if cat and cat.SavedRoot then
         if savedSection=='Outfits' then renderSavedOutfits() else renderSavedItems(savedGroup) end
         return
@@ -2048,7 +2884,8 @@ renderCategories=function()
         for _,o in ipairs(parent:GetChildren()) do if o:IsA('GuiButton') then o:Destroy() end end
     end
     local isSaved=categories[category].SavedRoot
-    optionsButton.Visible=not isSaved
+    local selectedSub=not isSaved and categories[category].Sub[subcategory]
+    optionsButton.Visible=not isSaved and not (selectedSub and selectedSub.Panel)
     local dw=app.Window.Width-1100
     query.Size=UDim2.fromOffset((isSaved and 658 or 452)+dw,40)
     searchButton.Position=UDim2.fromOffset((isSaved and 686 or 480)+dw,106)
@@ -2179,6 +3016,7 @@ updateControls=function()
     hideButton.Text=app.HideOriginal and 'Show originals' or 'Hide originals'
     hideButton.BackgroundColor3=app.HideOriginal and C.Green or C.Card
     refreshCards()
+    if app.RefreshBodyPanel then app.RefreshBodyPanel() end
 end
 local assetId=input('Asset ID, catalog or bundle link',20,650,596,38)
 assetId.Name='AssetIdInput'
@@ -2350,6 +3188,7 @@ do
             elseif b.Y<54 and b.X>=700 then x+=dw end
             o.Position=UDim2.fromOffset(x,y); o.Size=UDim2.fromOffset(w,h)
         end
+        if app.LayoutBodyPanel then app.LayoutBodyPanel(dw,dh) end
         sizeLabel.Text=math.floor(app.Window.Scale*100+0.5)..'%'
     end
     function app.SetWindowSize(w,h,persist)
@@ -2383,6 +3222,484 @@ do
     end)
     app.LayoutWindow(); fit()
 end
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Панели Body: Colors / Scale и переключатель мимики у Faces
+-- ══════════════════════════════════════════════════════════════════════════════
+;(function()
+    local SLOT_LABELS={All='All',Head='Head',Torso='Torso',LeftArm='Left Arm',RightArm='Right Arm',LeftLeg='Left Leg',RightLeg='Right Leg'}
+    local SELECTED_STROKE=Color3.fromRGB(255,255,255)
+    -- Выделение частей фигуры: голубое, видно и на белой, и на тёмной коже
+    local PART_SELECTED=Color3.fromRGB(105,184,255)
+    local DEFAULT_FACE='rbxasset://textures/face.png'
+    -- Панель занимает место выдачи и кнопки Load more
+    local body=make('Frame',{Name='BodyPanel',Position=UDim2.fromOffset(20,204),Size=UDim2.fromOffset(756,430),BackgroundTransparency=1,Visible=false},panel)
+    app.BodyPanel=body
+    local shownKind
+    local function blocked()
+        if app.Busy or app.Restoring then message('Please wait while items are equipped...'); return true end
+        return false
+    end
+    local function report(ok,result)
+        message(ok and (result or 'Done') or ('Failed: '..tostring(result)),not ok)
+    end
+
+    -- ── Переключатель мимики (Body > Faces), справа от Load more, как в CAC ───
+    local faceToggle=button('',0,0,208,36,function()
+        report(pcall(app.SetStaticFace,not app.StaticFace))
+    end)
+    faceToggle.Name='FacialAnimation'; faceToggle.Visible=false; faceToggle.TextSize=17
+
+    -- ── Colors ─────────────────────────────────────────────────────────────────
+    -- Слева фигура персонажа (как в CAC): клик по части выбирает/снимает её, красить можно
+    -- несколько сразу. Справа — стандартная палитра или, с Advanced colors, пипетка и своя палитра
+    local colors=make('Frame',{Name='Colors',Size=UDim2.fromScale(1,1),BackgroundTransparency=1,Visible=false},body)
+    local selected={}
+    for _,slot in ipairs(app.ColorSlots) do selected[slot]=true end
+    local function selectedList()
+        local list={}
+        for _,slot in ipairs(app.ColorSlots) do if selected[slot] then table.insert(list,slot) end end
+        return list
+    end
+    local function near(a,b)
+        return a and b and math.abs(a.R-b.R)<0.004 and math.abs(a.G-b.G)<0.004 and math.abs(a.B-b.B)<0.004
+    end
+    local function paint(color)
+        if blocked() then return end
+        report(pcall(app.SetBodyColor,selectedList(),color))
+    end
+
+    -- Фигура: блоки R6 в долях ширины a (ширина 4a, высота 5.1a); экран смотрит в лицо —
+    -- правая рука персонажа слева
+    local left=make('Frame',{Name='Left',Size=UDim2.new(0,230,1,0),BackgroundTransparency=1},colors)
+    local holder=make('Frame',{Name='FigureHolder',Size=UDim2.new(1,0,1,-150),BackgroundTransparency=1},left)
+    local figure=make('Frame',{Name='Figure',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromScale(1,1),BackgroundTransparency=1},holder)
+    make('UIAspectRatioConstraint',{AspectRatio=4/5.1},figure)
+    local FIGURE={Head={1.4,0,1.2,1.1},Torso={1,1.1,2,2},RightArm={0,1.1,1,2},LeftArm={3,1.1,1,2},RightLeg={1,3.1,1,2},LeftLeg={2,3.1,1,2}}
+    local figureParts={}
+    for _,slot in ipairs(app.ColorSlots) do
+        local r=FIGURE[slot]
+        local b=make('TextButton',{Name='Part_'..slot,Text='',AutoButtonColor=true,BorderSizePixel=0,
+            Position=UDim2.new(r[1]/4,2,r[2]/5.1,2),Size=UDim2.new(r[3]/4,-4,r[4]/5.1,-4)},figure)
+        corner(b,slot=='Head' and 14 or 4)
+        local stroke=make('UIStroke',{Color=C.Border,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},b)
+        local entry={Button=b,Stroke=stroke}
+        if slot=='Head' then
+            entry.Face=make('ImageLabel',{Name='Face',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromScale(0.9,0.9),
+                BackgroundTransparency=1,ScaleType=Enum.ScaleType.Fit},b)
+        end
+        b.Activated:Connect(function() selected[slot]=not selected[slot]; app.RefreshBodyPanel() end)
+        figureParts[slot]=entry
+    end
+    local selectAll=button('Select all',0,0,230,34,function()
+        local all=#selectedList()==#app.ColorSlots
+        for _,slot in ipairs(app.ColorSlots) do selected[slot]=not all end
+        app.RefreshBodyPanel()
+    end,left)
+    selectAll.Name='SelectAll'; selectAll.AnchorPoint=Vector2.new(0,1); selectAll.Position=UDim2.new(0,0,1,-104); selectAll.TextSize=17
+    -- Переключатель Advanced colors
+    local advancedRow=make('Frame',{Name='AdvancedColors',AnchorPoint=Vector2.new(0,1),Position=UDim2.new(0,0,1,-54),Size=UDim2.new(1,0,0,36),BackgroundTransparency=1},left)
+    label('Advanced colors',0,0,160,36,advancedRow,19)
+    local switch=make('TextButton',{Name='Switch',Text='',AutoButtonColor=false,AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,0,0.5,0),
+        Size=UDim2.fromOffset(52,26),BackgroundColor3=C.Card,BorderSizePixel=0},advancedRow)
+    corner(switch,13)
+    local knob=make('Frame',{Name='Knob',AnchorPoint=Vector2.new(0,0.5),Size=UDim2.fromOffset(20,20),BackgroundColor3=C.Text,BorderSizePixel=0},switch)
+    corner(knob,10)
+    local resetColors=button('Reset colors',0,0,230,36,function()
+        if blocked() then return end
+        report(pcall(app.ResetBodyColors))
+    end,left)
+    resetColors.Name='ResetColors'; resetColors.AnchorPoint=Vector2.new(0,1); resetColors.Position=UDim2.new(0,0,1,0)
+
+    local right=make('Frame',{Name='Right',Position=UDim2.fromOffset(246,0),Size=UDim2.new(1,-246,1,0),BackgroundTransparency=1},colors)
+    local target=label('',0,0,500,28,right,16)
+    target.Size=UDim2.new(1,0,0,28); target.TextColor3=C.Muted; target.TextTruncate=Enum.TextTruncate.AtEnd
+
+    -- Стандартная палитра: круги, как в CAC
+    local palette=make('ScrollingFrame',{Name='Palette',Position=UDim2.fromOffset(0,34),Size=UDim2.new(1,0,1,-34),BackgroundTransparency=1,
+        BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y},right)
+    make('UIGridLayout',{CellSize=UDim2.fromOffset(52,52),CellPadding=UDim2.fromOffset(12,12),SortOrder=Enum.SortOrder.LayoutOrder},palette)
+    make('UIPadding',{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4)},palette)
+    local swatches={}
+    for i,color in ipairs(app.Palette()) do
+        local b=make('TextButton',{Name='Swatch_'..color:ToHex(),Text='',LayoutOrder=i,BackgroundColor3=color,AutoButtonColor=true,BorderSizePixel=0},palette)
+        make('UICorner',{CornerRadius=UDim.new(0.5,0)},b)
+        local stroke=make('UIStroke',{Color=SELECTED_STROKE,Thickness=0,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},b)
+        b.Activated:Connect(function() paint(color) end)
+        table.insert(swatches,{Color=color,Stroke=stroke})
+    end
+
+    -- ── Пипетка (Advanced colors), как Custom Color в CAC ──────────────────────
+    local picker=make('Frame',{Name='Picker',Position=UDim2.fromOffset(0,34),Size=UDim2.new(1,0,1,-34),BackgroundTransparency=1,Visible=false},right)
+    local hue,sat,val=0,0,0.98
+    local mode='HSV'
+    local pickDrag   -- {Kind='SV'|'Slider', Index, Input}
+    local function pickColor() return Color3.fromHSV(hue,sat,val) end
+    -- Квадрат: насыщенность по x, яркость по y, поверх чистого тона
+    local square=make('Frame',{Name='SV',BorderSizePixel=0,BackgroundColor3=Color3.fromHSV(0,1,1)},picker)
+    corner(square,10)
+    local white=make('Frame',{Name='White',Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},square)
+    corner(white,10)
+    make('UIGradient',{Transparency=NumberSequence.new(0,1)},white)
+    local black=make('Frame',{Name='Black',Size=UDim2.fromScale(1,1),BackgroundColor3=Color3.new(0,0,0),BorderSizePixel=0},square)
+    corner(black,10)
+    make('UIGradient',{Rotation=90,Transparency=NumberSequence.new(1,0)},black)
+    local cursor=make('Frame',{Name='Cursor',AnchorPoint=Vector2.new(0.5,0.5),Size=UDim2.fromOffset(16,16),BackgroundTransparency=1,ZIndex=3},square)
+    corner(cursor,8); make('UIStroke',{Color=Color3.new(1,1,1),Thickness=2},cursor)
+    local squareHit=make('TextButton',{Name='Hit',Text='',AutoButtonColor=false,BackgroundTransparency=1,Size=UDim2.fromScale(1,1),ZIndex=4},square)
+    -- Колонка управления
+    local controls=make('Frame',{Name='Controls',BackgroundTransparency=1},picker)
+    local preview=make('Frame',{Name='Preview',Size=UDim2.new(1,0,0,40),BorderSizePixel=0},controls)
+    corner(preview,10); make('UIStroke',{Color=C.Border,Thickness=1},preview)
+    local modeButtons={}
+    for i,name in ipairs({'HSV','RGB'}) do
+        local b=button(name,(i-1)*62,50,56,30,function() mode=name; app.RefreshBodyPanel() end,controls)
+        b.Name='Mode_'..name; b.TextSize=16
+        modeButtons[name]=b
+    end
+    local hexBox=make('TextBox',{Name='Hex',Text='',PlaceholderText='#RRGGBB',Position=UDim2.fromOffset(128,50),Size=UDim2.new(1,-128,0,30),
+        BackgroundColor3=C.Surface,TextColor3=C.Text,PlaceholderColor3=C.Muted,Font=Enum.Font.SourceSans,TextSize=17,
+        ClearTextOnFocus=false,BorderSizePixel=0},controls)
+    corner(hexBox)
+    local hueKeys={}
+    for k=0,6 do table.insert(hueKeys,ColorSequenceKeypoint.new(k/6,Color3.fromHSV(k/6,1,1))) end
+    local HUE=ColorSequence.new(hueKeys)
+    local sliders={}
+    for i=1,3 do
+        local y=90+(i-1)*40
+        local track=make('Frame',{Name='Slider'..i,Position=UDim2.fromOffset(0,y+8),Size=UDim2.new(1,-66,0,16),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},controls)
+        corner(track,8)
+        local gradient=make('UIGradient',{},track)
+        local thumb=make('Frame',{Name='Thumb',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0,0.5),Size=UDim2.fromOffset(10,24),
+            BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0,ZIndex=2},track)
+        corner(thumb,5); make('UIStroke',{Color=Color3.fromRGB(40,40,40),Thickness=1},thumb)
+        local hit=make('TextButton',{Name='Hit',Text='',AutoButtonColor=false,BackgroundTransparency=1,AnchorPoint=Vector2.new(0,0.5),
+            Position=UDim2.new(0,-6,0.5,0),Size=UDim2.new(1,12,0,32),ZIndex=3},track)
+        local box=make('TextBox',{Name='Value',Text='0',AnchorPoint=Vector2.new(1,0),Position=UDim2.new(1,0,0,y),Size=UDim2.fromOffset(56,32),
+            BackgroundColor3=C.Surface,TextColor3=C.Text,Font=Enum.Font.SourceSans,TextSize=17,ClearTextOnFocus=false,BorderSizePixel=0},controls)
+        corner(box)
+        sliders[i]={Track=track,Gradient=gradient,Thumb=thumb,Box=box,Hit=hit}
+    end
+    local applyPick=button('Apply to selected',0,214,0,36,function() paint(pickColor()) end,controls,true)
+    applyPick.Name='ApplyColor'; applyPick.Size=UDim2.new(1,0,0,36)
+
+    -- Своя палитра: Save color добавляет текущий цвет, клик — взять в пипетку,
+    -- Remove (или правый клик по цвету) — удалить
+    local mine=make('Frame',{Name='MyColors',BackgroundTransparency=1},picker)
+    label('My colors',0,0,120,30,mine,18).Font=Enum.Font.SourceSansSemibold
+    local saveColor=button('Save color',0,0,110,30,function()
+        report(pcall(app.SaveCustomColor,pickColor()))
+    end,mine)
+    saveColor.Name='SaveColor'; saveColor.TextSize=16; saveColor.AnchorPoint=Vector2.new(1,0); saveColor.Position=UDim2.new(1,-96,0,0)
+    local selectedCustom
+    local removeColor=button('Remove',0,0,88,30,function()
+        if not selectedCustom then message('Choose a color in My colors first',true); return end
+        local ok,result=pcall(app.RemoveCustomColor,selectedCustom)
+        if ok then selectedCustom=nil end
+        report(ok,result)
+    end,mine)
+    removeColor.Name='RemoveColor'; removeColor.TextSize=16; removeColor.AnchorPoint=Vector2.new(1,0); removeColor.Position=UDim2.new(1,0,0,0)
+    local customList=make('ScrollingFrame',{Name='List',Position=UDim2.fromOffset(0,38),Size=UDim2.new(1,0,1,-38),BackgroundColor3=C.Surface,
+        BorderSizePixel=0,ScrollBarThickness=4,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y},mine)
+    corner(customList)
+    make('UIGridLayout',{CellSize=UDim2.fromOffset(34,34),CellPadding=UDim2.fromOffset(8,8),SortOrder=Enum.SortOrder.LayoutOrder},customList)
+    make('UIPadding',{PaddingTop=UDim.new(0,8),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,8)},customList)
+    -- Подсказка вне сетки: UIGridLayout разложил бы её как ячейку
+    local customEmpty=label('Saved colors appear here.',10,46,300,24,mine,15)
+    customEmpty.TextColor3=C.Muted; customEmpty.ZIndex=2
+    local shownCustom
+
+    local function setPick(color)
+        local h,s,v=color:ToHSV()
+        -- У серых тонов оттенок не определён: держим прежний, чтобы ползунок не прыгал
+        if s>0.001 and v>0.001 then hue=h end
+        if v>0.001 then sat=s end
+        val=v
+    end
+    local function refreshPicker()
+        local color=pickColor()
+        square.BackgroundColor3=Color3.fromHSV(hue,1,1)
+        cursor.Position=UDim2.fromScale(sat,1-val)
+        preview.BackgroundColor3=color
+        if not hexBox:IsFocused() then hexBox.Text='#'..color:ToHex():upper() end
+        for name,b in pairs(modeButtons) do
+            b.BackgroundColor3=name==mode and C.Card or C.Bg
+            b.TextColor3=name==mode and C.Text or C.Muted
+        end
+        local values,gradients
+        if mode=='HSV' then
+            values={{hue,math.floor(hue*360+0.5)},{sat,math.floor(sat*100+0.5)},{val,math.floor(val*100+0.5)}}
+            gradients={HUE,ColorSequence.new(Color3.fromHSV(hue,0,val),Color3.fromHSV(hue,1,val)),
+                ColorSequence.new(Color3.new(0,0,0),Color3.fromHSV(hue,sat,1))}
+        else
+            local r,g,b=color.R,color.G,color.B
+            values={{r,math.floor(r*255+0.5)},{g,math.floor(g*255+0.5)},{b,math.floor(b*255+0.5)}}
+            gradients={ColorSequence.new(Color3.new(0,g,b),Color3.new(1,g,b)),ColorSequence.new(Color3.new(r,0,b),Color3.new(r,1,b)),
+                ColorSequence.new(Color3.new(r,g,0),Color3.new(r,g,1))}
+        end
+        for i,sl in ipairs(sliders) do
+            sl.Gradient.Color=gradients[i]
+            sl.Thumb.Position=UDim2.fromScale(values[i][1],0.5)
+            if not sl.Box:IsFocused() then sl.Box.Text=tostring(values[i][2]) end
+        end
+        -- Своя палитра пересобирается только при изменении списка
+        local key=table.concat(app.CustomColors,',')
+        if key~=shownCustom then
+            shownCustom=key
+            for _,o in ipairs(customList:GetChildren()) do if o:IsA('TextButton') then o:Destroy() end end
+            for i,hex in ipairs(app.CustomColors) do
+                local c=Color3.fromHex(hex)
+                local b=make('TextButton',{Name='Custom_'..hex,Text='',LayoutOrder=i,BackgroundColor3=c,AutoButtonColor=true,BorderSizePixel=0},customList)
+                make('UICorner',{CornerRadius=UDim.new(0.5,0)},b)
+                make('UIStroke',{Name='Selection',Color=SELECTED_STROKE,Thickness=0,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},b)
+                b.Activated:Connect(function() selectedCustom=hex; setPick(c); app.RefreshBodyPanel() end)
+                b.MouseButton2Click:Connect(function()
+                    local ok,result=pcall(app.RemoveCustomColor,hex)
+                    if ok and selectedCustom==hex then selectedCustom=nil end
+                    report(ok,result)
+                end)
+            end
+        end
+        if selectedCustom and not table.find(app.CustomColors,selectedCustom) then selectedCustom=nil end
+        for _,o in ipairs(customList:GetChildren()) do
+            if o:IsA('TextButton') then o.Selection.Thickness=o.Name=='Custom_'..tostring(selectedCustom) and 3 or 0 end
+        end
+        customEmpty.Visible=#app.CustomColors==0
+        removeColor.TextColor3=selectedCustom and C.Text or C.Muted
+    end
+    -- Ползунок i в долях 0..1 в текущем режиме
+    local function setSlider(i,rel)
+        rel=math.clamp(rel,0,1)
+        if mode=='HSV' then
+            if i==1 then hue=math.min(rel,0.9999) elseif i==2 then sat=rel else val=rel end
+        else
+            local c=pickColor()
+            local rgb={c.R,c.G,c.B}; rgb[i]=rel
+            setPick(Color3.new(rgb[1],rgb[2],rgb[3]))
+        end
+        refreshPicker()
+    end
+    local function dragTo(position)
+        if pickDrag.Kind=='SV' then
+            local size=square.AbsoluteSize
+            sat=math.clamp((position.X-square.AbsolutePosition.X)/math.max(1,size.X),0,1)
+            val=1-math.clamp((position.Y-square.AbsolutePosition.Y)/math.max(1,size.Y),0,1)
+            refreshPicker()
+        else
+            local track=sliders[pickDrag.Index].Track
+            setSlider(pickDrag.Index,(position.X-track.AbsolutePosition.X)/math.max(1,track.AbsoluteSize.X))
+        end
+    end
+    local function startDrag(input,kind,index)
+        if input.UserInputType~=Enum.UserInputType.MouseButton1 and input.UserInputType~=Enum.UserInputType.Touch then return end
+        pickDrag={Kind=kind,Index=index,Input=input}
+        dragTo(input.Position)
+    end
+    connect(squareHit.InputBegan,function(input) startDrag(input,'SV') end)
+    for i,sl in ipairs(sliders) do
+        connect(sl.Hit.InputBegan,function(input) startDrag(input,'Slider',i) end)
+        connect(sl.Box.FocusLost,function()
+            local n=tonumber(sl.Box.Text)
+            if n then setSlider(i,mode=='HSV' and (i==1 and n/360 or n/100) or n/255) else refreshPicker() end
+        end)
+    end
+    connect(hexBox.FocusLost,function()
+        local hex=hexBox.Text:gsub('[#%s]','')
+        if hex:match('^%x%x%x%x%x%x$') then setPick(Color3.fromHex(hex)) else message('Enter a color as #RRGGBB',true) end
+        refreshPicker()
+    end)
+    connect(UIS.InputChanged,function(i)
+        if not pickDrag then return end
+        local touch=pickDrag.Input.UserInputType==Enum.UserInputType.Touch
+        if (touch and i==pickDrag.Input) or (not touch and i.UserInputType==Enum.UserInputType.MouseMovement) then dragTo(i.Position) end
+    end)
+    connect(UIS.InputEnded,function(i)
+        if pickDrag and (i==pickDrag.Input or i.UserInputType==Enum.UserInputType.MouseButton1) then pickDrag=nil end
+    end)
+    -- Размеры пипетки зависят от окна: квадрат по высоте, колонка управления справа, своя палитра снизу
+    -- w, h — размер всей панели; левая колонка подстраивается так, чтобы фигура заняла высоту
+    local function layoutPicker(w,h)
+        local leftWidth=math.floor(math.clamp((h-150)*4/5.1,200,math.min(380,w*0.42)))
+        left.Size=UDim2.new(0,leftWidth,1,0)
+        right.Position=UDim2.fromOffset(leftWidth+16,0); right.Size=UDim2.new(1,-(leftWidth+16),1,0)
+        for _,o in ipairs({selectAll,resetColors}) do o.Size=UDim2.new(1,0,0,o.Size.Y.Offset) end
+        w-=leftWidth+16
+        local size=math.floor(math.clamp(math.min(h-34-150,w*0.48),150,320))
+        square.Position=UDim2.fromOffset(0,0); square.Size=UDim2.fromOffset(size,size)
+        controls.Position=UDim2.fromOffset(size+16,0); controls.Size=UDim2.new(1,-(size+16),0,size)
+        mine.Position=UDim2.fromOffset(0,size+14); mine.Size=UDim2.new(1,0,1,-(size+14))
+    end
+
+    local pickerPrimed=false
+    local function setAdvanced(value)
+        app.AdvancedColors=value==true
+        pickerPrimed=true
+        if app.AdvancedColors then
+            -- Пипетка открывается с цветом первой выбранной части, как Custom Color в CAC
+            local first=selectedList()[1]
+            local color=first and app.SlotColor(first)
+            if color then setPick(color) end
+        end
+        saveSettings()
+        app.RefreshBodyPanel()
+    end
+    switch.Activated:Connect(function() setAdvanced(not app.AdvancedColors) end)
+
+    local function refreshColors()
+        local list=selectedList()
+        local ch=player.Character
+        local head=ch and ch:FindFirstChild('Head')
+        local face=head and head:FindFirstChild('face')
+        for slot,entry in pairs(figureParts) do
+            entry.Button.BackgroundColor3=app.SlotColor(slot) or C.Card
+            entry.Stroke.Color=selected[slot] and PART_SELECTED or C.Border
+            entry.Stroke.Thickness=selected[slot] and 3 or 1
+            -- Динамическая голова без декали — стандартное лицо, как на фигуре в CAC
+            if entry.Face then entry.Face.Image=(face and face:IsA('Decal') and face.Texture~='') and face.Texture or DEFAULT_FACE end
+        end
+        selectAll.Text=#list==#app.ColorSlots and 'Clear selection' or 'Select all'
+        local names={}
+        for _,slot in ipairs(list) do table.insert(names,SLOT_LABELS[slot]) end
+        target.Text=#list==0 and 'Click body parts on the figure to choose what to paint'
+            or ('Painting: '..(#list==#app.ColorSlots and 'whole body' or table.concat(names,', ')))
+        local advanced=app.AdvancedColors==true
+        -- Пипетка из сохранённой настройки: первый показ — с цветом выбранной части
+        if advanced and not pickerPrimed then
+            pickerPrimed=true
+            local color=list[1] and app.SlotColor(list[1])
+            if color then setPick(color) end
+        end
+        switch.BackgroundColor3=advanced and C.Green or C.Card
+        knob.Position=advanced and UDim2.new(1,-23,0.5,0) or UDim2.new(0,3,0.5,0)
+        palette.Visible=not advanced; picker.Visible=advanced
+        -- Обводка у цвета, совпадающего с первой выбранной частью
+        local first=list[1] and app.SlotColor(list[1])
+        for _,s in ipairs(swatches) do s.Stroke.Thickness=near(s.Color,first) and 3 or 0 end
+        if advanced then refreshPicker() end
+    end
+
+    -- ── Scale ──────────────────────────────────────────────────────────────────
+    local scaleFrame=make('Frame',{Name='Scale',Size=UDim2.fromScale(1,1),BackgroundTransparency=1,Visible=false},body)
+    local r6Notice=label('Scaling is available only for R15 avatars.',0,8,700,40,scaleFrame,20)
+    r6Notice.TextColor3=C.Muted
+    local rows,draft,dragging={},{},nil
+    local function bounds(spec) return app.ScaleBounds(spec) end
+    local function showValue(key,v)
+        local row=rows[key]
+        local lo,hi=bounds(row.Spec)
+        local rel=hi>lo and math.clamp((v-lo)/(hi-lo),0,1) or 0
+        row.Fill.Size=UDim2.fromScale(rel,1)
+        row.Knob.Position=UDim2.fromScale(rel,0.5)
+        row.Value.Text=string.format('%d%%',math.floor(v*100+0.5))
+    end
+    local function setFromX(key,x)
+        local row=rows[key]
+        local lo,hi,step=bounds(row.Spec)
+        local width=math.max(1,row.Track.AbsoluteSize.X)
+        local rel=math.clamp((x-row.Track.AbsolutePosition.X)/width,0,1)
+        local v=math.clamp(math.floor((lo+rel*(hi-lo))/step+0.5)*step,lo,hi)
+        draft[key]=v; showValue(key,v)
+    end
+    local function commit()
+        if not next(draft) then return end
+        if blocked() then draft={}; app.RefreshBodyPanel(); return end
+        local values=table.clone(draft)
+        -- Значения держим на ползунках, пока тело пересобирается
+        run(function(rev) return app.SetScalesAsync(values,rev) end)
+    end
+    for i,spec in ipairs(app.ScaleSpecs) do
+        local row=make('Frame',{Name=spec.Key,Position=UDim2.fromOffset(0,(i-1)*62),Size=UDim2.new(1,0,0,54),BackgroundColor3=C.Surface,BorderSizePixel=0},scaleFrame)
+        corner(row)
+        label(spec.Name,16,0,150,54,row,19).Font=Enum.Font.SourceSansSemibold
+        local value=label('100%',0,0,80,54,row,19)
+        value.AnchorPoint=Vector2.new(1,0); value.Position=UDim2.new(1,-16,0,0); value.TextXAlignment=Enum.TextXAlignment.Right
+        local track=make('Frame',{Name='Track',AnchorPoint=Vector2.new(0,0.5),Position=UDim2.new(0,180,0.5,0),Size=UDim2.new(1,-290,0,8),BackgroundColor3=C.Card,BorderSizePixel=0},row)
+        corner(track,4)
+        local fill=make('Frame',{Name='Fill',Size=UDim2.fromScale(0,1),BackgroundColor3=C.Accent,BorderSizePixel=0},track)
+        corner(fill,4)
+        local knob=make('Frame',{Name='Knob',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0,0.5),Size=UDim2.fromOffset(20,20),BackgroundColor3=C.Text,BorderSizePixel=0},track)
+        corner(knob,10)
+        -- Зона захвата шире полоски: удобно и мышью, и пальцем
+        local hit=make('TextButton',{Name='Hit',Text='',AutoButtonColor=false,BackgroundTransparency=1,AnchorPoint=Vector2.new(0,0.5),
+            Position=UDim2.new(0,168,0.5,0),Size=UDim2.new(1,-266,0,44)},row)
+        rows[spec.Key]={Spec=spec,Row=row,Value=value,Track=track,Fill=fill,Knob=knob}
+        connect(hit.InputBegan,function(input)
+            if input.UserInputType~=Enum.UserInputType.MouseButton1 and input.UserInputType~=Enum.UserInputType.Touch then return end
+            if blocked() then return end
+            dragging={Key=spec.Key,Input=input}
+            setFromX(spec.Key,input.Position.X)
+        end)
+    end
+    connect(UIS.InputChanged,function(i)
+        if not dragging then return end
+        local touch=dragging.Input.UserInputType==Enum.UserInputType.Touch
+        if (touch and i==dragging.Input) or (not touch and i.UserInputType==Enum.UserInputType.MouseMovement) then
+            setFromX(dragging.Key,i.Position.X)
+        end
+    end)
+    connect(UIS.InputEnded,function(i)
+        if dragging and (i==dragging.Input or i.UserInputType==Enum.UserInputType.MouseButton1) then
+            dragging=nil; commit()
+        end
+    end)
+    local scaleHelp=label('Changes apply when you release a slider. Proportions take effect when Body type is above 0%.',0,5*62+4,560,44,scaleFrame,15)
+    scaleHelp.TextColor3=C.Muted
+    local resetScale=button('Reset scale',0,0,140,36,function()
+        run(function(rev) return app.ResetScalesAsync(rev) end)
+    end,scaleFrame)
+    resetScale.Name='ResetScale'; resetScale.AnchorPoint=Vector2.new(1,0); resetScale.Position=UDim2.new(1,0,0,5*62+8)
+    local function refreshScale()
+        local ch=player.Character
+        local h=ch and ch:FindFirstChildOfClass('Humanoid')
+        local r15=not h or h.RigType==Enum.HumanoidRigType.R15
+        r6Notice.Visible=not r15
+        for _,row in pairs(rows) do row.Row.Visible=r15 end
+        scaleHelp.Visible=r15; resetScale.Visible=r15
+        -- Во время перетаскивания и пересборки показываем черновик
+        if not dragging and not app.Busy then draft={} end
+        local values=app.CurrentScales()
+        for key in pairs(rows) do showValue(key,draft[key] or values[key]) end
+        resetScale.TextColor3=app.Scales and C.Text or C.Muted
+    end
+
+    -- ── Общее ──────────────────────────────────────────────────────────────────
+    function app.RefreshBodyPanel()
+        faceToggle.Text=app.StaticFace and 'Facial animation: OFF' or 'Facial animation: ON'
+        faceToggle.BackgroundColor3=app.StaticFace and C.Card or C.Green
+        if shownKind=='Colors' then refreshColors() elseif shownKind=='Scale' then refreshScale() end
+    end
+    function app.ShowBodyPanel(selected)
+        local kind=selected and selected.Panel or nil
+        shownKind=kind
+        body.Visible=kind~=nil
+        colors.Visible=kind=='Colors'; scaleFrame.Visible=kind=='Scale'
+        results.Visible=kind==nil; moreButton.Visible=kind==nil
+        faceToggle.Visible=selected~=nil and selected.FaceToggle==true
+        if kind then query.Visible=false; searchButton.Visible=false; empty.Visible=false end
+        if not kind then dragging=nil; draft={} end
+        app.LayoutWindow()
+        app.RefreshBodyPanel()
+    end
+    -- Строка поиска панелям не нужна: подкатегории поднимаются на её место, панель — следом
+    local SEARCH_ROW=48
+    function app.LayoutBodyPanel(dw,dh)
+        local lift=shownKind and SEARCH_ROW or 0
+        if lift>0 then
+            subPanel.Position=UDim2.fromOffset(52,154-lift)
+            for _,name in ipairs({'PreviousSubcategories','NextSubcategories'}) do
+                local b=panel:FindFirstChild(name)
+                if b then b.Position=UDim2.fromOffset(b.Position.X.Offset,154-lift) end
+            end
+        end
+        body.Position=UDim2.fromOffset(20,204-lift)
+        body.Size=UDim2.fromOffset(756+dw,430+dh+lift)
+        layoutPicker(756+dw,430+dh+lift)
+        faceToggle.Position=UDim2.fromOffset(20+756+dw-208,598+dh)
+        if faceToggle.Visible then moreButton.Size=UDim2.fromOffset(756+dw-216,36) end
+    end
+    app.OnAvatarRules=function() app.RefreshBodyPanel() end
+    connect(player.CharacterAdded,function() task.delay(1,app.RefreshBodyPanel) end)
+    app.LayoutWindow()
+end)()
 -- Live transform editor. Handles affect only the selected client-owned accessory.
 local editor=make('Frame',{Name='TransformEditor',Visible=false,AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,-24,0.5,0),Size=UDim2.fromOffset(344,584),BackgroundColor3=C.Bg,BorderSizePixel=0},gui)
 corner(editor,14); make('UIStroke',{Color=C.Border,Thickness=1},editor)
@@ -2552,7 +3869,7 @@ end)
 ;(function()
     local PORTRAIT={Fov=66,ExtentScale=1.9465,TargetDrop=0.359,CameraPitch=6.6,
         Ambient=Color3.fromRGB(212,212,212),LightColor=Color3.fromRGB(254,254,254),LightAzimuth=-60.5,LightElevation=49.3}
-    function app.IsOutfitActive() return app.Alive and (next(app.Desired)~=nil or app.HideOriginal==true) end
+    function app.IsOutfitActive() return app.Alive and (next(app.Desired)~=nil or app.HideOriginal==true or app.BodyColors~=nil or app.Scales~=nil) end
     -- Суставы R15 бывают Motor6D и AnimationConstraint (апгрейд суставов аватара): {joint,part0,part1,c0,c1}
     local function portraitJoints(m)
         local list={}
@@ -2883,14 +4200,15 @@ end)()
 -- ══════════════════════════════════════════════════════════════════════════════
 -- Транспорт — relay скинченджера: он берёт ExportSync у провайдера catalog в
 -- getgenv().LookSync и приносит чужой образ в ApplyRemote. Формат {x=HideOriginal,
--- i={{id,layerOrder,transform9?}}}; тип предмета не передаётся — проверяем сами через
+-- i={{id,layerOrder,transform9?}}, c={слот=hex}?, s={шкала=число}?}; c и s — цвета и
+-- масштаб тела (старые клиенты и relay их просто игнорируют). Тип предмета не передаётся — проверяем сами через
 -- MarketplaceService, чтобы чужой пир не заставил грузить произвольный ассет.
 -- Чужой персонаж одевается тем же wearOn, но в своём контексте (Items/Hidden/Head)
 local SYNC_MAX_ITEMS=40
 app.Remote={}
 function app.ExportSync()
     local outfit=app.ExportOutfit()
-    if #outfit.AssetIds==0 and not outfit.HideOriginal then return nil end
+    if #outfit.AssetIds==0 and not outfit.HideOriginal and not outfit.BodyColors and not outfit.Scales then return nil end
     local items={}
     for _,id in ipairs(outfit.AssetIds) do
         if #items>=SYNC_MAX_ITEMS then break end
@@ -2910,7 +4228,7 @@ function app.ExportSync()
         end
         table.insert(items,entry)
     end
-    return {x=outfit.HideOriginal==true,i=items}
+    return {x=outfit.HideOriginal==true,i=items,c=outfit.BodyColors,s=outfit.Scales}
 end
 local function remoteValid(ctx,rev,ch)
     return app.Alive and ctx.Alive and ctx.Revision==rev and ctx.Player.Character==ch and ch.Parent~=nil
@@ -2919,6 +4237,7 @@ local function clearRemoteVisuals(ctx)
     local ids={}; for id in pairs(ctx.Items) do table.insert(ids,id) end
     for _,id in ipairs(ids) do destroyItem(id,ctx) end
     restoreBody(ctx)
+    if app.RestoreColors then app.RestoreColors(ctx) end
     restoreHidden(function() return true end,ctx)
 end
 -- Одно поколение на спавн и на версию образа: устаревшие загрузки не одевают новый персонаж
@@ -2948,7 +4267,9 @@ local function dressRemote(ctx)
                 elseif not animationKinds[info.Kind] then table.insert(rest,entry) end
             end
         end
-        if #body>0 then pcall(wearBody,ctx,ch,body,active) end
+        ctx.Scales=data.s; ctx.BodyColors=data.c
+        if #body>0 or ctx.Scales then pcall(wearBody,ctx,ch,body,active) end
+        if ctx.BodyColors and active() then pcall(app.ApplyColors,ctx,ch) end
         for _,entry in ipairs(rest) do
             if not active() then return end
             local id,order,tf=entry[1],entry[2],entry[3]
@@ -2985,7 +4306,12 @@ function app.ApplyRemote(target,data)
             end
         end
     end
-    if #clean.i==0 and not clean.x then forgetRemote(target); return end
+    -- Чужие цвета и масштаб проходят ту же нормализацию, что и свои (диапазоны правил аватара)
+    if type(data)=='table' then
+        clean.c=app.NormalizeColors(data.c)
+        clean.s=app.NormalizeScales(data.s)
+    end
+    if #clean.i==0 and not clean.x and not clean.c and not clean.s then forgetRemote(target); return end
     local ctx=app.Remote[target]
     if not ctx then
         ctx={Player=target,Items={},Hidden={},Revision=0,Alive=true,Connections={}}
@@ -3014,6 +4340,7 @@ function app.Unload()
     end)
     local remote={}; for target in pairs(app.Remote) do table.insert(remote,target) end
     for _,target in ipairs(remote) do forgetRemote(target) end
+    if app.ReleaseFace then pcall(app.ReleaseFace) end
     app.Reset(); app.Alive=false; searchSerial+=1
     for _,c in ipairs(app.Connections) do c:Disconnect() end
     for _,v in pairs(app.Cache) do v.Template:Destroy() end
