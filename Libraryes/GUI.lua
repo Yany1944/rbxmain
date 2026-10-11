@@ -18,6 +18,14 @@ return function(env)
 
     local task = env.Tasks or task
     local GUI = {}
+    local tabDefinitions = {}
+    function GUI.ConfigureTabGroups(groups)
+        for _, names in ipairs(groups) do
+            for order, name in ipairs(names) do
+                tabDefinitions[name] = {Group = names[1], Order = order, Count = #names}
+            end
+        end
+    end
 
     ----------------------------------------------------------------
     -- ТОКЕНЫ ДИЗАЙНА — Vercel Geist (dark theme)
@@ -254,6 +262,7 @@ return function(env)
 
     local SIDEBAR_W  = 200
     local HEADER_H   = 56
+    local WINDOW = {Width = 950, Height = 730, MinWidth = 948, MinHeight = 592, MaxWidth = 1500, MaxHeight = 900, NavGap = 28}
     local FOOTER_H   = 32
 
     -- Font = <Font-объект> кладём в FontFace (весовые шрифты), Font = <Enum>
@@ -828,8 +837,10 @@ return function(env)
     -- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ИЗ MAIN (через Handlers)
     ----------------------------------------------------------------
 
+    -- name — ключ в Handlers или сама функция: строки со своим колбэком
+    -- (вкладки спавнера) не попадают ни в Handlers, ни в реестр конфига
     local function callHandler(name, ...)
-        local fn = Handlers[name]
+        local fn = type(name) == "function" and name or Handlers[name]
         if fn then
             local result = fn(...)
             if env.SyncControls then env.SyncControls() end
@@ -864,6 +875,166 @@ return function(env)
 
     -- Элементы отдаются конфиг-менеджеру хоста: сериализацию и типовые
     -- парсеры держит он, библиотека только ведёт реестр
+    -- Общая кнопка для обычных строк и вкладок со своей вёрсткой.
+    function GUI.CreateActionButton(parent, buttonText, color, position, size, onClick)
+        -- Текст на кнопках всегда белый, поэтому и заливка везде
+        -- достаточно тёмная/насыщенная. Прежний primary был светло-серым
+        -- (gray-1000) с тёмным шрифтом — из-за него подписи и различались
+        -- по цвету; теперь это тёмная кнопка с рамкой (Geist secondary).
+        --   default (color = nil)  — тёмная заливка + рамка
+        --   error   (color = Red)  — заливка red-800
+        --   custom  (свой цвет)    — заливка переданным цветом
+        -- Роль, а не захваченный цвет: акцентная кнопка следует за темой
+        local role = color == "accent" and "accent" or color == "danger" and "danger" or color == CONFIG.Colors.Red and "danger"
+            or (color == nil and "default" or (color == CONFIG.Colors.Accent and "accent" or "custom"))
+        local baseColor, hoverColor, inkColor
+        local function resolveColors()
+            baseColor = role == "danger" and T.DangerBg or (role == "default" and T.Surface1
+                or (role == "accent" and T.Accent or color))
+            if role == "default" then
+                hoverColor = G.Gray200
+            elseif role == "danger" and currentThemeName == "Violite" then
+                hoverColor = Color3.fromRGB(233, 68, 74)
+            else
+                hoverColor = Color3.fromRGB(
+                    math.min(255, baseColor.R * 255 + 20),
+                    math.min(255, baseColor.G * 255 + 20),
+                    math.min(255, baseColor.B * 255 + 20)
+                )
+            end
+            inkColor = role == "default" and T.Text or inkOn(baseColor)
+        end
+        resolveColors()
+        local isDefault = role == "default"
+
+        local button = Create("TextButton", {
+            Text = buttonText,
+            Font = FONT.Bold,
+            TextSize = TS.Button,
+            TextColor3 = inkColor,
+            BackgroundColor3 = baseColor,
+            -- 12 + 20 + 6 + 32 + 12 = 82 при заголовке; иначе строго по центру
+            Position = position,
+            Size = size,
+            AutoButtonColor = false,
+            Parent = parent
+        })
+        AddCorner(button, R_CTRL)
+        if isDefault then
+            AddStroke(button, STROKE_W, T.Border)
+        end
+        table.insert(themeHooks, function()
+            resolveColors()
+            button.BackgroundColor3 = baseColor
+            button.TextColor3 = inkColor
+        end)
+
+        button.MouseButton1Click:Connect(function()
+            if onClick then onClick(button) end
+        end)
+
+        button.MouseEnter:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = hoverColor}):Play()
+        end)
+        button.MouseLeave:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = baseColor}):Play()
+        end)
+
+        return button
+    end
+
+    -- Общая сегментированная панель для подвкладок и фильтров.
+    function GUI.CreateSegmentedPanel(parent, options)
+        options = options or {}
+        local pad, gap, height = 4, 4, options.Height or 34
+        local panel = {Buttons = {}, Items = {}, Value = nil, Tweens = {}}
+        panel.Root = Create("Frame", {Name = options.Name or "SegmentedPanel", BackgroundColor3 = T.Surface2,
+            Position = options.Position or UDim2.new(), Size = options.Size or UDim2.fromOffset(8, height), Parent = parent})
+        AddCorner(panel.Root, R_CTRL + 2)
+        local border = AddStroke(panel.Root, STROKE_W, T.Border)
+        panel.Indicator = Create("Frame", {Name = "Selection", BackgroundColor3 = T.Surface1,
+            Size = UDim2.fromOffset(0, height - pad * 2), Visible = false, ZIndex = 2, Parent = panel.Root})
+        AddCorner(panel.Indicator, R_CTRL)
+        local selectedBorder = AddStroke(panel.Indicator, STROKE_W, T.Accent)
+        selectedBorder.Transparency = 0.65
+
+        function panel:Set(value, animate)
+            self.Value = value
+            local chosen = self.Buttons[value]
+            if not chosen then return end
+            self.Indicator.Visible = true
+            if self.Tween then self.Tween:Cancel() end
+            local goal = {Position = chosen.Position, Size = chosen.Size}
+            if animate ~= false then
+                self.Tween = TweenService:Create(self.Indicator, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), goal)
+                self.Tween:Play()
+            else
+                self.Indicator.Position, self.Indicator.Size = goal.Position, goal.Size
+            end
+            for key, button in pairs(self.Buttons) do
+                if self.Tweens[key] then self.Tweens[key]:Cancel() end
+                button.BackgroundTransparency = 1
+                button.TextColor3 = key == value and T.Accent or T.TextDark
+            end
+        end
+        function panel:Layout()
+            table.sort(self.Items, function(a, b) return a.Order < b.Order end)
+            local x = pad
+            for _, item in ipairs(self.Items) do
+                local width = options.Fill and math.max(1, (self.Root.AbsoluteSize.X - pad * 2 - gap * (#self.Items - 1)) / #self.Items)
+                    or (item.Width == "auto" and math.max(options.MinWidth or 56, math.ceil(item.Button.TextBounds.X) + (options.TextPad or 32)))
+                    or item.Width
+                item.Button.Position = UDim2.fromOffset(x, pad)
+                item.Button.Size = UDim2.fromOffset(width, height - pad * 2)
+                x += width + gap
+            end
+            if not options.Fill then self.Root.Size = UDim2.fromOffset(x - gap + pad, height) end
+            if self.Value then self:Set(self.Value, false) end
+        end
+        function panel:Add(key, label, width, order, onClick)
+            local button = Create("TextButton", {Name = tostring(key), Text = label,
+                Font = FONT.Bold, TextSize = options.TextSize or TS.Option, AutoButtonColor = false,
+                BackgroundColor3 = T.Surface2, BackgroundTransparency = 1, TextColor3 = T.TextDark,
+                ZIndex = 3, Parent = self.Root})
+            AddCorner(button, R_CTRL)
+            self.Buttons[key] = button
+            table.insert(self.Items, {Key = key, Button = button, Width = width or 92, Order = order or #self.Items + 1})
+            button.MouseButton1Click:Connect(function() if onClick then onClick(key) end end)
+            -- "auto": ширина по тексту; TextBounds известен только после отрисовки
+            if width == "auto" then
+                button:GetPropertyChangedSignal("TextBounds"):Connect(function() self:Layout() end)
+            end
+            local function hover(on)
+                if self.Tweens[key] then self.Tweens[key]:Cancel() end
+                self.Tweens[key] = TweenService:Create(button, TweenInfo.new(0.12), {
+                    BackgroundTransparency = on and self.Value ~= key and 0.35 or 1,
+                    TextColor3 = self.Value == key and T.Accent or (on and T.Text or T.TextDark),
+                })
+                self.Tweens[key]:Play()
+            end
+            button.MouseEnter:Connect(function() hover(true) end)
+            button.MouseLeave:Connect(function() hover(false) end)
+            self:Layout()
+            return button
+        end
+        function panel:SetWidth(key, width)
+            for _, item in ipairs(self.Items) do if item.Key == key then item.Width = width end end
+            self:Layout()
+        end
+        if options.Fill then panel.Root:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() panel:Layout() end) end
+        table.insert(themeHooks, function()
+            panel.Root.BackgroundColor3, border.Color = T.Surface2, T.Border
+            panel.Indicator.BackgroundColor3, selectedBorder.Color = T.Surface1, T.Accent
+            for _, button in pairs(panel.Buttons) do button.BackgroundColor3 = T.Surface2 end
+            if panel.Value then panel:Set(panel.Value, false) end
+        end)
+        panel.Root.Destroying:Connect(function()
+            if panel.Tween then panel.Tween:Cancel() end
+            for _, tween in pairs(panel.Tweens) do tween:Cancel() end
+        end)
+        return panel
+    end
+
     function GUI.GetElements()
         return GUI.Flags
     end
@@ -956,7 +1127,8 @@ return function(env)
         })
         State.UIElements.MainGui = gui
 
-        local mainFrame = createWindowShell(gui, UDim2.fromOffset(1000, 690), UDim2.new(0.5, -500, 0.5, -340))
+        -- Стартовый размер 950×730; высота растёт, только если навигация не влезает.
+        local mainFrame = createWindowShell(gui, UDim2.fromOffset(WINDOW.Width, WINDOW.Height), UDim2.new(0.5, -WINDOW.Width / 2, 0.5, -WINDOW.Height / 2))
 
         -- Размытие фона. Основной путь — acrylic: мылится только прямоугольник
         -- под окном. Если стекло не поднялось (нет камеры, старый клиент),
@@ -1070,13 +1242,17 @@ return function(env)
         })
 
         -- Внизу сайдбара — только строка подписи; навигация занимает всё остальное
-        local SIDEBAR_BOTTOM = 30
+        local manuallyResized = false
+        local navTop = HEADER_H + WINDOW.NavGap
 
+        local navSelection = Create("Frame", {Name = "NavSelection", BackgroundColor3 = G.Gray200,
+            Size = UDim2.new(0, SIDEBAR_W - 16, 0, NAV_H), Visible = false, ZIndex = 0, Parent = sidebar})
+        AddCorner(navSelection, R_CTRL)
         local navScroll = Create("ScrollingFrame", {
             Name = "NavScroll",
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 8, 0, 84),
-            Size = UDim2.new(0, SIDEBAR_W - 16, 1, -(84 + SIDEBAR_BOTTOM + 12)),
+            Position = UDim2.new(0, 8, 0, navTop),
+            Size = UDim2.new(0, SIDEBAR_W - 16, 1, -(navTop + FOOTER_H + 1 + WINDOW.NavGap)),
             CanvasSize = UDim2.new(0, 0, 0, 0),
             ScrollBarThickness = 0,
             BorderSizePixel = 0,
@@ -1089,7 +1265,14 @@ return function(env)
             Parent = navScroll
         })
         navLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            navScroll.CanvasSize = UDim2.new(0, 0, 0, navLayout.AbsoluteContentSize.Y + 4)
+            local contentHeight = navLayout.AbsoluteContentSize.Y
+            navScroll.CanvasSize = UDim2.new(0, 0, 0, contentHeight)
+            if not manuallyResized then
+                local height = math.max(WINDOW.Height, navTop + contentHeight + WINDOW.NavGap + FOOTER_H + 1)
+                local oldHeight = mainFrame.Size.Y.Offset
+                mainFrame.Size = UDim2.fromOffset(WINDOW.Width, height)
+                mainFrame.Position += UDim2.fromOffset(0, (oldHeight - height) / 2)
+            end
         end)
 
         -- Личная подпись внизу сайдбара — переехала из заголовка старой версии
@@ -1308,6 +1491,26 @@ return function(env)
 
         local Tabs = {}
         local currentTab = nil
+        local navTween
+        local function moveNavSelection(animate)
+            if not currentTab then return end
+            local target = currentTab.Btn.AbsolutePosition - sidebar.AbsolutePosition
+            local y = target.Y
+            navSelection.Visible = y >= navScroll.Position.Y.Offset and y + NAV_H <= navScroll.Position.Y.Offset + navScroll.AbsoluteSize.Y + 1
+            navSelection.BackgroundColor3 = G.Gray200
+            if navTween then navTween:Cancel() end
+            if animate and navSelection.Visible then
+                navTween = TweenService:Create(navSelection, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2.fromOffset(target.X, y)})
+                navTween:Play()
+            else
+                navSelection.Position = UDim2.fromOffset(target.X, y)
+            end
+        end
+        navScroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function() moveNavSelection(false) end)
+        navScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() moveNavSelection(false) end)
+        navLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() task.defer(moveNavSelection, false) end)
+        table.insert(themeHooks, function() moveNavSelection(false) end)
+
         local sections = {}   -- {frame, layout, rows = {{row, sep, name, desc}, ...}}
 
         ----------------------------------------------------------------
@@ -1332,8 +1535,13 @@ return function(env)
             })
             AddCorner(thumb, 2)
 
+            -- AbsoluteCanvasSize: верно и для ручного CanvasSize страниц, и для
+            -- AutomaticCanvasSize (сетки вкладок спавнера/Upgrade)
+            local function canvasHeight()
+                return math.max(scrollingFrame.CanvasSize.Y.Offset, scrollingFrame.AbsoluteCanvasSize.Y)
+            end
             local function update()
-                local canvasH = scrollingFrame.CanvasSize.Y.Offset
+                local canvasH = canvasHeight()
                 local viewH = scrollingFrame.AbsoluteSize.Y
                 if canvasH <= viewH or viewH <= 0 then
                     thumb.Visible = false
@@ -1350,6 +1558,7 @@ return function(env)
 
             TrackConnection(scrollingFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(update))
             TrackConnection(scrollingFrame:GetPropertyChangedSignal("CanvasSize"):Connect(update))
+            TrackConnection(scrollingFrame:GetPropertyChangedSignal("AbsoluteCanvasSize"):Connect(update))
             TrackConnection(scrollingFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(update))
 
             local dragging = false
@@ -1366,7 +1575,7 @@ return function(env)
 
             TrackConnection(UserInputService.InputChanged:Connect(function(input)
                 if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                    local canvasH = scrollingFrame.CanvasSize.Y.Offset
+                    local canvasH = canvasHeight()
                     local viewH = scrollingFrame.AbsoluteSize.Y
                     local maxScroll = canvasH - viewH
                     if maxScroll <= 0 then return end
@@ -1388,6 +1597,8 @@ return function(env)
             task.defer(update)
             return thumb
         end
+        -- Вкладки со своей вёрсткой (Upgrade) берут тот же ползунок, что страницы
+        GUI.AttachScrollbar = AttachCustomScrollbar
 
         ----------------------------------------------------------------
         -- ПОИСК: фильтрация строк, скрытие пустых секций
@@ -1465,6 +1676,7 @@ return function(env)
             trade    = "arrow-left-right",
             trades   = "arrow-left-right",
             cases    = "box",
+            upgrade  = "arrow-circle-up",
         }
 
         local function makeTabIcon(tabName, parent)
@@ -2187,35 +2399,142 @@ return function(env)
         ----------------------------------------------------------------
 
         -- fullWidth: одна колонка на всю ширину (вкладки skinchanger с сеткой/хостами)
-        local function CreateTab(name, fullWidth)
-            local tabBtn = Create("TextButton", {
-                Text = "",
-                BackgroundColor3 = G.Gray200,
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, NAV_H),
-                AutoButtonColor = false,
-                Parent = navScroll
-            })
-            AddCorner(tabBtn, R_CTRL)
-
-            local setIconColor = makeTabIcon(name, tabBtn)
-
-            local tabLabel = Create("TextLabel", {
-                Text = name,
+        -- Компактная версия того же списка для панелей со своей вёрсткой.
+        function GUI.CreateCompactDropdown(parent, position, width, options, default, onChanged)
+            local DD_W = width or 136
+            local dropdown = Create("TextButton", {
+                Text = default,
                 Font = FONT.Bold,
-                TextSize = TS.Nav,
-                TextColor3 = T.TextDark,
+                TextSize = TS.Button,
+                TextColor3 = T.Text,
                 TextXAlignment = Enum.TextXAlignment.Left,
-                BackgroundTransparency = 1,
-                Position = UDim2.new(0, 34, 0, 0),
-                Size = UDim2.new(1, -42, 1, 0),
-                Parent = tabBtn
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                BackgroundColor3 = T.Surface1,
+                Position = position,
+                Size = UDim2.new(0, DD_W, 0, CTRL_H),
+                AutoButtonColor = false,
+                ZIndex = 5,
+                Parent = parent
             })
+            AddCorner(dropdown, R_CTRL)
+            local ddStroke = AddStroke(dropdown, STROKE_W, T.Border)
+            -- правый паддинг 24 — место под рисованный шеврон
+            Create("UIPadding", {
+                PaddingLeft = UDim.new(0, 12),
+                PaddingRight = UDim.new(0, 24),
+                Parent = dropdown
+            })
+            glyphChevron(dropdown, 24)
+            dropdown.MouseEnter:Connect(function()
+                TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
+            end)
+            dropdown.MouseLeave:Connect(function()
+                TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
+            end)
+
+            local overlay, openAt, close = makeOverlayList(dropdown, math.max(180, DD_W))
+
+            -- Элемент-объект. Значение вне options просто ставится текстом:
+            -- конфиг из другой версии не должен ронять загрузку
+            local element = {
+                __type = "Dropdown",
+                Value = default,
+                Options = options,
+                Instance = dropdown,
+            }
+
+            function element:Set(option, fire)
+                self.Value = tostring(option)
+                dropdown.Text = self.Value
+                if fire then
+                    if onChanged then onChanged(self.Value) end
+                end
+            end
+
+
+            -- строки поповера — единая фабрика popoverRow
+            for _, option in ipairs(options) do
+                local optionBtn = popoverRow(overlay, option)
+                optionBtn.MouseButton1Click:Connect(function()
+                    element:Set(option, true)
+                    close()
+                end)
+            end
+
+            local function listHeight()
+                return #options * (POPOVER_ROW + 2) + POPOVER_PAD * 2
+            end
+
+            dropdown.MouseButton1Click:Connect(function()
+                if overlay.Visible then
+                    close()
+                else
+                    overlay.Visible = true
+                    overlay.CanvasSize = UDim2.new(0, 0, 0, listHeight())
+                    openAt(math.min(232, listHeight()))
+                end
+            end)
+
+            return element
+        end
+
+        local tabGroups = {}
+        -- Подвкладки живут в шапке, справа от пилюли конфига: отдельная строка
+        -- над контентом оставляла пустую полосу во всю ширину окна
+        local SUBNAV_X = EDGE + 4 + PILL_W + 12
+        local function paintSubtabs(group, animate)
+            group.Panel:Set(group.Selected, animate)
+        end
+        local function CreateTab(name, fullWidth)
+            local definition = tabDefinitions[name]
+            local navName = definition and definition.Group or name
+            local group = definition and tabGroups[navName]
+            local newNavigation = group == nil
+            local tabBtn, tabLabel, setIconColor
+            if group then
+                tabBtn, tabLabel, setIconColor = group.Btn, group.Label, group.SetIcon
+            else
+                tabBtn = Create("TextButton", {
+                    Text = "",
+                    BackgroundColor3 = G.Gray200,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, NAV_H),
+                    AutoButtonColor = false,
+                    Parent = navScroll
+                })
+                AddCorner(tabBtn, R_CTRL)
+
+                setIconColor = makeTabIcon(navName, tabBtn)
+
+                tabLabel = Create("TextLabel", {
+                    Text = navName,
+                    Font = FONT.Bold,
+                    TextSize = TS.Nav,
+                    TextColor3 = T.TextDark,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 34, 0, 0),
+                    Size = UDim2.new(1, -42, 1, 0),
+                    Parent = tabBtn
+                })
+
+            end
+            if definition and not group then
+                local panel = GUI.CreateSegmentedPanel(header, {
+                    Name = navName .. "Subtabs", Position = UDim2.new(0, SUBNAV_X, 0.5, 0), Height = PILL_H,
+                })
+                panel.Root.AnchorPoint = Vector2.new(0, 0.5)
+                panel.Root.Visible = false
+                group = {Btn = tabBtn, Label = tabLabel, SetIcon = setIconColor,
+                    Bar = panel.Root, Panel = panel, Members = {}, Buttons = panel.Buttons, Selected = navName}
+                tabGroups[navName] = group
+            end
 
             -- Контейнер двух колонок для этой вкладки
             local pageHolder = Create("Frame", {
                 Name = name .. "PageHolder",
                 BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(0, 0),
                 Size = UDim2.new(1, 0, 1, 0),
                 Visible = false,
                 Parent = pagesContainer
@@ -2304,44 +2623,58 @@ return function(env)
                     currentTab.Label.TextColor3 = T.TextDark
                     currentTab.SetIcon(T.TextDark)
                     currentTab.Holder.Visible = false
+                    if currentTab.Subnav then currentTab.Subnav.Visible = false end
                 end
                 currentTab = {
-                    Btn = tabBtn, Holder = pageHolder,
+                    Btn = tabBtn, Holder = pageHolder, Subnav = group and group.Bar,
                     Label = tabLabel, SetIcon = setIconColor
                 }
                 -- активный пункт: gray-200 подложка + gray-1000 текст (Geist nav)
-                tabBtn.BackgroundColor3 = G.Gray200
-                TweenService:Create(
-                    tabBtn,
-                    TweenInfo.new(0.12, Enum.EasingStyle.Quad),
-                    {BackgroundTransparency = 0}
-                ):Play()
+                TweenService:Create(tabBtn, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+                moveNavSelection(true)
                 tabLabel.TextColor3 = T.Text
                 setIconColor(T.Text)
                 pageHolder.Visible = true
+                if group then
+                    group.Selected = name
+                    group.Bar.Visible = true
+                    paintSubtabs(group, true)
+                end
             end
 
-            tabBtn.MouseButton1Click:Connect(Activate)
+            if group then
+                local button = group.Panel:Add(name, name, "auto", definition.Order, Activate)
+                button.Name = name .. "Subtab"
+                group.Members[name] = Activate
+                paintSubtabs(group, false)
+            end
 
-            tabBtn.MouseEnter:Connect(function()
-                if not isActive() then
-                    tabBtn.BackgroundColor3 = G.Gray100
-                    TweenService:Create(tabBtn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
-                        BackgroundTransparency = 0
-                    }):Play()
-                    tabLabel.TextColor3 = T.Text
-                    setIconColor(T.Text)
-                end
-            end)
-            tabBtn.MouseLeave:Connect(function()
-                if not isActive() then
-                    TweenService:Create(tabBtn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
-                        BackgroundTransparency = 1
-                    }):Play()
-                    tabLabel.TextColor3 = T.TextDark
-                    setIconColor(T.TextDark)
-                end
-            end)
+            if newNavigation then
+                tabBtn.MouseButton1Click:Connect(function()
+                    if group then (group.Members[group.Selected] or Activate)() else Activate() end
+                end)
+
+                tabBtn.MouseEnter:Connect(function()
+                    if not isActive() then
+                        tabBtn.BackgroundColor3 = G.Gray100
+                        TweenService:Create(tabBtn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+                            BackgroundTransparency = 0
+                        }):Play()
+                        tabLabel.TextColor3 = T.Text
+                        setIconColor(T.Text)
+                    end
+                end)
+                tabBtn.MouseLeave:Connect(function()
+                    if not isActive() then
+                        TweenService:Create(tabBtn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {
+                            BackgroundTransparency = 1
+                        }):Play()
+                        tabLabel.TextColor3 = T.TextDark
+                        setIconColor(T.TextDark)
+                    end
+                end)
+
+            end
 
             if #Tabs == 0 then
                 Activate()
@@ -2673,80 +3006,10 @@ return function(env)
                 local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
                 addRowText(row, title, desc, 152)
 
-                local DD_W = 112
-                local dropdown = Create("TextButton", {
-                    Text = default,
-                    Font = FONT.Bold,
-                    TextSize = TS.Button,
-                    TextColor3 = T.Text,
-                    TextXAlignment = Enum.TextXAlignment.Left,
-                    TextTruncate = Enum.TextTruncate.AtEnd,
-                    BackgroundColor3 = T.Surface1,
-                    Position = UDim2.new(1, -(DD_W + EDGE), 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(0, DD_W, 0, CTRL_H),
-                    AutoButtonColor = false,
-                    ZIndex = 5,
-                    Parent = row
-                })
-                AddCorner(dropdown, R_CTRL)
-                local ddStroke = AddStroke(dropdown, STROKE_W, T.Border)
-                -- правый паддинг 24 — место под рисованный шеврон
-                Create("UIPadding", {
-                    PaddingLeft = UDim.new(0, 12),
-                    PaddingRight = UDim.new(0, 24),
-                    Parent = dropdown
-                })
-                glyphChevron(dropdown, 24)
-                dropdown.MouseEnter:Connect(function()
-                    TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.BorderHi}):Play()
-                end)
-                dropdown.MouseLeave:Connect(function()
-                    TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
-                end)
-
-                local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
-
-                -- Элемент-объект. Значение вне options просто ставится текстом:
-                -- конфиг из другой версии не должен ронять загрузку
-                local element = {
-                    __type = "Dropdown",
-                    Value = default,
-                    Options = options,
-                    Instance = dropdown,
-                }
-
-                function element:Set(option, fire)
-                    self.Value = tostring(option)
-                    dropdown.Text = self.Value
-                    if fire then
-                        callHandler(handlerKey, self.Value)
-                    end
-                end
-
+                local element = GUI.CreateCompactDropdown(row,
+                    UDim2.new(1, -(112 + EDGE), 0.5, -CTRL_H / 2), 112, options, default,
+                    function(value) callHandler(handlerKey, value) end)
                 registerElement(handlerKey, element)
-
-                -- строки поповера — единая фабрика popoverRow
-                for _, option in ipairs(options) do
-                    local optionBtn = popoverRow(overlay, option)
-                    optionBtn.MouseButton1Click:Connect(function()
-                        element:Set(option, true)
-                        close()
-                    end)
-                end
-
-                local function listHeight()
-                    return #options * (POPOVER_ROW + 2) + POPOVER_PAD * 2
-                end
-
-                dropdown.MouseButton1Click:Connect(function()
-                    if overlay.Visible then
-                        close()
-                    else
-                        overlay.Visible = true
-                        overlay.CanvasSize = UDim2.new(0, 0, 0, listHeight())
-                        openAt(math.min(232, listHeight()))
-                    end
-                end)
 
                 return element
             end
@@ -3245,68 +3508,9 @@ return function(env)
                     })
                 end
 
-                -- Текст на кнопках всегда белый, поэтому и заливка везде
-                -- достаточно тёмная/насыщенная. Прежний primary был светло-серым
-                -- (gray-1000) с тёмным шрифтом — из-за него подписи и различались
-                -- по цвету; теперь это тёмная кнопка с рамкой (Geist secondary).
-                --   default (color = nil)  — тёмная заливка + рамка
-                --   error   (color = Red)  — заливка red-800
-                --   custom  (свой цвет)    — заливка переданным цветом
-                -- Роль, а не захваченный цвет: акцентная кнопка следует за темой
-                local role = color == CONFIG.Colors.Red and "danger"
-                    or (color == nil and "default" or (color == CONFIG.Colors.Accent and "accent" or "custom"))
-                local baseColor, hoverColor, inkColor
-                local function resolveColors()
-                    baseColor = role == "danger" and T.DangerBg or (role == "default" and T.Surface1
-                        or (role == "accent" and T.Accent or color))
-                    if role == "default" then
-                        hoverColor = G.Gray200
-                    elseif role == "danger" and currentThemeName == "Violite" then
-                        hoverColor = Color3.fromRGB(233, 68, 74)
-                    else
-                        hoverColor = Color3.fromRGB(
-                            math.min(255, baseColor.R * 255 + 20),
-                            math.min(255, baseColor.G * 255 + 20),
-                            math.min(255, baseColor.B * 255 + 20)
-                        )
-                    end
-                    inkColor = role == "default" and T.Text or inkOn(baseColor)
-                end
-                resolveColors()
-                local isDefault = role == "default"
-
-                local button = Create("TextButton", {
-                    Text = buttonText,
-                    Font = FONT.Bold,
-                    TextSize = TS.Button,
-                    TextColor3 = inkColor,
-                    BackgroundColor3 = baseColor,
-                    -- 12 + 20 + 6 + 32 + 12 = 82 при заголовке; иначе строго по центру
-                    Position = hasTitle and UDim2.new(0, EDGE, 0, 38) or UDim2.new(0, EDGE, 0.5, -CTRL_H / 2),
-                    Size = UDim2.new(1, -EDGE * 2, 0, CTRL_H),
-                    AutoButtonColor = false,
-                    Parent = row
-                })
-                AddCorner(button, R_CTRL)
-                if isDefault then
-                    AddStroke(button, STROKE_W, T.Border)
-                end
-                table.insert(themeHooks, function()
-                    resolveColors()
-                    button.BackgroundColor3 = baseColor
-                    button.TextColor3 = inkColor
-                end)
-
-                button.MouseButton1Click:Connect(function()
-                    callHandler(handlerKey)
-                end)
-
-                button.MouseEnter:Connect(function()
-                    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = hoverColor}):Play()
-                end)
-                button.MouseLeave:Connect(function()
-                    TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = baseColor}):Play()
-                end)
+                local button = GUI.CreateActionButton(row, buttonText, color,
+                    hasTitle and UDim2.new(0, EDGE, 0, 38) or UDim2.new(0, EDGE, 0.5, -CTRL_H / 2),
+                    UDim2.new(1, -EDGE * 2, 0, CTRL_H), function() callHandler(handlerKey) end)
 
                 return button
             end
@@ -3435,6 +3639,7 @@ return function(env)
 
         resizeGrip.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                manuallyResized = true
                 resizing = true
                 resizeStart = UserInputService:GetMouseLocation()
                 frameStartSize = mainFrame.AbsoluteSize
@@ -3444,8 +3649,8 @@ return function(env)
             if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
                 local mouseLoc = UserInputService:GetMouseLocation()
                 local delta = mouseLoc - resizeStart
-                local newW = math.clamp(frameStartSize.X + delta.X, 720, 1400)
-                local newH = math.clamp(frameStartSize.Y + delta.Y, 480, 900)
+                local newW = math.clamp(frameStartSize.X + delta.X, WINDOW.MinWidth, WINDOW.MaxWidth)
+                local newH = math.clamp(frameStartSize.Y + delta.Y, WINDOW.MinHeight, WINDOW.MaxHeight)
                 mainFrame.Size = UDim2.new(0, newW, 0, newH)
             end
         end))
@@ -3627,6 +3832,38 @@ return function(env)
         T = T, G = G, FONT = FONT, TS = TS,
         R_CTRL = R_CTRL, R_SM = R_SM, CTRL_H = CTRL_H, STROKE_W = STROKE_W,
     }
+
+    -- Карточка секции для вкладок со своей вёрсткой: тот же вид, что у групп
+    -- обычных вкладок (заголовок над карточкой, Surface1 с прозрачностью, обводка
+    -- Border). Токены T — общая перекраска темы находит их сама.
+    -- position/size — для внешней рамки (заголовок + карточка); карточка отступает
+    -- на 1 px, иначе её обводку срезают обрезающие предки
+    function GUI.CreateCard(parent, title, position, size)
+        local holder = Create("Frame", {
+            Name = (title or "Section") .. "Group", BackgroundTransparency = 1,
+            Position = position, Size = size, Parent = parent,
+        })
+        local top = 1
+        if title and title ~= "" then
+            local head = Create("TextLabel", {
+                Name = "GroupTitle", Text = title, Font = FONT.Bold, TextSize = TS.Section,
+                TextColor3 = T.TextDark, TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Bottom, BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 20), Parent = holder,
+            })
+            Create("UIPadding", {PaddingLeft = UDim.new(0, 2), Parent = head})
+            top = 20 + TITLE_GAP
+        end
+        local card = Create("Frame", {
+            Name = (title or "Section") .. "Card", BackgroundColor3 = T.Surface1,
+            BackgroundTransparency = CARD_TRANSPARENCY, BorderSizePixel = 0,
+            Position = UDim2.new(0, 1, 0, top), Size = UDim2.new(1, -2, 1, -(top + 1)),
+            Parent = holder,
+        })
+        AddCorner(card, R_CARD)
+        AddStroke(card, STROKE_W, T.Border)
+        return card, holder
+    end
 
     return GUI
 end

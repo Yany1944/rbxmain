@@ -1,5 +1,5 @@
 -- LocalCatalog v11. Client-only. Personalized browsing, makeup, bundles, body parts and resizable UI.
--- RightControl toggles the window. No place remotes or purchases: bundles and bodies are applied locally.
+-- Кнопка Catalog открывает окно и перемещается мышью или касанием. Примерка остаётся локальной.
 if not game:IsLoaded() then game.Loaded:Wait() end
 local env=getgenv and getgenv() or _G
 local carry,carryVisible
@@ -22,6 +22,7 @@ local LEGACY_SAVE='LocalCatalog-outfit.json'
 local OUTFITS='LocalCatalog-outfits.json'
 local FAVORITES='LocalCatalog-favorites.json'
 local SETTINGS='LocalCatalog-settings.json'
+local CONFIG={ToggleDragThreshold=6}
 local app={Alive=true,Items={},Desired={},Hidden={},Cache={},Connections={},Busy=false,
     Version=11,KeepOnRespawn=true,HideOriginal=false,Restoring=false,Revision=0,SearchBusy=false,
     Window={Width=1100,Height=736,Scale=1}}
@@ -1363,7 +1364,45 @@ title.Font=Enum.Font.SourceSansBold; title.Active=true
 label('Local avatar editor',170,15,220,26,nil,16).TextColor3=C.Muted
 button('Minimize',890,14,102,34,function() if app.CloseDialogs then app.CloseDialogs() end; panel.Visible=false end)
 button('Close',1000,14,78,34,function() app.Unload() end)
-local toggle=button('Catalog',14,130,116,40,function() if app.ToggleWindow then app.ToggleWindow() else panel.Visible=not panel.Visible end end,gui,true)
+local toggle=button('Catalog',14,130,116,40,nil,gui,true)
+toggle.Name='CatalogToggle'
+do
+    app.ToggleDrag={Dragged=false}
+    local state=app.ToggleDrag
+    local function clampToggle(position)
+        local bounds=gui.AbsoluteSize-toggle.AbsoluteSize
+        toggle.Position=UDim2.fromOffset(math.clamp(position.X,0,math.max(0,bounds.X)),
+            math.clamp(position.Y,0,math.max(0,bounds.Y)))
+    end
+    connect(toggle.InputBegan,function(i)
+        if state.Input then return end
+        if i.UserInputType~=Enum.UserInputType.MouseButton1 and i.UserInputType~=Enum.UserInputType.Touch then return end
+        state.Input=i; state.Start=i.Position; state.Dragged=false
+        state.Position=Vector2.new(toggle.Position.X.Offset,toggle.Position.Y.Offset)
+    end)
+    connect(UIS.InputChanged,function(i)
+        if not state.Input then return end
+        local touch=state.Input.UserInputType==Enum.UserInputType.Touch
+        if (touch and i~=state.Input) or (not touch and i.UserInputType~=Enum.UserInputType.MouseMovement) then return end
+        local delta=Vector2.new(i.Position.X-state.Start.X,i.Position.Y-state.Start.Y)
+        if delta.Magnitude>=CONFIG.ToggleDragThreshold then state.Dragged=true end
+        if state.Dragged then clampToggle(state.Position+delta) end
+    end)
+    connect(UIS.InputEnded,function(i)
+        if i==state.Input then state.Input=nil end
+    end)
+    connect(UIS.WindowFocusReleased,function()
+        state.Input=nil; state.Dragged=true
+    end)
+    -- Activated может прийти после InputEnded: признак переноса сбрасывает только новое нажатие.
+    connect(toggle.Activated,function()
+        if state.Dragged then return end
+        if app.ToggleWindow then app.ToggleWindow() else panel.Visible=not panel.Visible end
+    end)
+    connect(gui:GetPropertyChangedSignal('AbsoluteSize'),function()
+        clampToggle(Vector2.new(toggle.Position.X.Offset,toggle.Position.Y.Offset))
+    end)
+end
 local dragStart,dragPosition,dragTouch
 local dragHeader=make('Frame',{Name='DragHeader',Size=UDim2.new(1,0,0,54),BackgroundTransparency=1,Active=true,ZIndex=3},panel)
 connect(dragHeader.InputBegan,function(i)
@@ -2154,7 +2193,6 @@ wearId.Name='WearId'
 assetId.FocusLost:Connect(function(enter)
     if enter then run(function(rev) return app.WearFromInput(assetId.Text,rev) end) end
 end)
-label('Right Ctrl',720,15,150,26,nil,16).TextColor3=C.Muted
 status=label('Choose a category or search for an item.',22,696,1056,26,nil,17)
 status.Name='Status'; status.TextTruncate=Enum.TextTruncate.AtEnd
 do
@@ -2493,9 +2531,8 @@ end)
 connect(UIS.InputEnded,function(i)
     if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragTransform=nil end
 end)
-connect(UIS.InputBegan,function(i,processed)
+connect(UIS.InputBegan,function(i)
     if i.KeyCode==Enum.KeyCode.Escape and modalShade.Visible then clearModal(); return end
-    if not processed and i.KeyCode==Enum.KeyCode.RightControl then app.ToggleWindow() end
 end)
 connect(player.CharacterAdded,app.HandleCharacterAdded)
 -- If appearance arrives after the bounded wait, rebuild once from the completed server appearance.
