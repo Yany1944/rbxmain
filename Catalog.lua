@@ -1498,6 +1498,14 @@ end
         refresh()
         return 'Body colors restored'
     end
+    -- Цвет слота без своих перекрасок (для превью сохранённых образов: описание в MM2 даёт чёрный)
+    function app.OriginalSlotColor(slot)
+        local ch=player.Character
+        local part=ch and colorParts(ch,slot)[1]
+        if not part then return nil end
+        local rec=app.ColorState and app.ColorState.Parts[part]
+        return rec and rec.Original or part.Color
+    end
     -- Текущий цвет слота: свой выбор или цвет персонажа
     function app.SlotColor(slot)
         if slot=='All' then slot='Head' end
@@ -1931,6 +1939,8 @@ local favoriteButtons={}
 local function clearResults()
     -- Карточки бывают Frame и TextButton (плитка импорта) — убираем любые
     for _,o in ipairs(results:GetChildren()) do if o:IsA('GuiObject') then o:Destroy() end end
+    -- Сохранённые образы ставят ячейку выше (рендер аватара) — возвращаем стандартную
+    results.UIGridLayout.CellSize=UDim2.fromOffset(180,211)
     resultCount=0; cardButtons={}; favoriteButtons={}; results.CanvasPosition=Vector2.zero
 end
 local renderSavedOutfits,renderSavedItems,renderCategories,filterMatch,search
@@ -2116,6 +2126,287 @@ local function equipSavedOutfit(entry)
         return failed and #failed==0 and ('Outfit equipped: '..entry.Name) or ('Some outfit items could not load: '..table.concat(failed or {},', '))
     end)
 end
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Превью сохранённых образов: весь аватар целиком, а не отдельные предметы
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Образ не надет, поэтому собираем его как настоящий рендер: описание = исходная внешность
+-- персонажа + предметы образа, цвета и масштаб тела → модель Roblox → короткая подгонка в мире
+-- (слоёная одежда и суставы досчитываются только там) → якорим и показываем во ViewportFrame.
+-- Готовые модели кэшируем; рендер по одному, через ту же очередь запросов, что и примерка
+;(function()
+    local RENDER={Fov=30,Yaw=-18,Pitch=8,Margin=1.02,MaxCached=24,FitTimeout=1.5,
+        Ambient=Color3.fromRGB(205,205,210),LightColor=Color3.fromRGB(255,250,240),LightDirection=Vector3.new(-1,-1.2,-2)}
+    local BASE_PROPS={'Head','Torso','LeftArm','RightArm','LeftLeg','RightLeg','Face','Shirt','Pants','GraphicTShirt',
+        'HeightScale','WidthScale','DepthScale','HeadScale','BodyTypeScale','ProportionScale'}
+    local queue,waiting,order={},{},{}
+    local busy=false
+    local baseCache={Key=nil,Time=0}
+
+    -- Ключ исходной внешности: сменился персонаж или его вещи — превью устарели
+    local function baseKey()
+        if baseCache.Key and os.clock()-baseCache.Time<3 then return baseCache.Key end
+        local ch=player.Character
+        local h=ch and ch:FindFirstChildOfClass('Humanoid')
+        if not h then return nil end
+        local d=h:GetAppliedDescription()
+        local parts={h.RigType.Name}
+        for _,p in ipairs(BASE_PROPS) do table.insert(parts,tostring(d[p])) end
+        for _,a in ipairs(d:GetAccessories(true)) do table.insert(parts,tostring(a.AssetId)) end
+        for _,slot in ipairs(app.ColorSlots or {}) do
+            local c=app.OriginalSlotColor and app.OriginalSlotColor(slot)
+            table.insert(parts,c and c:ToHex() or '-')
+        end
+        d:Destroy()
+        baseCache.Key=table.concat(parts,':'); baseCache.Time=os.clock()
+        return baseCache.Key
+    end
+    local function outfitKey(data)
+        local orders={}
+        for _,it in ipairs(data.Items or {}) do if it.Id and it.LayerOrder then orders[string.format('%.0f',it.Id)]=it.LayerOrder end end
+        local ids={}
+        for i,id in ipairs(data.AssetIds or {}) do ids[i]=string.format('%.0f',id) end
+        return Http:JSONEncode({ids,orders,data.HideOriginal==true,data.BodyColors or false,data.Scales or false,data.Transforms or false})
+    end
+    -- Трансформ из Transform Item, если он что-то меняет
+    local function activeTransform(data,id)
+        local t=type(data.Transforms)=='table' and data.Transforms[string.format('%.0f',id)]
+        if type(t)~='table' then return nil end
+        local ok,norm=pcall(normalizedTransform,t)
+        if not ok then return nil end
+        for axis=1,3 do
+            if norm.Position[axis]~=0 or norm.Rotation[axis]~=0 or norm.Scale[axis]~=1 then return norm end
+        end
+        return nil
+    end
+
+    -- Описание аватара для образа
+    local function buildDescription(data,active)
+        local ch=player.Character
+        local h=ch and ch:FindFirstChildOfClass('Humanoid')
+        assert(h,'Character is still loading')
+        local d=h:GetAppliedDescription()
+        local rig=h.RigType
+        for _,slot in ipairs(app.ColorSlots or {}) do
+            local hex=type(data.BodyColors)=='table' and data.BodyColors[slot]
+            local ok,color=false,nil
+            if hex then ok,color=pcall(Color3.fromHex,tostring(hex)) end
+            color=ok and color or (app.OriginalSlotColor and app.OriginalSlotColor(slot))
+            if color then d[slot..'Color']=color end
+        end
+        if type(data.Scales)=='table' then
+            for key,v in pairs(data.Scales) do pcall(function() d[key]=v end) end
+        end
+        if data.HideOriginal then
+            d:SetAccessories({},true); d.Shirt=0; d.Pants=0; d.GraphicTShirt=0
+            for _,o in ipairs(d:GetChildren()) do if o:IsA('MakeupDescription') then o:Destroy() end end
+        end
+        local hints={}
+        for _,it in ipairs(data.Items or {}) do if it.Id then hints[it.Id]=it end end
+        local accessories=d:GetAccessories(true)
+        local transformed={}
+        for i,id in ipairs(data.AssetIds or {}) do
+            local hint=hints[id]
+            local ok,info=pcall(itemMetadata,id,hint and hint.Kind and hint or nil,active)
+            if not active() then error('Operation cancelled',0) end
+            local kind=ok and info.Kind
+            local order=hint and hint.LayerOrder or i
+            if kind and accessory[kind] then
+                local assetType
+                for name,value in pairs(assetTypesByName) do if value==kind then assetType=Enum.AvatarAssetType[name]; break end end
+                local okType,accType=pcall(AES.GetAccessoryType,AES,assetType)
+                if okType then
+                    local layered=(kind>=64 and kind<=72) or kind==76 or kind==77
+                    local transform=not layered and activeTransform(data,id)
+                    if transform then
+                        -- Сдвинутый/повёрнутый/масштабированный предмет садим сами, как на живом персонаже
+                        table.insert(transformed,{Id=id,Kind=kind,Transform=transform})
+                    else
+                        -- Order у жёсткого аксессуара заставляет SetAccessories молча выбросить запись
+                        table.insert(accessories,{AssetId=id,AccessoryType=accType,IsLayered=layered,Order=layered and order or nil})
+                    end
+                end
+            elseif kind==11 then d.Shirt=id
+            elseif kind==12 then d.Pants=id
+            elseif kind==2 then d.GraphicTShirt=id
+            elseif kind==18 then d.Face=id
+            elseif kind and makeup[kind] then
+                make('MakeupDescription',{AssetId=id,MakeupType=Enum.MakeupType[makeup[kind]],Order=order},d)
+            elseif kind and bodySlots[kind] then
+                d[bodySlots[kind]]=id
+            end
+        end
+        if not pcall(d.SetAccessories,d,accessories,true) then
+            -- Несовместимая слоёная запись — показываем хотя бы жёсткие аксессуары
+            local rigid={}
+            for _,a in ipairs(accessories) do if not a.IsLayered then table.insert(rigid,a) end end
+            pcall(d.SetAccessories,d,rigid,true)
+        end
+        return d,rig,transformed
+    end
+
+    -- Модель образа: сборка Roblox + подгонка в мире вдали от игроков
+    local fitSlot=0
+    local function renderModel(data,active)
+        local d,rig,transformed=buildDescription(data,active)
+        local model
+        local ok,err=pcall(function()
+            model=apiCall(network.Avatar,function() return Players:CreateHumanoidModelFromDescriptionAsync(d,rig) end,active,0.35)
+        end)
+        -- Трансформированные аксессуары: подогнанные под это же тело, как при примерке
+        local extras={}
+        if ok then
+            for _,e in ipairs(transformed) do
+                local desc=d:Clone()
+                local okFit,acc,fit=pcall(loadFittedWearable,e.Id,e.Kind,desc,rig,active)
+                desc:Destroy()
+                if okFit and acc then
+                    for _,s in ipairs(acc:QueryDescendants('LuaSourceContainer')) do s:Destroy() end
+                    table.insert(extras,{Accessory=acc,Fit=fit,Transform=e.Transform})
+                end
+            end
+        end
+        d:Destroy()
+        if not ok then
+            for _,e in ipairs(extras) do e.Accessory:Destroy() end
+            error(err,0)
+        end
+        local fitted,fitErr=pcall(function()
+            for _,s in ipairs(model:QueryDescendants('LuaSourceContainer')) do s:Destroy() end
+            for _,p in ipairs(model:QueryDescendants('BasePart')) do p.CanCollide=false; p.CanTouch=false; p.CanQuery=false end
+            local root=model:FindFirstChild('HumanoidRootPart')
+            assert(root,'Roblox returned a model without a root')
+            root.Anchored=true
+            local h=model:FindFirstChildOfClass('Humanoid')
+            if h then h.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None; h.BreakJointsOnDeath=false end
+            fitSlot=(fitSlot+1)%16
+            model.Name='_LocalCatalogPreview'; model:PivotTo(CFrame.new(fitSlot*40,10000,-4000)); model.Parent=workspace
+            local advanced=#model:QueryDescendants('AnimationConstraint')>0
+            local deadline=os.clock()+RENDER.FitTimeout
+            repeat
+                if not active() then error('Operation cancelled',0) end
+                task.wait(0.05)
+            until not advanced or #model:QueryDescendants('RigidConstraint')>0 or os.clock()>=deadline
+            -- Свои аксессуары с трансформом: та же посадка и transformItem, что у живого персонажа
+            for _,e in ipairs(extras) do
+                local acc=e.Accessory
+                local okAttach=pcall(function()
+                    local weld,base=attach(acc,model,e.Fit)
+                    local h=acc.Handle
+                    local it={Object=acc,Weld=weld,Base=base,BaseSize=h.Size,BaseC1=weld.C1,BaseAttachments={}}
+                    for _,a in ipairs(h:QueryDescendants('Attachment')) do it.BaseAttachments[a]=a.CFrame end
+                    it.Mesh=h:FindFirstChildOfClass('SpecialMesh')
+                    if it.Mesh then it.BaseMeshScale=it.Mesh.Scale; it.BaseMeshOffset=it.Mesh.Offset end
+                    for _,part in ipairs(acc:QueryDescendants('BasePart')) do part.CanQuery=false end
+                    transformItem(it,e.Transform)
+                end)
+                if not okAttach then acc:Destroy() end
+            end
+            task.wait(0.15)
+            -- Поза снята — дальше модель неподвижна, WorldModel суставы не шагает
+            for _,p in ipairs(model:QueryDescendants('BasePart')) do p.Anchored=true end
+            model.Parent=nil
+            model:PivotTo(CFrame.new())
+        end)
+        if not fitted then
+            for _,e in ipairs(extras) do if not e.Accessory.Parent then e.Accessory:Destroy() end end
+            model:Destroy(); error(fitErr,0)
+        end
+        model.Archivable=true
+        return model
+    end
+
+    -- Камера: весь рост, лёгкий поворот как у миниатюр аватаров
+    local function frame(view,model,camera)
+        local root=model:FindFirstChild('HumanoidRootPart')
+        local box,size=model:GetBoundingBox()
+        local look=root and root.CFrame.LookVector or Vector3.new(0,0,-1)
+        look=Vector3.new(look.X,0,look.Z)
+        look=look.Magnitude>0.01 and look.Unit or Vector3.new(0,0,-1)
+        -- Поворот вокруг вертикали, затем камера чуть выше пояса и смотрит слегка вниз
+        local flat=CFrame.Angles(0,math.rad(RENDER.Yaw),0):VectorToWorldSpace(look)
+        local pitch=math.rad(RENDER.Pitch)
+        local dir=flat*math.cos(pitch)+Vector3.yAxis*math.sin(pitch)
+        local aspect=math.max(0.2,view.AbsoluteSize.X/math.max(1,view.AbsoluteSize.Y))
+        local t=math.tan(math.rad(RENDER.Fov)/2)
+        local halfH=size.Y/2*RENDER.Margin
+        local halfW=math.max(size.X,size.Z)/2*RENDER.Margin
+        -- От центра рамки до её передней грани — четверть глубины, иначе аватар мельчит
+        local distance=math.max(halfH/t,halfW/(t*aspect))+math.max(size.X,size.Z)*0.25
+        camera.CFrame=CFrame.lookAt(box.Position+dir*distance,box.Position)
+    end
+    local function attach(job,template)
+        local view=job.View
+        if not view.Parent then return end
+        local note=view:FindFirstChild('Status')
+        if note then note:Destroy() end
+        local world=make('WorldModel',{Name='World'},view)
+        local model=template:Clone()
+        model.Parent=world
+        local camera=make('Camera',{FieldOfView=RENDER.Fov},view)
+        view.CurrentCamera=camera
+        frame(view,model,camera)
+        view:GetPropertyChangedSignal('AbsoluteSize'):Connect(function() if model.Parent then frame(view,model,camera) end end)
+    end
+    local function remember(key,model)
+        local cacheKey='preview|'..key
+        if app.Cache[cacheKey] then app.Cache[cacheKey].Template:Destroy() end
+        app.Cache[cacheKey]={Template=model,Kind='Preview'}
+        table.insert(order,cacheKey)
+        while #order>RENDER.MaxCached do
+            local old=table.remove(order,1)
+            if app.Cache[old] then app.Cache[old].Template:Destroy(); app.Cache[old]=nil end
+        end
+    end
+
+    -- Один рендер за раз; одинаковые образы ждут одну модель
+    local function pump()
+        if busy then return end
+        busy=true
+        task.spawn(function()
+            while app.Alive and #queue>0 do
+                local key=table.remove(queue,1)
+                local jobs=waiting[key] or {}
+                waiting[key]=nil
+                local alive={}
+                for _,job in ipairs(jobs) do if job.View.Parent then table.insert(alive,job) end end
+                local cached=app.Cache['preview|'..key]
+                if cached then
+                    for _,job in ipairs(alive) do attach(job,cached.Template) end
+                elseif #alive>0 then
+                    local ok,model=pcall(renderModel,alive[1].Data,function() return app.Alive end)
+                    if ok and app.Alive then
+                        remember(key,model)
+                        for _,job in ipairs(alive) do attach(job,model) end
+                    else
+                        for _,job in ipairs(alive) do
+                            local note=job.View:FindFirstChild('Status')
+                            if note then note.Text='Preview unavailable' end
+                        end
+                    end
+                end
+            end
+            busy=false
+        end)
+    end
+
+    -- Превью образа во весь parent. Пока модель собирается — подпись «Rendering...»
+    function app.OutfitPreview(data,parent)
+        local view=make('ViewportFrame',{Name='OutfitRender',Size=UDim2.fromScale(1,1),BackgroundTransparency=1,
+            Ambient=RENDER.Ambient,LightColor=RENDER.LightColor,LightDirection=RENDER.LightDirection},parent)
+        local note=label('Rendering...',0,0,10,10,view,14)
+        note.Name='Status'; note.Size=UDim2.fromScale(1,1); note.TextXAlignment=Enum.TextXAlignment.Center; note.TextColor3=C.Muted
+        local base=baseKey()
+        if not base then note.Text='Waiting for avatar...'; return view end
+        local key=base..'|'..outfitKey(data)
+        local cached=app.Cache['preview|'..key]
+        local job={View=view,Data=data}
+        if cached then attach(job,cached.Template); return view end
+        if not waiting[key] then waiting[key]={}; table.insert(queue,key) end
+        table.insert(waiting[key],job)
+        pump()
+        return view
+    end
+end)()
 -- ══════════════════════════════════════════════════════════════════════════════
 -- Сохранённые образы: общие элементы плиток, коды обмена, окна Open / Manage / Share / Import
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -2321,15 +2612,18 @@ end
     function app.OpenShareDialog(entry)
         local ok,code=pcall(app.EncodeOutfit,entry)
         if not ok then message(code,true); return end
-        local f=dialog('ShareOutfit',560,372,'Share outfit',entry.Name)
-        local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,86),Size=UDim2.fromOffset(512,60),BackgroundColor3=C.Surface,BorderSizePixel=0},f)
-        corner(shelf,10); app.OutfitShelf(entry.Data,shelf,46,50,9)
-        modalLabel(f,'Send this code to a friend. They can add the outfit in Saved > Import outfit.',24,156,512,24,16).TextColor3=C.Muted
-        local box=codeBox(f,24,186,512,96,code,false)
-        local size=modalLabel(f,#code..' characters  ·  '..app.DescribeOutfit(entry.Data),24,290,300,22,14)
+        local f=dialog('ShareOutfit',680,392,'Share outfit',entry.Name)
+        -- Слева весь образ (с трансформами предметов), справа код
+        local stage=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,88),Size=UDim2.fromOffset(190,280),BackgroundColor3=C.Surface,BorderSizePixel=0,ClipsDescendants=true},f)
+        corner(stage,12); app.OutfitPreview(entry.Data,stage); app.OutfitColorDots(entry.Data,stage,-8,8)
+        local x,w=230,680-230-24
+        local hint=modalLabel(f,'Send this code to a friend. They can add the outfit in Saved > Import outfit. Item positions, rotations and sizes are included.',x,88,w,44,16)
+        hint.TextColor3=C.Muted
+        local box=codeBox(f,x,140,w,140,code,false)
+        local size=modalLabel(f,#code..' characters  ·  '..app.DescribeOutfit(entry.Data),x,288,w,22,14)
         size.TextColor3=C.Muted; size.TextTruncate=Enum.TextTruncate.AtEnd; size.TextWrapped=false
         local copy
-        copy=modalButton(f,'Copy code',336,316,200,40,function()
+        copy=modalButton(f,'Copy code',x+w-200,328,200,40,function()
             if copyText(code) then
                 copy.Text='Copied!'; message('Outfit code copied: '..entry.Name)
             else
@@ -2339,35 +2633,39 @@ end
             end
         end,true)
         copy.Name='CopyCode'
-        modalButton(f,'Done',220,316,106,40,clearModal).Name='Done'
+        modalButton(f,'Done',x+w-200-116,328,106,40,clearModal).Name='Done'
     end
 
     -- ── Import ────────────────────────────────────────────────────────────────
     function app.OpenImportDialog()
-        local f=dialog('ImportOutfit',560,420,'Import outfit','Paste a code someone shared with you.')
-        local box=codeBox(f,24,86,512,96,'',true)
-        local preview=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,194),Size=UDim2.fromOffset(512,60),BackgroundColor3=C.Surface,BorderSizePixel=0},f)
-        corner(preview,10)
-        local status=modalLabel(f,'',24,262,512,22,15)
+        local f=dialog('ImportOutfit',680,412,'Import outfit','Paste a code someone shared with you.')
+        -- Слева весь образ из кода, справа код, имя и кнопки
+        local preview=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,88),Size=UDim2.fromOffset(190,300),BackgroundColor3=C.Surface,BorderSizePixel=0,ClipsDescendants=true},f)
+        corner(preview,12)
+        local x,w=230,680-230-24
+        local box=codeBox(f,x,88,w,150,'',true)
+        local status=modalLabel(f,'',x,246,w,22,15)
         status.TextTruncate=Enum.TextTruncate.AtEnd; status.TextWrapped=false
-        local nameBox=make('TextBox',{Name='OutfitName',Text='',PlaceholderText='Outfit name',Position=UDim2.fromOffset(24,296),Size=UDim2.fromOffset(512,38),
+        local nameBox=make('TextBox',{Name='OutfitName',Text='',PlaceholderText='Outfit name',Position=UDim2.fromOffset(x,280),Size=UDim2.fromOffset(w,38),
             BackgroundColor3=C.Surface,TextColor3=C.Text,PlaceholderColor3=C.Muted,Font=Enum.Font.SourceSans,TextSize=18,ClearTextOnFocus=false,
             TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0},f)
         corner(nameBox); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,10)},nameBox)
-        local add=modalButton(f,'Add to Saved',336,358,200,40,nil,true)
+        local add=modalButton(f,'Add to Saved',x+w-200,348,200,40,nil,true)
         add.Name='AddOutfit'
-        modalButton(f,'Cancel',220,358,106,40,clearModal).Name='Cancel'
+        modalButton(f,'Cancel',x+w-200-116,348,106,40,clearModal).Name='Cancel'
         local decoded
         local function update()
             for _,o in ipairs(preview:GetChildren()) do if not o:IsA('UICorner') then o:Destroy() end end
             decoded=nil
             if box.Text:gsub('%s','')=='' then
-                status.Text='The outfit preview will appear here.'; status.TextColor3=C.Muted
+                local hint=modalLabel(preview,'Paste a code to see the outfit',10,0,10,10,15)
+                hint.Size=UDim2.new(1,-20,1,0); hint.TextXAlignment=Enum.TextXAlignment.Center; hint.TextColor3=C.Muted
+                status.Text='The outfit preview will appear on the left.'; status.TextColor3=C.Muted
             else
                 local ok,result=pcall(app.DecodeOutfit,box.Text)
                 if ok then
                     decoded=result
-                    app.OutfitShelf(result.Data,preview,46,50,9)
+                    app.OutfitPreview(result.Data,preview); app.OutfitColorDots(result.Data,preview,-8,8)
                     status.Text=result.Name..'  ·  '..app.DescribeOutfit(result.Data); status.TextColor3=C.Text
                     if nameBox.Text=='' or nameBox:GetAttribute('Auto') then nameBox.Text=result.Name; nameBox:SetAttribute('Auto',true) end
                 else
@@ -2397,16 +2695,18 @@ end)()
 local function openOutfitPreview(entry)
     local items=outfitItems(entry.Data)
     clearModal(); modalShade.Visible=true
-    local W=640
+    local W=760
     local f=make('Frame',{Name='OutfitPreview',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(W,560),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
     make('UIScale',{Scale=scale.Scale},f); corner(f,16); make('UIStroke',{Color=C.Border,Thickness=1},f)
     local t=modalLabel(f,entry.Name,24,16,W-110,34,26); t.Font=Enum.Font.SourceSansBold; t.TextTruncate=Enum.TextTruncate.AtEnd; t.TextWrapped=false
     local sub=modalLabel(f,app.DescribeOutfit(entry.Data),24,50,W-48,24,16); sub.TextColor3=C.Muted
     modalButton(f,'X',W-62,18,38,32,clearModal).Name='Close'
-    -- Предметы плитками: миниатюра на подложке, имя, ID
-    local grid=make('ScrollingFrame',{Name='Items',Position=UDim2.fromOffset(20,86),Size=UDim2.fromOffset(W-40,390),BackgroundTransparency=1,BorderSizePixel=0,
+    -- Слева весь аватар в образе, справа предметы плитками: миниатюра, имя, ID
+    local stage=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,90),Size=UDim2.fromOffset(220,386),BackgroundColor3=C.Surface,BorderSizePixel=0,ClipsDescendants=true},f)
+    corner(stage,12); app.OutfitPreview(entry.Data,stage)
+    local grid=make('ScrollingFrame',{Name='Items',Position=UDim2.fromOffset(256,86),Size=UDim2.fromOffset(W-276,394),BackgroundTransparency=1,BorderSizePixel=0,
         CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4},f)
-    make('UIGridLayout',{CellSize=UDim2.new(1/4,-12,0,150),CellPadding=UDim2.fromOffset(12,12),SortOrder=Enum.SortOrder.LayoutOrder},grid)
+    make('UIGridLayout',{CellSize=UDim2.new(1/3,-12,0,150),CellPadding=UDim2.fromOffset(12,12),SortOrder=Enum.SortOrder.LayoutOrder},grid)
     make('UIPadding',{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,10),PaddingBottom=UDim.new(0,8)},grid)
     for i,item in ipairs(items) do
         local cell=make('Frame',{Name='Item_'..i,LayoutOrder=i,BackgroundColor3=C.Card,BorderSizePixel=0},grid)
@@ -2419,7 +2719,7 @@ local function openOutfitPreview(entry)
         local id=modalLabel(cell,'ID '..string.format('%.0f',item.Id),10,120,10,20,13); id.Size=UDim2.new(1,-20,0,20); id.TextColor3=C.Muted
     end
     if #items==0 then
-        local none=modalLabel(f,'This outfit changes only the body: colors, scale or hidden originals.',24,200,W-48,60,18)
+        local none=modalLabel(f,'This outfit changes only the body: colors, scale or hidden originals.',256,200,W-280,60,18)
         none.TextXAlignment=Enum.TextXAlignment.Center; none.TextColor3=C.Muted
     end
     local footer=modalLabel(f,entry.Data.HideOriginal and 'Original items will be hidden.' or 'Original items stay visible.',24,500,300,40,15)
@@ -2441,25 +2741,26 @@ local function confirmOverwrite(entry,data)
 end
 local function openOutfitActions(entry)
     clearModal(); modalShade.Visible=true
-    local W=500
-    local f=make('Frame',{Name='OutfitActions',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(W,416),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
+    local W=600
+    local f=make('Frame',{Name='OutfitActions',AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.fromScale(0.5,0.5),Size=UDim2.fromOffset(W,404),BackgroundColor3=C.Bg,BorderSizePixel=0},modalShade)
     make('UIScale',{Scale=scale.Scale},f); corner(f,16); make('UIStroke',{Color=C.Border,Thickness=1},f)
     local t=modalLabel(f,entry.Name,24,16,W-110,34,26); t.Font=Enum.Font.SourceSansBold; t.TextTruncate=Enum.TextTruncate.AtEnd; t.TextWrapped=false
     local sub=modalLabel(f,app.DescribeOutfit(entry.Data),24,50,W-48,24,16); sub.TextColor3=C.Muted
     modalButton(f,'X',W-62,18,38,32,clearModal).Name='Close'
-    local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,86),Size=UDim2.fromOffset(W-48,60),BackgroundColor3=C.Surface,BorderSizePixel=0},f)
-    corner(shelf,10); app.OutfitShelf(entry.Data,shelf,46,50,9)
-    -- Действия: поделиться — главное, удаление — внизу и красным
-    modalButton(f,'Share outfit',24,162,W-48,46,function() app.OpenShareDialog(entry) end,true).Name='ShareOutfit'
-    modalButton(f,'Overwrite with current outfit',24,218,W-48,46,function() confirmOverwrite(entry) end).Name='OverwriteOutfit'
-    modalButton(f,'Rename',24,274,W-48,46,function()
+    -- Слева весь образ, справа действия; поделиться — главное, удаление — внизу и красным
+    local stage=make('Frame',{Name='Preview',Position=UDim2.fromOffset(24,88),Size=UDim2.fromOffset(200,292),BackgroundColor3=C.Surface,BorderSizePixel=0,ClipsDescendants=true},f)
+    corner(stage,12); app.OutfitPreview(entry.Data,stage); app.OutfitColorDots(entry.Data,stage,-8,8)
+    local x,w=240,W-240-24
+    modalButton(f,'Share outfit',x,88,w,48,function() app.OpenShareDialog(entry) end,true).Name='ShareOutfit'
+    modalButton(f,'Overwrite with current outfit',x,146,w,48,function() confirmOverwrite(entry) end).Name='OverwriteOutfit'
+    modalButton(f,'Rename',x,204,w,48,function()
         openNameDialog('Rename outfit',entry.Name,function(name)
             local ok,err=pcall(app.RenameOutfit,entry.Id,name)
             if not ok then message(err,true) end
             renderSavedOutfits()
         end)
     end).Name='RenameOutfit'
-    local delete=modalButton(f,'Delete outfit',24,346,W-48,46,function()
+    local delete=modalButton(f,'Delete outfit',x,332,w,48,function()
         openConfirmDialog('Delete outfit?',''..entry.Name..' will be removed from your saved outfits.','Delete',function()
             local ok,err=pcall(app.DeleteOutfit,entry.Id)
             if not ok then message(err,true) end
@@ -2473,13 +2774,15 @@ end
 renderSavedOutfits=function()
     clearResults(); pages=nil; app.SearchBusy=false
     query.Visible=true; searchButton.Visible=true; query.PlaceholderText='Search saved items...'; searchButton.Text='Search'
+    -- Плитка выше обычной карточки: в ней рендер всего аватара
+    results.UIGridLayout.CellSize=UDim2.fromOffset(180,268)
     local import=make('TextButton',{Name='ImportOutfit',Text='',AutoButtonColor=false,LayoutOrder=0,BackgroundColor3=C.Surface,BorderSizePixel=0},results)
     corner(import,12); app.TileStroke(import)
-    local plus=make('Frame',{AnchorPoint=Vector2.new(0.5,0),Position=UDim2.new(0.5,0,0,44),Size=UDim2.fromOffset(56,56),BackgroundColor3=C.Card,BorderSizePixel=0},import)
-    corner(plus,28)
-    local sign=label('+',0,0,56,56,plus,36); sign.TextXAlignment=Enum.TextXAlignment.Center; sign.Font=Enum.Font.SourceSansBold
-    local it=label('Import outfit',0,112,180,26,import,18); it.Size=UDim2.new(1,0,0,26); it.TextXAlignment=Enum.TextXAlignment.Center; it.Font=Enum.Font.SourceSansSemibold
-    local ih=label('Paste a code someone shared',0,138,180,22,import,14); ih.Size=UDim2.new(1,0,0,22); ih.TextXAlignment=Enum.TextXAlignment.Center; ih.TextColor3=C.Muted
+    local plus=make('Frame',{AnchorPoint=Vector2.new(0.5,0),Position=UDim2.new(0.5,0,0,78),Size=UDim2.fromOffset(60,60),BackgroundColor3=C.Card,BorderSizePixel=0},import)
+    corner(plus,30)
+    local sign=label('+',0,0,60,60,plus,38); sign.TextXAlignment=Enum.TextXAlignment.Center; sign.Font=Enum.Font.SourceSansBold
+    local it=label('Import outfit',0,150,180,26,import,18); it.Size=UDim2.new(1,0,0,26); it.TextXAlignment=Enum.TextXAlignment.Center; it.Font=Enum.Font.SourceSansSemibold
+    local ih=label('Paste a code someone shared',0,176,180,22,import,14); ih.Size=UDim2.new(1,0,0,22); ih.TextXAlignment=Enum.TextXAlignment.Center; ih.TextColor3=C.Muted
     import.Activated:Connect(function() app.OpenImportDialog() end)
     for index,entry in ipairs(SavedOutfits) do
         if filterMatch(entry.Name) then
@@ -2489,17 +2792,18 @@ renderSavedOutfits=function()
             pcall(function() stroke.BorderStrokePosition=Enum.BorderStrokePosition.Inner end)
             card.MouseEnter:Connect(function() stroke.Color=C.Green; stroke.Thickness=2 end)
             card.MouseLeave:Connect(function() stroke.Color=C.Border; stroke.Thickness=1 end)
-            local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(8,8),Size=UDim2.new(1,-16,0,60),BackgroundColor3=C.Surface,BorderSizePixel=0},card)
-            corner(shelf,10); app.OutfitShelf(entry.Data,shelf,46,50,3)
-            local n=label(entry.Name,10,74,160,24,card,18); n.Size=UDim2.new(1,-20,0,24)
+            local stage=make('Frame',{Name='Preview',Position=UDim2.fromOffset(8,8),Size=UDim2.new(1,-16,0,150),BackgroundColor3=C.Surface,BorderSizePixel=0,ClipsDescendants=true},card)
+            corner(stage,10); app.OutfitPreview(entry.Data,stage); app.OutfitColorDots(entry.Data,stage,-6,6)
+            local n=label(entry.Name,10,164,160,24,card,18); n.Size=UDim2.new(1,-20,0,24)
             n.TextTruncate=Enum.TextTruncate.AtEnd; n.TextWrapped=false; n.Font=Enum.Font.SourceSansSemibold
-            local m=label(app.DescribeOutfit(entry.Data),10,98,160,20,card,14); m.Size=UDim2.new(1,-20,0,20)
+            local m=label(app.DescribeOutfit(entry.Data),10,188,160,20,card,14); m.Size=UDim2.new(1,-20,0,20)
             m.TextColor3=C.Muted; m.TextTruncate=Enum.TextTruncate.AtEnd; m.TextWrapped=false
             card:SetAttribute('OutfitId',entry.Id)
-            local open=button('Open',8,130,0,34,function() openOutfitPreview(entry) end,card,true)
-            open.Name='PreviewOutfit'; open.Size=UDim2.new(1,-16,0,34)
-            local manage=button('Manage',8,170,0,32,function() openOutfitActions(entry) end,card)
-            manage.Name='ManageOutfit'; manage.Size=UDim2.new(1,-16,0,32); manage.BackgroundColor3=C.Surface; manage.TextSize=17
+            local open=button('Open',8,222,0,36,function() openOutfitPreview(entry) end,card,true)
+            open.Name='PreviewOutfit'; open.Size=UDim2.new(0.5,-12,0,36); open.TextSize=17
+            local manage=button('Manage',0,222,0,36,function() openOutfitActions(entry) end,card)
+            manage.Name='ManageOutfit'; manage.AnchorPoint=Vector2.new(1,0); manage.Position=UDim2.new(1,-8,0,222)
+            manage.Size=UDim2.new(0.5,-12,0,36); manage.BackgroundColor3=C.Surface; manage.TextSize=17
         end
     end
     empty.Visible=resultCount==0 and #SavedOutfits>0
@@ -2511,7 +2815,7 @@ end
 local function openSaveDialog(data)
     -- Высота под содержимое: 1–2 ряда плиток, дальше — выглядывающий третий ряд как подсказка прокрутки
     local rows=math.max(1,math.ceil(#SavedOutfits/3))
-    local W,H=740,302+math.min(rows,2)*176+(rows>2 and 64 or 0)
+    local W,H=740,302+math.min(rows,2)*226+(rows>2 and 80 or 0)
     local thumb,describe,colorDots=app.OutfitThumb,app.DescribeOutfit,app.OutfitColorDots
 
     clearModal(); modalShade.Visible=true
@@ -2568,7 +2872,7 @@ local function openSaveDialog(data)
     corner(filter); make('UIPadding',{PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,10)},filter)
     local grid=make('ScrollingFrame',{Name='Outfits',Position=UDim2.fromOffset(20,276),Size=UDim2.fromOffset(W-40,H-276-16),CanvasSize=UDim2.new(),
         AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollBarThickness=4,BackgroundTransparency=1,BorderSizePixel=0},f)
-    make('UIGridLayout',{CellSize=UDim2.new(1/3,-12,0,164),CellPadding=UDim2.fromOffset(12,12),SortOrder=Enum.SortOrder.LayoutOrder},grid)
+    make('UIGridLayout',{CellSize=UDim2.new(1/3,-12,0,214),CellPadding=UDim2.fromOffset(12,12),SortOrder=Enum.SortOrder.LayoutOrder},grid)
     -- Список обрезает всё за своими краями: отступ со всех сторон, чтобы обводка крайних плиток
     -- не срезалась (справа — ещё и место под полосу прокрутки)
     make('UIPadding',{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,10),PaddingBottom=UDim.new(0,8)},grid)
@@ -2584,22 +2888,12 @@ local function openSaveDialog(data)
         local stroke=make('UIStroke',{Color=C.Border,Thickness=1,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},t)
         -- Обводка внутрь плитки — ровная по скруглению; в старых клиентах свойства нет, останется внешняя
         pcall(function() stroke.BorderStrokePosition=Enum.BorderStrokePosition.Inner end)
-        -- Превью: до четырёх предметов на подложке, остаток — «+N»
-        local shelf=make('Frame',{Name='Preview',Position=UDim2.fromOffset(10,10),Size=UDim2.new(1,-20,0,60),BackgroundColor3=C.Surface,BorderSizePixel=0},t)
-        corner(shelf,10)
-        local slots=#items>4 and 3 or #items
-        for j=1,slots do thumb(items[j].Id,46,7+(j-1)*50,7,shelf) end
-        if #items>4 then
-            local more=modalLabel(shelf,'+'..(#items-3),7+3*50,7,46,46,18)
-            more.TextXAlignment=Enum.TextXAlignment.Center; more.TextColor3=C.Muted
-        elseif #items==0 then
-            local e=modalLabel(shelf,'Body only',0,0,10,60,15)
-            e.Size=UDim2.fromScale(1,1); e.TextXAlignment=Enum.TextXAlignment.Center; e.TextColor3=C.Muted
-        end
-        colorDots(d,shelf,-6,6)
-        local name=modalLabel(t,entry.Name,12,78,10,24,18)
+        -- Превью: весь аватар в образе
+        local stage=make('Frame',{Name='Preview',Position=UDim2.fromOffset(10,10),Size=UDim2.new(1,-20,0,110),BackgroundColor3=C.Surface,BorderSizePixel=0,ClipsDescendants=true},t)
+        corner(stage,10); app.OutfitPreview(d,stage); colorDots(d,stage,-6,6)
+        local name=modalLabel(t,entry.Name,12,128,10,24,18)
         name.Size=UDim2.new(1,-24,0,24); name.Font=Enum.Font.SourceSansSemibold; name.TextTruncate=Enum.TextTruncate.AtEnd; name.TextWrapped=false
-        local info=modalLabel(t,describe(d),12,101,10,20,14)
+        local info=modalLabel(t,describe(d),12,151,10,20,14)
         info.Size=UDim2.new(1,-24,0,20); info.TextColor3=C.Muted; info.TextTruncate=Enum.TextTruncate.AtEnd; info.TextWrapped=false
         local pill=make('TextLabel',{Name='Action',Text='Replace',AnchorPoint=Vector2.new(1,1),Position=UDim2.new(1,-10,1,-10),Size=UDim2.fromOffset(92,28),
             BackgroundColor3=C.Surface,TextColor3=C.Text,Font=Enum.Font.SourceSansSemibold,TextSize=16,BorderSizePixel=0},t)
