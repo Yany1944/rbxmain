@@ -26,7 +26,8 @@ Assets/LICENSE.txt
 # Owner-only local tools (never publish)
 /OwnerTools.lua
 
-# Dev bundle built by build-dev.bat
+# Build output (build-dev.bat / build-release.bat)
+/dist/
 /Violite.dev.lua
 
 !/build/KEY-LOADER.md
