@@ -153,12 +153,22 @@ local startupOk, startupError = xpcall(function()
 -- ══════════════════════════════════════════════════════════════════════════════
 
 local CONFIG = {
+        -- Частоты фоновой работы фич. Релиз исполняется в VM обфускатора (в разы
+        -- медленнее), поэтому всё, что не обязано идти каждый кадр, идёт реже
+        Perf = {
+            RoleCheckInterval  = 0.1,  -- сек: роли и подсветка ESP (роли меняются раз в раунд)
+            PingChamsPartCheck = 0.25, -- сек: проверка набора частей/размера для призрака
+            AntiFlingFullPass  = 0.1,  -- сек: полный проход коллизии; корпус — каждый кадр
+            AntiFlingPartsTTL  = 2,    -- сек: жизнь кэша частей персонажа (± разброс); новый персонаж — сразу
+            AntiFlingCleanup   = 1,    -- сек: чистка записей об удалённых частях
+        },
         -- Адреса модулей нужны только вне бандла (в бандле модули уже внутри)
 --#dev
         Modules = {
             Visuals = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Visuals.lua",
             Optimization = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Optimization.lua",
             Movement = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Movement.lua",
+            HUD = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/HUD.lua",
         },
 --#end
         HideKey = Enum.KeyCode.Insert,
@@ -278,9 +288,8 @@ local CONFIG = {
         },
         -- Desync (вкладка Combat). Подмена реплицируемого CFrame/скорости корня.
         -- Замеры на двух аккаунтах в MM2: Spin и Pitch наблюдатель видит точно.
-        -- Chaos: случайные линейная и угловая скорости, CFrame не пишется (запись CFrame
-        -- гасит у наблюдателей экстраполяцию) — образ скачет (1500 studs/s → до ~40
-        -- studs) и кувыркается. Своя физика всегда идёт по реальному телу (подмена
+        -- Chaos: образ в стороне от угроз, скользит по дуге и кувыркается (поворот
+        -- CFrame). Своя физика всегда идёт по реальному телу (подмена
         -- снимается до симуляции), киллзоны и касания срабатывают по настоящей позиции.
         Desync = {
             Modes   = {"Jitter", "Spin", "Chaos"},
@@ -288,18 +297,62 @@ local CONFIG = {
             PitchOrder = {"Straight", "Up", "Down"},
             SpinSpeed     = {90, 2000},    -- град/с
             Radius        = {0, 10},       -- studs смещения; он же сила Chaos
-            ChaosPerStud  = 500,           -- studs/s случайной скорости Chaos на 1 stud радиуса
-                                           -- (10 → 5000; 0 — только кувыркание)
-            ChaosAngular  = 200,           -- рад/с случайной угловой скорости (кувыркание)
+            -- Случайные скорости (было Radius×500 studs/s, 200 рад/с) убраны: со временем
+            -- такие пакеты переставали приниматься и образ застывал рядом с нами.
+            -- Скорость теперь = настоящая + движение образа, не больше этой
+            ChaosMaxVelocity = 120,        -- studs/s
+            ChaosTumbleSpeed = 25,         -- рад/с кувыркания поворотом CFrame
             -- Замер в раунде: через некоторое время (респаун, старт раунда, перезаход
             -- наблюдателя) наблюдатели перестают экстраполировать по нашей скорости —
             -- Chaos превращается в дрожь, хотя скорости до них доходят. Переключение
             -- на Jitter на ~0.25 с это оживляет — делаем его сами раз в интервал.
-            -- Гибрид (CFrame-хаос через кадр + скорости) держал эффект стабильнее, но
-            -- у игрока в раунде выбрасывал персонажа — отказались
             RefreshInterval  = 2.5,        -- сек между всплесками
             RefreshBurst     = 0.35,       -- сек длительность всплеска
             RefreshAmplitude = 3,          -- studs сдвига вбок (±, через кадр)
+            -- Сдвиг позиции в пакете Chaos: на одних скоростях каждый пакет нёс настоящую
+            -- позицию — образ стоял ровно на серверной точке и клякса росла из неё.
+            -- Теперь пакет несёт точку под случайным углом, не ближе Min от настоящей;
+            -- угол меняется каждые ChaosHop секунд. Studs на 1 stud Desync Radius
+            -- Удар ножом (KnifeStabbed без цели) засчитывает сервер по образу. Образ,
+            -- кружащий вокруг нас, заметал убийцу, бегущего следом. Поэтому образ
+            -- стоит с дальней от угроз стороны: до убийцы = (до нас) + D, т.е. ≥ D.
+            -- Точка поворачивается по дуге (не через нас) не быстрее ChaosTurnRate,
+            -- на каждом hop — разброс ±ChaosSpread градусов и новое расстояние
+            -- Режим «от угроз» — отдельный переключатель Avoid Players (FakeChaosAvoid);
+            -- без него точка скачет по кругу на ChaosTurn градусов за hop
+            -- Масштаб под старый ползунок: случайные скорости Radius×500 studs/s при
+            -- ~1/40 с дорисовки давали скачки до ≈12.5×Radius. Сумма Max + Scatter +
+            -- Spike[2] ≈ 13×Radius, чтобы Desync Radius регулировал так же сильно
+            ChaosOffset   = {Min = 1.4, Max = 3.5},
+            ChaosHop      = {1 / 14, 1 / 7},
+            ChaosTurn     = {40, 90},      -- градусы скачка направления на hop (без Avoid Players),
+                                           -- направление — по всей сфере, вверх/вниз тоже
+            ChaosLift     = 3,             -- Avoid Players: высота образа ±, доли Desync Radius
+            -- Рандом позиции поверх пути (доли Desync Radius): каждый кадр новая точка
+            -- облака; к нам облако не ближе ChaosScatterIn. Случайные скорости давали
+            -- скачки, но застывали — теперь скачки только позицией, как у Jitter
+            ChaosScatter   = 1.0,          -- вдоль и поперёк направления (поперёк — и по высоте)
+            ChaosScatterIn = 0.3,          -- максимум к нам
+            -- Выбросы: с этим шансом на hop образ на ChaosSpikeTime отлетает дальше
+            ChaosSpikeChance = 0.2,
+            ChaosSpikeTime   = 0.08,       -- сек
+            ChaosSpike       = {3, 8.5},   -- доп. расстояние, доли Desync Radius
+            -- Образ не стоит в лучшей точке: скользит по дуге вокруг неё и «дышит»
+            -- расстоянием — иначе стоя у наблюдателей он замирал (жалоба на статику)
+            ChaosSweepArc   = 70,          -- градусы: дуга скольжения в каждую сторону от лучшего угла
+            ChaosSweepSpeed = {3, 7},      -- рад/с скольжения, новая на каждом hop
+            ChaosSweepFlip  = 0.3,         -- шанс на hop развернуть скольжение
+            ChaosSweepKeep  = 0.8,         -- точка дуги не хуже этой доли лучшей оценки
+            ChaosDistanceSpeed = 12,       -- Radius/с: как быстро расстояние и высота идут к новой цели
+            ChaosCandidates = 32,          -- сколько углов перебирать на круге
+            ChaosHysteresis = 1.5,         -- studs: на сколько новый угол должен быть лучше
+            ChaosTurnRate = 25,            -- рад/с: скорость поворота точки по дуге
+            ChaosThreatRange  = 90,        -- studs: дальше игроки угрозой не считаются
+            ChaosMurdererWeight = 4,       -- во сколько раз убийца весомее прочих
+            ChaosIdleOrbit = {4, 9},       -- рад/с кружения, когда рядом никого
+            -- Удар/выстрел засчитывает сервер по той позиции, где видит нас: пока в
+            -- руке инструмент и зажата ЛКМ (и ещё столько секунд) — сдвиг не шлём
+            AttackHold    = 0.4,
             -- Чамсы Chaos: сколько секунд наблюдатель дорисовывает нас по поддельной
             -- скорости (замер: 1500 studs/s → скачки до ~40 studs ≈ 1/40 с)
             ChaosChamsLead   = 1 / 40,
@@ -371,6 +424,12 @@ local CONFIG = {
             -- Auto Fire: стреляет, как только луч от точки вылета до точки упреждения чист
             MinTrackTime   = 0.45,   -- сек наблюдения за целью до первого автовыстрела
             AutoInterval   = 1 / 30, -- сек между оценками Auto Fire
+            -- Слежка за целью не чаще 60 Гц: при 240 FPS посекундная работа (луч до пола,
+            -- окна скорости, сдвиг истории) росла вчетверо, а в обфусцированной сборке
+            -- это давало заметные лаги при включённом Auto Fire. Предикт идёт по меткам
+            -- времени, частота сэмплов на него не влияет
+            TrackInterval  = 1 / 60,
+            MapParamsTTL   = 0.1,    -- сек жизни кэша RaycastParams карты (без extra)
             -- Смены ввода цели: средняя длина «отрезка» постоянного ввода по её истории,
             -- с априором (PriorSegments отрезков по PriorDuration с)
             PriorSegments  = 2,
@@ -409,6 +468,33 @@ local CONFIG = {
                 Release       = 1.5,   -- сек без подозрений — выключаем
                 TeleportSpeed = 150,   -- studs/s: быстрее — телепорт, окно сбрасываем
             },
+        },
+        -- Silent Knife: бросок ножа (бинд Fast throw и обычный бросок игры) летит в
+        -- упреждённую точку цели у курсора. Нож — снаряд ThrowSpeed studs/s по прямой
+        -- без гравитации (см. KnifeTracer), поэтому упреждение = пинг + ServerLead
+        -- (как у выстрела шерифа) + время полёта до точки встречи
+        SilentKnife = {
+            MaxRange    = 300,   -- studs: дальше цель не берём
+            MaxLead     = 1.5,   -- сек: потолок упреждения (дальний бросок по бегущей цели)
+            Iterations  = 4,     -- итераций «время полёта ↔ точка встречи»
+            MaxRiseSpeed = 60,   -- studs/s: вертикаль цели выше — спуф/флинг, её не тянем
+        },
+        -- Трассер выстрела: duration в CreateTracer — полное время жизни, последние
+        -- FadeTime секунд из него трассер плавно растворяется (раньше висел целиком
+        -- и гас за 0.1 с — пропадал рывком)
+        BulletTracer = {
+            FadeTime = 1.2,         -- сек растворения (не больше 60% жизни трассера)
+        },
+        -- Маршрут брошенного ножа (Tracers). Замер по декомпилу и живым броскам: Model
+        -- "ThrowingKnife" летит строго по прямой без гравитации — атрибуты Direction
+        -- (единичный) и ThrowSpeed (96 studs/s), исчезает в первой стене по лучу
+        KnifeTracer = {
+            DefaultSpeed  = 96,     -- studs/s, если атрибута ThrowSpeed нет
+            MaxRange      = 400,    -- studs: луч без стены — маршрут до этой дальности
+            ThrowerRadius = 8,      -- studs: ближайший к точке вылета игрок — бросивший, его не проверяем
+            HitLinger     = 0.6,    -- сек: точка удара висит после прилёта ножа
+            FadeTime      = 0.1,    -- сек затухания (как у CreateTracer)
+            MarkerSize    = 0.4,    -- studs: диаметр точки удара
         },
         -- Образ из LocalCatalog на экране итогов раунда (ScoreboardModule)
         CatalogPortrait = {
@@ -479,6 +565,7 @@ local State = {
         InstantKillAll = Enum.KeyCode.Unknown,
         Fly = Enum.KeyCode.Unknown,
         Speed = Enum.KeyCode.Unknown,
+        Desync = Enum.KeyCode.Unknown,
         Invisibility = Enum.KeyCode.Unknown,
         KillAura = Enum.KeyCode.Unknown,
     },
@@ -512,17 +599,22 @@ local State = {
         KillAuraRange = 7,
         KillAuraEnabled = false,
         KillAuraStatic = false,
-        FakePositionEnabled = false,
+        FakePositionEnabled = false,      -- Desync реально работает (по режиму бинда)
+        FakePositionToggleOn = false,     -- включён биндом в режиме Toggle
+        FakePositionBindMode = "Toggle",
         FakePositionMode = "Jitter",
         FakePositionRadius = 3,
         FakePositionPitch = "Straight",
         FakeSpinSpeed = 720,
         FakeSpinLocal = false,
+        FakeChaosAvoid = false,
         FakeLagEnabled = false,
         FakeLagMinDelay = 80,
         FakeLagMaxDelay = 200,
         FakeLagRandomization = 3,
         SpawnAtPlayer = false,
+        SilentKnifeEnabled = false,
+        HoldThrowEnabled = false,
         CanShootMurderer = true,
         ShootCooldown = 3,
         ShootLead = 0.09,   -- упреждение сверх пинга для броска ножа; у выстрела — CONFIG.SheriffAim
@@ -587,6 +679,7 @@ local State = {
         SwimConnection = nil,
         SpeedBindRow = nil,         -- GUI-строки «режим + бинд» (подсветка активности)
         FlyBindRow = nil,
+        FakePositionBindRow = nil,
         FakePositionOffset = Vector3.zero,
         CoinFarmThread = nil,
         LastCacheTime = 0,
@@ -635,6 +728,8 @@ local State = {
         PingChamsGhostPartCount = 0,
         PingChamsRenderConn = nil,
         TracersList = {},
+        KnifeRoutes = {},          -- активные маршруты брошенных ножей (Tracers)
+        KnifeRouteConn = nil,      -- Heartbeat, двигающий «голову» маршрутов
         FriendPairs = {},
         FriendBeams = {},
         FriendScanCoroutine = nil,
@@ -660,6 +755,37 @@ local State = {
     },
 }
 
+-- «Первое лицо» — как его считает TransparencyController Roblox (PlayerModule):
+-- расстояние камеры до фокуса d → 1 - (d - 0.5) / 1.5, ниже 0.5 — ноль, к значению
+-- подходит со скоростью 2.8/с (сразу — если цель 1 или прошлое значение ≥ 0.95).
+-- Своё тело Roblox гасит именно этим значением; наши копии (Spin Local Too, призрак
+-- Ping Chams, визуал скинченджера) гасим им же. Читать LTM настоящего тела нельзя:
+-- Spin Local Too сам держит его на 1. Шаг по времени складывается, поэтому функцию
+-- можно звать из нескольких мест за кадр
+do
+    local fade = {Value = 0, At = nil}
+    State.Runtime.FirstPersonFade = function()
+        local camera = Workspace.CurrentCamera
+        if not camera then return 0 end
+        local now = os.clock()
+        local distance = (camera.Focus.Position - camera.CFrame.Position).Magnitude
+        local target = distance < 2 and 1 - (distance - 0.5) / 1.5 or 0
+        if target < 0.5 then target = 0 end
+        target = math.clamp(target, 0, 1)
+        local value = target
+        if fade.At and target < 1 and fade.Value < 0.95 then
+            local step = 2.8 * (now - fade.At)
+            value = fade.Value + math.clamp(target - fade.Value, -step, step)
+        end
+        -- Как CameraUtils.Round(v, 2) у Roblox: в первом лице d = 0.5 с погрешностью
+        -- float, и без округления значение прыгало между 1 и 0.9999
+        fade.Value, fade.At = math.clamp(math.floor(value * 100 + 0.5) / 100, 0, 1), now
+        return fade.Value
+    end
+    -- Скинченджеру: его дисплеи и эффекты прячутся по тому же значению
+    if Kernel then Kernel.Shared.FirstPersonFade = State.Runtime.FirstPersonFade end
+end
+
 -- Замените существующий блок TeleportCheck на этот:
 local TeleportCheck = false
 
@@ -676,9 +802,11 @@ if queue_on_teleport then
                 -- Сборщик меняет строку: в релизе грузим лоадер с ключом (Junkie), а не
                 -- открытый исходник — иначе после телепорта скрипт шёл бы в обход ключа
 --#dev
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/MainScript.lua", true))()
+                -- dev: та же локальная сборка, что запускали (build-dev.bat кладёт её в workspace)
+                loadstring(readfile("VioCFG/Violite/Violite.dev.lua"))()
 --#end
---#release                 loadstring(game:HttpGet("__VIOLITE_LOADER_URL__", true))()
+--#release                 local loaderUrl = "__VIOLITE_LOADER_URL__"
+--#release                 if loaderUrl ~= "" then loadstring(game:HttpGet(loaderUrl, true))() end
             end)
             if not success then
                 warn("Ошибка автозагрузки:", err)
@@ -1755,17 +1883,26 @@ local function StartPingChams()
                     -- Пересобираем клон при респавне и при смене набора партов
                     -- (эквип/анэквип тула, добавление аксессуара), иначе гост
                     -- продолжает двигать несуществующие парты
+                    -- Набор партов сверяем раз в PingChamsPartCheck: обход потомков
+                    -- каждый кадр был одной из самых дорогих операций в раунде
                     local needRebuild = State.Runtime.PingChamsGhostClone == nil
                         or State.Runtime.PingChamsGhostChar ~= char
-                        or State.Runtime.PingChamsGhostPartCount ~= #PingChams.collectRigParts(char)
+                    local nowCheck = os.clock()
+                    local partCheck = needRebuild or nowCheck >= (State.Runtime.PingChamsPartCheckAt or 0)
+                    if partCheck then
+                        State.Runtime.PingChamsPartCheckAt = nowCheck + CONFIG.Perf.PingChamsPartCheck
+                        needRebuild = needRebuild
+                            or State.Runtime.PingChamsGhostPartCount ~= #PingChams.collectRigParts(char)
+                    end
                     if needRebuild then
                         PingChams.rebuildGhostClone(char, CONFIG.Colors.Accent, 0.6)
                     end
+                    State.Runtime.PingChamsSizeDue = partCheck
                     -- Десинк пишет историю сам, до восстановления настоящей
                     -- позиции. RenderStepped уже видит обычный CFrame игрока.
                     if not desync then PingChams.pushSample(tick(), char) end
                 end
-                if State.Runtime.PingChamsGhostPart then
+                if State.Runtime.PingChamsGhostPart and State.Runtime.PingChamsSizeDue ~= false then
                     State.Runtime.PingChamsGhostPart.Size = PingChams.sizeFromChar(char)
                 end
             end
@@ -1820,9 +1957,17 @@ local function StartPingChams()
                 State.Runtime.PingChamsTransparency = (State.Runtime.PingChamsTransparency or transPast) + (transPast - (State.Runtime.PingChamsTransparency or transPast)) * math.clamp(dt * 5.0, 0.05, 0.5)
                 State.Runtime.PingChamsTransparencyTime = nowFadeT
 
+                -- Первое лицо: призрак внутри тела (стоим, или он нас догнал) гаснет
+                -- вместе с телом, тем же значением, что Roblox; отставший призрак
+                -- (Fake Lag, десинк, бег с пингом) остаётся виден
+                local merge = CONFIG.Desync.ChamsMerge
+                local apart = lpRoot and (State.Runtime.PingChamsSmoothFrame.Position - lpRoot.Position).Magnitude or math.huge
+                local overlap = 1 - math.clamp((apart - merge[1]) / (merge[2] - merge[1]), 0, 1)
+                local firstPersonHide = State.Runtime.FirstPersonFade() * overlap
                 for src, gp in pairs(State.Runtime.PingChamsGhostMap) do
                     local off = samplePast.offsets and samplePast.offsets[src]
                     if off then
+                        gp.LocalTransparencyModifier = firstPersonHide
                         gp.Color        = CONFIG.Colors.Accent
                         -- Скрытое на настоящем теле (Fake Headless — голова, Fake Korblox —
                         -- настоящая правая нога) скрыто и у призрака; нога Korblox —
@@ -1847,9 +1992,10 @@ local function StartPingChams()
                     local targetTT = desync and 1 - visibility or 1 - math.clamp((speed - 14) / 1, 0, 1)
                     State.Runtime.PingChamsTextTransparency = (State.Runtime.PingChamsTextTransparency or targetTT) + (targetTT - (State.Runtime.PingChamsTextTransparency or targetTT)) * math.clamp(dtTT * 3, 0.03, 0.25)
                     State.Runtime.PingChamsTextTime = nowTT
-                    lbl.TextTransparency      = State.Runtime.PingChamsTextTransparency
-                    lbl.TextStrokeTransparency = State.Runtime.PingChamsTextTransparency
-                    State.Runtime.PingChamsGUI.Enabled = State.Settings.PingChamsShowLabel and State.Runtime.PingChamsTextTransparency < 0.995
+                    local labelHide = math.max(State.Runtime.PingChamsTextTransparency, firstPersonHide)
+                    lbl.TextTransparency      = labelHide
+                    lbl.TextStrokeTransparency = labelHide
+                    State.Runtime.PingChamsGUI.Enabled = State.Settings.PingChamsShowLabel and labelHide < 0.995
                 end
             else
                 if State.Runtime.PingChamsGUI then State.Runtime.PingChamsGUI.Enabled = false end
@@ -2004,14 +2150,16 @@ local function CreateTracer(startPos, endPos, duration)
 
     table.insert(State.Runtime.TracersList, {beam = beam, att0 = attachment0, att1 = attachment1, time = tick()})
 
-    Core.Tasks.delay(duration or 0.3, function()
-        local fadeTime = 0.1
+    local lifetime = duration or 0.3
+    local fadeTime = math.min(CONFIG.BulletTracer.FadeTime, lifetime * 0.6)
+    Core.Tasks.delay(lifetime - fadeTime, function()
         local startTime = tick()
         local startTrans = 0
         local startBrightness = 5
 
         while tick() - startTime < fadeTime do
-            local alpha = (tick() - startTime) / fadeTime
+            -- sine in-out: растворение начинается и заканчивается мягко, без рывка
+            local alpha = 0.5 - 0.5 * math.cos(math.pi * (tick() - startTime) / fadeTime)
             local trans = startTrans + (1 - startTrans) * alpha
             beam.Transparency = NumberSequence.new({
                 NumberSequenceKeypoint.new(0, trans),
@@ -2303,24 +2451,215 @@ do
         end
     end
 
-    -- ─── KNIFE: подписка на серверную Model "ThrowingKnife" в Workspace ──────────
+    -- ─── KNIFE: маршрут броска (как grenade predict) ─────────────────────────────
+    -- Точка удара считается как у Auto Fire: луч по карте (персонажи не мешают) и
+    -- отдельный луч только по чужим персонажам — кто ближе стены, в того и прилетит.
+    -- Маршрут — линия от ножа до точки удара; её начало едет вместе с ножом
+    -- (время × ThrowSpeed — как визуал игры)
+    local KT = CONFIG.KnifeTracer
+
+    local function knifeMapParams(knife)
+        local ignore = {Workspace.CurrentCamera, knife}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character then table.insert(ignore, player.Character) end
+        end
+        for _, child in ipairs(Workspace:GetChildren()) do
+            -- трассеры пуль игры и другие летящие ножи
+            if child.Name == "ThrowingKnife"
+                or (child:IsA("BasePart") and child.Name == "Part" and child:FindFirstChildOfClass("Beam")) then
+                table.insert(ignore, child)
+            end
+        end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = ignore
+        params.IgnoreWater = true
+        return params
+    end
+
+    -- Бросивший — ближайший к точке вылета живой игрок (нож вылетает из его руки)
+    local function findThrower(startPos)
+        local best, bestDist = nil, KT.ThrowerRadius
+        for _, player in ipairs(Players:GetPlayers()) do
+            local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                local dist = (root.Position - startPos).Magnitude
+                if dist < bestDist then best, bestDist = player, dist end
+            end
+        end
+        return best
+    end
+
+    -- {point, distance, victim}: первая стена или первый задетый чужой персонаж
+    local function predictKnifeImpact(knife, startPos, dir)
+        local reach = KT.MaxRange
+        local point = startPos + dir * reach
+        local wall = Workspace:Raycast(startPos, dir * reach, knifeMapParams(knife))
+        if wall then reach, point = wall.Distance, wall.Position end
+
+        local thrower = findThrower(startPos)
+        local bodies = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if player ~= thrower and hum and hum.Health > 0 then table.insert(bodies, char) end
+        end
+        local victim
+        if #bodies > 0 then
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Include
+            params.FilterDescendantsInstances = bodies
+            local body = Workspace:Raycast(startPos, dir * reach, params)
+            if body then
+                reach, point = body.Distance, body.Position
+                for _, char in ipairs(bodies) do
+                    if body.Instance:IsDescendantOf(char) then
+                        victim = Players:GetPlayerFromCharacter(char)
+                        break
+                    end
+                end
+            end
+        end
+        return point, reach, victim
+    end
+
+    local function destroyRoute(route)
+        pcall(function()
+            route.Att0:Destroy()
+            route.Att1:Destroy()
+            route.Marker:Destroy()
+        end)
+        table.clear(route.Beams)
+    end
+
+    -- Затухание как у CreateTracer: прозрачность к 1, яркость к 0
+    local function setRouteFade(route, alpha)
+        local seq = NumberSequence.new(alpha)
+        for _, beam in ipairs(route.Beams) do
+            beam.Transparency = seq
+            beam.Brightness = 5 * (1 - alpha)
+        end
+        route.Marker.Transparency = alpha
+    end
+
+    -- Линия маршрута — те же Beam, что у CreateTracer (TRACER_COUNT штук на общих
+    -- аттачментах): начало потом едет за ножом, конец стоит в точке удара
+    local function makeRouteLine(startPos, endPos)
+        local att0 = Core.New("Attachment", {WorldPosition = startPos}, Workspace.Terrain)
+        local att1 = Core.New("Attachment", {WorldPosition = endPos}, Workspace.Terrain)
+        local beams = {}
+        for _ = 1, TRACER_COUNT do
+            table.insert(beams, Core.New("Beam", {
+                Attachment0 = att0,
+                Attachment1 = att1,
+                Color = ColorSequence.new(CONFIG.Colors.Tracers),
+                FaceCamera = true,
+                LightEmission = 1,
+                LightInfluence = 0,
+                Brightness = 5,
+                Texture = "rbxasset://textures/particles/smoke_main.dds",
+                TextureMode = Enum.TextureMode.Stretch,
+                TextureSpeed = 0,
+                Transparency = NumberSequence.new(0),
+                Width0 = 0.3,
+                Width1 = 0.3,
+                ZOffset = 0.1,
+            }, att0))
+        end
+        return att0, att1, beams
+    end
+
+    local function makeMarker(point)
+        return Core.New("Part", {
+            Name = "KnifeImpact",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.one * KT.MarkerSize,
+            Position = point,
+            Anchored = true,
+            CanCollide = false,
+            CanQuery = false,
+            CanTouch = false,
+            CastShadow = false,
+            Material = Enum.Material.Neon,
+            Color = CONFIG.Colors.Tracers,
+        }, Workspace.CurrentCamera)  -- в камере: не попадает в чужие лучи и не реплицируется
+    end
+
+    -- Один Heartbeat на все маршруты: тянет начало линии за ножом, после прилёта
+    -- держит точку удара HitLinger и гасит маршрут
+    local function updateKnifeRoutes()
+        local routes = State.Runtime.KnifeRoutes
+        local now = os.clock()
+        for i = #routes, 1, -1 do
+            local route = routes[i]
+            local traveled = math.min((now - route.Start) * route.Speed, route.Distance)
+            if not route.FadeAt and (traveled >= route.Distance or not route.Knife.Parent) then
+                -- Сервер удаляет нож чуть раньше нашего счёта по времени (полпинга) — это
+                -- прилёт, точку держим. Пропал заметно раньше — задел то, чего мы не видим
+                local arrived = traveled >= route.Distance - route.Speed * 0.25
+                route.FadeAt = now + (arrived and KT.HitLinger or 0)
+            end
+            route.Att0.WorldPosition = route.Origin + route.Dir * traveled
+            if route.FadeAt and now >= route.FadeAt then
+                local alpha = math.clamp((now - route.FadeAt) / KT.FadeTime, 0, 1)
+                setRouteFade(route, alpha)
+                if alpha >= 1 then
+                    destroyRoute(route)
+                    table.remove(routes, i)
+                end
+            end
+        end
+        if #routes == 0 and State.Runtime.KnifeRouteConn then
+            State.Runtime.KnifeRouteConn:Disconnect()
+            State.Runtime.KnifeRouteConn = nil
+        end
+    end
+
     local function HandleKnifeTrajectory(obj)
         if not State.Settings.BulletTracersEnabled then return end
         if not obj or obj.Name ~= "ThrowingKnife" or not obj:IsA("Model") then return end
+        local received = os.clock()
 
         local bladePos = obj:WaitForChild("BladePosition", 0.3)
         if not bladePos or not bladePos:IsA("BasePart") then return end
 
-        local throwDir = obj:FindFirstChild("ThrowDirection")
-        if not throwDir or not throwDir:IsA("Vector3Value") then return end
+        local dir = obj:GetAttribute("Direction")
+        if typeof(dir) ~= "Vector3" then
+            local throwDir = obj:FindFirstChild("ThrowDirection")
+            dir = throwDir and throwDir:IsA("Vector3Value") and throwDir.Value
+        end
+        if not dir or dir.Magnitude < 1e-3 then return end
+        dir = dir.Unit
+        local speed = tonumber(obj:GetAttribute("ThrowSpeed")) or KT.DefaultSpeed
 
-        local dir = throwDir.Value
-        if dir.Magnitude == 0 then return end
+        local origin = bladePos.Position
+        local ok, point, distance = pcall(predictKnifeImpact, obj, origin, dir)
+        if not ok or not State.Settings.BulletTracersEnabled or not obj.Parent then return end
 
-        local startPos = bladePos.Position
-        local endPos = startPos + dir.Unit * 100
+        local att0, att1, beams = makeRouteLine(origin, point)
+        local route = {
+            Knife = obj, Origin = origin, Dir = dir, Speed = speed,
+            Distance = distance, Start = received,
+            Att0 = att0, Att1 = att1, Beams = beams, Marker = makeMarker(point),
+        }
+        table.insert(State.Runtime.KnifeRoutes, route)
 
-        SpawnTracers(startPos, endPos, 2)
+        if not State.Runtime.KnifeRouteConn then
+            State.Runtime.KnifeRouteConn = Core.Connect(RunService.Heartbeat, function()
+                local okUpd, err = pcall(updateKnifeRoutes)
+                if not okUpd then warn("[Knife Tracer] " .. tostring(err)) end
+            end)
+            TrackConnection(State.Runtime.KnifeRouteConn)
+        end
+    end
+
+    local function ClearKnifeRoutes()
+        if State.Runtime.KnifeRouteConn then
+            pcall(function() State.Runtime.KnifeRouteConn:Disconnect() end)
+            State.Runtime.KnifeRouteConn = nil
+        end
+        for _, route in ipairs(State.Runtime.KnifeRoutes) do destroyRoute(route) end
+        State.Runtime.KnifeRoutes = {}
     end
 
     -- ─── BULLET (свой пистолет): Tool.Activated на собственном Gun ───────────────
@@ -2388,6 +2727,7 @@ do
             ownCharAddedConn = nil
         end
         ClearOwnToolConnections()
+        ClearKnifeRoutes()
 
         for _, tracer in ipairs(State.Runtime.TracersList) do
             pcall(function()
@@ -2449,6 +2789,7 @@ local function cleanupSession()
     if State.Runtime.OptimizationModule then pcall(State.Runtime.OptimizationModule.Destroy) end
     if State.Runtime.VisualsModule then pcall(State.Runtime.VisualsModule.Destroy) end
     if State.Runtime.MovementModule then pcall(State.Runtime.MovementModule.Destroy) end
+    if State.Runtime.HUDModule then pcall(State.Runtime.HUDModule.Destroy) end
 
 
     -- Восстанавливаем настоящую позицию до остановки остальных систем.
@@ -3804,6 +4145,9 @@ local function StartRoleChecking()
     end
 
     State.Runtime.RoleCheckLoop = Core.Connect(RunService.Heartbeat, function()
+        local now = os.clock()
+        if now < (State.Runtime.NextRoleCheck or 0) then return end
+        State.Runtime.NextRoleCheck = now + CONFIG.Perf.RoleCheckInterval
         pcall(function()
             local murder  = getMurder()
             local sheriff = getSheriff()
@@ -4187,42 +4531,40 @@ end
 -- Anti-Trap: ловушка убийцы (перк Trap) действует только на клиенте жертвы. Сервер
 -- шлёт TrapSystem.TrapHitLocal, а игровой TrapScriptClient ставит WalkSpeed 0.01 и
 -- JumpPower 1 на 4 с, показывает TrapGUI и шлёт TrapReplicate (по нему остальные и
--- убийца видят сработавшую ловушку). Отключаем именно этот обработчик — нет ни
--- замедления, ни окна, ни сигнала убийце. Без getconnections — запасной путь:
--- свой обработчик сразу возвращает скорость и убирает окно.
+-- убийца видят сработавшую ловушку).
+-- Раньше игровой обработчик глушили через getconnections + conn:Disable() — на
+-- срабатывании ловушки (сервер стреляет событием в отключённое соединение) клиент
+-- падал целиком, без ошибки в логе. Теперь соединения игры не трогаем: свой
+-- обработчик в том же кадре снимает замедление и окно, а TrapReplicate режет хук
+-- __namecall — убийца сигнала не получает. Без hookmetamethod — только снятие замедления
 do
-    local anti = {Muted = {}, Fallback = nil, Watch = nil}
+    local anti = {Handler = nil, Watch = nil, Hooked = false, Replicate = nil}
 
-    local function trapRemote()
-        local system = ReplicatedStorage:FindFirstChild("TrapSystem")
-        return system and system:FindFirstChild("TrapHitLocal")
+    local function trapSystem()
+        return ReplicatedStorage:FindFirstChild("TrapSystem")
     end
 
-    local function isGameHandler(fn)
-        local ok, source = pcall(debug.info, fn, "s")
-        return ok and type(source) == "string" and source:find("TrapScriptClient", 1, true) ~= nil
-    end
-
-    -- true — игровые обработчики найдены и отключены (или их нет)
-    local function muteGameHandlers(remote)
-        if type(getconnections) ~= "function" then return false end
+    -- Хук ставится один раз и снять его нельзя без риска сорвать чужие хуки поверх
+    -- (как в skinchanger), поэтому при выключенной фиче и после выгрузки он прозрачен
+    local function hookReplicate(system)
+        anti.Replicate = system:FindFirstChild("TrapReplicate")
+        if anti.Hooked then return end
+        if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then return end
+        local wrap = type(newcclosure) == "function" and newcclosure or function(fn) return fn end
         local ok = pcall(function()
-            for _, conn in ipairs(getconnections(remote.OnClientEvent)) do
-                if not anti.Muted[conn] and conn.Function and isGameHandler(conn.Function) then
-                    conn:Disable()
-                    anti.Muted[conn] = true
+            local old
+            old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+                if self == anti.Replicate and anti.Replicate ~= nil and Core.Alive
+                    and State.Settings.AntiTrapEnabled and getnamecallmethod() == "FireServer" then
+                    return
                 end
-            end
+                return old(self, ...)
+            end))
         end)
-        return ok
+        anti.Hooked = ok
     end
 
-    local function unmuteGameHandlers()
-        for conn in pairs(anti.Muted) do pcall(function() conn:Enable() end) end
-        table.clear(anti.Muted)
-    end
-
-    -- Запасной путь: игровой обработчик уже замедлил — возвращаем как было
+    -- Игровой обработчик уже замедлил — возвращаем как было
     local function undoTrap()
         local character = LocalPlayer.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -4237,38 +4579,35 @@ do
 
     State.Runtime.SetAntiTrap = function(enabled)
         State.Settings.AntiTrapEnabled = enabled == true
-        if anti.Fallback then anti.Fallback:Disconnect(); anti.Fallback = nil end
+        if anti.Handler then anti.Handler:Disconnect(); anti.Handler = nil end
         if anti.Watch then Core.Tasks.cancel(anti.Watch); anti.Watch = nil end
-        unmuteGameHandlers()
         if not State.Settings.AntiTrapEnabled then return end
 
-        local remote = trapRemote()
+        local system = trapSystem()
+        local remote = system and system:FindFirstChild("TrapHitLocal")
         if not remote then
             -- Не MM2 или система ловушек ещё не загружена — ждём её в фоне
             anti.Watch = Core.Tasks.spawn(function()
-                local system = ReplicatedStorage:WaitForChild("TrapSystem", 60)
-                if system and system:WaitForChild("TrapHitLocal", 10) and State.Settings.AntiTrapEnabled then
+                local found = ReplicatedStorage:WaitForChild("TrapSystem", 60)
+                if found and found:WaitForChild("TrapHitLocal", 10) and State.Settings.AntiTrapEnabled then
                     State.Runtime.SetAntiTrap(true)
                 end
             end)
             return
         end
-        if not muteGameHandlers(remote) then
-            anti.Fallback = Core.Connect(remote.OnClientEvent, function()
-                Core.Tasks.defer(undoTrap)
+        pcall(hookReplicate, system)
+        -- Игровой обработчик подключён раньше и отрабатывает первым; defer — в том же
+        -- кадре после него. Через 4 с игра сама ставит JumpPower 50 — возвращаем свой
+        anti.Handler = Core.Connect(remote.OnClientEvent, function()
+            Core.Tasks.defer(undoTrap)
+            Core.Tasks.delay(4.1, function()
+                if State.Settings.AntiTrapEnabled then pcall(undoTrap) end
             end)
-        end
-        -- Включили уже сидя в ловушке: игровой таймер «через 4 с вернуть» мог оборваться
+        end)
+        -- Включили уже сидя в ловушке
         local character = LocalPlayer.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         if humanoid and humanoid.WalkSpeed < 0.1 then undoTrap() end
-        -- TrapScriptClient может переподключиться (перезагрузка PlayerScripts) — перепроверяем
-        anti.Watch = Core.Tasks.spawn(function()
-            while State.Settings.AntiTrapEnabled do
-                task.wait(5)
-                if not anti.Fallback then muteGameHandlers(remote) end
-            end
-        end)
     end
 end
 
@@ -5339,9 +5678,43 @@ function Fling.RestoreCharCollision(char)
     Fling.StrippedChars[char] = nil
 end
 
-function Fling.StripCharCollision(char)
+-- Части персонажа для антифлинга: снимать коллизию нужно каждый кадр (Humanoid
+-- возвращает её корпусу), а GetDescendants на каждого игрока за кадр создавал сотни
+-- объектов и десятки МБ мусора в секунду — в раунде это давало лаги. Состав частей
+-- кэшируем на CollisionPartsTTL, новые части подхватываются при обновлении
+-- Корпус (его коллизию Humanoid включает обратно на каждом шаге физики) — каждый
+-- кадр; остальные части — полным проходом раз в AntiFlingFullPass. Обновление кэша
+-- разнесено по времени случайным сдвигом, чтобы игроки не пересобирались в один кадр
+Fling.CollisionPartsCache = setmetatable({}, {__mode = "k"})
+Fling.CoreParts = {HumanoidRootPart = true, Head = true, Torso = true, UpperTorso = true, LowerTorso = true}
+function Fling.CollisionParts(char)
+    local now = os.clock()
+    local entry = Fling.CollisionPartsCache[char]
+    if entry and now < entry.Expires then return entry end
+    local parts, core = {}, {}
     for _, obj in ipairs(char:GetDescendants()) do
         if obj:IsA("BasePart") then
+            parts[#parts + 1] = obj
+            if Fling.CoreParts[obj.Name] and obj.Parent == char then core[#core + 1] = obj end
+        end
+    end
+    local ttl = CONFIG.Perf.AntiFlingPartsTTL
+    entry = {Parts = parts, Core = core, Expires = now + ttl * (0.5 + math.random()), NextFull = 0}
+    Fling.CollisionPartsCache[char] = entry
+    return entry
+end
+
+function Fling.StripCharCollision(char)
+    Fling.WatchCharParts(char)
+    local entry = Fling.CollisionParts(char)
+    local now = os.clock()
+    local list = entry.Core
+    if not Fling.StrippedChars[char] or now >= entry.NextFull then
+        entry.NextFull = now + CONFIG.Perf.AntiFlingFullPass
+        list = entry.Parts
+    end
+    for _, obj in ipairs(list) do
+        if obj.Parent then
             if Fling.AntiFlingCollision[obj] == nil then
                 Fling.AntiFlingCollision[obj] = obj.CanCollide
             end
@@ -5392,6 +5765,10 @@ function Fling.UpdateAntiFling()
         end
     end
 
+    -- Чистка удалённых частей — раз в AntiFlingCleanup: таблица держит части всех
+    -- игроков (сотни), обход каждый кадр стоил дороже самой защиты
+    if now < (Fling.NextCleanup or 0) then return end
+    Fling.NextCleanup = now + CONFIG.Perf.AntiFlingCleanup
     for part in pairs(Fling.AntiFlingCollision) do
         if not part.Parent then
             Fling.AntiFlingCollision[part] = nil
@@ -5404,6 +5781,123 @@ function Fling.UpdateAntiFling()
             Fling.StrippedChars[char] = nil
         end
     end
+    for char, conn in pairs(Fling.WatchedChars) do
+        if not char.Parent then
+            pcall(function() conn:Disconnect() end)
+            Fling.WatchedChars[char] = nil
+        end
+    end
+end
+
+-- Новая часть у персонажа (взятый инструмент, аксессуар) сразу сбрасывает кэш:
+-- раньше она оставалась твёрдой до истечения AntiFlingPartsTTL (1–3 с) — этим
+-- окном и пользовались флинги, раскрученные через инструмент
+Fling.WatchedChars = setmetatable({}, {__mode = "k"})
+function Fling.WatchCharParts(char)
+    if Fling.WatchedChars[char] then return end
+    Fling.WatchedChars[char] = Core.Connect(char.DescendantAdded, function(obj)
+        if obj:IsA("BasePart") then Fling.CollisionPartsCache[char] = nil end
+    end)
+end
+
+-- ─── Второй рубеж: защита своего корня ────────────────────────────────────────
+-- Снятие коллизии не помогает, если флинг считается не у нас (перехват network
+-- ownership) или бьёт не телом игрока. Поэтому каждый кадр перед физикой смотрим
+-- на результат: настоящая скорость корня, недостижимая обычной игрой и нашими
+-- фичами, — это удар. Отменяем: угловую в ноль, позицию и скорость — на последние
+-- нормальные. Стоит на RenderStep сразу после восстановлений Velocity Spoofer,
+-- Desync и невидимости (приоритет First) — видим настоящую скорость, а не подмену
+Fling.Guard = {BindName = "MM2_AntiFlingGuard", SafeCFrame = nil, SafeVelocity = Vector3.zero, Root = nil, NotifyAt = 0, Hits = 0}
+State.Runtime.FlingGuard = Fling.Guard   -- для замеров: Hits — сколько ударов отменено
+Fling.GuardLimits = {
+    Horizontal = 150,   -- studs/s: обычный бег, Speed, стрейфы
+    Rise = 180,         -- studs/s вверх: прыжки, в том числе bhop Jump Impulse
+    Fall = 400,         -- studs/s вниз: падение с большой высоты
+    Angular = 60,       -- рад/с: поворот корпуса и анимации так не крутят
+}
+
+-- Сейчас нас законно разгоняют свои механики — защиту не включаем
+function Fling.GuardPaused(character, humanoid, root)
+    if Fling.SessionActive or State.Runtime.IsFlingInProgress or State.Runtime.WalkFlingActive then return true end
+    if State.Settings.FlyEnabled or State.Settings.AutoFarmEnabled then return true end
+    if root.Anchored or humanoid.Health <= 0 or humanoid.Sit or humanoid.PlatformStand then return true end
+    return character:FindFirstChild("SpeedGlitchTool") ~= nil
+end
+
+-- Скорость корня за пределами обычной игры (или NaN — его дают экстремальные
+-- флинги, и обычные сравнения «>» его пропускали)
+function Fling.GuardViolation(root, velocity, angular)
+    local limits = Fling.GuardLimits
+    local horizontalLimit, riseLimit = limits.Horizontal, limits.Rise
+    local movement = State.Runtime.MovementModule
+    if movement and movement.State and movement.State.Enabled then
+        local values = movement.State.Values or {}
+        horizontalLimit = math.max(horizontalLimit, (tonumber(values.MaxSpeed) or 0) * 1.3 + 20)
+        riseLimit = math.max(riseLimit, (tonumber(values.JumpImpulse) or 0) * 1.4)
+    end
+    if velocity ~= velocity or angular ~= angular or root.Position ~= root.Position then return true end
+    local horizontal = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+    return horizontal > horizontalLimit or velocity.Y > riseLimit or velocity.Y < -limits.Fall
+        or angular.Magnitude > limits.Angular
+end
+
+-- Сразу после физики: удар виден здесь, даже если к следующей проверке скорость
+-- успела погаснуть (врезались в стену, гуманоид затормозил), а персонажа уже
+-- унесло. Тогда новое место не должно стать «безопасным» — помечаем кадр
+function Fling.GuardAfterPhysics()
+    local guard = Fling.Guard
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = humanoid and humanoid.RootPart
+    if not root or root ~= guard.Root or Fling.GuardPaused(character, humanoid, root) then return end
+    local velocity = State.Runtime.GetRealVelocity and State.Runtime.GetRealVelocity(root) or root.AssemblyLinearVelocity
+    local angular = root.AssemblyAngularVelocity
+    -- Chaos в Desync на Heartbeat сам шлёт фейковые линейную и угловую скорости (до
+    -- тысяч studs/s) и откатывает их к следующему кадру. Если его Heartbeat уже
+    -- отработал — снимаем подмену так же, как его откат: текущая − отправленная + настоящая
+    local desync = State.Runtime.FakePositionRuntime
+    if desync and desync.Root == root then
+        if desync.VelSent and desync.VelReal then velocity = velocity - desync.VelSent + desync.VelReal end
+        if desync.AngSent and desync.AngReal then angular = angular - desync.AngSent + desync.AngReal end
+    end
+    if Fling.GuardViolation(root, velocity, angular) then guard.Hit = true end
+end
+
+function Fling.GuardSelf()
+    local guard = Fling.Guard
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = humanoid and humanoid.RootPart
+    if not root then guard.Root, guard.SafeCFrame = nil, nil return end
+    if guard.Root ~= root then
+        guard.Root, guard.SafeCFrame, guard.SafeVelocity, guard.Hit = root, root.CFrame, Vector3.zero, false
+    end
+    if Fling.GuardPaused(character, humanoid, root) then
+        guard.SafeCFrame, guard.SafeVelocity, guard.Hit = root.CFrame, Vector3.zero, false
+        return
+    end
+
+    local velocity = State.Runtime.GetRealVelocity and State.Runtime.GetRealVelocity(root) or root.AssemblyLinearVelocity
+    local flung = guard.Hit or Fling.GuardViolation(root, velocity, root.AssemblyAngularVelocity)
+    guard.Hit = false
+
+    if not flung then
+        guard.SafeCFrame, guard.SafeVelocity = root.CFrame, velocity
+        return
+    end
+
+    guard.Hits += 1
+    root.AssemblyAngularVelocity = Vector3.zero
+    -- NaN в сохранённой скорости (удар пришёлся на кадр записи) — просто стоп
+    root.AssemblyLinearVelocity = guard.SafeVelocity == guard.SafeVelocity and guard.SafeVelocity or Vector3.zero
+    if guard.SafeCFrame and (root.Position - guard.SafeCFrame.Position).Magnitude > 2 then
+        root.CFrame = guard.SafeCFrame
+    end
+    local now = os.clock()
+    if State.Settings.NotificationsEnabled and now >= guard.NotifyAt then
+        guard.NotifyAt = now + 5
+        ShowNotification("<font color=\"rgb(168,228,160)\">Anti-Fling </font><font color=\"rgb(220,220,220)\">blocked a fling</font>", CONFIG.Colors.Text)
+    end
 end
 
 -- EnableAntiFling() - Включение защиты от флинга
@@ -5415,6 +5909,18 @@ local function EnableAntiFling()
         Fling.UpdateAntiFling()
     end)
     TrackConnection(Fling.AntiFlingConn)
+    Fling.Guard.Root, Fling.Guard.SafeCFrame, Fling.Guard.Hit = nil, nil, false
+    Fling.GuardHeartbeat = Core.Connect(RunService.Heartbeat, function()
+        local ok, err = pcall(Fling.GuardAfterPhysics)
+        if not ok then warn("[Anti-Fling] " .. tostring(err)) end
+    end)
+    TrackConnection(Fling.GuardHeartbeat)
+    pcall(function()
+        RunService:BindToRenderStep(Fling.Guard.BindName, Enum.RenderPriority.First.Value + 1, function()
+            local ok, err = pcall(Fling.GuardSelf)
+            if not ok then warn("[Anti-Fling] " .. tostring(err)) end
+        end)
+    end)
 end
 
 -- DisableAntiFling() - Отключение защиты
@@ -5424,6 +5930,12 @@ local function DisableAntiFling()
     if Fling.AntiFlingConn then
         Fling.AntiFlingConn:Disconnect()
         Fling.AntiFlingConn = nil
+    end
+    pcall(function() RunService:UnbindFromRenderStep(Fling.Guard.BindName) end)
+    if Fling.GuardHeartbeat then Fling.GuardHeartbeat:Disconnect(); Fling.GuardHeartbeat = nil end
+    for char, conn in pairs(Fling.WatchedChars) do
+        pcall(function() conn:Disconnect() end)
+        Fling.WatchedChars[char] = nil
     end
 
     Fling.RestoreAntiFlingCollision()
@@ -6122,7 +6634,26 @@ do
     local MovementBinds = {
         {Key = "Speed", Mode = "SpeedBindMode", Setting = "SpeedEnabled", Row = "SpeedBindRow"},
         {Key = "Fly", Mode = "FlyBindMode", Setting = "FlyToggleOn", Row = "FlyBindRow"},
+        {Key = "Desync", Mode = "FakePositionBindMode", Setting = "FakePositionToggleOn", Row = "FakePositionBindRow"},
     }
+
+    -- Desync по бинду, как Fly: тосты только в режиме Toggle
+    local function syncDesync(want)
+        local setFakePosition = State.Runtime.SetFakePosition
+        if not setFakePosition then return end
+        -- Флинг держит Desync на паузе и сам вернёт его; если бинд отпущен —
+        -- отложенное включение отменяем
+        if Fling.FakePositionPaused then
+            if not want then Fling.ForgetFakePositionPause() end
+            return
+        end
+        if want == State.Settings.FakePositionEnabled then return end
+        setFakePosition(want)
+        if State.Settings.FakePositionBindMode == "Toggle" and State.Settings.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(220,220,220)\">Desync</font> (" .. tostring(State.Settings.FakePositionMode) .. "): "
+                .. (want and "<font color=\"rgb(168,228,160)\">ON</font>" or "<font color=\"rgb(255, 85, 85)\">OFF</font>"), CONFIG.Colors.Text)
+        end
+    end
 
     State.Runtime.BindHeld = function(key)
         local bind = State.Settings.Keybinds[key]
@@ -6161,10 +6692,14 @@ do
 
     Core.Connect(RunService.Heartbeat, function(dt)
         local speedOn, wantFly = bindActive(MovementBinds[1]), bindActive(MovementBinds[2])
-        for i, on in ipairs({speedOn, wantFly}) do
+        local wantDesync = bindActive(MovementBinds[3])
+        State.Runtime.SpeedActive = speedOn   -- строка биндов центральной панели HUD
+        for i, on in ipairs({speedOn, wantFly, State.Settings.FakePositionEnabled}) do
             local row = State.Runtime[MovementBinds[i].Row]
             if row and row.SetActive then row:SetActive(on) end
         end
+
+        pcall(syncDesync, wantDesync)
 
         -- Fly: уведомления только в режиме Toggle — Hold/Always не спамят тостами
         if wantFly ~= State.Settings.FlyEnabled then
@@ -7525,6 +8060,7 @@ knifeThrow = function(silent)
     local mouse = LocalPlayer:GetMouse()
     local spawnPosition
     local targetPosition
+    local spawnedNear = false   -- Spawn Knife Near Player нашёл цель — silent не нужен
 
     -- Режим спавна рядом с игроком
     if State.Settings.SpawnAtPlayer then
@@ -7554,6 +8090,7 @@ knifeThrow = function(silent)
                 local direction = (aimPoint - spawnPosition)
                 direction = direction.Magnitude > 1e-3 and direction.Unit or -targetHRP.CFrame.LookVector
                 targetPosition = aimPoint + direction * 500
+                spawnedNear = true
             else
                 spawnPosition = LocalPlayer.Character.RightHand.Position
                 targetPosition = mouse.Hit.Position
@@ -7566,6 +8103,13 @@ knifeThrow = function(silent)
         -- Обычный бросок
         spawnPosition = LocalPlayer.Character.RightHand.Position
         targetPosition = mouse.Hit.Position
+    end
+
+    -- Silent Knife: из руки в упреждённую точку цели у курсора. На бинде приоритет
+    -- у Spawn Knife Near Player; без цели в FOV бросок остаётся по мыши
+    if not spawnedNear and State.Settings.SilentKnifeEnabled then
+        local ok, aimPoint = pcall(State.Runtime.SilentKnifeAim, spawnPosition, knife)
+        if ok and aimPoint then targetPosition = aimPoint end
     end
 
     if not targetPosition then
@@ -7582,9 +8126,12 @@ knifeThrow = function(silent)
     }
 
     -- МГНОВЕННАЯ ОТПРАВКА на сервер
+    -- Флаг: хук Silent Knife не трогает наш бросок (точку выбрали выше)
+    State.Runtime.SilentKnifeOwnCall = true
     local success, err = pcall(function()
         LocalPlayer.Character.Knife.Events.KnifeThrown:FireServer(unpack(argsThrowRemote))
     end)
+    State.Runtime.SilentKnifeOwnCall = false
 
     if success then
         task.wait()  -- Ждем только при успехе
@@ -7617,10 +8164,15 @@ end
 --     землю при приземлении — именно это давало «сильно ниже». Кламп ±2.4 к
 --     ТЕКУЩЕМУ Y убран: при большом прыжке/высоком пинге тело уезжает дальше и
 --     кламп сам уводил в промах. Параболу + пол не клампим, они уже физичны.
-local function predictAimPoint(hrp, thum, t)
-    t = math.clamp(t, 0.03, 0.25)  -- отсекаем выбросы при огромном пинге
+-- maxT — потолок упреждения: 0.25 с для хитскана (отсекаем выбросы пинга), у
+-- броска ножа больше — к пингу прибавляется время полёта снаряда
+local function predictAimPoint(hrp, thum, t, maxT)
+    t = math.clamp(t, 0.03, maxT or 0.25)
     local pos = hrp.Position
     local vel = hrp.AssemblyLinearVelocity
+    -- Вертикаль быстрее обычного прыжка вверх — Anti-Aim спуф или флинг: парабола
+    -- по ней увела бы прицел в небо. Падение не трогаем (пол ниже его ограничит)
+    if vel.Y > CONFIG.SilentKnife.MaxRiseSpeed then vel = Vector3.new(vel.X, 0, vel.Z) end
     local char = hrp.Parent
 
     -- горизонталь по интенту
@@ -7686,8 +8238,8 @@ end
 -- персонажа. predictAimPoint даёт будущую позицию HRP → берём её дельту и сдвигаем
 -- на неё выбранную часть (анимационный оффсет части берём текущий — за окно пинга
 -- он почти не меняется). Так прицел всегда на реальной геометрии, а не на корне.
-local function computeAimPoint(char, hrp, thum, t)
-    local predictedHRP = predictAimPoint(hrp, thum, t)
+local function computeAimPoint(char, hrp, thum, t, maxT)
+    local predictedHRP = predictAimPoint(hrp, thum, t, maxT)
     local part = pickAimPart(char)
     if not part then return predictedHRP end
     return part.Position + (predictedHRP - hrp.Position)
@@ -7744,6 +8296,283 @@ State.Runtime.FindClearOrigin = function(targetPos, targetChar, preferred, dista
     if bestFree >= minDistance then return bestOrigin end
     -- Цель зажата со всех сторон: вылет почти из самой цели
     return bestOrigin or targetPos + Vector3.yAxis * 0.5
+end
+
+-- ─── Silent Knife: упреждённая точка броска ────────────────────────────────────
+-- Нож летит из точки вылета по прямой со скоростью ThrowSpeed. Встреча с целью —
+-- через t = L + |aim(t) − origin| / speed, где L = пинг + ServerLead (сервер видит
+-- цель на столько раньше нашей картинки, как у выстрела шерифа). Точка зависит от
+-- времени, время — от точки: решаем итерациями. Цель — игрок ближе всех к курсору
+-- (без радиуса), до которого путь ножа свободен от стен; игроки за камерой — после
+-- видимых, по углу от взгляда.
+-- Возвращает aim, target или nil (цели нет — бросок остаётся как есть)
+State.Runtime.SilentKnifeAim = function(origin, knife)
+    local SK = CONFIG.SilentKnife
+    local camera = Workspace.CurrentCamera
+    if not camera or not origin then return nil end
+    -- Скорость полёта — атрибут модели летящего ножа (96). Одноимённый атрибут
+    -- инструмента Knife — время замаха в секундах (KnifeClient), его не берём
+    local speed = CONFIG.KnifeTracer.DefaultSpeed
+    -- Пинг — только из кэша: эта функция зовётся и из хука в потоке игрового
+    -- KnifeClient, а Stats:GetValue() там запрещён (lacking capability Plugin) —
+    -- ошибка пробивает pcall и обрывала игровой бросок (оставался один замах)
+    local ping = State.Runtime.SilentKnifePing
+    if not ping then
+        local aim = State.Runtime.SheriffAim
+        local isOurs = type(checkcaller) == "function" and checkcaller()
+        ping = (isOurs and aim and aim.Ping and aim.Ping()) or 0.1
+    end
+    local lead = ping + CONFIG.SheriffAim.ServerLead
+    local mouse = UserInputService:GetMouseLocation()
+    local look = camera.CFrame.LookVector
+
+    local ignore = {Workspace.CurrentCamera}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character then table.insert(ignore, player.Character) end
+    end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = ignore
+    params.IgnoreWater = true
+
+    -- Кандидаты по близости к курсору
+    local candidates = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        local char = player ~= LocalPlayer and player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 and (hrp.Position - origin).Magnitude <= SK.MaxRange then
+            -- Перед камерой — расстояние до курсора в пикселях (проекция камеры точная;
+            -- лучи ViewportPointToRay при изменённом FOV врут, см. GUI acrylic). За
+            -- камерой проекция бессмысленна — ставим после всех видимых, по углу
+            local screen = camera:WorldToViewportPoint(hrp.Position)
+            local gap
+            if screen.Z > 0 then
+                gap = (Vector2.new(screen.X, screen.Y) - mouse).Magnitude
+            else
+                local dir = (hrp.Position - camera.CFrame.Position).Unit
+                gap = 1e6 + math.acos(math.clamp(dir:Dot(look), -1, 1))
+            end
+            table.insert(candidates, {Char = char, Hrp = hrp, Hum = hum, Player = player, Gap = gap})
+        end
+    end
+    table.sort(candidates, function(a, b) return a.Gap < b.Gap end)
+
+    for _, c in ipairs(candidates) do
+        local t = lead + (c.Hrp.Position - origin).Magnitude / speed
+        local point
+        for _ = 1, SK.Iterations do
+            point = State.Runtime.ComputeAimPoint(c.Char, c.Hrp, c.Hum, t, SK.MaxLead)
+            t = lead + (point - origin).Magnitude / speed
+        end
+        -- Стена между вылетом и точкой встречи съест нож — берём следующую цель
+        local delta = point - origin
+        if delta.Magnitude > 1e-3 and not Workspace:Raycast(origin, delta, params) then
+            return point, c.Player
+        end
+    end
+    return nil
+end
+
+-- Обычный бросок игры: KnifeClient шлёт Events.KnifeThrown:FireServer(Handle.CFrame,
+-- точка мыши). Хук __namecall подменяет только точку цели, вылет (рука) — игровой.
+-- Внутри хука НЕЛЬЗЯ делать вызовы через двоеточие (Raycast, WorldToViewportPoint…):
+-- они проходят через тот же __namecall и затирают метод исходного вызова — игра
+-- вызывала у KnifeThrown «Raycast» вместо FireServer, и бросок обрывался. Поэтому
+-- точка считается заранее в своём потоке (Heartbeat, пока нож в руке), а хук только
+-- читает готовое значение: индексы свойств и глобальные функции, без методов.
+-- Бинд Fast throw шлёт сам с флагом SilentKnifeOwnCall — его не трогаем: там свой
+-- выбор (Spawn Near Player в приоритете). checkcaller не подходит: Hold Throw зовёт
+-- игровой обработчик ножа из нашего потока, и такой бросок тоже должен быть silent. Хук один на сессию и прозрачен, когда выключен
+-- (снять его нельзя без риска сорвать чужие хуки поверх — как в skinchanger)
+State.Runtime.SetSilentKnife = function(enabled)
+    State.Settings.SilentKnifeEnabled = enabled == true
+    if State.Runtime.SilentKnifeConn then
+        State.Runtime.SilentKnifeConn:Disconnect()
+        State.Runtime.SilentKnifeConn = nil
+    end
+    State.Runtime.SilentKnifeCache = nil
+    if not State.Settings.SilentKnifeEnabled then return end
+
+    -- Кэш точки (и пинга: в потоке игры Stats недоступен) — каждый кадр, пока нож в руке
+    local nextPing = 0
+    State.Runtime.SilentKnifeConn = Core.Connect(RunService.Heartbeat, function()
+        local now = os.clock()
+        if now >= nextPing then
+            nextPing = now + 0.5
+            local aim = State.Runtime.SheriffAim
+            if aim and aim.Ping then State.Runtime.SilentKnifePing = aim.Ping() end
+        end
+        local character = LocalPlayer.Character
+        local knife = character and character:FindFirstChild("Knife")
+        local handle = knife and knife:FindFirstChild("Handle")
+        if not handle then State.Runtime.SilentKnifeCache = nil; return end
+        local ok, point = pcall(State.Runtime.SilentKnifeAim, handle.Position, knife)
+        State.Runtime.SilentKnifeCache = ok and point and {Point = point, At = now} or nil
+    end)
+
+    if State.Runtime.SilentKnifeHooked then return end
+    if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then
+        ShowNotification("<font color=\"rgb(255, 85, 85)\">Silent Knife </font><font color=\"rgb(220,220,220)\">works only on Fast throw: executor has no hookmetamethod</font>", CONFIG.Colors.Text)
+        return
+    end
+    local wrap = type(newcclosure) == "function" and newcclosure or function(fn) return fn end
+    local ok, err = pcall(function()
+        local old
+        old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+            if State.Settings.SilentKnifeEnabled and not State.Runtime.SilentKnifeOwnCall
+                and getnamecallmethod() == "FireServer"
+                and typeof(self) == "Instance" and self.Name == "KnifeThrown" then
+                local cache = State.Runtime.SilentKnifeCache
+                local origin, target = ...
+                if cache and os.clock() - cache.At < 0.1 and typeof(origin) == "CFrame" then
+                    -- Тип как у игры: ПК шлёт CFrame, тач — Vector3
+                    local replaced = typeof(target) == "Vector3" and cache.Point or CFrame.new(cache.Point)
+                    return old(self, origin, replaced, select(3, ...))
+                end
+            end
+            return old(self, ...)
+        end))
+    end)
+    State.Runtime.SilentKnifeHooked = ok
+    if not ok then warn("[Silent Knife] " .. tostring(err)) end
+end
+
+-- ─── Hold Throw: мобильная схема броска на ПК ──────────────────────────────────
+-- KnifeClient на тач-вводе после замаха не бросает, а держит нож (поза ThrowHold,
+-- u10 = true) до тапа по миру (TouchTapInWorld → throwKnife). На ПК после замаха
+-- бросок уходит сразу. Пока зажата E (действие Throw), для KnifeClient подменяем
+-- PreferredInput на Touch (хук __index, только этому скрипту) — игра сама уходит в
+-- ветку удержания, и с почти законченной анимацией можно бегать сколько угодно.
+-- Отпустили E в удержании — зовём только Lua-обработчик ножа на TouchTapInWorld
+-- (у события ещё ~5 системных подписчиков, firesignal дёрнул бы и их). Отпустили
+-- раньше конца замаха — подмена снята, игра бросит по-ПК-шному. Бросок идёт через
+-- KnifeThrown:FireServer игры — Silent Knife подменяет точку как обычно
+do
+    local Hold = {Spoof = false, Client = nil, Action = nil, Conns = {}, Watch = nil, Hooked = false}
+    State.Runtime.HoldThrow = Hold
+    local TOUCH = Enum.PreferredInput.Touch
+
+    local function hookPreferredInput()
+        if Hold.Hooked then return true end
+        if type(hookmetamethod) ~= "function" then return false end
+        local wrap = type(newcclosure) == "function" and newcclosure or function(fn) return fn end
+        local getCaller = type(getcallingscript) == "function" and getcallingscript or nil
+        if not getCaller then return false end
+        local ok = pcall(function()
+            local old
+            -- Только сравнения ссылок и строк: любой индекс инстанса внутри снова
+            -- прошёл бы через этот же __index
+            old = hookmetamethod(game, "__index", wrap(function(self, key)
+                if Hold.Spoof and key == "PreferredInput" and self == UserInputService
+                    and Hold.Client ~= nil and getCaller() == Hold.Client then
+                    return TOUCH
+                end
+                return old(self, key)
+            end))
+        end)
+        Hold.Hooked = ok
+        return ok
+    end
+
+    local function equippedKnife()
+        local character = LocalPlayer.Character
+        local knife = character and character:FindFirstChild("Knife")
+        return knife and knife:IsA("Tool") and knife or nil
+    end
+
+    local function holdingPose()
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+        if not animator then return false end
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            if track.Animation and track.Animation.Name == "ThrowHold" then return true end
+        end
+        return false
+    end
+
+    -- Lua-обработчик TouchTapInWorld именно этого KnifeClient
+    local function knifeTapHandler(client)
+        if type(getconnections) ~= "function" then return nil end
+        local ok, list = pcall(getconnections, UserInputService.TouchTapInWorld)
+        if not ok then return nil end
+        for _, connection in ipairs(list) do
+            local fn = connection.LuaConnection and connection.Function
+            if type(fn) == "function" then
+                local okEnv, env = pcall(getfenv, fn)
+                if okEnv and env and rawget(env, "script") == client then return fn end
+            end
+        end
+        return nil
+    end
+
+    local function onPressed()
+        local knife = equippedKnife()
+        local client = knife and knife:FindFirstChild("KnifeClient")
+        if not client or getMurder() ~= LocalPlayer then return end
+        Hold.Client = client
+        Hold.Spoof = true
+    end
+
+    local function onReleased()
+        if not Hold.Spoof then return end
+        local client = Hold.Client
+        if holdingPose() and equippedKnife() then
+            local handler = knifeTapHandler(client)
+            if handler then
+                Core.Tasks.spawn(handler, UserInputService:GetMouseLocation(), false)
+            else
+                -- Обработчик не нашли: бросаем сами (Fast throw снимает нож — игра
+                -- сбрасывает удержание по Unequipped)
+                Core.Tasks.spawn(knifeThrow, true)
+            end
+        end
+        -- Подмену снимаем после броска: throwKnife игры читает ввод синхронно
+        Core.Tasks.defer(function() Hold.Spoof = false end)
+    end
+
+    local function unbindAction()
+        for _, connection in ipairs(Hold.Conns) do pcall(function() connection:Disconnect() end) end
+        table.clear(Hold.Conns)
+        Hold.Action = nil
+    end
+
+    -- InputAction Throw живёт в PlayerGui и может пересоздаться (респавн) — сверяем
+    local function bindAction()
+        local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        local context = gui and gui:FindFirstChild("InputContext")
+        local gameplay = context and context:FindFirstChild("GameplayContext")
+        local action = gameplay and gameplay:FindFirstChild("Throw")
+        if action == Hold.Action then return end
+        unbindAction()
+        if not action then return end
+        Hold.Action = action
+        table.insert(Hold.Conns, Core.Connect(action.Pressed, onPressed))
+        table.insert(Hold.Conns, Core.Connect(action.Released, onReleased))
+    end
+
+    State.Runtime.SetHoldThrow = function(enabled)
+        State.Settings.HoldThrowEnabled = enabled == true
+        if Hold.Watch then Core.Tasks.cancel(Hold.Watch); Hold.Watch = nil end
+        unbindAction()
+        Hold.Spoof, Hold.Client = false, nil
+        if not State.Settings.HoldThrowEnabled then return end
+        if not hookPreferredInput() then
+            State.Settings.HoldThrowEnabled = false
+            ShowNotification("<font color=\"rgb(255, 85, 85)\">Hold Throw </font><font color=\"rgb(220,220,220)\">needs hookmetamethod + getcallingscript</font>", CONFIG.Colors.Text)
+            return
+        end
+        bindAction()
+        Hold.Watch = Core.Tasks.spawn(function()
+            while State.Settings.HoldThrowEnabled and Core.Alive do
+                task.wait(1)
+                pcall(bindAction)
+                -- Нож убрали / умерли с зажатой E — подмену не держим
+                if Hold.Spoof and not equippedKnife() then Hold.Spoof = false end
+            end
+        end)
+    end
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -7803,6 +8632,10 @@ do
 
     -- Лучи по карте: без персонажей, камеры и серверных трассеров (Part+Beam в корне)
     local function mapParams(extra)
+        -- Без extra параметры одинаковы для всех лучей кадра: собираем их не чаще
+        -- MapParamsTTL (обход всего Workspace и новый RaycastParams на каждый луч дороги)
+        local cache = Aim.MapParamsCache
+        if not extra and cache and os.clock() - cache.Time < SA.MapParamsTTL then return cache.Params end
         local ignore = {Workspace.CurrentCamera}
         for _, player in ipairs(Players:GetPlayers()) do
             if player.Character then table.insert(ignore, player.Character) end
@@ -7817,6 +8650,7 @@ do
         params.FilterType = Enum.RaycastFilterType.Exclude
         params.FilterDescendantsInstances = ignore
         params.IgnoreWater = true
+        if not extra then Aim.MapParamsCache = {Time = os.clock(), Params = params} end
         return params
     end
 
@@ -7826,6 +8660,7 @@ do
         table.clear(Aim.Samples); table.clear(Aim.Segments); table.clear(Aim.Jumps)
         table.clear(Aim.Suspects)
         table.clear(Aim.SegTimes); table.clear(Aim.Checks); table.clear(Aim.Errors)
+        Aim.ErrorsDirty, Aim.NextTrack = true, 0
         Aim.Health, Aim.NextCheck, Aim.LastRise = 1, 0, nil
         Aim.SegDir, Aim.SegStart = nil, nil
         Aim.WasGrounded, Aim.StandOffset = true, nil
@@ -8185,6 +9020,7 @@ do
             if not inputChanged and not jumped and now - check.due < 0.1 then
                 local miss = current.pos - check.pos
                 table.insert(Aim.Errors, {now, miss.Magnitude, flat(miss).Magnitude, miss.Y})
+                Aim.ErrorsDirty = true
                 -- калибровка K: средний квадрат горизонтальной ошибки каждого кандидата
                 for i, pos in ipairs(check.byK) do
                     local e = flat(current.pos - pos).Magnitude
@@ -8201,20 +9037,27 @@ do
                 end
             end
         end
-        while Aim.Errors[1] and now - Aim.Errors[1][1] > SC.Window do table.remove(Aim.Errors, 1) end
-        if #Aim.Errors >= SC.MinSamples then
-            local sorted = {}
-            for i, e in ipairs(Aim.Errors) do sorted[i] = e[2] end
-            table.sort(sorted)
-            local rank = math.max(1, math.ceil(#sorted * SC.Percentile))
-            local err = sorted[rank]
-            local horizontal = {}
-            for i, e in ipairs(Aim.Errors) do horizontal[i] = e[3] end
-            table.sort(horizontal)
-            Aim.Health = err >= SC.BadError and 0 or 1
-            Aim.ModelError, Aim.LateralError = err, horizontal[rank]
-        else
-            Aim.Health, Aim.ModelError, Aim.LateralError = 1, nil, nil
+        while Aim.Errors[1] and now - Aim.Errors[1][1] > SC.Window do
+            table.remove(Aim.Errors, 1)
+            Aim.ErrorsDirty = true
+        end
+        -- Перцентили пересчитываем только при новых/устаревших ошибках, а не каждый кадр
+        if Aim.ErrorsDirty then
+            Aim.ErrorsDirty = false
+            if #Aim.Errors >= SC.MinSamples then
+                local sorted = {}
+                for i, e in ipairs(Aim.Errors) do sorted[i] = e[2] end
+                table.sort(sorted)
+                local rank = math.max(1, math.ceil(#sorted * SC.Percentile))
+                local err = sorted[rank]
+                local horizontal = {}
+                for i, e in ipairs(Aim.Errors) do horizontal[i] = e[3] end
+                table.sort(horizontal)
+                Aim.Health = err >= SC.BadError and 0 or 1
+                Aim.ModelError, Aim.LateralError = err, horizontal[rank]
+            else
+                Aim.Health, Aim.ModelError, Aim.LateralError = 1, nil, nil
+            end
         end
         -- новое предсказание — сразу для всех кандидатов K
         if now < Aim.NextCheck then return end
@@ -8234,11 +9077,26 @@ do
 
     -- Хитбоксы цели: видимые части и аксессуары (сервер засчитывает и их), без HRP
     -- (Extended Hitbox раздувает его только у нас) и без инструментов
+    -- Список частей-хитбоксов персонажа живёт HitboxPartsTTL: обход всех потомков
+    -- (аксессуары) на каждую оценку Auto Fire был самой частой работой. CFrame и
+    -- размер читаем каждый раз заново — кэшируется только состав
+    local HitboxPartsTTL = 0.5
     local function hitboxes(char)
+        local cache = Aim.HitboxCache
+        if not cache or cache.Char ~= char or os.clock() - cache.Time > HitboxPartsTTL then
+            local parts = {}
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.CanQuery
+                    and not part:FindFirstAncestorOfClass("Tool") then
+                    table.insert(parts, part)
+                end
+            end
+            cache = {Char = char, Time = os.clock(), Parts = parts}
+            Aim.HitboxCache = cache
+        end
         local boxes = {}
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.CanQuery
-                and not part:FindFirstAncestorOfClass("Tool") then
+        for _, part in ipairs(cache.Parts) do
+            if part.Parent then
                 local half = part.Size / 2 - Vector3.one * SA.PartMargin
                 table.insert(boxes, {cf = part.CFrame,
                     half = Vector3.new(math.max(half.X, 0.05), math.max(half.Y, 0.05), math.max(half.Z, 0.05))})
@@ -8247,22 +9105,29 @@ do
         return boxes
     end
 
-    -- Луч (origin, единичное dir, длина maxT) против OBB (slab-метод)
-    local function rayHitsBox(origin, dir, maxT, cf, half)
-        local lo, ld = cf:PointToObjectSpace(origin), cf:VectorToObjectSpace(dir)
-        local tmin, tmax = 0, maxT
-        for _, axis in ipairs({"X", "Y", "Z"}) do
-            local p, d, e = lo[axis], ld[axis], half[axis]
-            if math.abs(d) < 1e-8 then
-                if math.abs(p) > e then return false end
-            else
-                local t1, t2 = (-e - p) / d, (e - p) / d
-                if t1 > t2 then t1, t2 = t2, t1 end
-                tmin, tmax = math.max(tmin, t1), math.min(tmax, t2)
-                if tmin > tmax then return false end
-            end
+    -- Одна ось slab-метода: сужает [tmin, tmax]; nil — луч мимо
+    local function slab(p, d, e, tmin, tmax)
+        if math.abs(d) < 1e-8 then
+            if math.abs(p) > e then return nil end
+            return tmin, tmax
         end
-        return true
+        local t1, t2 = (-e - p) / d, (e - p) / d
+        if t1 > t2 then t1, t2 = t2, t1 end
+        if t1 > tmin then tmin = t1 end
+        if t2 < tmax then tmax = t2 end
+        if tmin > tmax then return nil end
+        return tmin, tmax
+    end
+
+    -- Луч против OBB (slab-метод) в локальных координатах коробки: lo — начало луча,
+    -- ld — единичное направление, maxT — длина. Без таблиц и строковых индексов:
+    -- вызывается сотни раз на одну оценку Auto Fire
+    local function rayHitsBox(lo, ld, maxT, half)
+        local tmin, tmax = slab(lo.X, ld.X, half.X, 0, maxT)
+        if not tmin then return false end
+        tmin, tmax = slab(lo.Y, ld.Y, half.Y, tmin, tmax)
+        if not tmin then return false end
+        return slab(lo.Z, ld.Z, half.Z, tmin, tmax) ~= nil
     end
 
     -- blur — σ поперечной ошибки модели (studs): каждый сценарий сдвигаем поперёк
@@ -8280,12 +9145,17 @@ do
             side = side.Unit
             offsets, weights = SC.BlurOffsets, SC.BlurWeights
         end
+        -- Сдвиг коробки на shift ≡ сдвиг начала луча на -shift: направление в
+        -- локальных осях каждой коробки считаем один раз на вызов, без новых CFrame
+        local localDirs = table.create(#boxes)
+        for i, box in ipairs(boxes) do localDirs[i] = box.cf:VectorToObjectSpace(dir) end
         local chance = 0
         for _, s in ipairs(scenarios) do
             for k, offset in ipairs(offsets) do
                 local shift = s.disp + (offset ~= 0 and side * (offset * blur) or Vector3.zero)
-                for _, box in ipairs(boxes) do
-                    if rayHitsBox(origin, dir, maxT, box.cf + shift, box.half) then
+                local from = origin - shift
+                for i, box in ipairs(boxes) do
+                    if rayHitsBox(box.cf:PointToObjectSpace(from), localDirs[i], maxT, box.half) then
                         chance += s.w * weights[k]
                         break
                     end
@@ -8427,7 +9297,7 @@ do
         if not char or distance < 1e-3 then return end
         local dir = delta / distance
         for _, box in ipairs(hitboxes(char)) do
-            if rayHitsBox(info.origin, dir, distance + 12, box.cf, box.half) then obs.onTarget = true break end
+            if rayHitsBox(box.cf:PointToObjectSpace(info.origin), box.cf:VectorToObjectSpace(dir), distance + 12, box.half) then obs.onTarget = true break end
         end
         local torso = pickAimPart(char) or char:FindFirstChild("HumanoidRootPart")
         if torso then
@@ -8439,7 +9309,7 @@ do
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player ~= info.target and player.Character then
                 for _, box in ipairs(hitboxes(player.Character)) do
-                    if rayHitsBox(info.origin, dir, distance, box.cf, box.half) then obs.blocker = player.Name break end
+                    if rayHitsBox(box.cf:PointToObjectSpace(info.origin), box.cf:VectorToObjectSpace(dir), distance, box.half) then obs.blocker = player.Name break end
                 end
                 if obs.blocker then break end
             end
@@ -8620,13 +9490,16 @@ do
             if Aim.Target then resetTrack(nil) end
             return
         end
-        local ok, err = pcall(track, now)
-        if not ok then warn("[Sheriff Aim] " .. tostring(err)) return end
-        ok, err = pcall(selfCheck, now)
-        if not ok then warn("[Sheriff Aim] " .. tostring(err)) end
+        if now >= (Aim.NextTrack or 0) then
+            Aim.NextTrack = now + SA.TrackInterval
+            local ok, err = pcall(track, now)
+            if not ok then warn("[Sheriff Aim] " .. tostring(err)) return end
+            ok, err = pcall(selfCheck, now)
+            if not ok then warn("[Sheriff Aim] " .. tostring(err)) end
+        end
         settlePending(now)
         if armed then
-            ok, err = pcall(autoFire, now)
+            local ok, err = pcall(autoFire, now)
             if not ok then warn("[Auto Fire] " .. tostring(err)) end
         end
     end)
@@ -9474,26 +10347,250 @@ do
         return direction.Magnitude > 1e-3 and direction.Unit or Vector3.yAxis
     end
 
-    -- Chaos: только скорости, CFrame не пишем (запись CFrame гасит у наблюдателей
-    -- экстраполяцию); редкие всплески Jitter делает Heartbeat (см. RefreshInterval). Линейная — вокруг настоящей
-    -- (или спуфнутой, если включён Velocity Spoofer: он задаёт центр кляксы, Chaos —
-    -- разброс); угловая — кувыркание.
-    local function applyChaos(root, now)
-        local strength = desyncRadius() * CONFIG.Desync.ChaosPerStud
+    -- Chaos: скорость, согласованная с движением образа. Раньше слали случайные
+    -- Radius×500 studs/s и 200 рад/с: через некоторое время такие пакеты переставали
+    -- приниматься нормально, образ застывал на последнем «нормальном» (всплеск
+    -- Refresh с настоящими скоростями) — у наблюдателей стоял на полу рядом с нами.
+    -- Jitter шлёт настоящие скорости и так не делает. Теперь скорость = настоящая
+    -- (или спуфнутая) + скорость самого образа, не больше ChaosMaxVelocity;
+    -- угловую не подменяем — кувыркание идёт поворотом CFrame (как Spin/Pitch)
+    local function applyChaos(root, now, dt, offset)
         runtime.Root = root
-        if strength > 0 then
-            -- Линейную скорость ведём мы; при активном спуфе он задаёт центр кляксы
-            local spoof = State.Runtime.VelocitySpoofActive()
-            if spoof then State.Runtime.VelocitySpoofRelease() end
-            local real = root.AssemblyLinearVelocity
-            local base = spoof and State.Runtime.SpoofedVelocity(real) or real
-            runtime.VelReal, runtime.VelSent = real, base + randomUnit() * strength
-            root.AssemblyLinearVelocity = runtime.VelSent
-            runtime.ChaosOwnedAt = now
+        local spoof = State.Runtime.VelocitySpoofActive()
+        if spoof then State.Runtime.VelocitySpoofRelease() end
+        local real = root.AssemblyLinearVelocity
+        local base = spoof and State.Runtime.SpoofedVelocity(real) or real
+        local previous = runtime.ChaosPrevOffset or offset
+        runtime.ChaosPrevOffset = offset
+        local drift = dt > 1e-4 and (offset - previous) / dt or Vector3.zero
+        local limit = CONFIG.Desync.ChaosMaxVelocity
+        if drift.Magnitude > limit then drift = drift.Unit * limit end
+        runtime.VelReal, runtime.VelSent = real, base + drift
+        root.AssemblyLinearVelocity = runtime.VelSent
+        runtime.ChaosOwnedAt = now
+    end
+
+    -- Кувыркание образа: ось меняется на каждом hop, угол растёт ChaosTumbleSpeed рад/с
+    local function chaosTumble(dt)
+        if not runtime.ChaosTumbleAxis or runtime.ChaosTumbleHop ~= runtime.ChaosHopAt then
+            runtime.ChaosTumbleHop = runtime.ChaosHopAt
+            runtime.ChaosTumbleAxis = randomUnit()
         end
-        local realW = root.AssemblyAngularVelocity
-        runtime.AngReal, runtime.AngSent = realW, randomUnit() * CONFIG.Desync.ChaosAngular
-        root.AssemblyAngularVelocity = runtime.AngSent
+        runtime.ChaosTumble = (runtime.ChaosTumble or CFrame.identity)
+            * CFrame.fromAxisAngle(runtime.ChaosTumbleAxis, CONFIG.Desync.ChaosTumbleSpeed * dt)
+        runtime.ChaosTumble = runtime.ChaosTumble.Rotation:Orthonormalize()
+        return runtime.ChaosTumble
+    end
+
+    -- Сдвиг пакета Chaos: случайный угол по горизонтали, расстояние от Min до Max
+    -- (× Desync Radius) — образ не встаёт на серверную позицию. Угол меняется раз в
+    -- ChaosHop. Во время атаки (инструмент + ЛКМ) не сдвигаем: удар считает сервер
+    local function wrapAngle(angle)
+        return (angle + math.pi) % (2 * math.pi) - math.pi
+    end
+
+    -- Угол «от угроз»: перебираем ChaosCandidates точек на круге радиуса distance
+    -- и берём ту, что дальше всех от ближайшего живого игрока (расстояние до
+    -- убийцы делим на ChaosMurdererWeight — он «ближе», чем есть). Сумма векторов
+    -- «от всех» при игроках с разных сторон указывала прямо на кого-то (замер:
+    -- 7% кадров образ ближе к чужому корню, чем мы, минимум 2.6 studs).
+    -- Прежний угол держим, пока новый лучше меньше чем на ChaosHysteresis studs —
+    -- иначе цель мечется между почти равными сторонами. nil — рядом никого.
+    -- Роль убийцы ищем раз в 0.25 с: поиск держателя ножа обходит инвентари
+    local function chaosAwayAngle(root, now, distance)
+        local cfg = CONFIG.Desync
+        if now >= (runtime.ChaosRoleAt or 0) then
+            runtime.ChaosRoleAt = now + 0.25
+            local ok, murderer = pcall(getMurder)
+            runtime.ChaosMurderer = ok and murderer or nil
+        end
+        local origin = root.Position
+        local threats, weights = runtime.ChaosThreats or {}, runtime.ChaosWeights or {}
+        runtime.ChaosThreats, runtime.ChaosWeights = threats, weights
+        table.clear(threats); table.clear(weights)
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local character = player.Character
+                local other = character and character:FindFirstChild("HumanoidRootPart")
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                if other and humanoid and humanoid.Health > 0 then
+                    local flat = Vector3.new(other.Position.X - origin.X, 0, other.Position.Z - origin.Z)
+                    if flat.Magnitude < cfg.ChaosThreatRange then
+                        table.insert(threats, flat)
+                        table.insert(weights, player == runtime.ChaosMurderer and cfg.ChaosMurdererWeight or 1)
+                    end
+                end
+            end
+        end
+        if #threats == 0 then return nil end
+        local function score(angle)
+            local point = Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance)
+            local worst = math.huge
+            for i, flat in ipairs(threats) do
+                worst = math.min(worst, (point - flat).Magnitude / weights[i])
+            end
+            return worst
+        end
+        local bestAngle, bestScore = nil, -math.huge
+        local count = cfg.ChaosCandidates
+        for i = 0, count - 1 do
+            local angle = i * 2 * math.pi / count
+            local value = score(angle)
+            if value > bestScore then bestAngle, bestScore = angle, value end
+        end
+        local held = runtime.ChaosTarget
+        if held and score(held) + cfg.ChaosHysteresis >= bestScore then return held, score, bestScore end
+        runtime.ChaosTarget = bestAngle
+        return bestAngle, score, bestScore
+    end
+
+    -- Точка образа (относительно нас) не ближе к игрокам из последнего поиска
+    -- chaosAwayAngle, чем мы сами; сравнение по горизонтали
+    local function chaosClear(offset)
+        local point = Vector3.new(offset.X, 0, offset.Z)
+        for _, flat in ipairs(runtime.ChaosThreats or {}) do
+            if (point - flat).Magnitude < flat.Magnitude then return false end
+        end
+        return true
+    end
+
+    local function chaosOffset(root, character, now, dt)
+        local cfg = CONFIG.Desync
+        local attacking = character:FindFirstChildOfClass("Tool")
+            and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+        if attacking then runtime.AttackUntil = now + cfg.AttackHold end
+        if now < (runtime.AttackUntil or 0) then return Vector3.zero end
+        local radius = desyncRadius()
+        if radius <= 0 then return Vector3.zero end
+        local function between(min, max) return min + math.random() * (max - min) end
+        -- Случайный единичный вектор, перпендикулярный dir
+        local function perpendicular(dir)
+            local axis = randomUnit():Cross(dir)
+            return axis.Magnitude > 1e-3 and axis.Unit or (dir:Cross(Vector3.yAxis).Magnitude > 1e-3
+                and dir:Cross(Vector3.yAxis).Unit or Vector3.xAxis)
+        end
+        if not runtime.ChaosAngle then
+            runtime.ChaosAngle = math.random() * 2 * math.pi
+            runtime.ChaosHopAt = 0
+        end
+        if not runtime.ChaosDir then
+            runtime.ChaosDir = randomUnit()
+            runtime.ChaosOrbitAxis = perpendicular(runtime.ChaosDir)
+        end
+        local minDistance, maxDistance = radius * cfg.ChaosOffset.Min, radius * cfg.ChaosOffset.Max
+        if now >= (runtime.ChaosHopAt or 0) then
+            runtime.ChaosHopAt = now + between(cfg.ChaosHop[1], cfg.ChaosHop[2])
+            runtime.ChaosDistanceTarget = between(minDistance, maxDistance)
+            runtime.ChaosSweepSpeed = between(cfg.ChaosSweepSpeed[1], cfg.ChaosSweepSpeed[2])
+            if not runtime.ChaosSweepDir or math.random() < cfg.ChaosSweepFlip then
+                runtime.ChaosSweepDir = math.random() < 0.5 and 1 or -1
+            end
+            runtime.ChaosOrbit = between(cfg.ChaosIdleOrbit[1], cfg.ChaosIdleOrbit[2]) * (math.random() < 0.5 and 1 or -1)
+            -- Без Avoid Players направление скачет по всей сфере (вверх/вниз тоже, как
+            -- было со случайными скоростями), но не больше ChaosTurn за hop:
+            -- напротив себя точка не оказывается, образ не проходит через нас
+            runtime.ChaosJump = math.rad(between(cfg.ChaosTurn[1], cfg.ChaosTurn[2]))
+            runtime.ChaosLiftTarget = radius * between(-cfg.ChaosLift, cfg.ChaosLift)
+            -- Редкий выброс: образ резко отлетает дальше по своему направлению
+            if math.random() < cfg.ChaosSpikeChance then
+                runtime.ChaosSpikeUntil = now + cfg.ChaosSpikeTime
+                runtime.ChaosSpike = radius * between(cfg.ChaosSpike[1], cfg.ChaosSpike[2])
+            end
+        end
+        -- Расстояние не прыгает и не стоит: каждый кадр тянется к новой цели hop
+        local distance = runtime.ChaosDistance or maxDistance
+        local distanceTarget = runtime.ChaosDistanceTarget or distance
+        local distanceStep = cfg.ChaosDistanceSpeed * radius * dt
+        distance += math.clamp(distanceTarget - distance, -distanceStep, distanceStep)
+        distance = math.clamp(distance, minDistance, maxDistance)
+        runtime.ChaosDistance = distance
+        local away, score, bestScore
+        if State.Settings.FakeChaosAvoid then
+            away, score, bestScore = chaosAwayAngle(root, now, distance)
+        else
+            runtime.ChaosTarget = nil
+        end
+        if away then
+            -- Образ не стоит в лучшей точке, а всё время скользит по дуге вокруг неё
+            -- (±ChaosSweepArc, ChaosSweepSpeed рад/с). Отражаемся от края дуги и от
+            -- мест, где образ заметно ближе к игроку, чем в лучшей точке
+            local sweep = (runtime.ChaosSweep or 0) + runtime.ChaosSweepDir * runtime.ChaosSweepSpeed * dt
+            local arc = math.rad(cfg.ChaosSweepArc)
+            if math.abs(sweep) > arc then
+                sweep = math.sign(sweep) * arc
+                runtime.ChaosSweepDir = -math.sign(sweep)
+            elseif score(away + sweep) < bestScore * cfg.ChaosSweepKeep then
+                -- Заехали к игроку: разворот, шаг назад к безопасной части дуги
+                runtime.ChaosSweepDir = -runtime.ChaosSweepDir
+                sweep = runtime.ChaosSweep or 0
+                if score(away + sweep) < bestScore * cfg.ChaosSweepKeep then
+                    sweep *= 0.5
+                end
+            end
+            runtime.ChaosSweep = sweep
+            -- Поворот к цели по короткой дуге с ограниченной скоростью: при смене
+            -- стороны (убийца пробежал сквозь нас) образ обходит нас по кругу на
+            -- расстоянии D, а не пролетает через центр
+            local delta = wrapAngle(away + sweep - runtime.ChaosAngle)
+            local step = cfg.ChaosTurnRate * dt
+            runtime.ChaosAngle += math.clamp(delta, -step, step)
+            runtime.ChaosAngle %= 2 * math.pi
+            -- Высота: горизонталь выбрана от угроз, а вверх/вниз образ ходит свободно —
+            -- от этого до игроков только дальше
+            local lift = runtime.ChaosLift or 0
+            local liftStep = cfg.ChaosDistanceSpeed * radius * dt
+            lift += math.clamp((runtime.ChaosLiftTarget or 0) - lift, -liftStep, liftStep)
+            runtime.ChaosLift = lift
+            local flatDir = Vector3.new(math.cos(runtime.ChaosAngle), 0, math.sin(runtime.ChaosAngle))
+            runtime.ChaosOffset = flatDir * distance + Vector3.yAxis * lift
+            -- Синхронизируем 3D-направление: выключение Avoid Players продолжит отсюда
+            runtime.ChaosDir = runtime.ChaosOffset.Unit
+        else
+            -- Без Avoid Players (или рядом никого): направление по всей сфере —
+            -- скачок на hop вокруг случайной перпендикулярной оси + кружение
+            runtime.ChaosSweep = 0
+            local dir = runtime.ChaosDir
+            if runtime.ChaosJump then
+                dir = CFrame.fromAxisAngle(perpendicular(dir), runtime.ChaosJump):VectorToWorldSpace(dir)
+                runtime.ChaosOrbitAxis = perpendicular(dir)
+            end
+            dir = CFrame.fromAxisAngle(runtime.ChaosOrbitAxis, (runtime.ChaosOrbit or 0) * dt):VectorToWorldSpace(dir)
+            runtime.ChaosDir = dir.Unit
+            runtime.ChaosOffset = runtime.ChaosDir * distance
+            -- Синхронизируем горизонтальный угол и высоту для Avoid Players
+            local flat = Vector3.new(dir.X, 0, dir.Z)
+            if flat.Magnitude > 1e-3 then runtime.ChaosAngle = math.atan2(flat.Z, flat.X) end
+            runtime.ChaosLift = runtime.ChaosOffset.Y
+        end
+        runtime.ChaosJump = nil
+        -- Плавная часть пути — по ней считается скорость в пакете
+        local direction = runtime.ChaosOffset.Magnitude > 1e-3 and runtime.ChaosOffset.Unit or Vector3.xAxis
+        -- Рандом поверх: каждый кадр новая точка в облаке ChaosScatter·Radius
+        -- (поперёк — во все стороны, включая вверх/вниз; к нам — не ближе
+        -- ChaosScatterIn) и выбросы наружу. Скорость их не учитывает: только позиция
+        local sideA = direction:Cross(Vector3.yAxis)
+        sideA = sideA.Magnitude > 1e-3 and sideA.Unit or Vector3.xAxis
+        local sideB = direction:Cross(sideA).Unit
+        local scatter = radius * cfg.ChaosScatter
+        local extra = direction * (math.random() * 2 - 1) * scatter
+        if extra:Dot(direction) < -radius * cfg.ChaosScatterIn then
+            extra = direction * -radius * cfg.ChaosScatterIn
+        end
+        extra += sideA * (math.random() * 2 - 1) * scatter
+        extra += sideB * (math.random() * 2 - 1) * scatter
+        if now < (runtime.ChaosSpikeUntil or 0) then
+            extra += direction * (runtime.ChaosSpike or 0)
+        end
+        -- Avoid Players: тряска не должна подводить образ к игроку ближе, чем мы
+        -- сами (замер: без проверки 7.7% кадров). Такую тряску режем до высоты и
+        -- выброса наружу — по горизонтали остаётся точка пути, выбранная от угроз
+        if away and not chaosClear(runtime.ChaosOffset + extra) then
+            extra = Vector3.yAxis * extra.Y
+            if now < (runtime.ChaosSpikeUntil or 0) and chaosClear(runtime.ChaosOffset + direction * (runtime.ChaosSpike or 0)) then
+                extra += direction * (runtime.ChaosSpike or 0)
+            end
+        end
+        return runtime.ChaosOffset + extra
     end
 
     -- Поворот, который увидят другие: Spin крутит yaw, Pitch наклоняет корпус
@@ -9538,6 +10635,8 @@ do
     -- выключаем — LocalTransparencyModifier частицы и лучи не прячет, была бы вторая аура
     runtime.AvatarMap, runtime.AvatarHidden, runtime.AvatarEffects = {}, {}, {}
     runtime.AvatarFlat, runtime.AvatarJoints = {}, {}
+    runtime.AvatarSurfaces = {} -- пары декалей, включая отдельный хрома-слой
+    runtime.AvatarTool = {}   -- части тулов: в первом лице видны, как у оригинала
     runtime.AvatarCount, runtime.AvatarAuraCount, runtime.AvatarCheckAt = 0, 0, 0
     runtime.AvatarRebuildAt = nil
 
@@ -9596,9 +10695,25 @@ do
         runtime.AvatarFx[real] = entry
     end
 
+    -- Настоящим частям возвращаем то, что поставил бы им оригинал, а не 0: Roblox
+    -- пишет LTM тела только при смене значения, и в первом лице после выключения
+    -- копии тело оставалось бы видимым. Тело — значение первого лица, тул — всегда 0,
+    -- дисплеи оружия — как CharacterClient игры (только 0 или 1)
     local function unhideReal()
+        local fade = State.Runtime.FirstPersonFade()
+        local character = LocalPlayer.Character
         for part in pairs(runtime.AvatarHidden) do
-            if part.Parent then pcall(function() part.LocalTransparencyModifier = 0 end) end
+            if part.Parent then
+                local value = 0
+                if not part:FindFirstAncestorOfClass("Tool") then
+                    if character and part:IsDescendantOf(character) then
+                        value = fade
+                    else
+                        value = fade >= 1 and 1 or 0
+                    end
+                end
+                pcall(function() part.LocalTransparencyModifier = value end)
+            end
         end
         table.clear(runtime.AvatarHidden)
         for effect in pairs(runtime.AvatarEffects) do
@@ -9634,9 +10749,12 @@ do
         if runtime.AvatarModel then pcall(function() runtime.AvatarModel:Destroy() end) end
         runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = nil, nil, 0
         runtime.AvatarRoot = nil
+        runtime.AvatarAppearance = nil
         table.clear(runtime.AvatarMap)
         table.clear(runtime.AvatarFlat)
         table.clear(runtime.AvatarJoints)
+        table.clear(runtime.AvatarTool)
+        table.clear(runtime.AvatarSurfaces)
     end
 
     -- Все части, включая HumanoidRootPart: он невидим, но на нём сидят Magic Circle,
@@ -9659,16 +10777,42 @@ do
         return sources
     end
 
-    -- Меш/текстура дисплеев: скинченджер меняет их на месте — копию надо пересобрать
-    local function displaySignature(character, sources)
-        local parts = {}
+    -- При подборе оружия игра заменяет дисплей или его декали, сохраняя число
+    -- частей и имена. Снимок хранит сами экземпляры: старая пара слоёв больше
+    -- не должна оставаться на копии. Цвет исключён: хрома меняет его каждый кадр.
+    local function avatarAppearance(sources)
+        local snapshot = {}
         for _, part in ipairs(sources) do
-            if not part:IsDescendantOf(character) then
-                local mesh = part:FindFirstChildOfClass("SpecialMesh")
-                table.insert(parts, (mesh and mesh.MeshId .. mesh.TextureId) or (part:IsA("MeshPart") and part.MeshId .. part.TextureID) or part.Name)
+            local values = {}
+            values[part] = part.Name .. "|" .. (part:IsA("MeshPart") and part.MeshId .. "|" .. part.TextureID or "")
+            for _, child in ipairs(part:GetChildren()) do
+                if child:IsA("Decal") then
+                    values[child] = child.Name .. "|" .. tostring(child.Face) .. "|" .. child.Texture
+                elseif child:IsA("SpecialMesh") then
+                    values[child] = child.MeshId .. "|" .. child.TextureId .. "|" .. tostring(child.Scale) .. "|" .. tostring(child.Offset)
+                end
+            end
+            snapshot[part] = values
+        end
+        return snapshot
+    end
+
+    local function appearanceChanged(current, previous)
+        if not previous then return true end
+        for part, values in pairs(current) do
+            local old = previous[part]
+            if not old then return true end
+            for object, value in pairs(values) do
+                if old[object] ~= value then return true end
+            end
+            for object in pairs(old) do
+                if values[object] == nil then return true end
             end
         end
-        return table.concat(parts, "|")
+        for part in pairs(previous) do
+            if not current[part] then return true end
+        end
+        return false
     end
 
     -- Группа коллизий, которая не сталкивается с персонажем (в MM2 — PlayerNoCollision).
@@ -9868,8 +11012,29 @@ do
                 end
             end
         end
+        for src, copy in pairs(runtime.AvatarMap) do
+            local isTool = src:FindFirstAncestorOfClass("Tool") ~= nil
+            if isTool then runtime.AvatarTool[src] = true end
+            -- Сопоставляем слои один раз при сборке, без поиска по дереву каждый кадр.
+            -- Имя не уникально: учитываем грань, текстуру и уже занятые копии.
+            local used = {}
+            local children = copy:GetChildren()
+            for _, real in ipairs(src:GetChildren()) do
+                if real:IsA("Decal") then
+                    for _, surface in ipairs(children) do
+                        if not used[surface] and surface.ClassName == real.ClassName
+                            and surface.Name == real.Name and surface.Face == real.Face
+                            and surface.Texture == real.Texture then
+                            used[surface] = true
+                            table.insert(runtime.AvatarSurfaces, {Real = real, Copy = surface, Tool = isTool})
+                            break
+                        end
+                    end
+                end
+            end
+        end
         runtime.AvatarModel, runtime.AvatarChar, runtime.AvatarCount = model, character, #sources
-        runtime.AvatarDisplays = displaySignature(character, sources)
+        runtime.AvatarAppearance = avatarAppearance(sources)
         runtime.AvatarFxCount = effectCount(sources)
         setSpinFlag(true)
         -- Клонировали с включёнными эффектами (unhideReal до клонирования их вернул),
@@ -9885,16 +11050,11 @@ do
             and State.Settings.FakePositionMode == "Spin"
             -- Heartbeat Spin в последних кадрах работал (не пауза из-за флинга/посадки)
             and os.clock() - runtime.LastSpinAt <= 0.1
-        -- Камера вплотную к голове: копия плавно гаснет, как Roblox гасит своё тело
-        -- (иначе голова копии закрывала обзор); в первом лице копии нет вовсе
-        local camera = Workspace.CurrentCamera
-        local head = character and character:FindFirstChild("Head")
-        local fade = 0
-        if active and camera and head then
-            local distance = (camera.CFrame.Position - head.Position).Magnitude
-            fade = math.clamp(1 - (distance - 0.5) / 2.5, 0, 1)
-            if fade >= 0.999 then active = false end
-        end
+        -- Камера вплотную: копия гаснет ровно как Roblox гасит своё тело (тем же
+        -- значением первого лица); в полном первом лице копии нет вовсе — настоящий
+        -- тул в руке остаётся видимым, тело прячет сам Roblox
+        local fade = State.Runtime.FirstPersonFade()
+        if active and fade >= 1 then active = false end
         if not active then
             if runtime.AvatarModel then destroyLocalSpin() end
             return
@@ -9911,7 +11071,7 @@ do
             -- Сменился набор частей или аур (включили/выключили ауру) — пересобираем
             local sources = avatarSources(character)
             if #sources ~= runtime.AvatarCount or #auraObjects(character) ~= runtime.AvatarAuraCount
-                or displaySignature(character, sources) ~= runtime.AvatarDisplays
+                or appearanceChanged(avatarAppearance(sources), runtime.AvatarAppearance)
                 or effectCount(sources) ~= runtime.AvatarFxCount then
                 buildLocalSpin(character, sources)
             end
@@ -9932,11 +11092,28 @@ do
         for src, copy in pairs(runtime.AvatarFlat) do
             if src.Parent then copy.CFrame = shown * (inverse * src.CFrame) end
         end
+        -- Хрома часто находится в Decal, а не в Color самой части.
+        -- Скрываем исходный слой и переносим его анимацию на вращающуюся копию.
+        for _, surface in ipairs(runtime.AvatarSurfaces) do
+            local real, copy = surface.Real, surface.Copy
+            if copy.Parent then
+                if real.Parent then
+                    copy.Color3 = real.Color3
+                    copy.Texture = real.Texture
+                    copy.Transparency = real.Transparency
+                    copy.LocalTransparencyModifier = surface.Tool and 0 or fade
+                    runtime.AvatarHidden[real] = true
+                    real.LocalTransparencyModifier = 1
+                else
+                    copy.Transparency = 1
+                end
+            end
+        end
         for src, copy in pairs(runtime.AvatarMap) do
             if src.Parent then
                 copy.Transparency = src.Transparency
                 copy.Color = src.Color   -- хрома скинов перекрашивает части каждый кадр
-                copy.LocalTransparencyModifier = fade
+                copy.LocalTransparencyModifier = runtime.AvatarTool[src] and 0 or fade
                 runtime.AvatarHidden[src] = true
                 src.LocalTransparencyModifier = 1
             else
@@ -10037,7 +11214,14 @@ do
     local function disableOnError(err)
         State.Settings.FakeLagEnabled = false
         State.Runtime.SetFakePosition(false)
-        if State.Runtime.FakePositionToggle then State.Runtime.FakePositionToggle:Set(false, false) end
+        -- Hold/Always включили бы Desync обратно на следующем кадре и ошибка
+        -- повторялась бы по кругу — сбрасываем в Toggle (выключен)
+        State.Settings.FakePositionToggleOn = false
+        if State.Settings.FakePositionBindMode ~= "Toggle" then
+            State.Settings.FakePositionBindMode = "Toggle"
+            local row = State.Runtime.FakePositionBindRow
+            if row and row.Set then pcall(row.Set, row, "Toggle", false) end
+        end
         if State.Runtime.FakeLagToggle then State.Runtime.FakeLagToggle:Set(false, false) end
         warn("[Fake Position] " .. tostring(err))
         ShowNotification("Fake Position stopped: " .. tostring(err), CONFIG.Colors.Red)
@@ -10124,8 +11308,11 @@ do
                 -- Spin, Chaos и наклон Pitch должны быть видны и на месте;
                 -- Jitter намеренно трясётся лишь в движении — так легитнее.
                 local mode = desyncOn and State.Settings.FakePositionMode or nil
-                -- Chaos: раз в RefreshInterval на RefreshBurst идём веткой Jitter — это
-                -- возвращает наблюдателям экстраполяцию (см. CONFIG.Desync)
+                -- Chaos: раз в RefreshInterval на RefreshBurst шлём тряску в духе Jitter —
+                -- это возвращает наблюдателям экстраполяцию (см. CONFIG.Desync). Раньше
+                -- всплеск уходил в саму ветку Jitter: тряска вокруг реала, а без толчка
+                -- физики стоящего персонажа не отправляло — образ замирал на теле.
+                -- Теперь тряска идёт вокруг точки Chaos, толчок не выключается
                 local burst = false
                 if mode == "Chaos" then
                     local clock = os.clock()
@@ -10133,7 +11320,6 @@ do
                         runtime.BurstAt = clock
                     end
                     burst = clock - runtime.BurstAt < CONFIG.Desync.RefreshBurst
-                    if burst then mode = "Jitter" end
                 end
                 local nudging = mode == "Spin" or mode == "Chaos"
                     or (desyncOn and (CONFIG.Desync.Pitches[State.Settings.FakePositionPitch] or 0) ~= 0)
@@ -10144,6 +11330,15 @@ do
                     resetFakeLag()
                     local estimate = estimateReplicatedFrame(root, root.CFrame, root.CFrame, true)
                     if State.Settings.PingChamsEnabled then pcall(PingChams.pushSample, tick(), character, estimate, true) end
+                    return
+                end
+                -- Невидимость сама уводит корень под карту на Heartbeat: две подмены CFrame
+                -- с откатом в RenderStep First без гарантированного порядка оставляли
+                -- одну из них на месте. Наблюдатели нас всё равно не видят — подмену не
+                -- пишем, только крутим угол Spin для локальной копии
+                if State.Settings.IsInvisible then
+                    resetFakeLag()
+                    if mode == "Spin" then sentRotation(root.CFrame, dt) end
                     return
                 end
                 local now = os.clock()
@@ -10158,11 +11353,30 @@ do
                     end
                     smoothTowardTargets(dt)
                 end
-                -- Chaos пишет только скорости (запись CFrame гасит экстраполяцию),
-                -- поэтому Fake Lag на это время не держит позицию
+                -- Chaos: скорости кляксы + сдвиг позиции под случайным углом. Fake Lag на
+                -- это время не держит позицию
                 if mode == "Chaos" then
                     resetFakeLag()
-                    applyChaos(root, now)
+                    local offset = chaosOffset(root, character, now, dt)
+                    if burst then
+                        -- Всплеск: настоящие скорости и ±RefreshAmplitude поперёк
+                        -- направления на точку — центр тряски остаётся вне тела
+                        runtime.Root = root
+                        runtime.Flip = not runtime.Flip
+                        if offset.Magnitude > 1e-3 then
+                            local across = offset.Unit:Cross(Vector3.yAxis)
+                            offset += across * (runtime.Flip and CONFIG.Desync.RefreshAmplitude or -CONFIG.Desync.RefreshAmplitude)
+                        end
+                        runtime.ChaosPrevOffset = nil
+                    else
+                        -- Скорость — по плавной части пути, без тряски и выбросов
+                        applyChaos(root, now, dt, runtime.ChaosOffset or offset)
+                    end
+                    runtime.Original = root.CFrame
+                    runtime.Sent = CFrame.new(runtime.Original.Position + offset)
+                        * chaosTumble(dt) * runtime.Original.Rotation
+                    State.Runtime.FakePositionOffset = offset
+                    root.CFrame = runtime.Sent
                     if State.Settings.PingChamsEnabled then
                         pcall(PingChams.pushSample, tick(), character, chaosEstimate(root), true)
                     end
@@ -10358,11 +11572,34 @@ end
 
 local INVIS_DEPTH = 200000  -- юнитов вниз, чтобы скрыть от сервера
 
+-- Возврат корня из-под карты. Раньше шёл через RenderStepped:Wait() — уже после
+-- шагов на RenderStep (bhop на Camera+1, локальный Spin на Camera+2): они видели
+-- корень на 200000 studs ниже — bhop не находил пол, копия Spin улетала вниз.
+-- Теперь возврат первым на RenderStep и страховкой перед физикой
+Core.Invisibility.BindName = "MM2_InvisibilityRestore"
+function Core.Invisibility.Restore()
+    local frame = Core.Invisibility.Frame
+    if not frame then return end
+    Core.Invisibility.Frame = nil
+    if frame.Root.Parent then frame.Root.CFrame = frame.CFrame end
+    if frame.Humanoid.Parent then frame.Humanoid.CameraOffset = frame.Offset end
+end
+
 ToggleInvisibility = function()
     State.Settings.IsInvisible = not State.Settings.IsInvisible
 
     if State.Settings.IsInvisible then
         if InvisibilityConnection then InvisibilityConnection:Disconnect() end
+        if Core.Invisibility.PreSim then Core.Invisibility.PreSim:Disconnect() end
+        pcall(function() RunService:UnbindFromRenderStep(Core.Invisibility.BindName) end)
+        pcall(function()
+            RunService:BindToRenderStep(Core.Invisibility.BindName, Enum.RenderPriority.First.Value, function()
+                pcall(Core.Invisibility.Restore)
+            end)
+        end)
+        Core.Invisibility.PreSim = Core.Connect(RunService.PreSimulation, function()
+            pcall(Core.Invisibility.Restore)
+        end)
 
         InvisibilityConnection = Core.Connect(RunService.Heartbeat, function()
             if not State.Settings.IsInvisible then return end
@@ -10386,6 +11623,9 @@ ToggleInvisibility = function()
                 end)
             end
 
+            -- Heartbeat может сработать дважды без отрисовки: сначала вернуть прошлый сдвиг
+            Core.Invisibility.Restore()
+
             local OriginalCFrame       = RootPart.CFrame
             local OriginalCameraOffset = Humanoid.CameraOffset
             local NewCFrame            = OriginalCFrame * CFrame.new(0, -INVIS_DEPTH, 0)
@@ -10393,12 +11633,6 @@ ToggleInvisibility = function()
             Core.Invisibility.Frame = {Root = RootPart, Humanoid = Humanoid, CFrame = OriginalCFrame, Offset = OriginalCameraOffset}
             RootPart.CFrame     = NewCFrame
             Humanoid.CameraOffset = NewCFrame:ToObjectSpace(CFrame.new(OriginalCFrame.Position)).Position
-
-            RunService.RenderStepped:Wait()
-
-            RootPart.CFrame     = OriginalCFrame
-            Humanoid.CameraOffset = OriginalCameraOffset
-            Core.Invisibility.Frame = nil
         end)
 
         if State.Settings.NotificationsEnabled then
@@ -10410,13 +11644,11 @@ ToggleInvisibility = function()
             InvisibilityConnection = nil
         end
 
+        if Core.Invisibility.PreSim then Core.Invisibility.PreSim:Disconnect(); Core.Invisibility.PreSim = nil end
+        pcall(function() RunService:UnbindFromRenderStep(Core.Invisibility.BindName) end)
         Core.Invisibility.Character = nil
         if Core.Invisibility.Added then Core.Invisibility.Added:Disconnect(); Core.Invisibility.Added = nil end
-        local frame = Core.Invisibility.Frame
-        if frame then
-            pcall(function() frame.Root.CFrame = frame.CFrame; frame.Humanoid.CameraOffset = frame.Offset end)
-            Core.Invisibility.Frame = nil
-        end
+        pcall(Core.Invisibility.Restore)
         for part, value in pairs(Core.Invisibility.Transparency) do pcall(function() part.Transparency = value end) end
         table.clear(Core.Invisibility.Transparency)
         local Character = LocalPlayer.Character
@@ -10475,26 +11707,18 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 
 -- SetupAntiAFK() - VirtualUser:CaptureController()
+-- Idled приходит через ~2 мин бездействия, кик — через 20: виртуальный клик на
+-- каждом Idled сбрасывает таймер бездействия, и до кика дело не доходит.
+-- Раньше вдобавок отключали все соединения Idled через getconnections + Disable():
+-- Disable() правит память соединения executor'ом и мог ронять клиент (см. Anti-Trap),
+-- а заодно гасил и наш собственный обработчик выше
 local function SetupAntiAFK()
     local VirtualUser = game:GetService("VirtualUser")
     Core.Connect(LocalPlayer.Idled, function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end)
-
-    Core.Tasks.spawn(function()
-        while Core.Alive do
-            pcall(function()
-                if getconnections then
-                    for _, connection in next, getconnections(LocalPlayer.Idled) do
-                        if connection.Disable then
-                            connection:Disable()
-                        end
-                    end
-                end
-            end)
-            task.wait(60)
-        end
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end)
     end)
 end
 
@@ -11405,6 +12629,10 @@ Core.StopFeatures = function()
         {"Fling", State.Runtime.FlingCleanup},
         {"Fly", function() State.Settings.FlyToggleOn = false; State.Settings.FlyBindMode = "Toggle"; StopFly(true) end},
         {"Speed", function() State.Settings.SpeedEnabled = false; State.Settings.SpeedBindMode = "Toggle" end},
+        {"Desync", function()
+            State.Settings.FakePositionToggleOn = false; State.Settings.FakePositionBindMode = "Toggle"
+            State.Runtime.SetFakePosition(false)
+        end},
         {"AspectRatio", function() Core.Movement.SetAspectRatio(false, true) end},
         {"ViewClip", function() if State.Settings.ViewClipEnabled then Core.Movement.DisableViewClip() end end},
         {"NoClip", DisableNoClip}, {"AntiFling", DisableAntiFling},
@@ -11415,6 +12643,8 @@ Core.StopFeatures = function()
         {"CoinMuter", StopCoinMuter}, {"FriendViewer", StopFriendViewer},
         {"CatalogPortrait", function() State.Runtime.SetCatalogPortrait(false) end},
         {"AntiTrap", function() State.Runtime.SetAntiTrap(false) end},
+        {"SilentKnife", function() State.Runtime.SetSilentKnife(false) end},
+        {"HoldThrow", function() State.Runtime.SetHoldThrow(false) end},
         {"BulletTracers", function() ToggleBulletTracers(false) end},
         {"CoinTracer", RemoveCoinTracer},
         {"Headless", function() State.Runtime.ApplyFakeHeadless(false) end},
@@ -11521,12 +12751,14 @@ local GUI = GUIFactory({
             end
         end,
         FakePosition = function(on) Fling.ForgetFakePositionPause() State.Runtime.SetFakePosition(on) end,
+        FakePositionBindMode = function(v) State.Runtime.SetBindMode("Desync", v) end,
         FakePositionMode = function(v)
             if table.find(CONFIG.Desync.Modes, v) then State.Settings.FakePositionMode = v end
         end,
         FakePositionRadius = function(v) State.Settings.FakePositionRadius = math.clamp(tonumber(v) or 3, CONFIG.Desync.Radius[1], CONFIG.Desync.Radius[2]) end,
         FakePositionPitch = function(v) if CONFIG.Desync.Pitches[v] then State.Settings.FakePositionPitch = v end end,
         FakeSpinLocal = function(on) State.Settings.FakeSpinLocal = on end,
+        FakeChaosAvoid = function(on) State.Settings.FakeChaosAvoid = on end,
         FakeSpinSpeed = function(v) State.Settings.FakeSpinSpeed = math.clamp(tonumber(v) or 720, CONFIG.Desync.SpinSpeed[1], CONFIG.Desync.SpinSpeed[2]) end,
         FakeLag = function(on) State.Runtime.SetFakeLag(on) end,
         FakeLagMinDelay = function(v) State.Settings.FakeLagMinDelay = math.clamp(tonumber(v) or 80, CONFIG.FakeLag.MinDelay[1], CONFIG.FakeLag.MinDelay[2]) end,
@@ -11540,6 +12772,8 @@ local GUI = GUIFactory({
         VelocitySpoofStrength = function(v) State.Settings.VelocitySpoofStrength = math.clamp(tonumber(v) or 150, 20, 500) end,
         VelocitySpoofSpeed = function(v) State.Settings.VelocitySpoofSpeed = math.clamp(tonumber(v) or CONFIG.DefaultWalkSpeed, 0, 20) end,
         SpawnAtPlayer = function(on) State.Settings.SpawnAtPlayer = on end,
+        SilentKnife = function(on) State.Runtime.SetSilentKnife(on) end,
+        HoldThrow = function(on) State.Runtime.SetHoldThrow(on) end,
         AutoFire = function(on) State.Runtime.SheriffAim.SetAutoFire(on) end,
         Resolver = function(on) State.Runtime.SheriffAim.SetResolver(on) end,
         KillAuraRange = function(v) State.Settings.KillAuraRange = v end,
@@ -11760,6 +12994,9 @@ local GUI = GUIFactory({
         if State.Runtime.MovementModule and State.Runtime.MovementModule.Handlers[key] then
             return State.Runtime.MovementModule.Handlers[key]
         end
+        if State.Runtime.HUDModule and State.Runtime.HUDModule.Handlers[key] then
+            return State.Runtime.HUDModule.Handlers[key]
+        end
         return State.Runtime.OptimizationModule and State.Runtime.OptimizationModule.Handlers[key]
     end})
 })
@@ -11824,7 +13061,7 @@ do
             -- Movement уступает корень флингу (Fling — локальная таблица MainScript)
             IsMovementBusy = function() return Fling.SessionActive == true end,
         }
-        for _,entry in ipairs({{"Visuals", "VisualsModule"}, {"Optimization", "OptimizationModule"}, {"Movement", "MovementModule"}}) do
+        for _,entry in ipairs({{"Visuals", "VisualsModule"}, {"Optimization", "OptimizationModule"}, {"Movement", "MovementModule"}, {"HUD", "HUDModule"}}) do
             local ok, result = pcall(function()
                 -- В бандле модуль уже внутри — берём фабрику из ядра; вне бандла тянем с CDN
                 local factory = Kernel and Kernel.Require(entry[1])
@@ -12320,6 +13557,14 @@ end)()
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
 ----------------------------------------------------------------
+GUI.ConfigureTabGroups({
+    {"Main", "Bhop"},
+    {"Combat", "Aim"},
+    {"Visuals", "World", "Auras"},
+    {"Fun", "Troll"},
+    {"Skins", "Effects", "Cases"},
+})
+
 do
     local MainTab = GUI.CreateTab("Main")
 
@@ -12343,19 +13588,9 @@ do
         MainTab:CreateSection("CAMERA")
         MainTab:CreateInputField("Field of View", "Set custom camera FOV", State.Settings.CameraFOV, "ApplyFOV")
         MainTab:CreateToggle("Aspect Ratio", "Stretched screen, like stretched res", "AspectRatio", false)
-        MainTab:CreateSlider("Aspect Ratio Value", "1 = normal, lower = stretched", CONFIG.AspectRatio.Range[1], CONFIG.AspectRatio.Range[2], State.Settings.AspectRatioValue, "AspectRatioValue", CONFIG.AspectRatio.Step)
+        MainTab:CreateSlider("Aspect Ratio Value", "1 normal, lower stretches", CONFIG.AspectRatio.Range[1], CONFIG.AspectRatio.Range[2], State.Settings.AspectRatioValue, "AspectRatioValue", CONFIG.AspectRatio.Step)
         MainTab:CreateToggle("ViewClip", "Camera clips through walls", "ViewClip",false)
         MainTab:CreateKeybindButton("Toggle Invisible", "invisibility", "Invisibility")
-
-        MainTab:CreateSection("Speed Glitch")
-        MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
-
-        -- Bhop / автострейф: секции строит модуль Libraryes/Movement.lua
-        -- (физику Source — ниже, под FLY SETTINGS; старая версия модуля строит всё сразу)
-        local movement = State.Runtime.MovementModule
-        if movement then
-            if movement.BuildMainSection then movement.BuildMainSection(MainTab) else movement.BuildSections(MainTab) end
-        end
 
         MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key + LMB)", "clicktp", "ClickTP")
@@ -12365,10 +13600,14 @@ do
         State.Runtime.FlyBindRow = bindModeRow("Fly", "Space/E up, Q down", "FlyBindMode", State.Settings.FlyBindMode, "Fly")
         MainTab:CreateDropdown("Fly Mode", "Select fly type", CONFIG.Fly.Modes, "Fly", "FlyMode")
         MainTab:CreateSlider("Fly Speed", "Adjust flying speed", 10, 80, State.Settings.FlySpeed, "FlySpeed", 5)
-        ----------------------------------------------------------------------------
+        -- Отдельная карточка действий: респавн, сразу под ним инструмент глитча.
+        MainTab:CreateSection(nil, "right")
         MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
+        MainTab:CreateButton("", "Speed Glitch Tool", CONFIG.Colors.Accent, "SpeedGlitchTool")
 
-        if movement and movement.BuildPhysicsSection then movement.BuildPhysicsSection(MainTab) end
+        local BhopTab = GUI.CreateTab("Bhop")
+        local movement = State.Runtime.MovementModule
+        if movement then movement.BuildSections(BhopTab) end
 end
 
 do
@@ -12387,7 +13626,7 @@ do
         AimTab:CreateSection("TARGETING VALUES")
         AimTab:CreateSlider("Distance", "Maximum target distance", 100, 5000, State.Settings.AimbotConfig.Distance, "AimbotDistance", 50)
         AimTab:CreateSlider("FOV", "Field of view radius", 50, 500, State.Settings.AimbotConfig.Fov, "AimbotFov", 10)
-        AimTab:CreateSlider("FOV Transparency", "Circle opacity: 0 = invisible, 1 = solid", 0, 1, State.Settings.AimbotConfig.FovTransparency, "AimbotFovTransparency", 0.05)
+        AimTab:CreateSlider("FOV Transparency", "FOV circle opacity", 0, 1, State.Settings.AimbotConfig.FovTransparency, "AimbotFovTransparency", 0.05)
         AimTab:CreateSlider("Smoothness", "Aim smoothness", 1, 10, State.Settings.AimbotConfig.Smoothness, "AimbotSmoothness", 0.1)
 
         AimTab:CreateSection("ADVANCED OPTIONS", "right")
@@ -12398,7 +13637,7 @@ do
         AimTab:CreateDropdown("Mouse Button", "Activation button", {"LMB", "RMB"}, State.Settings.AimbotConfig.MouseButton, "AimbotMouseButton")
 
         AimTab:CreateSection("PREDICTION & OFFSET", "right")
-        AimTab:CreateSlider("Prediction", "Movement prediction strength", 0, 30, State.Settings.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
+        AimTab:CreateSlider("Prediction", "Movement lead strength", 0, 30, State.Settings.AimbotConfig.PredictionValue * 100, "AimbotPredictionValue", 1)
         AimTab:CreateSlider("Y Offset", "Vertical aiming offset", -200, 200, State.Settings.AimbotConfig.VerticalOffset * 100, "AimbotVerticalOffset", 5)
 end
 
@@ -12408,6 +13647,8 @@ do
         CombatTab:CreateSection("MURDERER TOOLS")
         CombatTab:CreateKeybindButton("Fast throw", "knifeThrow", "knifeThrow")
         CombatTab:CreateToggle("Spawn Knife Near Player", "Spawns knife next to closest target", "SpawnAtPlayer")
+        CombatTab:CreateToggle("Silent Knife", "Throws lead the player nearest cursor", "SilentKnife", false)
+        CombatTab:CreateToggle("Hold Throw", "Hold E to keep it ready, release to throw", "HoldThrow", false)
 
         CombatTab:CreateSection("KILL AURA")
         CombatTab:CreateKeybindButton("Kill Aura", "killaura", "KillAura")
@@ -12422,43 +13663,53 @@ do
         -- Режим выстрела — отдельным биндом: Shoot Murderer = Silent, Wallbang = Magic.
         -- 4-й аргумент (подпись) старый закэшированный GUI.lua просто игнорирует
         CombatTab:CreateSection("SHERIFF TOOLS", "right")
-        CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer", "Silent shot from your gun with movement lead")
+        CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer", "Silent shot with movement lead")
         CombatTab:CreateToggle("Auto Fire", "Shoots the murderer once the line to him is clear", "AutoFire", false)
         CombatTab:CreateToggle("Resolver", "Use only versus velocity spoofer", "Resolver", false)
-        CombatTab:CreateKeybindButton("Wallbang", "wallbang", "Wallbang", "Shot through walls from next to the murderer")
+        CombatTab:CreateKeybindButton("Wallbang", "wallbang", "Wallbang", "Wallbang shot from beside murderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun", "Grabs the dropped gun from anywhere")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", false)
 
         CombatTab:CreateSection("PROTECTION", "right")
-        CombatTab:CreateToggle("Anti Trap", "Murderer traps don't slow you, murderer isn't notified", "AntiTrap", false)
+        CombatTab:CreateToggle("Anti Trap", "Traps don't slow you or alert murderer", "AntiTrap", false)
 end
 
 do
     local AntiAimTab = GUI.CreateTab("Anti-Aim")
 
         AntiAimTab:CreateSection("DESYNC")
-        State.Runtime.FakePositionToggle = AntiAimTab:CreateToggle("Desync", "Send a fake position / rotation to other players", "FakePosition", false)
-        AntiAimTab:CreateDropdown("Desync Mode", "Jitter: side shake; Spin: rotation; Chaos: tumbling blob", CONFIG.Desync.Modes, State.Settings.FakePositionMode, "FakePositionMode")
-        AntiAimTab:CreateDropdown("Pitch", "Body tilt seen by others (not in Chaos)", CONFIG.Desync.PitchOrder, State.Settings.FakePositionPitch, "FakePositionPitch")
-        AntiAimTab:CreateSlider("Desync Radius", "Jitter offset in studs; Chaos strength (10 = 5000 studs/s)", CONFIG.Desync.Radius[1], CONFIG.Desync.Radius[2], State.Settings.FakePositionRadius, "FakePositionRadius", 0.1)
-        AntiAimTab:CreateSlider("Spin Speed", "Spin mode: degrees per second", CONFIG.Desync.SpinSpeed[1], CONFIG.Desync.SpinSpeed[2], State.Settings.FakeSpinSpeed, "FakeSpinSpeed", 10)
-        AntiAimTab:CreateToggle("Spin Local Too", "Spin mode: visually spin on your screen as others see you", "FakeSpinLocal", State.Settings.FakeSpinLocal)
+        -- Desync — строка «режим бинда + бинд», как у Fly (Toggle / Hold / Always);
+        -- старый закэшированный GUI.lua её не знает — тогда режим и бинд отдельно
+        if AntiAimTab.CreateBindModeRow then
+            State.Runtime.FakePositionBindRow = AntiAimTab:CreateBindModeRow("Desync", "Fake position / rotation for others",
+                "FakePositionBindMode", CONFIG.BindModes, State.Settings.FakePositionBindMode, "Desync")
+        else
+            State.Runtime.FakePositionBindRow = AntiAimTab:CreateDropdown("Desync", "Fake position / rotation for others",
+                CONFIG.BindModes, State.Settings.FakePositionBindMode, "FakePositionBindMode")
+            AntiAimTab:CreateKeybindButton("Desync Key", "Desync", "Desync")
+        end
+        AntiAimTab:CreateDropdown("Desync Mode", "Shake, spin or tumble for others", CONFIG.Desync.Modes, State.Settings.FakePositionMode, "FakePositionMode")
+        AntiAimTab:CreateDropdown("Pitch", "Body tilt others see (not Chaos)", CONFIG.Desync.PitchOrder, State.Settings.FakePositionPitch, "FakePositionPitch")
+        AntiAimTab:CreateSlider("Desync Radius", "Offset or Chaos strength", CONFIG.Desync.Radius[1], CONFIG.Desync.Radius[2], State.Settings.FakePositionRadius, "FakePositionRadius", 0.1)
+        AntiAimTab:CreateSlider("Spin Speed", "Spin speed, degrees/s", CONFIG.Desync.SpinSpeed[1], CONFIG.Desync.SpinSpeed[2], State.Settings.FakeSpinSpeed, "FakeSpinSpeed", 10)
+        AntiAimTab:CreateToggle("Spin Local Too", "Spin on your screen too, as others see", "FakeSpinLocal", State.Settings.FakeSpinLocal)
+        AntiAimTab:CreateToggle("Avoid Players", "Chaos: keep fake on the side away from players", "FakeChaosAvoid", State.Settings.FakeChaosAvoid)
 
         AntiAimTab:CreateSection("FAKE LAG")
-        State.Runtime.FakeLagToggle = AntiAimTab:CreateToggle("Enable Fake Lag", "Hold your sent position for short bursts (paused in Chaos)", "FakeLag", false)
-        AntiAimTab:CreateSlider("Min Delay", "Shortest hold in milliseconds", CONFIG.FakeLag.MinDelay[1], CONFIG.FakeLag.MinDelay[2], State.Settings.FakeLagMinDelay, "FakeLagMinDelay", 10)
-        AntiAimTab:CreateSlider("Max Delay", "Longest hold in milliseconds", CONFIG.FakeLag.MaxDelay[1], CONFIG.FakeLag.MaxDelay[2], State.Settings.FakeLagMaxDelay, "FakeLagMaxDelay", 10)
-        AntiAimTab:CreateSlider("Randomization", "0: always Max Delay; 10: random between Min and Max", CONFIG.FakeLag.Randomization[1], CONFIG.FakeLag.Randomization[2], State.Settings.FakeLagRandomization, "FakeLagRandomization", 1)
+        State.Runtime.FakeLagToggle = AntiAimTab:CreateToggle("Enable Fake Lag", "Hold your sent position in short bursts", "FakeLag", false)
+        AntiAimTab:CreateSlider("Min Delay", "Shortest hold, ms", CONFIG.FakeLag.MinDelay[1], CONFIG.FakeLag.MinDelay[2], State.Settings.FakeLagMinDelay, "FakeLagMinDelay", 10)
+        AntiAimTab:CreateSlider("Max Delay", "Longest hold, ms", CONFIG.FakeLag.MaxDelay[1], CONFIG.FakeLag.MaxDelay[2], State.Settings.FakeLagMaxDelay, "FakeLagMaxDelay", 10)
+        AntiAimTab:CreateSlider("Randomization", "0 = max delay, 10 = random", CONFIG.FakeLag.Randomization[1], CONFIG.FakeLag.Randomization[2], State.Settings.FakeLagRandomization, "FakeLagRandomization", 1)
 
         AntiAimTab:CreateSection("VELOCITY SPOOFER", "right")
         State.Runtime.VelocitySpoofToggle = AntiAimTab:CreateToggle("Velocity Spoofer", "Report fake velocity to other players", "VelocitySpoof", false)
-        AntiAimTab:CreateDropdown("Spoof Mode", "Anti-Aim: fake upward velocity; Zero: never above normal speed", {"Anti-Aim", "Zero"}, State.Settings.VelocitySpoofMode, "VelocitySpoofMode")
-        AntiAimTab:CreateToggle("Only As Murderer", "On: spoof only while you are murderer (sheriffs miss). Off: always", "VelocitySpoofMurdererOnly", State.Settings.VelocitySpoofMurdererOnly)
-        AntiAimTab:CreateSlider("Anti-Aim Strength", "Fake upward speed in studs/s; higher = more jitter for others", 20, 500, State.Settings.VelocitySpoofStrength, "VelocitySpoofStrength", 10)
-        AntiAimTab:CreateSlider("Zero Max Speed", "Highest speed reported in Zero mode (place default: " .. CONFIG.DefaultWalkSpeed .. ")", 0, 20, State.Settings.VelocitySpoofSpeed, "VelocitySpoofSpeed", 1)
+        AntiAimTab:CreateDropdown("Spoof Mode", "Fake rise, or cap at walk speed", {"Anti-Aim", "Zero"}, State.Settings.VelocitySpoofMode, "VelocitySpoofMode")
+        AntiAimTab:CreateToggle("Only As Murderer", "Spoof only while you are the murderer", "VelocitySpoofMurdererOnly", State.Settings.VelocitySpoofMurdererOnly)
+        AntiAimTab:CreateSlider("Anti-Aim Strength", "Fake rise speed, studs/s", 20, 500, State.Settings.VelocitySpoofStrength, "VelocitySpoofStrength", 10)
+        AntiAimTab:CreateSlider("Zero Max Speed", "Speed cap in Zero mode", 0, 20, State.Settings.VelocitySpoofSpeed, "VelocitySpoofSpeed", 1)
 
         AntiAimTab:CreateSection("DESYNC CHAMS", "right")
-        AntiAimTab:CreateToggle("Ping / Desync Chams", "Show estimated fake position during desync; ping ghost otherwise", "PingChams")
+        AntiAimTab:CreateToggle("Ping / Desync Chams", "Show your fake position or ping ghost", "PingChams")
         AntiAimTab:CreateToggle("Chams Label", "Show text above Ping / Desync Chams", "PingChamsShowLabel", State.Settings.PingChamsShowLabel)
 end
 
@@ -12472,6 +13723,8 @@ do
         VisualsTab:CreateToggle("Show Nicknames", "Display player nicknames", "PlayerNicknamesESP", false)
         VisualsTab:CreateToggle("Dropped Gun", "Highlight dropped gun", "GunESP",false)
         VisualsTab:CreateToggle("Tracers", "Show bullet/knife trajectory", "BulletTracers")
+        local hud = State.Runtime.HUDModule
+        if hud then hud.BuildCrosshairSection(VisualsTab) end
 
         VisualsTab:CreateSection("Misc", "right")
         VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled",false)
@@ -12479,6 +13732,7 @@ do
         VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly")
         VisualsTab:CreateToggle("Friend Viewer", "Show beams between Roblox friends", "FriendViewer", false)
         VisualsTab:CreateToggle("Coin Muter", "Mute coin pickup sound", "CoinMuter", false)
+        if hud then hud.BuildPanelSection(VisualsTab) end
 end
 
 if State.Runtime.VisualsModule then State.Runtime.VisualsModule.BuildTabs() end
@@ -12517,7 +13771,7 @@ do
         FunTab:CreateToggle("Walk Fling", "Fling players by walking into them", "WalkFling", false)
 
         FunTab:CreateSection("FLING SETTINGS", "right")
-        FunTab:CreateDropdown("Fling Method", "Vio: contact, stronger. NaN: precise aim, weaker", Fling.MethodChoices, Fling.MethodLabel(State.Settings.FlingMethod), "FlingMethod")
+        FunTab:CreateDropdown("Fling Method", "Vio: stronger; NaN: more precise", Fling.MethodChoices, Fling.MethodLabel(State.Settings.FlingMethod), "FlingMethod")
         FunTab:CreateSlider("Prediction Range", "Lead time", 0.6, 1.2, State.Settings.SkidLead, "SkidLead", 0.05)
 
         FunTab:CreateSection("FLING PLAYER", "right")
@@ -12564,7 +13818,7 @@ do
         UtilityTab:CreateSection("SERVER MANAGEMENT")
         UtilityTab:CreateButton("", "Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
         UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
-        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Automatically rejoin server if kicked/disconnected","HandleAutoRejoin",false)
+        UtilityTab:CreateToggle("Auto Rejoin on Disconnect","Rejoin automatically if kicked or dropped","HandleAutoRejoin",false)
         UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
         -- Палитра интерфейса (закэшированный CDN старый GUI.lua тем не знает — тогда без пункта)
         if UtilityTab.CreateThemeDropdown then
@@ -12582,8 +13836,10 @@ end
 if Kernel then
     local ok, err = pcall(function()
         local spawner = Kernel.Require("Skinchanger")
-        spawner.Build({GUI = GUI, RegisterConfig = ConfigManager.RegisterExtension})
+        -- Ссылка до Build: модуль уже поставил хук и петли, выгрузка должна их снять,
+        -- даже если построение вкладок упадёт
         State.Runtime.SpawnerModule = spawner
+        spawner.Build({GUI = GUI, RegisterConfig = ConfigManager.RegisterExtension})
     end)
     if not ok then
         warn("[Violite] Skinchanger: " .. tostring(err))
@@ -12609,7 +13865,7 @@ do
             AFKMode = "AFKModeEnabled", AntiFling = "AntiFlingEnabled", WalkFling = "WalkFlingEnabledByUser",
             ExtendedHitbox = "ExtendedHitboxEnabled", InstantPickup = "InstantPickupEnabled", BulletTracers = "BulletTracersEnabled",
             FriendViewer = "FriendViewerEnabled", PingChams = "PingChamsEnabled", FakePosition = "FakePositionEnabled", FakeLag = "FakeLagEnabled",
-            VelocitySpoof = "VelocitySpoofEnabled", AntiTrap = "AntiTrapEnabled",
+            VelocitySpoof = "VelocitySpoofEnabled", AntiTrap = "AntiTrapEnabled", SilentKnife = "SilentKnifeEnabled", HoldThrow = "HoldThrowEnabled",
             AutoFire = "AutoFireEnabled", Resolver = "ResolverEnabled",
             Orbit = "OrbitEnabled", LoopFling = "LoopFlingEnabled", BlockPath = "BlockPathEnabled",
             HandleAutoRejoin = "AutoRejoinEnabled", HandleAutoReconnect = "AutoReconnectEnabled",

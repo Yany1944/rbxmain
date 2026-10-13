@@ -12,13 +12,20 @@ return function(env)
     local Lighting = game:GetService("Lighting")
     local RunService = game:GetService("RunService")
     local Workspace = game:GetService("Workspace")
+    local CollectionService = game:GetService("CollectionService")
+    local TweenService = game:GetService("TweenService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local LocalPlayer = Players.LocalPlayer
     local CONFIG = {
         FPSCap = 9999,
         AntiGlare = {BrightnessScale = 0.2, Ambient = Color3.fromRGB(0, 0, 0)},
         AnimationInterval = 0.2,
-        CoinScript = "CoinVisualizer",
-        CoinCallback = "UpdateCoins",
+        -- Монеты: тег визуала, который крутит игровой CoinVisualizer (UpdateCoins на
+        -- PreSimulation), и его же тайминги угасания/удаления собранной монеты
+        Coins = {Tag = "CoinVisual", FadeTime = 0.266, DeleteDelay = 0.5},
+        -- Труп убитого: сервер кладёт регдолл-модель с этим именем в папку текущей
+        -- карты (Workspace.<Карта>.Raggy: Humanoid, части тела, одежда)
+        DeadBodyName = "Raggy",
         Candidates = "BasePart, Decal, Texture, SpecialMesh, SurfaceAppearance, ParticleEmitter, Trail, Beam, Smoke, Fire, Sparkles, PostEffect, ForceField",
         Options = {
             {Key = "NoRender", Flag = "AFKMode", Label = "No Render", Hint = "Disable 3D rendering; keep the interface"},
@@ -26,6 +33,7 @@ return function(env)
             {Key = "RemoveTextures", Label = "Remove Textures", Hint = "Hide textures and surface appearances"},
             {Key = "RemoveParticles", Label = "Remove Particles / Effects", Hint = "Disable particles, trails and post effects"},
             {Key = "StopAnimations", Label = "Stop Animations", Hint = "Freeze other players and coin rotation"},
+            {Key = "RemoveDeadBodies", Label = "Remove Dead Bodies", Hint = "Hide ragdolls of killed players"},
             {Key = "NoShadows", Label = "No Shadows", Hint = "Disable global and part shadows"},
             {Key = "RemoveReflections", Label = "Remove Reflections", Hint = "Disable part, environment and water reflections"},
             {Key = "FPSUnlocker", Label = "FPS Unlocker", Hint = "Remove the framerate cap (9999)"},
@@ -33,7 +41,8 @@ return function(env)
         },
     }
     local State = {
-        Enabled = {}, Records = {}, Connections = {}, CoinConnections = {},
+        Enabled = {}, Records = {}, Connections = {},
+        FrozenCoins = {}, CoinSignals = {},   -- снятые с тега монеты и подписки заморозки
         AnimationSpeeds = {}, Unloaded = false,
     }
     local Module = {State = State, Handlers = {}}
@@ -120,6 +129,15 @@ return function(env)
         end
     end
 
+    -- Смену Parent внутри DescendantAdded Roblox запрещает («unexpectedly tried to
+    -- set the parent»), а pcall это глушил — новый объект оставался на месте.
+    -- Поэтому Parent меняем отложенно, после события
+    local function forceParentNil(key, object)
+        task.defer(function()
+            if State.Enabled[key] then pcall(forceProperty, key, object, "Parent", nil) end
+        end)
+    end
+
     local function applyObject(key, object)
         pcall(function()
             if key == "RemoveTextures" then
@@ -130,7 +148,7 @@ return function(env)
                 elseif object:IsA("SpecialMesh") then
                     forceProperty(key, object, "TextureId", "")
                 elseif object:IsA("SurfaceAppearance") then
-                    forceProperty(key, object, "Parent", nil)
+                    forceParentNil(key, object)
                 end
                 if object:IsA("BasePart") then forceProperty(key, object, "MaterialVariant", "") end
             elseif key == "RemoveParticles" then
@@ -147,11 +165,19 @@ return function(env)
                 forceProperty(key, object, "Reflectance", 0)
             elseif key == "PlasticMaterials" and object:IsA("BasePart") then
                 forceProperty(key, object, "Material", Enum.Material.SmoothPlastic)
+            elseif key == "RemoveDeadBodies" and object.Name == CONFIG.DeadBodyName and object:IsA("Model") then
+                -- Только у себя: убираем из мира, ссылка и исходный родитель хранятся
+                -- в записи — при выключении трупы текущего раунда вернутся на место
+                forceParentNil(key, object)
             end
         end)
     end
 
     local function scan(key)
+        if key == "RemoveDeadBodies" then
+            for _,object in ipairs(Workspace:QueryDescendants("Model#" .. CONFIG.DeadBodyName)) do applyObject(key, object) end
+            return
+        end
         for _,object in ipairs(Workspace:QueryDescendants(CONFIG.Candidates)) do applyObject(key, object) end
         for _,object in ipairs(Lighting:GetChildren()) do applyObject(key, object) end
     end
@@ -159,14 +185,22 @@ return function(env)
     -- ══════════════════════════════════════════════════════════════════════════
     -- БЛОК 3: АНИМАЦИИ И МОНЕТЫ
     -- ══════════════════════════════════════════════════════════════════════════
+    -- Монетам возвращаем тег — CoinVisualizer снова их крутит; его обработчик
+    -- появления тега заодно пометит на удаление уже собранные за время заморозки
+    local function restoreCoins()
+        for _,signal in ipairs(State.CoinSignals) do disconnect(signal) end
+        table.clear(State.CoinSignals)
+        for coin,connections in pairs(State.FrozenCoins) do
+            for _,connection in ipairs(connections) do disconnect(connection) end
+            if coin.Parent then pcall(function() CollectionService:AddTag(coin, CONFIG.Coins.Tag) end) end
+        end
+        table.clear(State.FrozenCoins)
+    end
+
     local function restoreAnimations()
         disconnect(State.AnimationConnection)
-        disconnect(State.CoinTick)
-        State.AnimationConnection, State.CoinTick = nil, nil
-        for _,record in ipairs(State.CoinConnections) do
-            pcall(function() record.Connection:Enable() end)
-        end
-        table.clear(State.CoinConnections)
+        State.AnimationConnection = nil
+        restoreCoins()
         for track,record in pairs(State.AnimationSpeeds) do
             disconnect(record.Connection)
             pcall(function() track:AdjustSpeed(record.Speed) end)
@@ -198,28 +232,68 @@ return function(env)
         end
     end
 
-    local function pauseCoins()
-        local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
-        local coinScript = scripts and scripts:FindFirstChild(CONFIG.CoinScript)
-        if not coinScript or type(getconnections) ~= "function" then return false end
-        local ok, connections = pcall(getconnections, RunService.PreSimulation)
-        if not ok then return false end
-        for _,connection in ipairs(connections) do
-            pcall(function()
-                local callback = connection.Function
-                if type(callback) ~= "function" or not connection.Enabled then return end
-                local environment = getfenv(callback)
-                if environment.script ~= coinScript or debug.info(callback, "n") ~= CONFIG.CoinCallback then return end
-                connection:Disable()
-                table.insert(State.CoinConnections, {Connection = connection, Callback = callback})
-            end)
+    -- Заморозка монет. Раньше игровой UpdateCoins отключали через getconnections +
+    -- Disable() и звали его сами с dt = 0 каждый кадр. Disable() правит память
+    -- соединения executor'ом и мог ронять клиент; вызов каждый кадр — лишняя работа.
+    -- Теперь локально снимаем с монеты тег CoinVisual: UpdateCoins обходит только
+    -- тегнутые и больше её не крутит, а его оставшуюся работу (угасание собранной,
+    -- удаление по Delete и по CoinCollected) делаем по событиям — ноль работы в кадр
+    local function fadeCoin(coin)
+        local info = TweenInfo.new(CONFIG.Coins.FadeTime, Enum.EasingStyle.Linear)
+        for _,object in ipairs(coin:GetDescendants()) do
+            if object:IsA("BasePart") or object:IsA("Decal") then
+                pcall(function() TweenService:Create(object, info, {Transparency = 1}):Play() end)
+            end
         end
-        if #State.CoinConnections == 0 then return false end
-        -- UpdateCoins(0) сохраняет удаление и затухание собранных монет,
-        -- но не меняет их CFrame: вращение и взлёт полностью остановлены.
-        State.CoinTick = RunService.PreSimulation:Connect(function()
-            for _,record in ipairs(State.CoinConnections) do pcall(record.Callback, 0) end
-        end)
+        pcall(function() TweenService:Create(coin, info, {Transparency = 1}):Play() end)
+    end
+
+    local function freezeCoin(coin)
+        if State.FrozenCoins[coin] or not coin:IsA("BasePart") then return end
+        local connections = {}
+        State.FrozenCoins[coin] = connections
+        local function check()
+            if coin:GetAttribute("Delete") then
+                pcall(function() coin:Destroy() end)
+            elseif coin:GetAttribute("Collected") and not coin:GetAttribute("IsSetup") then
+                coin:SetAttribute("IsSetup", true)
+                fadeCoin(coin)
+            end
+        end
+        table.insert(connections, coin:GetAttributeChangedSignal("Delete"):Connect(check))
+        table.insert(connections, coin:GetAttributeChangedSignal("Collected"):Connect(check))
+        table.insert(connections, coin.Destroying:Connect(function()
+            for _,connection in ipairs(connections) do disconnect(connection) end
+            State.FrozenCoins[coin] = nil
+        end))
+        pcall(function() CollectionService:RemoveTag(coin, CONFIG.Coins.Tag) end)
+        check()
+    end
+
+    local function pauseCoins()
+        local tag = CONFIG.Coins.Tag
+        for _,coin in ipairs(CollectionService:GetTagged(tag)) do freezeCoin(coin) end
+        -- Новые монеты: обработчик игры на этом же сигнале успевает отработать
+        -- (метит уже собранные на Delete), снимаем тег следом
+        table.insert(State.CoinSignals, CollectionService:GetInstanceAddedSignal(tag):Connect(function(coin)
+            task.defer(function()
+                if State.Enabled.StopAnimations ~= false then freezeCoin(coin) end
+            end)
+        end))
+        -- Собранная монета: игра через DeleteDelay помечает Delete только тегнутые
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        local gameplay = remotes and remotes:FindFirstChild("Gameplay")
+        local collected = gameplay and gameplay:FindFirstChild("CoinCollected")
+        if collected then
+            table.insert(State.CoinSignals, collected.OnClientEvent:Connect(function(coinId, current, maximum)
+                if type(current) ~= "number" or type(maximum) ~= "number" or maximum > current then return end
+                task.delay(CONFIG.Coins.DeleteDelay, function()
+                    for coin in pairs(State.FrozenCoins) do
+                        if coin:GetAttribute("CoinID") == coinId then pcall(function() coin:Destroy() end) end
+                    end
+                end)
+            end))
+        end
         return true
     end
 
@@ -232,27 +306,22 @@ return function(env)
         if State.Enabled[key] == enabled then setControl(key, enabled); return true end
         if enabled and key == "FPSUnlocker" then
             if type(getfpscap) ~= "function" or type(setfpscap) ~= "function" then
-                notify("Executor не поддерживает чтение и восстановление лимита FPS")
+                notify("Executor can't read or restore the FPS cap")
                 setControl(key, false)
                 return false
             end
             local ok, cap = pcall(getfpscap)
             if not ok or type(cap) ~= "number" or not pcall(setfpscap, CONFIG.FPSCap) then
-                notify("Не удалось изменить лимит FPS")
+                notify("Failed to change the FPS cap")
                 setControl(key, false)
                 return false
             end
             State.FPSCap = cap
         elseif enabled and key == "NoRender" then
             local ok = pcall(function() RunService:Set3dRenderingEnabled(false) end)
-            if not ok then notify("No Render недоступен"); setControl(key, false); return false end
+            if not ok then notify("No Render is unavailable"); setControl(key, false); return false end
         elseif enabled and key == "StopAnimations" then
-            if not pauseCoins() then
-                restoreAnimations()
-                notify("Не найден доступный UpdateCoins; Stop Animations не включён")
-                setControl(key, false)
-                return false
-            end
+            pauseCoins()
             pausePlayerAnimations()
             local elapsed = 0
             State.AnimationConnection = RunService.Heartbeat:Connect(function(dt)
@@ -281,7 +350,8 @@ return function(env)
             local terrain = Workspace:FindFirstChildOfClass("Terrain")
             if terrain then forceProperty(key, terrain, "WaterReflectance", 0) end
             scan(key)
-        elseif key == "RemoveTextures" or key == "RemoveParticles" or key == "PlasticMaterials" then
+        elseif key == "RemoveTextures" or key == "RemoveParticles" or key == "PlasticMaterials"
+            or key == "RemoveDeadBodies" then
             scan(key)
         end
         setControl(key, State.Enabled[key] == true)
