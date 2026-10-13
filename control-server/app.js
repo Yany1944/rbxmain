@@ -236,6 +236,11 @@ export function createApp(config, options={}) {
     // Только явно разрешённые файлы панели. Исходники и конфигурация недоступны.
     const file=path==='/'?'index.html':path.slice(1);
     if(!/^(index\.html|dashboard\.html|assets\/(common\.js|login\.js|live\.js|style\.css))$/.test(file))fail(404,'Not found');
+    // Без входа доступна только страница входа; рабочая панель и её код — после TOTP
+    if(file==='dashboard.html'||file==='assets/live.js') {
+      try{authenticated(req);}
+      catch(e){if(e.status!==401)throw e;if(file==='dashboard.html'){res.writeHead(302,{Location:'/'});return res.end();}throw e;}
+    }
     // До первого push рабочей панели используем проверенную копию релиза.
     // После push существующий таймер продолжает обновлять только статические файлы.
     let panelDirectory=config.panelDirectory;

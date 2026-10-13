@@ -33,7 +33,7 @@ async function fixture(t) {
   async function login() {
     const first=await admin('/api/auth/login',{username:'owner',password});assert.equal(first.status,200);
     const second=await admin('/api/auth/mfa',{challenge:first.body.challenge,code:totp(config.totpSecret,Math.floor(clock/30000))});assert.equal(second.status,200);
-    cookie=second.cookie.split(';')[0];csrf=(await admin('/api/auth/me')).body.csrf;
+    cookie=second.cookie.split(';')[0];csrf=(await admin('/api/auth/me')).body.csrf;return cookie;
   }
   async function control(path,body={},headers={}) {
     const b={key:'JN-TEST-KEY',hwid:'TEST-HWID',user:'12345',v:'100',nonce:randomToken().slice(0,32),...body};
@@ -158,4 +158,15 @@ test('ban by Roblox account blocks every HWID the account used',async t=>{
   assert.equal((await f.control('/session',{hwid:'DEVICE-B',user:'777'})).body.message,'Alt accounts');
   assert.equal((await f.control('/session',{hwid:'DEVICE-C',user:'600'})).body.ok,true);
   assert.equal((await f.admin('/api/state')).body.bans.filter(b=>b.kind==='hwid').length,2);
+});
+test('dashboard and its script are served only after login',async t=>{
+  const f=await fixture(t);
+  const port=f.app.adminServer.address().port,get=(path,cookie='')=>fetch(`http://127.0.0.1:${port}${path}`,{redirect:'manual',headers:cookie?{Cookie:cookie}:{}});
+  assert.equal((await get('/')).status,200);
+  assert.equal((await get('/assets/login.js')).status,200);
+  const page=await get('/dashboard.html');assert.equal(page.status,302);assert.equal(page.headers.get('location'),'/');
+  assert.equal((await get('/assets/live.js')).status,401);
+  const cookie=await f.login();
+  assert.equal((await get('/dashboard.html',cookie)).status,200);
+  assert.equal((await get('/assets/live.js',cookie)).status,200);
 });

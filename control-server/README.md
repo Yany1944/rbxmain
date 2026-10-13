@@ -97,12 +97,11 @@ Roblox, кэш в памяти 6 ч. CSP разрешает картинки т�
 Перед reload: backup Caddyfile, `caddy validate`. После reload проверить Relay,
 недоступность публичного admin API, вход через туннель и журнал сервиса.
 
-`panelDirectory` в production указывает на `/opt/rbxmain/admin-panel`, а
-`panelFallbackDirectory` — на `/opt/violite-control/current/admin-panel`.
-Пока в Git main нет marker `control-api-version.json` версии 1, показывается
-проверенная копия. После первого push существующий таймер снова обновляет UI
-примерно каждые 30 секунд. Backend этим таймером **не перезапускается**: его обновляют
-отдельным релизом после тестов. Несовместимое изменение API требует новой версии marker.
+Панель отдаётся из самого релиза: `panelDirectory` = `/opt/violite-control/current/admin-panel`,
+`panelFallbackDirectory` не используется. Публичный Git-каталог `/opt/rbxmain` для панели
+больше не читается — UI и backend всегда одной версии. Без входа доступны только
+страница входа и общие стили/скрипты; `dashboard.html` перенаправляет на вход,
+`assets/live.js` отвечает 401.
 
 Секреты нельзя хранить в `/opt/rbxmain`: его содержимое заменяет git reset.
 В build/secrets.json для сборки нужны `controlUrl`, соответствующие proxySecret и
@@ -112,12 +111,23 @@ responseSecret, а также **ссылка запуска основного �
 
 ## Обновление и откат
 
-1. Собрать отдельный каталог releases, запустить тесты на Node 24.
-2. Сделать backup SQLite через `backup.js` (команда ниже).
-3. Переключить current на новый каталог и перезапустить только violite-control.
-4. Проверить вход, API и Relay. При ошибке вернуть прежнюю ссылку и конфиг Caddy.
-   При несовместимой миграции БД восстановить backup при остановленном сервисе.
-   Текущая схема версии 1; более новую схему этот сервер открывать отказывается.
+С компьютера владельца, из корня проекта (нужен SSH-ключ `skin_relay`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File control-server\deploy\deploy.ps1
+```
+
+Скрипт упаковывает `admin-panel` и `control-server` (без config, базы и .md), отправляет
+по SSH и запускает `deploy/release.sh` на сервере. Тот:
+1. распаковывает в `releases/<UTC-время>`, гоняет тесты на Node 24 — при ошибке ничего не меняется;
+2. делает backup SQLite и `config.json.bak-<id>`;
+3. переключает `current`, перезапускает только violite-control;
+4. проверяет `/` = 200, `/dashboard.html` = 302, `/api/state` = 401, иначе сам откатывает
+   ссылку и конфиг. Хранит 5 последних релизов. Команда ручного отката печатается в конце.
+
+При несовместимой миграции БД восстановить backup при остановленном сервисе.
+Текущая схема версии 1; более новую схему этот сервер открывать отказывается.
+Ручной backup:
 
 ```sh
 sudo -u violite env VIOLITE_CONFIG=/etc/violite-control/config.json \
