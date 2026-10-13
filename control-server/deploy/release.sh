@@ -3,6 +3,8 @@
 # переключение current и перезапуск. При любой ошибке после переключения — откат.
 # Запускается deploy.ps1 от root: sh release.sh /tmp/violite-release.tgz
 set -eu
+# Любая неожиданная остановка печатает строку с кодом, а не обрывается молча
+trap 'rc=$?; [ "$rc" -eq 0 ] || echo "!! release.sh stopped (exit $rc)"' EXIT
 
 ARCHIVE=$1
 BASE=/opt/violite-control
@@ -20,13 +22,13 @@ chown -R root:root "$DIR"
 chmod -R u=rwX,go=rX "$DIR"
 
 echo "== Tests"
-if ! (cd "$DIR/control-server" && "$NODE" --test test/*.test.js >/tmp/violite-test.log 2>&1); then
+if ! (cd "$DIR/control-server" && "$NODE" --test --test-reporter=tap test/*.test.js >/tmp/violite-test.log 2>&1); then
   tail -n 40 /tmp/violite-test.log
   rm -rf "$DIR"
   echo "!! Tests failed, nothing changed"
   exit 1
 fi
-grep -E '^# (pass|fail)' /tmp/violite-test.log
+grep -E "^# (pass|fail)" /tmp/violite-test.log || true
 
 echo "== Database backup"
 runuser -u violite -- env VIOLITE_CONFIG=$CONFIG "$NODE" "$DIR/control-server/backup.js" "/var/lib/violite-control/backup-$ID.sqlite"
