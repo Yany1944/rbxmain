@@ -11,6 +11,9 @@
         "writefile",
         "makefolder",
         "isfolder",
-        "setclipboard"
+        "setclipboard",
+        "Drawing",
+        "crypt",
+        "base64_decode"
     ]
 }

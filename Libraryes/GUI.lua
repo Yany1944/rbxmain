@@ -451,9 +451,30 @@ return function(env)
             Parent = part
         })
 
-        local function toWorld(cam, point)
-            local ray = cam:ScreenPointToRay(point.X, point.Y)
-            return ray.Origin + ray.Direction * ACRYLIC_DISTANCE
+        -- Точка GUI → мир, ровно туда, где её нарисует камера. ScreenPointToRay /
+        -- ViewportPointToRay для этого не годятся: при FOV, изменённом скриптом
+        -- (у нас 90), они сжимают вертикаль ровно в 9/16 относительно отрисовки
+        -- (замер: стекло съезжало вниз и сплющивалось вдвое). Поэтому проекцию
+        -- калибруем самой камерой через WorldToViewportPoint на опорных точках
+        local function makeProjector(cam)
+            local cf = cam.CFrame
+            local center = cam:WorldToViewportPoint(cf * Vector3.new(0, 0, -1))
+            local unitX = cam:WorldToViewportPoint(cf * Vector3.new(1, 0, -1))
+            local unitY = cam:WorldToViewportPoint(cf * Vector3.new(0, 1, -1))
+            local spanX, spanY = unitX.X - center.X, unitY.Y - center.Y
+            if math.abs(spanX) < 1e-3 or math.abs(spanY) < 1e-3 then return nil end
+            -- Координаты GUI отсчитываются от-под верхней панели, вьюпорт — от края экрана
+            local screenGui = target:FindFirstAncestorOfClass("ScreenGui")
+            local inset = (screenGui and screenGui.IgnoreGuiInset) and Vector2.zero
+                or game:GetService("GuiService"):GetGuiInset()
+            -- Стекло — сразу за ближней плоскостью отсечения
+            local depth = -cam.NearPlaneZ + ACRYLIC_DISTANCE
+            return function(point)
+                local v = point + inset
+                local lx = (v.X - center.X) / spanX
+                local ly = (v.Y - center.Y) / spanY
+                return cf * Vector3.new(lx * depth, ly * depth, -depth)
+            end
         end
 
         local function render()
@@ -466,9 +487,11 @@ return function(env)
             local pos = target.AbsolutePosition + Vector2.new(offset / 2, offset / 2)
             if size.X <= 0 or size.Y <= 0 then return end
 
-            local topLeft = toWorld(cam, pos)
-            local topRight = toWorld(cam, pos + Vector2.new(size.X, 0))
-            local bottomRight = toWorld(cam, pos + size)
+            local toWorld = makeProjector(cam)
+            if not toWorld then return end
+            local topLeft = toWorld(pos)
+            local topRight = toWorld(pos + Vector2.new(size.X, 0))
+            local bottomRight = toWorld(pos + size)
 
             local camCF = cam.CFrame
             part.CFrame = CFrame.fromMatrix(
@@ -944,19 +967,45 @@ return function(env)
     end
 
     -- Общая сегментированная панель для подвкладок и фильтров.
+    -- options.Style = "Underline" — вкладки шапки: без подложки и рамки, выбранная
+    -- подчёркнута акцентной полосой по низу панели (панель высотой с шапку, полоса
+    -- ложится на линию под ней). Коробка-переключатель рядом с пилюлей конфига
+    -- выглядела вторым контролом, а не навигацией; в контенте (Skins, Upgrade) —
+    -- прежний вид
     function GUI.CreateSegmentedPanel(parent, options)
         options = options or {}
-        local pad, gap, height = 4, 4, options.Height or 34
+        local underline = options.Style == "Underline"
+        local pad, gap, height = underline and 0 or 4, 4, options.Height or 34
+        local UNDERLINE_H = 2
         local panel = {Buttons = {}, Items = {}, Value = nil, Tweens = {}}
         panel.Root = Create("Frame", {Name = options.Name or "SegmentedPanel", BackgroundColor3 = T.Surface2,
+            BackgroundTransparency = underline and 1 or 0,
             Position = options.Position or UDim2.new(), Size = options.Size or UDim2.fromOffset(8, height), Parent = parent})
-        AddCorner(panel.Root, R_CTRL + 2)
-        local border = AddStroke(panel.Root, STROKE_W, T.Border)
-        panel.Indicator = Create("Frame", {Name = "Selection", BackgroundColor3 = T.Surface1,
-            Size = UDim2.fromOffset(0, height - pad * 2), Visible = false, ZIndex = 2, Parent = panel.Root})
-        AddCorner(panel.Indicator, R_CTRL)
-        local selectedBorder = AddStroke(panel.Indicator, STROKE_W, T.Accent)
-        selectedBorder.Transparency = 0.65
+        local border, selectedBorder
+        if not underline then
+            AddCorner(panel.Root, R_CTRL + 2)
+            border = AddStroke(panel.Root, STROKE_W, T.Border)
+        end
+        panel.Indicator = Create("Frame", {Name = "Selection", BackgroundColor3 = underline and T.Accent or T.Surface1,
+            BorderSizePixel = 0,
+            Size = UDim2.fromOffset(0, underline and UNDERLINE_H or height - pad * 2), Visible = false, ZIndex = 2, Parent = panel.Root})
+        if underline then
+            AddCorner(panel.Indicator, UNDERLINE_H / 2)
+        else
+            AddCorner(panel.Indicator, R_CTRL)
+            selectedBorder = AddStroke(panel.Indicator, STROKE_W, T.Accent)
+            selectedBorder.Transparency = 0.65
+        end
+
+        -- Полоса под текстом кнопки (с отступом по краям), иначе — плашка во всю кнопку
+        local function indicatorGoal(button)
+            if not underline then return {Position = button.Position, Size = button.Size} end
+            local inset = options.UnderlineInset or 10
+            return {
+                Position = UDim2.fromOffset(button.Position.X.Offset + inset, height - UNDERLINE_H),
+                Size = UDim2.fromOffset(math.max(button.Size.X.Offset - inset * 2, 8), UNDERLINE_H),
+            }
+        end
 
         function panel:Set(value, animate)
             self.Value = value
@@ -964,7 +1013,7 @@ return function(env)
             if not chosen then return end
             self.Indicator.Visible = true
             if self.Tween then self.Tween:Cancel() end
-            local goal = {Position = chosen.Position, Size = chosen.Size}
+            local goal = indicatorGoal(chosen)
             if animate ~= false then
                 self.Tween = TweenService:Create(self.Indicator, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), goal)
                 self.Tween:Play()
@@ -974,7 +1023,8 @@ return function(env)
             for key, button in pairs(self.Buttons) do
                 if self.Tweens[key] then self.Tweens[key]:Cancel() end
                 button.BackgroundTransparency = 1
-                button.TextColor3 = key == value and T.Accent or T.TextDark
+                -- Вкладки шапки: выбранная — основной текст (акцент несёт полоса), как сайдбар
+                button.TextColor3 = key == value and (underline and T.Text or T.Accent) or T.TextDark
             end
         end
         function panel:Layout()
@@ -1007,8 +1057,9 @@ return function(env)
             local function hover(on)
                 if self.Tweens[key] then self.Tweens[key]:Cancel() end
                 self.Tweens[key] = TweenService:Create(button, TweenInfo.new(0.12), {
-                    BackgroundTransparency = on and self.Value ~= key and 0.35 or 1,
-                    TextColor3 = self.Value == key and T.Accent or (on and T.Text or T.TextDark),
+                    -- у вкладок шапки ховер только текстом: плашка вернула бы «коробку»
+                    BackgroundTransparency = (on and not underline and self.Value ~= key) and 0.35 or 1,
+                    TextColor3 = self.Value == key and (underline and T.Text or T.Accent) or (on and T.Text or T.TextDark),
                 })
                 self.Tweens[key]:Play()
             end
@@ -1023,8 +1074,10 @@ return function(env)
         end
         if options.Fill then panel.Root:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() panel:Layout() end) end
         table.insert(themeHooks, function()
-            panel.Root.BackgroundColor3, border.Color = T.Surface2, T.Border
-            panel.Indicator.BackgroundColor3, selectedBorder.Color = T.Surface1, T.Accent
+            panel.Root.BackgroundColor3 = T.Surface2
+            if border then border.Color = T.Border end
+            panel.Indicator.BackgroundColor3 = underline and T.Accent or T.Surface1
+            if selectedBorder then selectedBorder.Color = T.Accent end
             for _, button in pairs(panel.Buttons) do button.BackgroundColor3 = T.Surface2 end
             if panel.Value then panel:Set(panel.Value, false) end
         end)
@@ -1931,25 +1984,52 @@ return function(env)
                 Parent = overlay
             })
 
-            -- Скрытие после твина — через task.delay, а не блокирующий wait:
-            -- close() зовут из обработчиков, поток которых может быть
-            -- невыдаваемым (тогда wait ронял бы весь обработчик)
+            -- Открыт ли список — свой флаг, а не root.Visible: во время твина
+            -- закрытия список ещё виден, и клик по кнопке закрывал его повторно
+            -- вместо открытия. Каждое open/close отменяет прошлый твин, а
+            -- скрывает список только завершение СВОЕГО твина (по поколению):
+            -- раньше скрытие по таймеру 0.2 с срабатывало до конца твина или
+            -- после повторного открытия, и оставалась недозакрытая полоска
+            local isOpen, generation, activeTween = false, 0, nil
+            local function playSize(height, direction)
+                if activeTween then activeTween:Cancel() end
+                activeTween = TweenService:Create(
+                    root,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, direction),
+                    {Size = UDim2.new(0, width, 0, height)}
+                )
+                activeTween:Play()
+                return activeTween
+            end
+
+            -- Без блокирующего wait: close() зовут из обработчиков, поток которых
+            -- может быть невыдаваемым (тогда wait ронял бы весь обработчик)
             local function close()
-                if root.Visible then
-                    TweenService:Create(
-                        root,
-                        TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-                        {Size = UDim2.new(0, width, 0, 0)}
-                    ):Play()
-                    task.delay(0.2, function()
-                        if root.Size.Y.Offset <= 0 then
-                            root.Visible = false
-                        end
-                    end)
+                if not isOpen and not root.Visible then return end
+                isOpen = false
+                generation += 1
+                local mine = generation
+                local function hide()
+                    if generation == mine then
+                        root.Visible = false
+                        root.Size = UDim2.new(0, width, 0, 0)
+                    end
                 end
+                playSize(0, Enum.EasingDirection.In).Completed:Connect(function(playback)
+                    if playback == Enum.PlaybackState.Completed then hide() end
+                end)
+                -- Страховка: твин не дошёл (окно скрыли, твин перебили снаружи)
+                task.delay(0.3, hide)
             end
 
             local function openAt(targetHeight)
+                -- Открыт только один список: остальные закрываем, иначе соседние
+                -- списки (Desync Mode и Pitch подряд) ложились друг на друга
+                for _, closeOther in ipairs(State.UIElements.OpenDropdowns or {}) do
+                    if closeOther ~= close then pcall(closeOther) end
+                end
+                isOpen = true
+                generation += 1
                 local absPos = anchorBtn.AbsolutePosition
                 local absSize = anchorBtn.AbsoluteSize
                 local mainPos = mainFrame.AbsolutePosition
@@ -1959,16 +2039,12 @@ return function(env)
                 )
                 root.Size = UDim2.new(0, width, 0, 0)
                 root.Visible = true
-                TweenService:Create(
-                    root,
-                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                    {Size = UDim2.new(0, width, 0, targetHeight)}
-                ):Play()
+                playSize(targetHeight, Enum.EasingDirection.Out)
             end
 
             -- Закрытие по клику вне списка и вне кнопки
             local clickOutsideConnection = UserInputService.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 and root.Visible then
+                if input.UserInputType == Enum.UserInputType.MouseButton1 and isOpen then
                     local mousePos = UserInputService:GetMouseLocation()
                     local framePos = root.AbsolutePosition
                     local frameSize = root.AbsoluteSize
@@ -1995,7 +2071,8 @@ return function(env)
             end
             table.insert(State.UIElements.OpenDropdowns, close)
 
-            return overlay, openAt, close, root, headerFrame
+            local function getOpen() return isOpen end
+            return overlay, openAt, close, root, headerFrame, getOpen
         end
 
         -- Единая строка поповера: 36px, радиус 6, hover — gray-200.
@@ -2051,7 +2128,7 @@ return function(env)
         local cfgRenaming = nil    -- конфиг в режиме переименования
         local cfgCreating = false  -- показывать строку ввода нового имени
 
-        local cfgList, cfgOpenAt, cfgClose, cfgPanel, cfgHeader =
+        local cfgList, cfgOpenAt, cfgClose, cfgPanel, cfgHeader, cfgIsOpen =
             makeOverlayList(configPill, CFG_PANEL_W, {headerH = CFG_HEADER_H})
 
         -- Шапка панели: подпись + «+» справа, разделитель снизу
@@ -2348,7 +2425,7 @@ return function(env)
 
         rebuildAndResize = function()
             local h = rebuildConfigList()
-            if cfgPanel.Visible then
+            if cfgIsOpen() then
                 TweenService:Create(cfgPanel, TweenInfo.new(0.15, Enum.EasingStyle.Quad),
                     {Size = UDim2.new(0, CFG_PANEL_W, 0, h)}):Play()
             end
@@ -2356,7 +2433,7 @@ return function(env)
 
         -- Пилюля: клик — открыть/закрыть панель (режимы сбрасываются)
         configPill.MouseButton1Click:Connect(function()
-            if cfgPanel.Visible then
+            if cfgIsOpen() then
                 cfgClose()
             elseif not configManager then
                 cfgNotify("Config system unavailable")
@@ -2432,7 +2509,7 @@ return function(env)
                 TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
             end)
 
-            local overlay, openAt, close = makeOverlayList(dropdown, math.max(180, DD_W))
+            local overlay, openAt, close, _, _, isOpen = makeOverlayList(dropdown, math.max(180, DD_W))
 
             -- Элемент-объект. Значение вне options просто ставится текстом:
             -- конфиг из другой версии не должен ронять загрузку
@@ -2466,7 +2543,7 @@ return function(env)
             end
 
             dropdown.MouseButton1Click:Connect(function()
-                if overlay.Visible then
+                if isOpen() then
                     close()
                 else
                     overlay.Visible = true
@@ -2521,7 +2598,8 @@ return function(env)
             end
             if definition and not group then
                 local panel = GUI.CreateSegmentedPanel(header, {
-                    Name = navName .. "Subtabs", Position = UDim2.new(0, SUBNAV_X, 0.5, 0), Height = PILL_H,
+                    Name = navName .. "Subtabs", Position = UDim2.new(0, SUBNAV_X, 0.5, 0), Height = HEADER_H,
+                    Style = "Underline", TextSize = TS.Nav,
                 })
                 panel.Root.AnchorPoint = Vector2.new(0, 0.5)
                 panel.Root.Visible = false
@@ -3014,6 +3092,303 @@ return function(env)
                 return element
             end
 
+            -- Сетка пресетов: плитки в стиле обычных контролов (фон поверхности, тонкая
+            -- рамка), слева — маленькое превью-градиент «небо → земля», справа имя.
+            -- Выбранная — как в сегментной панели: акцентная рамка и акцентный текст.
+            -- presets = {{Name, Top, Bottom}, ...}; значение — имя (в конфиге как Dropdown)
+            function TabFunctions:CreatePresetGrid(presets, default, handlerKey, columns)
+                columns = columns or 3
+                local TILE_H, GAP, PAD, CHIP = 36, 8, 10, 18
+                local host = self:CreateHost(nil)
+                Create("UIPadding", {
+                    PaddingLeft = UDim.new(0, PAD), PaddingRight = UDim.new(0, PAD),
+                    PaddingTop = UDim.new(0, PAD), PaddingBottom = UDim.new(0, PAD),
+                    Parent = host
+                })
+                Create("UIGridLayout", {
+                    -- доля считается от полной ширины хоста, без UIPadding — вычитаем и его
+                    CellSize = UDim2.new(1 / columns, -(GAP * (columns - 1) + PAD * 2) / columns, 0, TILE_H),
+                    CellPadding = UDim2.fromOffset(GAP, GAP),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                    Parent = host
+                })
+
+                local element = {__type = "Dropdown", Value = default, Options = {}, Instance = host}
+                local tiles = {}
+                local function look(name, hovered)
+                    local t = tiles[name]
+                    local on = element.Value == name
+                    return {
+                        Stroke = {Color = on and T.Accent or (hovered and T.BorderHi or T.Border), Transparency = on and 0.3 or 0},
+                        Label = {TextColor3 = on and T.Accent or (hovered and T.Text or T.TextDark)},
+                    }, t
+                end
+                local function paint(name, hovered, animate)
+                    local goal, t = look(name, hovered)
+                    if not t then return end
+                    if animate then
+                        TweenService:Create(t.Stroke, TweenInfo.new(0.15), goal.Stroke):Play()
+                        TweenService:Create(t.Label, TweenInfo.new(0.15), goal.Label):Play()
+                    else
+                        t.Stroke.Color, t.Stroke.Transparency = goal.Stroke.Color, goal.Stroke.Transparency
+                        t.Label.TextColor3 = goal.Label.TextColor3
+                    end
+                end
+                local function paintAll(animate)
+                    for name in pairs(tiles) do paint(name, false, animate) end
+                end
+
+                for index, preset in ipairs(presets) do
+                    table.insert(element.Options, preset.Name)
+                    local tile = Create("TextButton", {
+                        Name = preset.Name .. "Preset",
+                        Text = "",
+                        AutoButtonColor = false,
+                        BackgroundColor3 = T.Surface1,
+                        LayoutOrder = index,
+                        Parent = host
+                    })
+                    AddCorner(tile, R_CTRL)
+                    local stroke = AddStroke(tile, STROKE_W, T.Border)
+                    local chip = Create("Frame", {
+                        BackgroundColor3 = Color3.new(1, 1, 1),
+                        BorderSizePixel = 0,
+                        AnchorPoint = Vector2.new(0, 0.5),
+                        Position = UDim2.new(0, 10, 0.5, 0),
+                        Size = UDim2.fromOffset(CHIP, CHIP),
+                        Parent = tile
+                    })
+                    AddCorner(chip, R_SM)
+                    AddStroke(chip, STROKE_W, T.Border)
+                    Create("UIGradient", {
+                        Rotation = 90,
+                        Color = ColorSequence.new(preset.Top, preset.Bottom),
+                        Parent = chip
+                    })
+                    local label = Create("TextLabel", {
+                        Text = preset.Name,
+                        Font = FONT.Bold,
+                        TextSize = TS.Option,
+                        TextColor3 = T.TextDark,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd,
+                        BackgroundTransparency = 1,
+                        Position = UDim2.new(0, 10 + CHIP + 9, 0, 0),
+                        Size = UDim2.new(1, -(10 + CHIP + 9 + 8), 1, 0),
+                        Parent = tile
+                    })
+                    tiles[preset.Name] = {Tile = tile, Stroke = stroke, Label = label}
+                    tile.MouseEnter:Connect(function() paint(preset.Name, true, true) end)
+                    tile.MouseLeave:Connect(function() paint(preset.Name, false, true) end)
+                    TrackConnection(tile.MouseButton1Click:Connect(function()
+                        element:Set(preset.Name, true)
+                    end))
+                end
+
+                function element:Set(value, fire)
+                    self.Value = tostring(value)
+                    paintAll(true)
+                    if fire then callHandler(handlerKey, self.Value) end
+                end
+                paintAll(false)
+                registerElement(handlerKey, element)
+                table.insert(themeHooks, function()
+                    for _, t in pairs(tiles) do t.Tile.BackgroundColor3 = T.Surface1 end
+                    paintAll(false)
+                end)
+                return element
+            end
+
+            -- Сетка переключателей: плитки в стиле сетки пресетов, но включать можно
+            -- сколько угодно сразу. items = {{Name, Flag}, ...}; каждая плитка —
+            -- обычный Toggle-элемент под своим флагом (конфиги и Set как у CreateToggle)
+            function TabFunctions:CreateToggleGrid(items, columns)
+                columns = columns or 2
+                local TILE_H, GAP, PAD, DOT = 36, 8, 10, 8
+                local host = self:CreateHost(nil)
+                Create("UIPadding", {
+                    PaddingLeft = UDim.new(0, PAD), PaddingRight = UDim.new(0, PAD),
+                    PaddingTop = UDim.new(0, PAD), PaddingBottom = UDim.new(0, PAD),
+                    Parent = host
+                })
+                Create("UIGridLayout", {
+                    CellSize = UDim2.new(1 / columns, -(GAP * (columns - 1) + PAD * 2) / columns, 0, TILE_H),
+                    CellPadding = UDim2.fromOffset(GAP, GAP),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                    Parent = host
+                })
+
+                local elements = {}
+                for index, item in ipairs(items) do
+                    local tile = Create("TextButton", {
+                        Name = item.Flag .. "Tile",
+                        Text = "",
+                        AutoButtonColor = false,
+                        BackgroundColor3 = T.Surface1,
+                        LayoutOrder = index,
+                        Parent = host
+                    })
+                    AddCorner(tile, R_CTRL)
+                    local stroke = AddStroke(tile, STROKE_W, T.Border)
+                    local label = Create("TextLabel", {
+                        Text = item.Name,
+                        Font = FONT.Bold,
+                        TextSize = TS.Option,
+                        TextColor3 = T.TextDark,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd,
+                        BackgroundTransparency = 1,
+                        Position = UDim2.new(0, 12, 0, 0),
+                        Size = UDim2.new(1, -(12 + DOT + 14), 1, 0),
+                        Parent = tile
+                    })
+                    local dot = Create("Frame", {
+                        BackgroundColor3 = T.TrackBg,
+                        BorderSizePixel = 0,
+                        AnchorPoint = Vector2.new(1, 0.5),
+                        Position = UDim2.new(1, -12, 0.5, 0),
+                        Size = UDim2.fromOffset(DOT, DOT),
+                        Parent = tile
+                    })
+                    AddCorner(dot, DOT / 2)
+
+                    local element = {__type = "Toggle", Value = false, Instance = tile}
+                    local hovered = false
+                    local function paint(animate)
+                        local on = element.Value
+                        local strokeGoal = {Color = on and T.Accent or (hovered and T.BorderHi or T.Border), Transparency = on and 0.3 or 0}
+                        local labelGoal = {TextColor3 = (on or hovered) and T.Text or T.TextDark}
+                        local dotGoal = {BackgroundColor3 = on and T.Accent or T.TrackBg}
+                        if animate then
+                            TweenService:Create(stroke, TweenInfo.new(0.15), strokeGoal):Play()
+                            TweenService:Create(label, TweenInfo.new(0.15), labelGoal):Play()
+                            TweenService:Create(dot, TweenInfo.new(0.15), dotGoal):Play()
+                        else
+                            stroke.Color, stroke.Transparency = strokeGoal.Color, strokeGoal.Transparency
+                            label.TextColor3, dot.BackgroundColor3 = labelGoal.TextColor3, dotGoal.BackgroundColor3
+                        end
+                    end
+                    function element:Set(value, fire)
+                        self.Value = value and true or false
+                        paint(true)
+                        if fire then callHandler(item.Flag, self.Value) end
+                    end
+                    tile.MouseEnter:Connect(function() hovered = true; paint(true) end)
+                    tile.MouseLeave:Connect(function() hovered = false; paint(true) end)
+                    TrackConnection(tile.MouseButton1Click:Connect(function()
+                        element:Set(not element.Value, true)
+                    end))
+                    paint(false)
+                    registerElement(item.Flag, element)
+                    table.insert(themeHooks, function()
+                        tile.BackgroundColor3 = T.Surface1
+                        paint(false)
+                    end)
+                    elements[item.Flag] = element
+                end
+                return elements
+            end
+
+            -- Строка-палитра: кружки цветов справа, под названием — имя выбранного.
+            -- swatches = {{Name, Color}, ...}; значение — имя (в конфиге как Dropdown)
+            function TabFunctions:CreateSwatchRow(title, swatches, default, handlerKey)
+                local DOT, GAP = 18, 8
+                local row = addRow(ROW_H_DESC, title, "")
+                local reserved = #swatches * (DOT + GAP) + EDGE + 12
+                addRowText(row, title, " ", reserved)
+                -- подпись выбранного цвета — вторая (нижняя) метка строки
+                local valueLabel
+                for _, child in ipairs(row:GetChildren()) do
+                    if child:IsA("TextLabel") and child.Text == " " then valueLabel = child end
+                end
+
+                local element = {__type = "Dropdown", Value = default, Options = {}, Instance = row}
+                local dots = {}
+                local function paint(name)
+                    for dotName, d in pairs(dots) do
+                        d.Ring.Transparency = dotName == name and 0 or 1
+                    end
+                    if valueLabel then valueLabel.Text = name end
+                end
+
+                for index, swatch in ipairs(swatches) do
+                    table.insert(element.Options, swatch.Name)
+                    local x = -(EDGE + (#swatches - index + 1) * (DOT + GAP) - GAP)
+                    local dot = Create("TextButton", {
+                        Name = swatch.Name .. "Swatch",
+                        Text = "",
+                        AutoButtonColor = false,
+                        BackgroundColor3 = swatch.Color,
+                        Position = UDim2.new(1, x, 0.5, -DOT / 2),
+                        Size = UDim2.fromOffset(DOT, DOT),
+                        Parent = row
+                    })
+                    AddCorner(dot, DOT / 2)
+                    -- тонкая обводка: светлые и тёмные цвета не сливаются с карточкой
+                    AddStroke(dot, STROKE_W, T.Border)
+                    local ring = Create("Frame", {
+                        BackgroundTransparency = 1,
+                        AnchorPoint = Vector2.new(0.5, 0.5),
+                        Position = UDim2.fromScale(0.5, 0.5),
+                        Size = UDim2.fromOffset(DOT + 8, DOT + 8),
+                        Parent = dot
+                    })
+                    AddCorner(ring, (DOT + 8) / 2)
+                    local ringStroke = AddStroke(ring, 2, T.Accent)
+                    dots[swatch.Name] = {Ring = ringStroke}
+                    TrackConnection(dot.MouseButton1Click:Connect(function()
+                        element:Set(swatch.Name, true)
+                    end))
+                end
+
+                function element:Set(value, fire)
+                    self.Value = tostring(value)
+                    paint(self.Value)
+                    if fire then callHandler(handlerKey, self.Value) end
+                end
+                paint(default)
+                registerElement(handlerKey, element)
+                table.insert(themeHooks, function()
+                    for _, d in pairs(dots) do d.Ring.Color = T.Accent end
+                    paint(element.Value)
+                end)
+                return element
+            end
+
+            -- Строка с сегментной панелью справа (как фильтры Skins): короткий
+            -- выбор из 2–5 вариантов без выпадающего списка
+            function TabFunctions:CreateSegmentedRow(title, desc, options, default, handlerKey)
+                local hasDesc = desc ~= nil and desc ~= ""
+                local row = addRow(hasDesc and ROW_H_DESC or ROW_H, title, desc or "")
+                local element = {__type = "Dropdown", Value = default, Options = options, Instance = row}
+                local panel = GUI.CreateSegmentedPanel(row, {Name = title .. "Segments", Height = CTRL_H + 4, TextSize = TS.Chip, MinWidth = 44, TextPad = 22})
+                panel.Root.AnchorPoint = Vector2.new(1, 0.5)
+                panel.Root.Position = UDim2.new(1, -EDGE, 0.5, 0)
+                for index, option in ipairs(options) do
+                    panel:Add(option, option, "auto", index, function(key) element:Set(key, true) end)
+                end
+                panel:Set(default, false)
+                addRowText(row, title, desc, math.max(panel.Root.AbsoluteSize.X, 150) + EDGE + 12)
+                -- ширина панели известна после отрисовки текста — поджимаем подписи
+                local labels = {}
+                for _, child in ipairs(row:GetChildren()) do
+                    if child:IsA("TextLabel") then table.insert(labels, child) end
+                end
+                panel.Root:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                    for _, label in ipairs(labels) do
+                        label.Size = UDim2.new(1, -(panel.Root.AbsoluteSize.X + EDGE + 12), label.Size.Y.Scale, label.Size.Y.Offset)
+                    end
+                end)
+
+                function element:Set(value, fire)
+                    self.Value = tostring(value)
+                    panel:Set(self.Value, true)
+                    if fire then callHandler(handlerKey, self.Value) end
+                end
+                registerElement(handlerKey, element)
+                return element
+            end
+
             -- Строка «режим бинда + чип бинда» (Speed, Fly): вместо тогла — выпадающий
             -- список режимов (Toggle / Hold / Always) и чип клавиши. Сам режим решает
             -- MainScript; элемент умеет подсветить чип, пока фича работает (SetActive)
@@ -3054,7 +3429,7 @@ return function(env)
                     TweenService:Create(ddStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
                 end)
 
-                local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
+                local overlay, openAt, close, _, _, isOpen = makeOverlayList(dropdown, DD_W)
 
                 local element = {
                     __type = "Dropdown",
@@ -3099,7 +3474,7 @@ return function(env)
                 end
 
                 dropdown.MouseButton1Click:Connect(function()
-                    if overlay.Visible then
+                    if isOpen() then
                         close()
                     else
                         overlay.Visible = true
@@ -3417,7 +3792,7 @@ return function(env)
                     TweenService:Create(pdStroke, TweenInfo.new(0.15), {Color = T.Border}):Play()
                 end)
 
-                local overlay, openAt, close = makeOverlayList(dropdown, DD_W)
+                local overlay, openAt, close, _, _, isOpen = makeOverlayList(dropdown, DD_W)
 
                 local function updatePlayerList()
                     for _, child in ipairs(overlay:GetChildren()) do
@@ -3464,7 +3839,7 @@ return function(env)
                 end
 
                 dropdown.MouseButton1Click:Connect(function()
-                    if overlay.Visible then
+                    if isOpen() then
                         close()
                     else
                         overlay.Visible = true
@@ -3475,13 +3850,13 @@ return function(env)
                 end)
 
                 TrackConnection(Players.PlayerAdded:Connect(function()
-                    if overlay.Visible then
+                    if isOpen() then
                         updatePlayerList()
                     end
                 end))
 
                 TrackConnection(Players.PlayerRemoving:Connect(function()
-                    if overlay.Visible then
+                    if isOpen() then
                         updatePlayerList()
                     end
                 end))

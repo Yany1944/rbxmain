@@ -49,10 +49,10 @@ return function(env)
         KeybindName = "Bhop",
         -- Key — поле State.Values, Flag — флаг контрола GUI, {min, max, step}
         Params = {
-            {Key = "MaxSpeed",    Flag = "BhopMaxSpeed",    Default = 70,   Min = 16,  Max = 300, Step = 1,    Label = "Max Speed",         Hint = "Strafe acceleration limit (studs/s)"},
-            {Key = "TickRate",    Flag = "BhopTickRate",    Default = 128,  Min = 64,  Max = 256, Step = 32,   Label = "Tick Rate",         Hint = "Movement simulation frequency (Hz)"},
-            {Key = "AirAccel",    Flag = "BhopAirAccel",    Default = 12,   Min = 1,   Max = 100, Step = 0.5,  Label = "Air Accelerate",    Hint = "sv_airaccelerate: strafe gain and turn rate"},
-            {Key = "AirCap",      Flag = "BhopAirCap",      Default = 1.92, Min = 0.5, Max = 8,   Step = 0.01, Label = "Air Speed Cap",     Hint = "Air wish speed cap (CS2 30u = 1.92)"},
+            {Key = "MaxSpeed",    Flag = "BhopMaxSpeed",    Default = 70,   Min = 16,  Max = 300, Step = 1,    Label = "Max Speed",         Hint = "Strafe speed cap, studs/s"},
+            {Key = "TickRate",    Flag = "BhopTickRate",    Default = 128,  Min = 64,  Max = 256, Step = 32,   Label = "Tick Rate",         Hint = "Simulation rate, Hz"},
+            {Key = "AirAccel",    Flag = "BhopAirAccel",    Default = 12,   Min = 1,   Max = 100, Step = 0.5,  Label = "Air Accelerate",    Hint = "Strafe gain and turn rate"},
+            {Key = "AirCap",      Flag = "BhopAirCap",      Default = 1.92, Min = 0.5, Max = 8,   Step = 0.01, Label = "Air Speed Cap",     Hint = "Air speed cap, CS2 = 1.92"},
             {Key = "GroundAccel", Flag = "BhopGroundAccel", Default = 5.5,  Min = 1,   Max = 20,  Step = 0.1,  Label = "Ground Accelerate", Hint = "sv_accelerate"},
             {Key = "Friction",    Flag = "BhopFriction",    Default = 5.2,  Min = 0,   Max = 15,  Step = 0.1,  Label = "Friction",          Hint = "sv_friction"},
             {Key = "StopSpeed",   Flag = "BhopStopSpeed",   Default = 5.12, Min = 0,   Max = 16,  Step = 0.01, Label = "Stop Speed",        Hint = "sv_stopspeed (studs/s)"},
@@ -62,6 +62,13 @@ return function(env)
         MainParams = {MaxSpeed = true, TickRate = true},
         JumpLockout = 0.12,       -- сек после прыжка, пока пол ещё «виден»
         GroundedMaxUp = 2,        -- вертикальная скорость, выше которой это не посадка
+        -- Проверка пола своими лучами: при Velocity Spoofer (подмена на Heartbeat)
+        -- FloorMaterial встаёт на пол заранее — замер: прыжок в среднем на 0.8 stud
+        -- выше обычного и до 3–4 stud в ~20% прыжков, т.е. прыжок прямо в воздухе
+        FloorProbeMargin = 0.75,  -- studs: насколько ноги могут не доставать до пола
+        FloorMinNormalY = 0.3,    -- круче (стена) — не пол
+        SettledTime = 0.05,       -- сек: столько FloorMaterial держит пол — опора без лучей
+        SettledMaxSpeed = 4,      -- studs/s: |vy| ниже — стоим, а не падаем
         MaxFrameTime = 0.1,       -- защита аккумулятора от спирали после фриза
         DisengageMargin = 0.5,    -- запас над скоростью ходьбы, при котором ещё скользим по Source
         StrafeModes = {"View", "Directional"},
@@ -86,6 +93,9 @@ return function(env)
         PrevYaw = nil,
         LastSide = 1,            -- сторона последнего стрейфа (+1 / −1)
         LastJump = 0,
+        FloorSince = nil,        -- с какого момента FloorMaterial непрерывно не Air
+        FloorParams = nil,       -- RaycastParams проверки пола (без своего персонажа)
+        FloorParamsCharacter = nil,
         Vx = 0, Vz = 0,          -- последняя отданная горизонтальная скорость
         Toggle = nil,
         Unloaded = false,
@@ -388,6 +398,43 @@ return function(env)
         return BAIL_STATES[humanoid:GetState()] == true
     end
 
+    -- Ноги у пола: лучи вниз из центра и углов корня (как датчик пола Humanoid'а).
+    -- Shapecast не годится: по Union он бьёт в упрощённую коллизию на ~2.5 stud выше
+    -- настоящей поверхности. Дальность — до подошвы, плюс запас и путь падения за кадр.
+    -- Возвращает нормаль пола (по ней считается допуск подъёма) или nil
+    local FLOOR_OFFSETS = {Vector2.new(0, 0), Vector2.new(1, 1), Vector2.new(-1, 1), Vector2.new(1, -1), Vector2.new(-1, -1)}
+    local function floorBelow(character, root, humanoid, vy, frameDt)
+        if State.FloorParamsCharacter ~= character then
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = {character, Workspace.CurrentCamera}
+            params.RespectCanCollide = true
+            params.IgnoreWater = true
+            State.FloorParams, State.FloorParamsCharacter = params, character
+        end
+        -- R15: HipHeight — от низа корня до пола; R6: ноги 2 stud плюс HipHeight
+        local legs = humanoid.RigType == Enum.HumanoidRigType.R6 and 2 + humanoid.HipHeight or humanoid.HipHeight
+        local reach = root.Size.Y / 2 + legs + CONFIG.FloorProbeMargin + math.max(-vy, 0) * frameDt
+        local down = Vector3.new(0, -reach, 0)
+        local origin = root.Position
+        local hx, hz = root.Size.X * 0.45, root.Size.Z * 0.45
+        local look = root.CFrame.LookVector
+        local forward = Vector3.new(look.X, 0, look.Z)
+        forward = forward.Magnitude > 1e-3 and forward.Unit or Vector3.zAxis
+        local right = Vector3.new(-forward.Z, 0, forward.X)
+        for _, offset in ipairs(FLOOR_OFFSETS) do
+            local hit = Workspace:Raycast(origin + right * (offset.X * hx) + forward * (offset.Y * hz), down, State.FloorParams)
+            if hit and hit.Normal.Y >= CONFIG.FloorMinNormalY then return hit.Normal end
+        end
+        return nil
+    end
+
+    -- Вертикальная скорость, которую даёт движение вдоль наклонного пола (n·v = 0):
+    -- на подъёме она положительная, и прежний порог GroundedMaxUp не пускал прыжок
+    local function slopeRise(normal, vx, vz)
+        return -(normal.X * vx + normal.Z * vz) / normal.Y
+    end
+
     -- wishDir одного воздушного тика по режиму стрейфа.
     --   View (как в CS): A/D — ручной стрейф, сырой wishDir от ввода, поворот
     --     даёт мышь (синхрон стрейфа с камерой = прирост скорости). Без A/D
@@ -432,9 +479,22 @@ return function(env)
 
         local now = os.clock()
         local holdingJump = jumpHeld(humanoid)
-        local grounded = humanoid.FloorMaterial ~= Enum.Material.Air and vy <= CONFIG.GroundedMaxUp
-            and now - State.LastJump > CONFIG.JumpLockout
-            and humanoid:GetState() ~= Enum.HumanoidStateType.Jumping
+        local onFloor = humanoid.FloorMaterial ~= Enum.Material.Air
+        if onFloor then State.FloorSince = State.FloorSince or now else State.FloorSince = nil end
+        -- Опора по факту: пол по Humanoid держится и падения нет. Нужна там, где лучи
+        -- из-под корня не видят, на чём стоим (ступени, край препятствия). Ложный пол
+        -- от спуфера бывает только в падении — его скорость сюда не пропускает
+        local settled = State.FloorSince ~= nil and now - State.FloorSince >= CONFIG.SettledTime
+            and math.abs(vy) <= CONFIG.SettledMaxSpeed
+        local grounded = false
+        if onFloor and now - State.LastJump > CONFIG.JumpLockout
+            and humanoid:GetState() ~= Enum.HumanoidStateType.Jumping then
+            local normal = floorBelow(character, root, humanoid, vy, frameDt)
+            -- На подъёме допускаем вертикаль, которую даёт сам наклон
+            local maxUp = CONFIG.GroundedMaxUp
+            if normal then maxUp += math.max(slopeRise(normal, vx, vz), 0) end
+            grounded = vy <= maxUp and (normal ~= nil or settled)
+        end
 
         if not State.Engaged then
             -- Без Space персонажем управляет Roblox — трогаем только поворот
@@ -454,6 +514,8 @@ return function(env)
             grounded = false
             jumped = true
             State.LastJump = now
+            -- Пол, «залипший» с прошлой посадки, не должен засчитаться опорой у вершины
+            State.FloorSince = nil
         end
 
         -- Фиксированный шаг: траектория скорости не зависит от FPS. Yaw камеры
@@ -543,6 +605,7 @@ return function(env)
         State.RemovingConnection = connect(LocalPlayer.CharacterRemoving, function()
             State.Humanoid, State.SavedWalkSpeed, State.SavedAutoRotate = nil, nil, nil
             State.Accumulator, State.PrevYaw, State.Engaged = 0, nil, false
+            State.FloorSince = nil
         end)
         local function runStep(dt)
             local ok, err = pcall(step, tonumber(dt) or 1 / 60)
@@ -607,9 +670,9 @@ return function(env)
     -- Управление bhop (левая колонка вкладки)
     function Module.BuildMainSection(tab)
         tab:CreateSection("BHOP & AUTOSTRAFE")
-        State.Toggle = tab:CreateToggle("Bunnyhop", "Hold Space to bhop, body follows camera", "Bhop", false, CONFIG.KeybindName)
+        State.Toggle = tab:CreateToggle("Bunnyhop", "Hold Space; body faces camera", "Bhop", false, CONFIG.KeybindName)
         tab:CreateToggle("Autostrafe", "Strafes are computed while Space is held", "BhopAutoStrafe", State.AutoStrafe)
-        tab:CreateDropdown("Strafe Mode", "View: A/D strafe like CS, Directional: WASD = direction", CONFIG.StrafeModes, State.StrafeMode, "BhopStrafeMode")
+        tab:CreateDropdown("Strafe Mode", "A/D like CS, or WASD direction", CONFIG.StrafeModes, State.StrafeMode, "BhopStrafeMode")
         for _, param in ipairs(CONFIG.Params) do
             if CONFIG.MainParams[param.Key] then
                 tab:CreateSlider(param.Label, param.Hint, param.Min, param.Max, State.Values[param.Key], param.Flag, param.Step)

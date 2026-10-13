@@ -182,7 +182,7 @@
   // ════════════════════════════════════════════════════════════════════════
   const pages={
     overview:{
-      meta:()=>data.settings.maintenance?'<b>Обслуживание включено</b> · запуски отклоняются':`<b>${model.online.size}</b> ${model.online.size===1?'игрок':'игроков'} в игре сейчас`,
+      meta:()=>data.settings.maintenance?'<b>Обслуживание включено</b> · запуски отклоняются':`<b>${model.online.size}</b> ${plural(model.online.size,'игрок','игрока','игроков').replace(/^\d+ /,'')} в игре сейчас`,
       results() {
         const published=data.releases.filter(r=>r.status==='published');
         const week=data.serverTime-7*86400,dayStart=new Date().setHours(0,0,0,0)/1000;
