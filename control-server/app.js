@@ -109,7 +109,7 @@ export function createApp(config, options={}) {
       const role=(config.ownerKeyHashes||[]).includes(key)?'owner':'user';
       // Один живой запуск на ключ и устройство; перезапуск отзывает старый токен.
       query.run("UPDATE sessions SET revoked=1,reason='Заменена новым запуском' WHERE key_hash=? AND hwid_hash=? AND revoked=0",key,hwid);
-      query.run('INSERT INTO sessions(id,token_hash,key_hash,hwid_hash,user_id,version,role,created,last_seen,expires) VALUES(?,?,?,?,?,?,?,?,?,?)',id,digest(token),key,hwid,body.user,Number(body.v),role,now(),now(),now()+ttl);
+      query.run('INSERT INTO sessions(id,token_hash,key_hash,hwid_hash,hwid,user_id,version,role,created,last_seen,expires) VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,digest(token),key,hwid,body.hwid,body.user,Number(body.v),role,now(),now(),now()+ttl);
       audit('client','session.open',id);
       return {ok:true,token,ttl,role};
     });
@@ -172,9 +172,9 @@ export function createApp(config, options={}) {
         return send(res,200,{profiles:await roblox.lookup(ids)});
       }
       if(req.method==='GET' && path==='/api/state') {
-        const sessions=query.all('SELECT id,user_id,version,role,created,last_seen,expires,revoked,reason,substr(key_hash,1,12) AS key_ref,substr(hwid_hash,1,12) AS hwid_ref FROM sessions ORDER BY created DESC LIMIT 2000');
+        const sessions=query.all('SELECT id,user_id,version,role,created,last_seen,expires,revoked,reason,substr(key_hash,1,12) AS key_ref,substr(hwid_hash,1,12) AS hwid_ref,hwid FROM sessions ORDER BY created DESC LIMIT 2000');
         const totals=query.get('SELECT count(*) AS total,sum(CASE WHEN revoked=0 AND expires>? THEN 1 ELSE 0 END) AS active FROM sessions',now());
-        return send(res,200,{api:2,serverTime:now(),settings:query.get('SELECT maintenance FROM settings WHERE id=1'),releases:query.all('SELECT * FROM releases ORDER BY version DESC LIMIT 500'),sessions,totals,bans:query.all('SELECT id,kind,CASE WHEN kind=\'user\' THEN value ELSE substr(value,1,12) END AS reference,reason,created FROM bans ORDER BY created DESC LIMIT 500'),logs:query.all('SELECT * FROM audit ORDER BY id DESC LIMIT 200'),ttl,heartbeat:60,prices:prices.status()});
+        return send(res,200,{api:3,serverTime:now(),settings:query.get('SELECT maintenance FROM settings WHERE id=1'),releases:query.all('SELECT * FROM releases ORDER BY version DESC LIMIT 500'),sessions,totals,bans:query.all('SELECT id,kind,CASE WHEN kind=\'user\' THEN value ELSE substr(value,1,12) END AS reference,reason,created FROM bans ORDER BY created DESC LIMIT 500'),logs:query.all('SELECT * FROM audit ORDER BY id DESC LIMIT 200'),ttl,heartbeat:60,prices:prices.status()});
       }
       const body=await jsonBody(req);
       if(req.method==='POST' && path==='/api/prices/run') {
@@ -236,6 +236,11 @@ export function createApp(config, options={}) {
     // Только явно разрешённые файлы панели. Исходники и конфигурация недоступны.
     const file=path==='/'?'index.html':path.slice(1);
     if(!/^(index\.html|dashboard\.html|assets\/(common\.js|login\.js|live\.js|style\.css))$/.test(file))fail(404,'Not found');
+    // Без входа доступна только страница входа; рабочая панель и её код — после TOTP
+    if(file==='dashboard.html'||file==='assets/live.js') {
+      try{authenticated(req);}
+      catch(e){if(e.status!==401)throw e;if(file==='dashboard.html'){res.writeHead(302,{Location:'/'});return res.end();}throw e;}
+    }
     // До первого push рабочей панели используем проверенную копию релиза.
     // После push существующий таймер продолжает обновлять только статические файлы.
     let panelDirectory=config.panelDirectory;

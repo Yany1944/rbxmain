@@ -50,81 +50,15 @@ local State = {
     Unloaded = false,
     Connections = {},
     UIElements = env.GUI.Flags,
-    ActiveShader = nil,
-    ActiveSky = nil,
 
-        -- 1. Shader Pack
-    ShaderPack = {
-        Enabled = false,
-        Mode = "None",
-        Bloom = true,
-        BloomIntensity = 4,
-        BloomSize = 24,
-        Atmosphere = true,
-        AtmosphereDensity = 40,
-        SunRays = true,
-        SunRaysIntensity = 25,
-        Blur = false,
-        BlurStrength = 75,
-        FocusDistance = 0,
-    },
-
-    -- 2. Storm
-    Storm = {
-        Enabled = false,
-        WindLines = true,
-        DepthBlur = true
-    },
-
-    -- 3. After Hours
-    AfterHours = {
-        Enabled = false,
-        Brightness = 4.0,
-        Exposure = 0.35,
-        Clock = 6.89,
-        Haze = 0.350
-    },
-
-    -- 4. Realistic
-    Realistic = {
-        Enabled = false,
-        Brightness = 3.0,
-        Exposure = 0.0,
-        Time = 14.5,
-        Haze = 0.300,
-        GroundFog = false,
-        FutureLighting = false
-    },
-
-    -- 5. Photo Studio
-    PhotoStudio = {
-        Enabled = false,
-        Brightness = 1.5,
-        Time = 0.0,
-        Haze = 0.218
-    },
-
-    -- 6. Desert
-    Desert = {
-        Enabled = false,
-        Brightness = 4.0,
-        Time = 9.0,
-        Haze = 0.350
-    },
-
-    -- 7. Clear Atmosphere
-    ClearAtmosphere = {
-        Enabled = false,
-        Density = 35,
-        HorizonOffset = 80,
-        SunGlare = 30
-    },
+    -- Окружение (вкладка World): один набор параметров. Пресет лишь заполняет
+    -- его значениями; правка любого параметра превращает пресет в Custom.
+    -- Значения по умолчанию — освещение карты (см. AMB.MapValues)
+    Amb = {},
 
     -- Effects & Auras
     Auras = {},
     AuraConfig = {},
-
-
 }
 
 -- Инициализация настроек для всех 10 аур
@@ -170,11 +104,16 @@ local GUI = env.GUI
 local OwnedLighting = {}
 local SuppressedLighting = {}
 
+-- Объекты карты, которые наше окружение сейчас перекрывает: небо (есть своё),
+-- атмосфера (есть своя или включён No Map Fog) и пост-эффекты (No Map Effects).
+-- Размытие и стекло самого меню (Violite_*) и наши объекты не трогаем
 function VFX.SyncEnvironment()
+    local A = State.Amb
     local function suppressed(obj)
+        if obj.Name:sub(1, 7) == "Violite" or obj.Name:sub(1, 4) == "MM2_" then return false end
         return (obj:IsA('Sky') and Lighting:FindFirstChild('Visuals_Sky') ~= nil)
-            or (obj:IsA('Atmosphere') and (Lighting:FindFirstChild('Visuals_Atmosphere') ~= nil or Lighting:FindFirstChild('Visuals_ClearAtmo') ~= nil))
-            or (obj:IsA('PostEffect') and State.ActiveShader ~= nil)
+            or (obj:IsA('Atmosphere') and (Lighting:FindFirstChild('Visuals_Atmosphere') ~= nil or A.NoMapFog == true))
+            or (obj:IsA('PostEffect') and A.NoMapFX == true)
     end
     for _,obj in ipairs(Lighting:GetChildren()) do
         if not OwnedLighting[obj] and suppressed(obj) and not SuppressedLighting[obj] then
@@ -337,30 +276,6 @@ function VFX.UpdateWindLines(on)
         end
     end)
     TrackConnection(WindLinesConn)
-end
-
-function VFX.DisableAllFX()
-    for _, name in ipairs({
-        "Visuals_Bloom", "Visuals_Blur", "Visuals_CC", "Visuals_SunRays", "Visuals_DoF"
-    }) do
-        local inst = Lighting:FindFirstChild(name)
-        if inst and inst:IsA("PostEffect") then inst.Enabled = false end
-    end
-    local atmo = Lighting:FindFirstChild("Visuals_Atmosphere")
-    if atmo then atmo:Destroy() end
-    VFX.UpdateWindLines(false)
-    VFX.UpdateGroundFog(false)
-    if State.ClearAtmosphere.Enabled then
-        VFX.ApplyClearAtmosphere()
-    end
-end
-
-function VFX.RestoreDefaultLighting()
-    State.ActiveShader=nil
-    VFX.DisableAllFX()
-    for prop,val in pairs(DefaultLighting) do pcall(function() Lighting[prop]=val end) end
-    if State.ActiveSky then VFX.ApplySky(State.ActiveSky) else VFX.RemoveSky() end
-    VFX.SyncEnvironment()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -555,527 +470,382 @@ local function applySkyDataToInstance(sky, d)
     if d.CelestialBodiesShown ~= nil then pcall(function() sky.CelestialBodiesShown = d.CelestialBodiesShown end) end
 end
 
-function VFX.ApplyShaderSky(shaderName)
-    if State.ActiveSky then return end
-    local data=SHADER_SKIES[shaderName]
-    if data then applySkyDataToInstance(VFX.GetSky(),data) else VFX.RemoveSky() end
-end
-
-function VFX.ApplySky(name)
-    if not name or name=='Default' then
-        State.ActiveSky=nil
-        VFX.ApplyShaderSky(State.ActiveShader)
-        return
-    end
-    local data=assert(SKYBOXES[name], 'Unknown sky '..tostring(name))
-    State.ActiveSky=name
-    applySkyDataToInstance(VFX.GetSky(),data)
-end
-
-function VFX.ApplyClearAtmosphere()
-    local ca = State.ClearAtmosphere
-    local clearAtmo = Lighting:FindFirstChild("Visuals_ClearAtmo")
-    if not ca.Enabled then
-        if clearAtmo then clearAtmo:Destroy() end
-        -- Восстанавливаем весь текущий пресет, включая четыре режима времени суток.
-        if State.ActiveShader then VFX.ApplyShader(State.ActiveShader) else VFX.SyncEnvironment() end
-        return
-    end
-
-    local shaderAtmo = Lighting:FindFirstChild("Visuals_Atmosphere")
-    if shaderAtmo then shaderAtmo:Destroy() end
-
-    local atmo = VFX.GetOrCreate("Atmosphere", "Visuals_ClearAtmo")
-    atmo.Density = (ca.Density / 100) * 0.5 -- 35% -> 0.175
-    atmo.Offset = ca.HorizonOffset / 100 -- 80% -> 0.80
-    atmo.Glare = (ca.SunGlare / 100) * 5.0 -- 30% -> 1.50
-    atmo.Haze = 0.90
-    atmo.Color = Color3.fromRGB(205, 214, 228)
-    atmo.Decay = Color3.fromRGB(96, 108, 124)
-    VFX.SyncEnvironment()
-end
-
 -- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 7: ПРЕСЕТЫ ШЕЙДЕРОВ
+-- БЛОК 7: ОКРУЖЕНИЕ (AMBIENCE) — пресеты, параметры, погода
 -- ══════════════════════════════════════════════════════════════════════════════
--- Полные параметры четырёх пресетов сверены с живым Pulse Hub.
-local CompletePresets = {
-    Morning = {Exposure = 0.3, Diffuse = 0.1, Specular = 0.1, Top = Color3.fromRGB(200,200,200), Latitude = 44,
-        Bloom = {0.2,5,0.8}, DoF = {0.5,0.5,15,5},
-        Atmo = {0.2,0.5,Color3.fromRGB(70,120,170),Color3.fromRGB(10,50,100),0.3,1}},
-    Midday = {Exposure = 0.85, Diffuse = 0.203, Specular = 0.255, Top = Color3.fromRGB(255,247,237), Latitude = -15.12,
-        Bloom = {0.3,10,0.8}, DoF = {0.277,0.277,21.54,16.77},
-        Atmo = {0.364,0.556,Color3.fromRGB(175,221,255),Color3.fromRGB(13,105,172),0.36,0.72}},
-    Evening = {Exposure = 0.65, Diffuse = 0.203, Specular = 0.215, Top = Color3.fromRGB(255,247,237), Latitude = 45,
-        Bloom = {0.3234,10,0.813}, DoF = {0.217,0.277,21.54,16.77},
-        Atmo = {0.364,1,Color3.fromRGB(199,175,166),Color3.fromRGB(44,39,33),0.36,1.72}},
-    Night = {Exposure = 0.85, Diffuse = 0.203, Specular = 0.255, Top = Color3.fromRGB(255,247,237), Latitude = -15,
-        Bloom = {0.34,10,0.813}, DoF = {0.217,0.277,11.54,16.77},
-        Atmo = {0.264,0.156,Color3.fromRGB(175,221,255),Color3.fromRGB(13,105,172),0.36,1.72}},
+-- Вместо десяти взаимоисключающих шейдеров со своими копиями ползунков — один
+-- набор параметров (как Ambience в Neverlose). Пресет заполняет его значениями,
+-- любая правка превращает пресет в Custom. Пресет Map = освещение карты; поверх
+-- него всегда работают независимые переключатели (Fullbright, Removals, Ground Fog)
+local AMB = {}
+local rgb = Color3.fromRGB
+
+-- Палитры: кружок в GUI, значение — имя (так оно и лежит в конфиге)
+AMB.Ambient = {
+    {Name = "Map", Color = DefaultLighting.OutdoorAmbient},
+    {Name = "Neutral", Color = rgb(128, 128, 128)},
+    {Name = "Warm", Color = rgb(150, 115, 80)},
+    {Name = "Cool", Color = rgb(85, 105, 145)},
+    {Name = "Violet", Color = rgb(115, 85, 150)},
+    {Name = "Dark", Color = rgb(35, 38, 58)},
 }
-local function applyCompletePreset(name)
-    local p = CompletePresets[name]
-    if not p then return end
-    Lighting.ExposureCompensation = p.Exposure
-    Lighting.EnvironmentDiffuseScale = p.Diffuse
-    Lighting.EnvironmentSpecularScale = p.Specular
-    Lighting.ColorShift_Top = p.Top
-    Lighting.ColorShift_Bottom = Color3.fromRGB(0,0,0)
-    Lighting.GeographicLatitude = p.Latitude
-    Lighting.GlobalShadows = true
-    Lighting.ShadowSoftness = 0.5
-    Lighting.FogColor = Color3.fromRGB(255,255,255)
-    Lighting.FogStart = math.huge
-    Lighting.FogEnd = math.huge
-    local bloom = VFX.GetBloom()
-    bloom.Intensity, bloom.Size, bloom.Threshold = unpack(p.Bloom)
-    bloom.Enabled = true
-    local dof = VFX.GetDoF()
-    dof.FarIntensity, dof.NearIntensity, dof.FocusDistance, dof.InFocusRadius = unpack(p.DoF)
-    dof.Enabled = true
-    if not State.ClearAtmosphere.Enabled then
-        local atmo = VFX.GetAtmosphere()
-        atmo.Density, atmo.Offset, atmo.Color, atmo.Decay, atmo.Glare, atmo.Haze = unpack(p.Atmo)
+AMB.Fog = {
+    {Name = "White", Color = rgb(205, 210, 218)},
+    {Name = "Blue", Color = rgb(150, 195, 240)},
+    {Name = "Amber", Color = rgb(225, 175, 120)},
+    {Name = "Rose", Color = rgb(230, 165, 190)},
+    {Name = "Violet", Color = rgb(160, 140, 225)},
+    {Name = "Dark", Color = rgb(30, 32, 40)},
+}
+AMB.Tint = {
+    {Name = "None", Color = rgb(255, 255, 255)},
+    {Name = "Warm", Color = rgb(255, 224, 196)},
+    {Name = "Cool", Color = rgb(206, 224, 255)},
+    {Name = "Rose", Color = rgb(255, 208, 224)},
+    {Name = "Mint", Color = rgb(206, 255, 228)},
+    {Name = "Violet", Color = rgb(226, 208, 255)},
+}
+
+local function colorOf(list, name)
+    for _, entry in ipairs(list) do
+        if entry.Name == name then return entry.Color end
+    end
+    return list[1].Color
+end
+
+-- Небеса: короткие понятные имена вместо названий исходных паков
+AMB.Skies = {
+    {Name = "Map"},
+    {Name = "Clear Day", Data = SKYBOXES["Classic Realistic Sky"]},
+    {Name = "Realistic", Data = SKYBOXES["Realistic Sky"]},
+    {Name = "Cloudy", Data = SHADER_SKIES["Realistic"]},
+    {Name = "Heavenly", Data = SKYBOXES["Heavenly Clouds"]},
+    {Name = "Anime", Data = SKYBOXES["Anime Sky"]},
+    {Name = "Pink", Data = SKYBOXES["Pink Sky"]},
+    {Name = "Pastel", Data = SKYBOXES["Pastel Pink Sky"]},
+    {Name = "Desert", Data = SHADER_SKIES["Desert"]},
+    {Name = "Neon Night", Data = SHADER_SKIES["After Hours"]},
+    {Name = "Studio", Data = SHADER_SKIES["Photo Studio"]},
+    {Name = "Overcast", Data = SKYBOXES["Rain Sky"]},
+    {Name = "Storm", Data = SHADER_SKIES["Storm"]},
+    {Name = "Thunder", Data = SKYBOXES["Black Storm"]},
+    {Name = "Stormy", Data = SKYBOXES["Stormy Sky"]},
+    {Name = "Space", Data = SKYBOXES["Space Sky"]},
+    {Name = "Nebula", Data = SKYBOXES["Blue Space"]},
+}
+AMB.SkyNames = {}
+for _, sky in ipairs(AMB.Skies) do table.insert(AMB.SkyNames, sky.Name) end
+local function skyData(name)
+    for _, sky in ipairs(AMB.Skies) do
+        if sky.Name == name then return sky.Data end
+    end
+    return nil
+end
+
+AMB.WeatherKinds = {"None", "Rain", "Snow", "Wind"}
+
+-- Параметры, которые задаёт пресет (флаг GUI — "Amb" .. ключ)
+AMB.PresetKeys = {"Time", "Brightness", "Exposure", "Ambient", "Tint", "Contrast", "Saturation",
+    "Sky", "Haze", "Glare", "FogColor", "Bloom", "SunRays", "DoF", "Weather"}
+
+-- Значения «как на карте»: правка с пресета Map меняет ровно один параметр
+function AMB.MapValues()
+    return {
+        Time = math.floor(DefaultLighting.ClockTime * 4 + 0.5) / 4,
+        Brightness = math.clamp(math.floor(DefaultLighting.Brightness * 10 + 0.5) / 10, 0, 10),
+        Exposure = math.clamp(math.floor(DefaultLighting.ExposureCompensation * 20 + 0.5) / 20, -2, 2),
+        Ambient = "Map", Tint = "None", Contrast = 0, Saturation = 0,
+        Sky = "Map", Haze = 0, Glare = 0, FogColor = "White",
+        Bloom = 0, SunRays = 0, DoF = 0, Weather = "None",
+    }
+end
+
+AMB.Presets = {
+    Day = {Time = 14, Brightness = 3, Exposure = 0, Ambient = "Neutral", Tint = "None", Contrast = 5, Saturation = 10,
+        Sky = "Clear Day", Haze = 20, Glare = 10, FogColor = "White", Bloom = 15, SunRays = 20, DoF = 0, Weather = "None"},
+    Golden = {Time = 17.5, Brightness = 2.5, Exposure = 0.1, Ambient = "Warm", Tint = "Warm", Contrast = 10, Saturation = 15,
+        Sky = "Map", Haze = 35, Glare = 45, FogColor = "Amber", Bloom = 30, SunRays = 45, DoF = 0, Weather = "None"},
+    Night = {Time = 0, Brightness = 2, Exposure = 0.25, Ambient = "Dark", Tint = "Cool", Contrast = 10, Saturation = -10,
+        Sky = "Map", Haze = 20, Glare = 0, FogColor = "Blue", Bloom = 35, SunRays = 0, DoF = 0, Weather = "None"},
+    Neon = {Time = 6.75, Brightness = 4, Exposure = 0.35, Ambient = "Violet", Tint = "Rose", Contrast = 10, Saturation = 20,
+        Sky = "Neon Night", Haze = 35, Glare = 0, FogColor = "Violet", Bloom = 40, SunRays = 5, DoF = 0, Weather = "None"},
+    Storm = {Time = 14, Brightness = 1.5, Exposure = -0.1, Ambient = "Cool", Tint = "Cool", Contrast = 10, Saturation = -30,
+        Sky = "Storm", Haze = 55, Glare = 30, FogColor = "White", Bloom = 10, SunRays = 0, DoF = 25, Weather = "Rain"},
+    Studio = {Time = 12, Brightness = 1.5, Exposure = 0, Ambient = "Neutral", Tint = "None", Contrast = 15, Saturation = -10,
+        Sky = "Studio", Haze = 20, Glare = 0, FogColor = "White", Bloom = 15, SunRays = 0, DoF = 0, Weather = "None"},
+    Desert = {Time = 9, Brightness = 4, Exposure = 0, Ambient = "Warm", Tint = "Warm", Contrast = 12, Saturation = -30,
+        Sky = "Desert", Haze = 35, Glare = 15, FogColor = "Amber", Bloom = 25, SunRays = 10, DoF = 0, Weather = "None"},
+}
+
+-- Плитки сетки пресетов: градиент «небо сверху → земля снизу»
+AMB.Tiles = {
+    {Name = "Map", Top = rgb(74, 78, 90), Bottom = rgb(34, 36, 42)},
+    {Name = "Day", Top = rgb(100, 165, 235), Bottom = rgb(200, 226, 250)},
+    {Name = "Golden", Top = rgb(255, 172, 95), Bottom = rgb(120, 68, 108)},
+    {Name = "Night", Top = rgb(16, 22, 52), Bottom = rgb(58, 70, 122)},
+    {Name = "Neon", Top = rgb(118, 50, 200), Bottom = rgb(255, 88, 170)},
+    {Name = "Storm", Top = rgb(62, 72, 88), Bottom = rgb(132, 142, 152)},
+    {Name = "Studio", Top = rgb(236, 236, 242), Bottom = rgb(156, 156, 168)},
+    {Name = "Desert", Top = rgb(242, 202, 132), Bottom = rgb(198, 118, 68)},
+    {Name = "Custom", Top = rgb(94, 106, 210), Bottom = rgb(38, 42, 78)},
+}
+
+do
+    local initial = AMB.MapValues()
+    for key, value in pairs(initial) do State.Amb[key] = value end
+    State.Amb.Preset = "Map"
+    State.Amb.WeatherAmount = 50
+    State.Amb.Fullbright = false
+    State.Amb.GroundFog = false
+    State.Amb.NoShadows = false
+    State.Amb.NoMapFog = false
+    State.Amb.NoMapFX = false
+end
+
+-- ─── Погода: частицы вокруг камеры ────────────────────────────────────────────
+-- Дождь и снег идут из плиты над камерой (частицы в мире: камера уходит — капли
+-- остаются). Под крышей осадки гаснут: раз в 0.25 с луч от камеры вверх
+local Weather = {Kind = "None", Folder = nil, Emitter = nil, Conn = nil, Amount = 50, Covered = false, NextSky = 0}
+local WEATHER = {
+    Rain = {Height = 26, Ahead = 10, Size = 80, Rate = 16,
+        Props = {
+            Texture = "rbxasset://textures/particles/sparkles_main.dds",
+            Orientation = Enum.ParticleOrientation.VelocityParallel,
+            Size = NumberSequence.new(0.32), Squash = NumberSequence.new(-2.6),
+            Color = ColorSequence.new(rgb(205, 220, 235)), LightEmission = 0.5, LightInfluence = 0.4,
+            Transparency = NumberSequence.new(0.2), Speed = NumberRange.new(85, 105),
+            Lifetime = NumberRange.new(0.45, 0.65), EmissionDirection = Enum.NormalId.Bottom,
+            SpreadAngle = Vector2.new(3, 3),
+        }},
+    Snow = {Height = 18, Ahead = 6, Size = 70, Rate = 4,
+        Props = {
+            Texture = "rbxasset://textures/particles/smoke_main.dds",
+            Size = NumberSequence.new(0.28), Color = ColorSequence.new(rgb(245, 248, 255)),
+            LightEmission = 0.6, LightInfluence = 0.5, Transparency = NumberSequence.new(0.05),
+            Speed = NumberRange.new(4, 7), Lifetime = NumberRange.new(6, 8),
+            EmissionDirection = Enum.NormalId.Bottom, SpreadAngle = Vector2.new(25, 25),
+            Acceleration = Vector3.new(1.2, -1.5, 0.6), RotSpeed = NumberRange.new(-60, 60),
+            Rotation = NumberRange.new(0, 360),
+        }},
+}
+
+local function clearWeather()
+    if Weather.Conn then pcall(function() Weather.Conn:Disconnect() end) end
+    if Weather.Folder then pcall(function() Weather.Folder:Destroy() end) end
+    Weather.Conn, Weather.Folder, Weather.Emitter = nil, nil, nil
+end
+
+local function skyCovered(cam)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local ignore = {cam}
+    local char = LocalPlayer.Character
+    if char then table.insert(ignore, char) end
+    params.FilterDescendantsInstances = ignore
+    return workspace:Raycast(cam.CFrame.Position, Vector3.new(0, 120, 0), params) ~= nil
+end
+
+function AMB.SetWeather(kind, amount)
+    amount = math.clamp(tonumber(amount) or 50, 0, 100)
+    Weather.Amount = amount
+    if kind == "Wind" then
+        clearWeather()
+        Weather.Kind = kind
+        VFX.UpdateWindLines(true)
+        local part = WindLinesFolder and WindLinesFolder:FindFirstChild("WindEmitterPart")
+        local emitter = part and part:FindFirstChildOfClass("ParticleEmitter")
+        if emitter then emitter.Rate = 4 + amount * 0.5 end
+        return
+    end
+    VFX.UpdateWindLines(false)
+    local spec = WEATHER[kind]
+    if not spec or State.Unloaded then
+        clearWeather()
+        Weather.Kind = "None"
+        return
+    end
+    if Weather.Kind ~= kind or not Weather.Folder or not Weather.Folder.Parent then
+        clearWeather()
+        Weather.Kind = kind
+        local cam = workspace.CurrentCamera
+        if not cam then return end
+        local folder = Instance.new("Folder")
+        folder.Name = "Visuals_Weather"
+        local part = Instance.new("Part")
+        part.Name = "WeatherEmitter"
+        part.Anchored, part.CanCollide, part.CanQuery, part.CanTouch = true, false, false, false
+        part.Transparency, part.CastShadow = 1, false
+        part.Size = Vector3.new(spec.Size, 1, spec.Size)
+        part.Parent = folder
+        local emitter = Instance.new("ParticleEmitter")
+        for prop, value in pairs(spec.Props) do pcall(function() emitter[prop] = value end) end
+        emitter.Parent = part
+        folder.Parent = cam
+        Weather.Folder, Weather.Emitter = folder, emitter
+        Weather.Covered, Weather.NextSky = false, 0
+        Weather.Conn = RunService.RenderStepped:Connect(function()
+            local current = workspace.CurrentCamera
+            if not current or not part.Parent then return end
+            folder.Parent = current
+            local look = current.CFrame.LookVector
+            local flat = Vector3.new(look.X, 0, look.Z)
+            flat = flat.Magnitude > 1e-3 and flat.Unit or Vector3.zero
+            part.CFrame = CFrame.new(current.CFrame.Position + flat * spec.Ahead + Vector3.new(0, spec.Height, 0))
+            local now = os.clock()
+            if now >= Weather.NextSky then
+                Weather.NextSky = now + 0.25
+                Weather.Covered = skyCovered(current)
+                emitter.Enabled = not Weather.Covered
+            end
+        end)
+        TrackConnection(Weather.Conn)
+    end
+    if Weather.Emitter then Weather.Emitter.Rate = spec.Rate * amount end
+end
+
+-- Туман у земли пересоздаётся только при смене состояния
+local groundFogOn = false
+local function setGroundFog(on)
+    on = on == true
+    if on == groundFogOn and (not on or GroundFogPart) then return end
+    groundFogOn = on
+    VFX.UpdateGroundFog(on)
+end
+
+-- ─── Применение ───────────────────────────────────────────────────────────────
+-- Всё считается с нуля от снимка освещения карты: порядок правок не важен,
+-- и ничего не накапливается
+local function setEffect(getter, name, amount, configure)
+    local inst = Lighting:FindFirstChild(name)
+    if amount > 0 then
+        inst = getter()
+        configure(inst, amount / 100)
+        inst.Enabled = true
+    elseif inst then
+        inst.Enabled = false
     end
 end
 
-function VFX.ApplyShader(shaderName)
-    State.ActiveShader = (shaderName and shaderName ~= 'None') and shaderName or nil
-    VFX.DisableAllFX()
-    for prop,val in pairs(DefaultLighting) do pcall(function() Lighting[prop]=val end) end
+function AMB.Apply()
+    if State.Unloaded then return end
+    local A = State.Amb
+    local active = A.Preset ~= "Map"
+    for prop, val in pairs(DefaultLighting) do pcall(function() Lighting[prop] = val end) end
 
-    if shaderName == "None" or not shaderName then
-        VFX.RestoreDefaultLighting()
-        return
+    if active then
+        Lighting.ClockTime = A.Time
+        Lighting.Brightness = A.Brightness
+        Lighting.ExposureCompensation = A.Exposure
+        if A.Ambient ~= "Map" then
+            local color = colorOf(AMB.Ambient, A.Ambient)
+            Lighting.OutdoorAmbient = color
+            Lighting.Ambient = color:Lerp(Color3.new(0, 0, 0), 0.35)
+        end
     end
-
-    ----------------------------------------------------------------
-    -- 1. Shader Pack
-    ----------------------------------------------------------------
-    if shaderName == "Shader Pack" then
-        local sp = State.ShaderPack
-        local cc = VFX.GetCC()
-
-        if sp.Mode == "Day" then
-            Lighting.ClockTime = 14
-            Lighting.Brightness = 3
-            Lighting.OutdoorAmbient = Color3.fromRGB(140, 140, 140)
-            Lighting.ExposureCompensation = 0
-            cc.TintColor = Color3.fromRGB(255, 255, 255)
-            cc.Brightness = 0
-            cc.Contrast = 0
-            cc.Saturation = 0
-            cc.Enabled = true
-        elseif sp.Mode == "Sunset" then
-            Lighting.ClockTime = 18.5
-            Lighting.Brightness = 2.5
-            Lighting.OutdoorAmbient = Color3.fromRGB(180, 120, 80)
-            Lighting.ExposureCompensation = 0
-            cc.TintColor = Color3.fromRGB(255, 200, 160)
-            cc.Brightness = 0
-            cc.Contrast = 0
-            cc.Saturation = 0
-            cc.Enabled = true
-        elseif sp.Mode == "Midnight" then
-            Lighting.ClockTime = 0
-            Lighting.Brightness = 1.5
-            Lighting.OutdoorAmbient = Color3.fromRGB(25, 25, 45)
-            Lighting.ExposureCompensation = 0
-            cc.TintColor = Color3.fromRGB(180, 200, 255)
-            cc.Brightness = 0
-            cc.Contrast = 0
-            cc.Saturation = 0
-            cc.Enabled = true
-        else
-            Lighting.ClockTime = DefaultLighting.ClockTime
-            Lighting.Brightness = DefaultLighting.Brightness
-            Lighting.OutdoorAmbient = DefaultLighting.OutdoorAmbient
-            Lighting.ExposureCompensation = DefaultLighting.ExposureCompensation
-            cc.Enabled = false
-        end
-
-        local bloom = VFX.GetBloom()
-        bloom.Intensity = sp.BloomIntensity / 10
-        bloom.Size = sp.BloomSize
-        bloom.Threshold = 0.8
-        bloom.Enabled = sp.Bloom
-
-        if sp.Atmosphere and not State.ClearAtmosphere.Enabled then
-            local atmo = VFX.GetAtmosphere()
-            atmo.Density = sp.AtmosphereDensity / 100
-            atmo.Offset = 0
-            atmo.Haze = 0
-            atmo.Glare = 0
-            atmo.Color = Color3.fromRGB(199, 199, 199)
-            atmo.Decay = Color3.fromRGB(106, 112, 125)
-        end
-
-        local rays = VFX.GetSunRays()
-        rays.Intensity = sp.SunRaysIntensity / 100
-        rays.Spread = 1.0
-        rays.Enabled = sp.SunRays
-
-        -- В Pulse Hub переключатель Blur в Shader Pack управляет Depth of Field!
-        local blur = Lighting:FindFirstChild("Visuals_Blur")
-        if blur then blur.Enabled = false end
-
-        local dof = Lighting:FindFirstChild("Visuals_DoF")
-        if sp.Blur then
-            if not dof then dof = VFX.GetDoF() end
-            dof.FarIntensity = sp.BlurStrength / 100
-            dof.NearIntensity = sp.BlurStrength / 100
-            dof.FocusDistance = (sp.FocusDistance > 0 and sp.FocusDistance) or 0.05
-            dof.InFocusRadius = 10
-            dof.Enabled = true
-        elseif dof then
-            dof.Enabled = false
-        end
-
-        VFX.ApplyShaderSky("Shader Pack")
-
-    ----------------------------------------------------------------
-    -- 2. Storm (Точный дамп Pulse Hub)
-    ----------------------------------------------------------------
-    elseif shaderName == "Storm" then
-        Lighting.ClockTime = 14.0
-        Lighting.Brightness = DefaultLighting.Brightness
-        Lighting.ExposureCompensation = 0
-        Lighting.Ambient = DefaultLighting.Ambient
-        Lighting.OutdoorAmbient = DefaultLighting.OutdoorAmbient
-        Lighting.GlobalShadows = true
-        Lighting.ShadowSoftness = 0.5
-        Lighting.GeographicLatitude = 41.733
-
-        if not State.ClearAtmosphere.Enabled then
-            local atmo = VFX.GetAtmosphere()
-            atmo.Density = 0.325
-            atmo.Offset = 0
-            atmo.Color = Color3.fromRGB(199, 199, 199)
-            atmo.Decay = Color3.fromRGB(59, 59, 59)
-            atmo.Glare = 1.0
-            atmo.Haze = 2.0
-        end
-
-        local bloom = VFX.GetBloom()
-        bloom.Intensity = 0.1
-        bloom.Size = 0.4
-        bloom.Threshold = 0.8
-        bloom.Enabled = true
-
-        local rays = VFX.GetSunRays()
-        rays.Intensity = 0.005
-        rays.Spread = 0.65
-        rays.Enabled = true
-
-        local dof = VFX.GetDoF()
-        dof.FarIntensity = 0.4
-        dof.NearIntensity = 0.05
-        dof.FocusDistance = 100
-        dof.InFocusRadius = 0
-        dof.Enabled = State.Storm.DepthBlur
-
-        local blur = VFX.GetBlur()
-        blur.Size = 3
-        blur.Enabled = true
-
-        local cc = Lighting:FindFirstChild("Visuals_CC")
-        if cc then cc.Enabled = false end
-
-        VFX.ApplyShaderSky("Storm")
-        VFX.UpdateWindLines(State.Storm.WindLines)
-
-    ----------------------------------------------------------------
-    -- 3. After Hours (Точный дамп Pulse Hub)
-    ----------------------------------------------------------------
-    elseif shaderName == "After Hours" then
-        Lighting.EnvironmentDiffuseScale = 0.5
-        Lighting.EnvironmentSpecularScale = 0.65
-        Lighting.GeographicLatitude = 0
-        Lighting.ClockTime = State.AfterHours.Clock
-        Lighting.Brightness = State.AfterHours.Brightness
-        Lighting.ExposureCompensation = State.AfterHours.Exposure
-        Lighting.Ambient = Color3.fromRGB(50, 50, 50)
-        Lighting.OutdoorAmbient = Color3.fromRGB(50, 50, 50)
-        Lighting.ColorShift_Top = Color3.fromRGB(0, 0, 0)
-        Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
-
-        if not State.ClearAtmosphere.Enabled then
-            local atmo = VFX.GetAtmosphere()
-            atmo.Density = State.AfterHours.Haze
-            atmo.Offset = 0.6
-            atmo.Color = Color3.fromRGB(0, 0, 0)
-            atmo.Decay = Color3.fromRGB(92, 60, 13)
-            atmo.Glare = 0
-            atmo.Haze = 0
-        end
-
-        local cc = VFX.GetCC()
-        cc.Brightness = 0
-        cc.Contrast = 0.05
-        cc.Saturation = 0.05
-        cc.TintColor = Color3.fromRGB(255, 255, 255)
-        cc.Enabled = true
-
-        local bloom = VFX.GetBloom()
-        bloom.Intensity = 0.25
-        bloom.Size = 24
-        bloom.Threshold = 2
-        bloom.Enabled = true
-
-        local rays = VFX.GetSunRays()
-        rays.Intensity = 0.02
-        rays.Spread = 0.1
-        rays.Enabled = true
-
-        local blur = VFX.GetBlur()
-        blur.Size = 4
-        blur.Enabled = true
-
-        local dof = Lighting:FindFirstChild("Visuals_DoF")
-        if dof then dof.Enabled = false end
-
-        VFX.ApplyShaderSky("After Hours")
-
-    ----------------------------------------------------------------
-    -- 4. Realistic (Точный дамп Pulse Hub — БЛЮР ВЫКЛЮЧЕН!)
-    ----------------------------------------------------------------
-    elseif shaderName == "Realistic" then
-        Lighting.ClockTime = State.Realistic.Time
-        Lighting.Brightness = State.Realistic.Brightness
-        Lighting.ExposureCompensation = State.Realistic.Exposure
-        Lighting.Ambient = Color3.fromRGB(70, 70, 70)
-        Lighting.OutdoorAmbient = Color3.fromRGB(70, 70, 70)
-        Lighting.ColorShift_Top = Color3.fromRGB(0, 0, 0)
-        Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
-        Lighting.EnvironmentDiffuseScale = 1.0
-        Lighting.EnvironmentSpecularScale = 1.0
-        Lighting.GlobalShadows = true
-        Lighting.ShadowSoftness = State.Realistic.FutureLighting and 0.1 or 0.4
-        Lighting.GeographicLatitude = 0
-        Lighting.FogColor = Color3.fromRGB(192, 192, 192)
-
-        if State.Realistic.GroundFog then
-            Lighting.FogEnd = 120
-            Lighting.FogStart = 0
-        else
-            Lighting.FogEnd = 100000
-            Lighting.FogStart = 0
-        end
-
-        VFX.UpdateGroundFog(State.Realistic.GroundFog)
-
-        if not State.ClearAtmosphere.Enabled then
-            local atmo = VFX.GetAtmosphere()
-            atmo.Density = State.Realistic.Haze
-            atmo.Offset = 0.25
-            atmo.Color = Color3.fromRGB(199, 199, 199)
-            atmo.Decay = Color3.fromRGB(106, 112, 125)
-            atmo.Glare = 0
-            atmo.Haze = 0
-        end
-
-        local cc = VFX.GetCC()
-        cc.Brightness = -0.1
-        cc.Contrast = 0.1
-        cc.Saturation = 0.1
-        cc.TintColor = Color3.fromRGB(255, 247, 247)
-        cc.Enabled = true
-
-        local bloom = VFX.GetBloom()
-        bloom.Intensity = 0.1
-        bloom.Size = 20
-        bloom.Threshold = 0
-        bloom.Enabled = true
-
-        local rays = VFX.GetSunRays()
-        rays.Intensity = 0.167
-        rays.Spread = 1.0
-        rays.Enabled = true
-
-        local dof = VFX.GetDoF()
-        dof.FarIntensity = 1.0
-        dof.NearIntensity = 0
-        dof.FocusDistance = 125
-        dof.InFocusRadius = 50
-        dof.Enabled = true
-
-        local blur = Lighting:FindFirstChild("Visuals_Blur")
-        if blur then blur.Enabled = false end
-
-        VFX.ApplyShaderSky("Realistic")
-
-    ----------------------------------------------------------------
-    -- 5. Photo Studio (Точный дамп Pulse Hub — БЛЮР ВЫКЛЮЧЕН!)
-    ----------------------------------------------------------------
-    elseif shaderName == "Photo Studio" then
-        Lighting.ClockTime = State.PhotoStudio.Time -- 0.0
-        Lighting.Brightness = State.PhotoStudio.Brightness -- 1.5
-        Lighting.ExposureCompensation = 0.0
-        Lighting.Ambient = Color3.fromRGB(63, 63, 63)
-        Lighting.OutdoorAmbient = Color3.fromRGB(65, 65, 65)
-        Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
-        Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
-        Lighting.EnvironmentDiffuseScale = 0.65
-        Lighting.EnvironmentSpecularScale = 0.0
-        Lighting.GeographicLatitude = 25
-        Lighting.GlobalShadows = true
-        Lighting.ShadowSoftness = 0.1
-        Lighting.FogColor = Color3.fromRGB(0, 0, 0)
-        Lighting.FogStart = 0
-        Lighting.FogEnd = 10000
-        pcall(function() Lighting.Technology = Enum.Technology.ShadowMap end)
-
-        if not State.ClearAtmosphere.Enabled then
-            local atmo = VFX.GetAtmosphere()
-            atmo.Density = State.PhotoStudio.Haze
-            atmo.Offset = 0
-            atmo.Color = Color3.fromRGB(255, 255, 255)
-            atmo.Decay = Color3.fromRGB(0, 0, 0)
-            atmo.Glare = 0
-            atmo.Haze = 1
-        end
-
-        local cc = VFX.GetCC()
-        cc.Brightness = 0.10
-        cc.Contrast = 0.15
-        cc.Saturation = -0.10
-        cc.TintColor = Color3.fromRGB(255, 255, 255)
-        cc.Enabled = true
-
-        local bloom = VFX.GetBloom()
-        bloom.Intensity = 0.15
-        bloom.Size = 18
-        bloom.Threshold = 0.80
-        bloom.Enabled = true
-
-        local rays = Lighting:FindFirstChild("Visuals_SunRays")
-        if rays then rays.Enabled = false end
-
-        -- Глубина резкости строго выключена
-        local dof = Lighting:FindFirstChild("Visuals_DoF")
-        if dof then dof.Enabled = false end
-
-        -- Размытие экрана строго выключено
-        local blur = Lighting:FindFirstChild("Visuals_Blur")
-        if blur then blur.Enabled = false end
-
-        VFX.ApplyShaderSky("Photo Studio")
-
-    ----------------------------------------------------------------
-    -- 6. Desert (Точный дамп Pulse Hub — БЛЮР ВЫКЛЮЧЕН!)
-    ----------------------------------------------------------------
-    elseif shaderName == "Desert" then
-        Lighting.ClockTime = State.Desert.Time
-        Lighting.Brightness = State.Desert.Brightness
-        Lighting.ExposureCompensation = 0.0
-        Lighting.Ambient = Color3.fromRGB(85, 85, 0)
-        Lighting.OutdoorAmbient = Color3.fromRGB(50, 50, 50)
-        Lighting.ColorShift_Top = Color3.fromRGB(85, 85, 0)
-        Lighting.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
-        Lighting.EnvironmentDiffuseScale = 0.25
-        Lighting.EnvironmentSpecularScale = 0.5
-        Lighting.GlobalShadows = true
-        Lighting.ShadowSoftness = 0.2
-        Lighting.GeographicLatitude = 35
-        Lighting.FogColor = Color3.fromRGB(192, 192, 192)
-        Lighting.FogStart = 0
+    if A.Fullbright then
+        Lighting.Ambient = rgb(178, 178, 178)
+        Lighting.OutdoorAmbient = rgb(178, 178, 178)
+        Lighting.Brightness = math.max(Lighting.Brightness, 2)
+        Lighting.GlobalShadows = false
+    end
+    if A.NoShadows then Lighting.GlobalShadows = false end
+    if A.NoMapFog then
+        Lighting.FogStart = 100000
         Lighting.FogEnd = 100000
-
-        pcall(function() Lighting.Technology = Enum.Technology.Future end)
-
-        if not State.ClearAtmosphere.Enabled then
-            local atmo = VFX.GetAtmosphere()
-            atmo.Density = State.Desert.Haze
-            atmo.Offset = 1.0
-            atmo.Color = Color3.fromRGB(170, 255, 255)
-            atmo.Decay = Color3.fromRGB(200, 200, 200)
-            atmo.Glare = 0.25
-            atmo.Haze = 10
-        end
-
-        local cc = VFX.GetCC()
-        cc.Brightness = 0
-        cc.Contrast = 0.125
-        cc.Saturation = -0.3
-        cc.TintColor = Color3.fromRGB(255, 255, 255)
-        cc.Enabled = true
-
-        local bloom = VFX.GetBloom()
-        bloom.Intensity = 0.25
-        bloom.Size = 32
-        bloom.Threshold = 2
-        bloom.Enabled = true
-
-        local rays = VFX.GetSunRays()
-        rays.Intensity = 0.1
-        rays.Spread = 0.6
-        rays.Enabled = true
-
-        local dof = Lighting:FindFirstChild("Visuals_DoF")
-        if dof then dof.Enabled = false end
-
-        local blur = Lighting:FindFirstChild("Visuals_Blur")
-        if blur then blur.Enabled = false end
-
-        VFX.ApplyShaderSky("Desert")
-
-    ----------------------------------------------------------------
-    -- 7. Lighting Presets (Morning, Midday, Evening, Night)
-    ----------------------------------------------------------------
-    elseif shaderName == "Morning" then
-        Lighting.ClockTime = 7.5
-        Lighting.Brightness = 1.5
-        Lighting.Ambient = Color3.fromRGB(10, 10, 10)
-        Lighting.OutdoorAmbient = Color3.fromRGB(10, 10, 10)
-        local cc = VFX.GetCC()
-        cc.TintColor = Color3.fromRGB(100, 150, 200)
-        cc.Brightness = -0.02
-        cc.Contrast = 0.8
-        cc.Saturation = -0.5
-        cc.Enabled = true
-        VFX.ApplyShaderSky("Morning")
-
-    elseif shaderName == "Midday" then
-        Lighting.ClockTime = 8.0
-        Lighting.Brightness = 3.25
-        Lighting.Ambient = Color3.fromRGB(2, 2, 2)
-        Lighting.OutdoorAmbient = Color3.fromRGB(51, 54, 67)
-        local cc = VFX.GetCC()
-        cc.TintColor = Color3.fromRGB(242, 243, 243)
-        cc.Brightness = 0.1
-        cc.Contrast = 0.5
-        cc.Saturation = -0.3
-        cc.Enabled = true
-        VFX.ApplyShaderSky("Midday")
-
-    elseif shaderName == "Evening" then
-        Lighting.ClockTime = 16.0
-        Lighting.Brightness = 2.25
-        Lighting.Ambient = Color3.fromRGB(2, 2, 2)
-        Lighting.OutdoorAmbient = Color3.fromRGB(0, 0, 0)
-        local cc = VFX.GetCC()
-        cc.TintColor = Color3.fromRGB(255, 205, 185)
-        cc.Brightness = 0.1
-        cc.Contrast = 0.5
-        cc.Saturation = -0.3
-        cc.Enabled = true
-        VFX.ApplyShaderSky("Evening")
-
-    elseif shaderName == "Night" then
-        Lighting.ClockTime = 20.0
-        Lighting.Brightness = 3.25
-        Lighting.Ambient = Color3.fromRGB(33, 33, 33)
-        Lighting.OutdoorAmbient = Color3.fromRGB(51, 54, 67)
-        local cc = VFX.GetCC()
-        cc.TintColor = Color3.fromRGB(242, 243, 243)
-        cc.Brightness = -0.06
-        cc.Contrast = -0.02
-        cc.Saturation = -0.2
-        cc.Enabled = true
-        VFX.ApplyShaderSky("Night")
     end
-    applyCompletePreset(shaderName)
+
+    -- Дымка: Haze — плотность, Glare — свечение вокруг солнца
+    local haze, glare = active and A.Haze or 0, active and A.Glare or 0
+    local atmo = Lighting:FindFirstChild("Visuals_Atmosphere")
+    if haze > 0 or glare > 0 then
+        atmo = VFX.GetAtmosphere()
+        local color = colorOf(AMB.Fog, A.FogColor)
+        atmo.Density = haze / 100 * 0.6
+        atmo.Offset = 0.25
+        atmo.Color = color
+        atmo.Decay = color:Lerp(Color3.new(0, 0, 0), 0.55)
+        atmo.Glare = glare / 100 * 3
+        atmo.Haze = haze / 100 * 2.5
+    elseif atmo then
+        atmo:Destroy()
+    end
+
+    -- Цвет картинки
+    local cc = Lighting:FindFirstChild("Visuals_CC")
+    if active and (A.Tint ~= "None" or A.Contrast ~= 0 or A.Saturation ~= 0) then
+        cc = VFX.GetCC()
+        cc.TintColor = colorOf(AMB.Tint, A.Tint)
+        cc.Contrast = A.Contrast / 100
+        cc.Saturation = A.Saturation / 100
+        cc.Brightness = 0
+        cc.Enabled = true
+    elseif cc then
+        cc.Enabled = false
+    end
+
+    setEffect(VFX.GetBloom, "Visuals_Bloom", active and A.Bloom or 0, function(bloom, k)
+        bloom.Intensity, bloom.Size, bloom.Threshold = k * 1.2, 24, 0.9
+    end)
+    setEffect(VFX.GetSunRays, "Visuals_SunRays", active and A.SunRays or 0, function(rays, k)
+        rays.Intensity, rays.Spread = k * 0.3, 0.8
+    end)
+    setEffect(VFX.GetDoF, "Visuals_DoF", active and A.DoF or 0, function(dof, k)
+        dof.FarIntensity, dof.NearIntensity, dof.FocusDistance, dof.InFocusRadius = k * 0.8, 0, 40, 35
+    end)
+    local blur = Lighting:FindFirstChild("Visuals_Blur")
+    if blur then blur.Enabled = false end
+
+    local sky = active and skyData(A.Sky) or nil
+    if sky then applySkyDataToInstance(VFX.GetSky(), sky) else VFX.RemoveSky() end
+
+    AMB.SetWeather(active and A.Weather or "None", A.WeatherAmount)
+    setGroundFog(A.GroundFog)
     VFX.SyncEnvironment()
+end
+
+-- Контролы GUI под текущие значения (после выбора пресета), без вызова обработчиков
+function AMB.SyncControls()
+    for _, key in ipairs(AMB.PresetKeys) do
+        local element = State.UIElements["Amb" .. key]
+        if element and element.Set then pcall(element.Set, element, State.Amb[key], false) end
+    end
+end
+
+-- Правка параметра: пресет становится Custom, если значение разошлось с ним
+function AMB.MarkCustom(key, value)
+    local A = State.Amb
+    if A.Preset == "Custom" then return end
+    local reference = A.Preset == "Map" and AMB.MapValues() or AMB.Presets[A.Preset]
+    if reference and reference[key] == value then return end
+    A.Preset = "Custom"
+    local grid = State.UIElements.AmbPreset
+    if grid and grid.Set then pcall(grid.Set, grid, "Custom", false) end
+end
+
+function AMB.ApplyPreset(name)
+    local A = State.Amb
+    if name == "Custom" then
+        A.Preset = "Custom"
+    else
+        local values = name == "Map" and AMB.MapValues() or AMB.Presets[name]
+        if not values then return end
+        A.Preset = name
+        for key, value in pairs(values) do A[key] = value end
+        AMB.SyncControls()
+    end
+    AMB.Apply()
+end
+
+function AMB.Reset()
+    local A = State.Amb
+    A.Fullbright, A.GroundFog, A.NoShadows, A.NoMapFog, A.NoMapFX = false, false, false, false, false
+    A.WeatherAmount = 50
+    for flag, value in pairs({AmbFullbright = false, AmbGroundFog = false, AmbNoShadows = false,
+        AmbNoMapFog = false, AmbNoMapFX = false, AmbWeatherAmount = 50, AmbPreset = "Map"}) do
+        local element = State.UIElements[flag]
+        if element and element.Set then pcall(element.Set, element, value, false) end
+    end
+    AMB.ApplyPreset("Map")
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -1229,7 +999,7 @@ local function buildAura(name, char)
         local control=State.UIElements['Aura_'..name:gsub('%s+','')]
         if control then control:Set(false,false) end
         warn('[Visuals] '..name..': '..tostring(err))
-        ShowNotification('Aura', 'Не удалось создать '..name, 4)
+        ShowNotification('Aura', 'Failed to create '..name, 4)
         return false,err
     end
     return true
@@ -1290,393 +1060,33 @@ end))
 -- ══════════════════════════════════════════════════════════════════════════════
 local Handlers = {}
 
-local ShaderToggleNames = {
-    "ShaderPack", "Morning", "Midday", "Evening", "Night",
-    "Storm", "AfterHours", "Realistic",
-    "PhotoStudio", "Desert"
-}
-
-local function resetOtherShaderToggles(activeKey)
-    for _, k in ipairs(ShaderToggleNames) do
-        if k ~= activeKey and type(State[k]) == 'table' then State[k].Enabled=false end
-        if k ~= activeKey and State.UIElements[k] and State.UIElements[k].Set then
-            State.UIElements[k]:Set(false, false)
-        end
+-- Окружение: пресет, параметры пресета и независимые переключатели
+Handlers.AmbPreset = function(name)
+    AMB.ApplyPreset(name)
+end
+for _, key in ipairs(AMB.PresetKeys) do
+    local numeric = type(State.Amb[key]) == "number"
+    Handlers["Amb" .. key] = function(value)
+        if numeric then value = tonumber(value) or State.Amb[key] end
+        State.Amb[key] = value
+        AMB.MarkCustom(key, value)
+        AMB.Apply()
     end
 end
-
--- 1. Shader Pack
-Handlers.ShaderPack = function(on)
-    State.ShaderPack.Enabled = on
-    if on then
-        resetOtherShaderToggles("ShaderPack")
-        VFX.ApplyShader("Shader Pack")
-    else
-        VFX.ApplyShader("None")
+for flag, key in pairs({AmbFullbright = "Fullbright", AmbGroundFog = "GroundFog", AmbNoShadows = "NoShadows",
+    AmbNoMapFog = "NoMapFog", AmbNoMapFX = "NoMapFX"}) do
+    Handlers[flag] = function(on)
+        State.Amb[key] = on == true
+        AMB.Apply()
     end
 end
-Handlers.ShaderPackMode = function(mode)
-    State.ShaderPack.Mode = mode
-    if State.ShaderPack.Enabled then
-        local cc = VFX.GetCC()
-        if mode == "Day" then
-            Lighting.ClockTime = 14
-            Lighting.Brightness = 3
-            Lighting.OutdoorAmbient = Color3.fromRGB(140, 140, 140)
-            Lighting.ExposureCompensation = 0
-            cc.TintColor = Color3.fromRGB(255, 255, 255)
-            cc.Brightness = 0
-            cc.Contrast = 0
-            cc.Saturation = 0
-            cc.Enabled = true
-        elseif mode == "Sunset" then
-            Lighting.ClockTime = 18.5
-            Lighting.Brightness = 2.5
-            Lighting.OutdoorAmbient = Color3.fromRGB(180, 120, 80)
-            Lighting.ExposureCompensation = 0
-            cc.TintColor = Color3.fromRGB(255, 200, 160)
-            cc.Brightness = 0
-            cc.Contrast = 0
-            cc.Saturation = 0
-            cc.Enabled = true
-        elseif mode == "Midnight" then
-            Lighting.ClockTime = 0
-            Lighting.Brightness = 1.5
-            Lighting.OutdoorAmbient = Color3.fromRGB(25, 25, 45)
-            Lighting.ExposureCompensation = 0
-            cc.TintColor = Color3.fromRGB(180, 200, 255)
-            cc.Brightness = 0
-            cc.Contrast = 0
-            cc.Saturation = 0
-            cc.Enabled = true
-        else
-            Lighting.ClockTime = DefaultLighting.ClockTime
-            Lighting.Brightness = DefaultLighting.Brightness
-            Lighting.OutdoorAmbient = DefaultLighting.OutdoorAmbient
-            Lighting.ExposureCompensation = DefaultLighting.ExposureCompensation
-            cc.Enabled = false
-        end
-    end
+Handlers.AmbWeatherAmount = function(value)
+    State.Amb.WeatherAmount = tonumber(value) or 50
+    AMB.Apply()
 end
-Handlers.ShaderBloom = function(on)
-    State.ShaderPack.Bloom = on
-    if State.ShaderPack.Enabled then
-        local b = Lighting:FindFirstChild("Visuals_Bloom")
-        if b then
-            b.Enabled = on
-        elseif on then
-            b = VFX.GetBloom()
-            b.Intensity = State.ShaderPack.BloomIntensity / 10
-            b.Size = State.ShaderPack.BloomSize
-            b.Threshold = 0.8
-            b.Enabled = true
-        end
-    end
-end
-Handlers.BloomIntensity = function(val)
-    State.ShaderPack.BloomIntensity = val
-    if State.ShaderPack.Enabled and State.ShaderPack.Bloom then
-        local b = VFX.GetBloom()
-        b.Intensity = val / 10
-        b.Enabled = true
-    end
-end
-Handlers.BloomSize = function(val)
-    State.ShaderPack.BloomSize = val
-    if State.ShaderPack.Enabled and State.ShaderPack.Bloom then
-        local b = VFX.GetBloom()
-        b.Size = val
-        b.Enabled = true
-    end
-end
-Handlers.ShaderAtmosphere = function(on)
-    State.ShaderPack.Atmosphere = on
-    if State.ShaderPack.Enabled and not State.ClearAtmosphere.Enabled then
-        local a = Lighting:FindFirstChild("Visuals_Atmosphere")
-        if a then
-            if on then
-                a.Density = State.ShaderPack.AtmosphereDensity / 100
-            else
-                a:Destroy()
-            end
-        elseif on then
-            a = VFX.GetAtmosphere()
-            a.Density = State.ShaderPack.AtmosphereDensity / 100
-            a.Offset = 0
-            a.Haze = 0
-            a.Glare = 0
-            a.Color = Color3.fromRGB(199, 199, 199)
-            a.Decay = Color3.fromRGB(106, 112, 125)
-        end
-    end
-    VFX.SyncEnvironment()
-end
-Handlers.AtmosphereDensity = function(val)
-    State.ShaderPack.AtmosphereDensity = val
-    if State.ShaderPack.Enabled and State.ShaderPack.Atmosphere and not State.ClearAtmosphere.Enabled then
-        local a = VFX.GetAtmosphere()
-        a.Density = val / 100
-    end
-end
-Handlers.ShaderSunRays = function(on)
-    State.ShaderPack.SunRays = on
-    if State.ShaderPack.Enabled then
-        local r = Lighting:FindFirstChild("Visuals_SunRays")
-        if r then
-            r.Enabled = on
-        elseif on then
-            r = VFX.GetSunRays()
-            r.Intensity = State.ShaderPack.SunRaysIntensity / 100
-            r.Spread = 1.0
-            r.Enabled = true
-        end
-    end
-end
-Handlers.SunRaysIntensity = function(val)
-    State.ShaderPack.SunRaysIntensity = val
-    if State.ShaderPack.Enabled and State.ShaderPack.SunRays then
-        local r = VFX.GetSunRays()
-        r.Intensity = val / 100
-        r.Enabled = true
-    end
-end
-Handlers.ShaderBlur = function(on)
-    State.ShaderPack.Blur = on
-    if State.ShaderPack.Enabled then
-        local dof = Lighting:FindFirstChild("Visuals_DoF")
-        if on then
-            if not dof then dof = VFX.GetDoF() end
-            dof.FarIntensity = State.ShaderPack.BlurStrength / 100
-            dof.NearIntensity = State.ShaderPack.BlurStrength / 100
-            dof.FocusDistance = (State.ShaderPack.FocusDistance > 0 and State.ShaderPack.FocusDistance) or 0.05
-            dof.InFocusRadius = 10
-            dof.Enabled = true
-        elseif dof then
-            dof.Enabled = false
-        end
-        local bl = Lighting:FindFirstChild("Visuals_Blur")
-        if bl then bl.Enabled = false end
-    end
-end
-Handlers.BlurStrength = function(val)
-    State.ShaderPack.BlurStrength = val
-    if State.ShaderPack.Enabled and State.ShaderPack.Blur then
-        local dof = VFX.GetDoF()
-        dof.FarIntensity = val / 100
-        dof.NearIntensity = val / 100
-        dof.Enabled = true
-    end
-end
-Handlers.FocusDistance = function(val)
-    State.ShaderPack.FocusDistance = val
-    if State.ShaderPack.Enabled and State.ShaderPack.Blur then
-        local dof = VFX.GetDoF()
-        dof.FocusDistance = (val > 0 and val) or 0.05
-        dof.Enabled = true
-    end
-end
-
--- 2. Storm
-Handlers.Storm = function(on)
-    State.Storm.Enabled = on
-    if on then
-        resetOtherShaderToggles("Storm")
-        VFX.ApplyShader("Storm")
-    else
-        VFX.ApplyShader("None")
-    end
-end
-Handlers.StormWindLines = function(on)
-    State.Storm.WindLines = on
-    if State.ActiveShader == "Storm" then
-        VFX.UpdateWindLines(on)
-    end
-end
-Handlers.StormDepthBlur = function(on)
-    State.Storm.DepthBlur = on
-    local dof = Lighting:FindFirstChild("Visuals_DoF")
-    if dof and State.ActiveShader == "Storm" then
-        dof.Enabled = on
-    end
-end
-
--- 3. Lighting Presets
-Handlers.Morning = function(on)
-    if on then resetOtherShaderToggles("Morning") VFX.ApplyShader("Morning") else VFX.ApplyShader("None") end
-end
-Handlers.Midday = function(on)
-    if on then resetOtherShaderToggles("Midday") VFX.ApplyShader("Midday") else VFX.ApplyShader("None") end
-end
-Handlers.Evening = function(on)
-    if on then resetOtherShaderToggles("Evening") VFX.ApplyShader("Evening") else VFX.ApplyShader("None") end
-end
-Handlers.Night = function(on)
-    if on then resetOtherShaderToggles("Night") VFX.ApplyShader("Night") else VFX.ApplyShader("None") end
-end
-
--- 4. After Hours
-Handlers.AfterHours = function(on)
-    State.AfterHours.Enabled = on
-    if on then resetOtherShaderToggles("AfterHours") VFX.ApplyShader("After Hours") else VFX.ApplyShader("None") end
-end
-Handlers.NightBrightness = function(v)
-    State.AfterHours.Brightness = v
-    if State.ActiveShader == "After Hours" then Lighting.Brightness = v end
-end
-Handlers.NightExposure = function(v)
-    State.AfterHours.Exposure = v
-    if State.ActiveShader == "After Hours" then Lighting.ExposureCompensation = v end
-end
-Handlers.NightClock = function(v)
-    State.AfterHours.Clock = v
-    if State.ActiveShader == "After Hours" then Lighting.ClockTime = v end
-end
-Handlers.NightHaze = function(v)
-    State.AfterHours.Haze = v
-    local atmo = Lighting:FindFirstChild("Visuals_Atmosphere")
-    if atmo and State.ActiveShader == "After Hours" then atmo.Density = v end
-end
-
--- 5. Realistic
-Handlers.Realistic = function(on)
-    State.Realistic.Enabled = on
-    if on then resetOtherShaderToggles("Realistic") VFX.ApplyShader("Realistic") else VFX.ApplyShader("None") end
-end
-Handlers.RealisticBrightness = function(v)
-    State.Realistic.Brightness = v
-    if State.ActiveShader == "Realistic" then Lighting.Brightness = v end
-end
-Handlers.RealisticExposure = function(v)
-    State.Realistic.Exposure = v
-    if State.ActiveShader == "Realistic" then Lighting.ExposureCompensation = v end
-end
-Handlers.RealisticTime = function(v)
-    State.Realistic.Time = v
-    if State.ActiveShader == "Realistic" then Lighting.ClockTime = v end
-end
-Handlers.RealisticHaze = function(v)
-    State.Realistic.Haze = v
-    local atmo = Lighting:FindFirstChild("Visuals_Atmosphere")
-    if atmo and State.ActiveShader == "Realistic" then atmo.Density = v end
-end
-Handlers.RealisticGroundFog = function(on)
-    State.Realistic.GroundFog = on
-    if State.ActiveShader == "Realistic" then
-        VFX.UpdateGroundFog(on)
-        Lighting.FogEnd = on and 120 or 100000
-        Lighting.FogStart = 0
-        Lighting.FogColor = Color3.fromRGB(192, 192, 192)
-    end
-end
-Handlers.RealisticFutureLighting = function(on)
-    State.Realistic.FutureLighting = on
-    if State.ActiveShader == "Realistic" then
-        Lighting.ShadowSoftness = on and 0.1 or 0.4
-    end
-end
-
--- 6. Photo Studio
-Handlers.PhotoStudio = function(on)
-    State.PhotoStudio.Enabled = on
-    if on then resetOtherShaderToggles("PhotoStudio") VFX.ApplyShader("Photo Studio") else VFX.ApplyShader("None") end
-end
-Handlers.StudioBrightness = function(v)
-    State.PhotoStudio.Brightness = v
-    if State.ActiveShader == "Photo Studio" then Lighting.Brightness = v end
-end
-Handlers.StudioTime = function(v)
-    State.PhotoStudio.Time = v
-    if State.ActiveShader == "Photo Studio" then Lighting.ClockTime = v end
-end
-Handlers.StudioHaze = function(v)
-    State.PhotoStudio.Haze = v
-    local atmo = Lighting:FindFirstChild("Visuals_Atmosphere")
-    if atmo and State.ActiveShader == "Photo Studio" then atmo.Density = v end
-end
-
--- 7. Desert
-Handlers.Desert = function(on)
-    State.Desert.Enabled = on
-    if on then resetOtherShaderToggles("Desert") VFX.ApplyShader("Desert") else VFX.ApplyShader("None") end
-end
-Handlers.DesertBrightness = function(v)
-    State.Desert.Brightness = v
-    if State.ActiveShader == "Desert" then Lighting.Brightness = v end
-end
-Handlers.DesertTime = function(v)
-    State.Desert.Time = v
-    if State.ActiveShader == "Desert" then Lighting.ClockTime = v end
-end
-Handlers.DesertHaze = function(v)
-    State.Desert.Haze = v
-    local atmo = Lighting:FindFirstChild("Visuals_Atmosphere")
-    if atmo and State.ActiveShader == "Desert" then atmo.Density = v end
-end
-
--- 8. Clear Atmosphere
-Handlers.ClearAtmosphere = function(on)
-    State.ClearAtmosphere.Enabled = on
-    VFX.ApplyClearAtmosphere()
-end
-Handlers.ClearAtmoDensity = function(v)
-    State.ClearAtmosphere.Density = v
-    VFX.ApplyClearAtmosphere()
-end
-Handlers.ClearAtmoOffset = function(v)
-    State.ClearAtmosphere.HorizonOffset = v
-    VFX.ApplyClearAtmosphere()
-end
-Handlers.ClearAtmoGlare = function(v)
-    State.ClearAtmosphere.SunGlare = v
-    VFX.ApplyClearAtmosphere()
-end
-
--- 9. Custom Skies
-local SkyToggleNames = {"AnimeSky", "PinkSky", "HeavenlyClouds", "RealisticSky", "RainSky", "SpaceSky",
-    "BlackStormSky", "BlueSpaceSky", "StormySky", "PastelPinkSky", "ClassicRealisticSky"}
--- Новые небеса: флаг тогла → имя в SKYBOXES (обработчики генерируются ниже)
-local ExtraSkies = {
-    {Flag = "BlackStormSky", Name = "Black Storm", Hint = "Dark thunderstorm clouds"},
-    {Flag = "BlueSpaceSky", Name = "Blue Space", Hint = "Blue nebula starfield"},
-    {Flag = "StormySky", Name = "Stormy Sky", Hint = "Grey stormy overcast"},
-    {Flag = "PastelPinkSky", Name = "Pastel Pink Sky", Hint = "Soft pink pastel clouds"},
-    {Flag = "ClassicRealisticSky", Name = "Classic Realistic Sky", Hint = "Clear classic daylight sky"},
-}
-local function resetOtherSkyToggles(activeKey)
-    for _, k in ipairs(SkyToggleNames) do
-        if k ~= activeKey and State.UIElements[k] and State.UIElements[k].Set then
-            State.UIElements[k]:Set(false, false)
-        end
-    end
-end
-
-Handlers.AnimeSky = function(on)
-    if on then resetOtherSkyToggles("AnimeSky") VFX.ApplySky("Anime Sky") else VFX.ApplySky("Default") end
-end
-Handlers.PinkSky = function(on)
-    if on then resetOtherSkyToggles("PinkSky") VFX.ApplySky("Pink Sky") else VFX.ApplySky("Default") end
-end
-Handlers.HeavenlyClouds = function(on)
-    if on then resetOtherSkyToggles("HeavenlyClouds") VFX.ApplySky("Heavenly Clouds") else VFX.ApplySky("Default") end
-end
-Handlers.RealisticSky = function(on)
-    if on then resetOtherSkyToggles("RealisticSky") VFX.ApplySky("Realistic Sky") else VFX.ApplySky("Default") end
-end
-Handlers.RainSky = function(on)
-    if on then resetOtherSkyToggles("RainSky") VFX.ApplySky("Rain Sky") else VFX.ApplySky("Default") end
-end
-Handlers.SpaceSky = function(on)
-    if on then resetOtherSkyToggles("SpaceSky") VFX.ApplySky("Space Sky") else VFX.ApplySky("Default") end
-end
-for _, sky in ipairs(ExtraSkies) do
-    Handlers[sky.Flag] = function(on)
-        if on then resetOtherSkyToggles(sky.Flag) VFX.ApplySky(sky.Name) else VFX.ApplySky("Default") end
-    end
-end
-Handlers.ResetSky = function()
-    VFX.ApplySky("Default")
-    resetOtherSkyToggles(nil)
-    ShowNotification("Sky", "Оригинальное небо карты восстановлено", 2)
+Handlers.AmbReset = function()
+    AMB.Reset()
+    ShowNotification("World", "Map lighting restored", 2)
 end
 
 -- Обработчики десяти аур: переключатель и индивидуальный HSV
@@ -1685,6 +1095,8 @@ for _, auraName in ipairs(AurasListNames) do
 
     Handlers["Aura_" .. clean] = function(on)
         VFX.ToggleAura(auraName, on)
+        -- включённую ауру сразу открываем в карточке цвета
+        if on and State.AuraEdit and State.AuraEdit.Select then State.AuraEdit.Select(auraName) end
     end
 
     Handlers["AuraColor_" .. clean] = function(h)
@@ -1709,16 +1121,10 @@ for _, auraName in ipairs(AurasListNames) do
     end
 end
 
--- Сброс освещения и аур
-Handlers.ResetLighting = function()
-    State.ClearAtmosphere.Enabled=false
-    State.ActiveSky=nil
-    if State.UIElements.ClearAtmosphere then State.UIElements.ClearAtmosphere:Set(false,false) end
-    resetOtherSkyToggles(nil)
-    VFX.ApplyClearAtmosphere()
-    VFX.RestoreDefaultLighting()
-    resetOtherShaderToggles(nil)
-    ShowNotification("Lighting", "Освещение и визуалы сброшены к дефолту", 2)
+-- Цвет выбранной в карточке Color ауры — к исходному
+Handlers.AuraResetColor = function()
+    local edit = State.AuraEdit
+    if edit and edit.Apply then edit.Apply({Hue = 0, Saturation = 90, Brightness = 100}) end
 end
 
 Handlers.ResetAuras = function()
@@ -1729,226 +1135,221 @@ Handlers.ResetAuras = function()
             State.UIElements["Aura_" .. clean]:Set(false, false)
         end
     end
-    ShowNotification("Auras", "Все ауры выключены", 2)
+    ShowNotification("Auras", "All auras turned off", 2)
 end
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 10: ИНТЕГРАЦИЯ С ХОСТОМ И ОЧИСТКА
 -- ══════════════════════════════════════════════════════════════════════════════
--- Конфиги загружают флаги в произвольном порядке: выключение неактивного
--- пресета не должно сбрасывать тот, который уже включился из того же конфига.
-local ShaderNames = {ShaderPack = "Shader Pack", Storm = "Storm", AfterHours = "After Hours",
-    Realistic = "Realistic", PhotoStudio = "Photo Studio", Desert = "Desert",
-    Morning = "Morning", Midday = "Midday", Evening = "Evening", Night = "Night"}
-for key,name in pairs(ShaderNames) do
-    local handler = Handlers[key]
-    Handlers[key] = function(on)
-        if not on and State.ActiveShader ~= name then
-            if type(State[key]) == "table" then State[key].Enabled = false end
-            return
-        end
-        return handler(on)
-    end
-end
-local SkyNames = {AnimeSky = "Anime Sky", PinkSky = "Pink Sky", HeavenlyClouds = "Heavenly Clouds",
-    RealisticSky = "Realistic Sky", RainSky = "Rain Sky", SpaceSky = "Space Sky"}
-for _, sky in ipairs(ExtraSkies) do SkyNames[sky.Flag] = sky.Name end
-for key,name in pairs(SkyNames) do
-    local handler = Handlers[key]
-    Handlers[key] = function(on)
-        if not on and State.ActiveSky ~= name then return end
-        return handler(on)
-    end
-end
 for key,handler in pairs(Handlers) do
     Handlers[key] = function(...)
         if State.Unloaded then return end
         local ok, result = pcall(handler, ...)
         if not ok then
             warn("[Visuals] " .. key .. ": " .. tostring(result))
-            ShowNotification("Visuals", "Не удалось применить " .. key, 4)
+            ShowNotification("Visuals", "Failed to apply " .. key, 4)
         end
         return ok, result
     end
 end
 
-local Module = {State = State, Handlers = Handlers, VFX = VFX}
+local Module = {State = State, Handlers = Handlers, VFX = VFX, Ambience = AMB}
 function Module.BuildTabs()
     if State.TabsBuilt then return end
     State.TabsBuilt = true
-    local world = GUI.CreateTab("World")
-do
-            local tab = world
-
-    -----------------------
-    -- ЛЕВАЯ КОЛОНКА
-    -----------------------
-    tab:CreateSection("SHADER PACK", "left")
-    tab:CreateToggle("Shader Pack", "Full customizable shader bundle", "ShaderPack", false)
-    tab:CreateDropdown("Mode", "Select time mode", {"None", "Day", "Sunset", "Midnight"}, "None", "ShaderPackMode")
-    tab:CreateToggle("Bloom", "Enable bloom glow", "ShaderBloom", true)
-    tab:CreateSlider("Intensity", "Bloom glow strength", 0, 10, 4, "BloomIntensity", 0.5)
-    tab:CreateSlider("Size", "Radius of the bloom effect", 0, 56, 24, "BloomSize", 1)
-    tab:CreateToggle("Atmosphere", "Enable atmosphere haze", "ShaderAtmosphere", true)
-    tab:CreateSlider("Density", "Atmospheric haze thickness", 0, 100, 40, "AtmosphereDensity", 1)
-    tab:CreateToggle("Sun Rays", "Enable volumetric god rays", "ShaderSunRays", true)
-    tab:CreateSlider("Intensity", "Sun rays intensity", 0, 100, 25, "SunRaysIntensity", 1)
-    tab:CreateToggle("Blur", "Enable screen blur", "ShaderBlur", false)
-    tab:CreateSlider("Strength", "Screen blur effect size", 0, 100, 75, "BlurStrength", 1)
-    tab:CreateSlider("Focus Distance", "Depth of field focus distance", 0, 100, 0, "FocusDistance", 1)
-
-    tab:CreateSection("STORM", "left")
-    tab:CreateToggle("Storm", "Dark stormy atmosphere with custom sky & haze", "Storm", false)
-    tab:CreateToggle("Wind Lines", "Swirling wind streaks across the screen", "StormWindLines", true)
-    tab:CreateToggle("Depth Blur", "Distant storm depth of field blur", "StormDepthBlur", true)
-
-    tab:CreateSection("DESERT", "left")
-    tab:CreateToggle("Desert", "Arid heatwave with warm sun rays", "Desert", false)
-    tab:CreateSlider("Desert Brightness", "Direct desert sunlight", 0, 10, 4.0, "DesertBrightness", 0.1)
-    tab:CreateSlider("Desert Time", "Position of desert sun", 0, 24, 9.0, "DesertTime", 0.1)
-    tab:CreateSlider("Desert Density", "Atmosphere density", 0, 1, 0.350, "DesertHaze", 0.01)
-
-    tab:CreateSection("LIGHTING PRESETS", "left")
-    tab:CreateToggle("Morning", "Warm fresh sunrise atmosphere", "Morning", false)
-    tab:CreateToggle("Midday", "Bright clear daylight setting", "Midday", false)
-    tab:CreateToggle("Evening", "Golden hour sunset glow", "Evening", false)
-    tab:CreateToggle("Night", "Moody dark night scene", "Night", false)
-
-    -----------------------
-    -- ПРАВАЯ КОЛОНКА
-    -----------------------
-    tab:CreateSection("AFTER HOURS", "right")
-    tab:CreateToggle("After Hours", "Vibrant late-night neon lighting", "AfterHours", false)
-    tab:CreateSlider("Night Brightness", "Overall scene brightness", 0, 10, 4.0, "NightBrightness", 0.1)
-    tab:CreateSlider("Night Exposure", "Exposure compensation level", -1, 2, 0.35, "NightExposure", 0.05)
-    tab:CreateSlider("Night Clock", "Time of day (hours)", 0, 24, 6.89, "NightClock", 0.1)
-    tab:CreateSlider("Night Density", "Atmosphere density", 0, 1, 0.350, "NightHaze", 0.01)
-
-    tab:CreateSection("REALISTIC", "right")
-    tab:CreateToggle("Realistic", "High-contrast cinematic shading (no screen blur)", "Realistic", false)
-    tab:CreateSlider("Realistic Brightness", "Scene brightness level", 0, 10, 3.0, "RealisticBrightness", 0.1)
-    tab:CreateSlider("Realistic Exposure", "Exposure compensation level", -1, 2, 0.0, "RealisticExposure", 0.05)
-    tab:CreateSlider("Realistic Time", "Sun angle and time of day", 0, 24, 14.5, "RealisticTime", 0.1)
-    tab:CreateSlider("Realistic Density", "Atmosphere density", 0, 1, 0.300, "RealisticHaze", 0.01)
-    tab:CreateToggle("Ground Fog", "Volumetric low ground fog", "RealisticGroundFog", false)
-    tab:CreateToggle("Sharper Shadows", "Reduce shadow softness for this preset", "RealisticFutureLighting", false)
-
-    tab:CreateSection("PHOTO STUDIO", "right")
-    tab:CreateToggle("Photo Studio", "Neutral white studio lighting for screenshots", "PhotoStudio", false)
-    tab:CreateSlider("Studio Brightness", "Studio lamp brightness", 0, 10, 1.5, "StudioBrightness", 0.1)
-    tab:CreateSlider("Studio Time", "Time of day position", 0, 24, 0.0, "StudioTime", 0.5)
-    tab:CreateSlider("Studio Density", "Atmosphere density", 0, 1, 0.218, "StudioHaze", 0.01)
-end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- АТМОСФЕРА И НЕБО
+-- WORLD: пресет сверху, под ним параметры по смыслу (свет, цвет / небо, эффекты,
+-- погода, отключения карты). Палитры вместо RGB-ползунков, подписи под каждым
 -- ══════════════════════════════════════════════════════════════════════════════
 do
-            local tab = world
-
-    -----------------------
-    -- ЛЕВАЯ КОЛОНКА
-    -----------------------
-    tab:CreateSection("CLEAR ATMOSPHERE", "left")
-    tab:CreateToggle("Clear Atmosphere", "High-visibility clean sky atmosphere", "ClearAtmosphere", false)
-    tab:CreateSlider("Density", "Atmosphere air thickness", 0, 100, 35, "ClearAtmoDensity", 1)
-    tab:CreateSlider("Horizon Offset", "Horizon blend offset", 0, 100, 80, "ClearAtmoOffset", 1)
-    tab:CreateSlider("Sun Glare", "Direct sun flare intensity", 0, 100, 30, "ClearAtmoGlare", 1)
-
-    -----------------------
-    -- ПРАВАЯ КОЛОНКА
-    -----------------------
-    tab:CreateSection("CUSTOM SKIES", "right")
-    tab:CreateToggle("Anime Sky", "Vibrant stylized anime skybox", "AnimeSky", false)
-    tab:CreateToggle("Pink Sky", "Dreamy pink aesthetic sky", "PinkSky", false)
-    tab:CreateToggle("Heavenly Clouds", "High-altitude holy cumulus clouds", "HeavenlyClouds", false)
-    tab:CreateToggle("Realistic Sky", "Hyper-realistic crisp daylight sky", "RealisticSky", false)
-    tab:CreateToggle("Rain Sky", "Gloomy overcast raincloud skybox", "RainSky", false)
-    tab:CreateToggle("Space Sky", "Deep cosmic galaxy starfield", "SpaceSky", false)
-    for _, sky in ipairs(ExtraSkies) do
-        tab:CreateToggle(sky.Name, sky.Hint, sky.Flag, false)
+    local tab = GUI.CreateTab("World")
+    local A = State.Amb
+    -- Старый закэшированный GUI.lua без новых элементов — те же флаги дропдаунами
+    local function swatches(title, list, default, flag)
+        if tab.CreateSwatchRow then return tab:CreateSwatchRow(title, list, default, flag) end
+        local names = {}
+        for _, entry in ipairs(list) do table.insert(names, entry.Name) end
+        return tab:CreateDropdown(title, nil, names, default, flag)
     end
-    tab:CreateButton("Reset Sky", "Restore Original Map Sky", CONFIG.Colors.Accent, "ResetSky")
+
+    -----------------------
+    -- ЛЕВАЯ КОЛОНКА
+    -----------------------
+    tab:CreateSection("AMBIENCE", "left")
+    if tab.CreatePresetGrid then
+        tab:CreatePresetGrid(AMB.Tiles, "Map", "AmbPreset", 3)
+    else
+        local names = {}
+        for _, tile in ipairs(AMB.Tiles) do table.insert(names, tile.Name) end
+        tab:CreateDropdown("Preset", "Ready-made look", names, "Map", "AmbPreset")
+    end
+
+    tab:CreateSection("LIGHTING", "left")
+    tab:CreateSlider("Time of Day", "Sun position, hours", 0, 24, A.Time, "AmbTime", 0.25)
+    tab:CreateSlider("Brightness", "Sunlight strength", 0, 10, A.Brightness, "AmbBrightness", 0.1)
+    tab:CreateSlider("Exposure", "Overall image exposure", -2, 2, A.Exposure, "AmbExposure", 0.05)
+    swatches("Ambient Light", AMB.Ambient, A.Ambient, "AmbAmbient")
+    tab:CreateToggle("Fullbright", "Even light, no dark corners", "AmbFullbright", false)
+
+    tab:CreateSection("COLOR", "left")
+    swatches("Color Tint", AMB.Tint, A.Tint, "AmbTint")
+    tab:CreateSlider("Contrast", "Image contrast", -50, 50, A.Contrast, "AmbContrast", 1)
+    tab:CreateSlider("Saturation", "Color intensity", -100, 100, A.Saturation, "AmbSaturation", 1)
+
+    -----------------------
+    -- ПРАВАЯ КОЛОНКА
+    -----------------------
+    tab:CreateSection("SKY & ATMOSPHERE", "right")
+    tab:CreateDropdown("Skybox", "Replace the map sky", AMB.SkyNames, A.Sky, "AmbSky")
+    tab:CreateSlider("Haze", "Atmosphere thickness", 0, 100, A.Haze, "AmbHaze", 1)
+    tab:CreateSlider("Sun Glare", "Glow around the sun", 0, 100, A.Glare, "AmbGlare", 1)
+    swatches("Haze Color", AMB.Fog, A.FogColor, "AmbFogColor")
+    tab:CreateToggle("Ground Fog", "Low mist around your feet", "AmbGroundFog", false)
+
+    tab:CreateSection("EFFECTS", "right")
+    tab:CreateSlider("Bloom", "Glow on bright spots", 0, 100, A.Bloom, "AmbBloom", 1)
+    tab:CreateSlider("Sun Rays", "Light shafts from the sun", 0, 100, A.SunRays, "AmbSunRays", 1)
+    tab:CreateSlider("Depth of Field", "Blur distant objects", 0, 100, A.DoF, "AmbDoF", 1)
+
+    tab:CreateSection("WEATHER", "right")
+    if tab.CreateSegmentedRow then
+        tab:CreateSegmentedRow("Weather", nil, AMB.WeatherKinds, A.Weather, "AmbWeather")
+    else
+        tab:CreateDropdown("Weather", nil, AMB.WeatherKinds, A.Weather, "AmbWeather")
+    end
+    tab:CreateSlider("Intensity", "Amount of particles", 0, 100, A.WeatherAmount, "AmbWeatherAmount", 1)
+
+    tab:CreateSection("REMOVALS", "right")
+    tab:CreateToggle("No Shadows", "Remove all shadows", "AmbNoShadows", false)
+    tab:CreateToggle("No Map Fog", "Hide the map's own fog and haze", "AmbNoMapFog", false)
+    tab:CreateToggle("No Map Effects", "Turn off the map's post effects", "AmbNoMapFX", false)
+    tab:CreateButton("Reset World", "Reset", CONFIG.Colors.Accent, "AmbReset")
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- АУРЫ: ОТДЕЛЬНЫЕ КАРТОЧКИ С НАСТРОЙКАМИ HSV
+-- АУРЫ: сетка переключателей + одна карточка цвета для выбранной ауры
 -- ══════════════════════════════════════════════════════════════════════════════
+-- Раньше у каждой из 10 аур была своя карточка (переключатель + 3 ползунка) —
+-- 40 строк. Теперь включаются плитками, а цвет правится в одной карточке: сверху
+-- выбор ауры, ниже палитра и ползунки. Флаги прежние: Aura_* у плиток, а
+-- AuraColor_/AuraSat_/AuraBri_* каждой ауры — невидимые элементы реестра,
+-- чтобы старые конфиги загружались и сохранялись как раньше
 do
     local tab = GUI.CreateTab("Auras")
+    local function cleanOf(name) return (name:gsub("%s+", ""):gsub("%(", ""):gsub("%)", "")) end
+    local function shortOf(name) return (name:gsub(" Aura$", "")) end
+
+    local HUES = {
+        {Name = "Original", Color = Color3.fromRGB(226, 226, 232)},
+        {Name = "Red", Hue = 355}, {Name = "Orange", Hue = 25}, {Name = "Gold", Hue = 48},
+        {Name = "Green", Hue = 130}, {Name = "Cyan", Hue = 185}, {Name = "Blue", Hue = 220},
+        {Name = "Purple", Hue = 275}, {Name = "Pink", Hue = 320},
+    }
+    for _, swatch in ipairs(HUES) do
+        swatch.Color = swatch.Color or Color3.fromHSV(swatch.Hue / 360, 0.85, 1)
+    end
+
+    -- Невидимые элементы реестра: значения каждой ауры в конфиге
+    local KINDS = {
+        {Prefix = "AuraColor_", Key = "Hue", Default = 0, Min = 0, Max = 360, Step = 5},
+        {Prefix = "AuraSat_", Key = "Saturation", Default = 90, Min = 0, Max = 100, Step = 1},
+        {Prefix = "AuraBri_", Key = "Brightness", Default = 100, Min = 0, Max = 100, Step = 1},
+    }
+    local edit = {Name = AurasListNames[1], Controls = {}}
+    State.AuraEdit = edit
+    local hidden = {}
+    for _, auraName in ipairs(AurasListNames) do
+        local clean = cleanOf(auraName)
+        for _, kind in ipairs(KINDS) do
+            local flag = kind.Prefix .. clean
+            local element = {__type = "Slider", Value = State.AuraConfig[auraName][kind.Key],
+                Default = kind.Default, Flag = flag, Min = kind.Min, Max = kind.Max, Step = kind.Step}
+            function element:Set(value, fire)
+                value = math.clamp(tonumber(value) or kind.Default, kind.Min, kind.Max)
+                self.Value = value
+                if fire and Handlers[flag] then Handlers[flag](value) end
+                if edit.Name == auraName and edit.Refresh then edit.Refresh() end
+            end
+            GUI.Flags[flag] = element
+            hidden[flag] = element
+        end
+    end
+
+    local function swatchFor(cfg)
+        if cfg.Hue == 0 and cfg.Saturation == 90 and cfg.Brightness == 100 then return "Original" end
+        for _, swatch in ipairs(HUES) do
+            if swatch.Hue == cfg.Hue then return swatch.Name end
+        end
+        return "Custom"
+    end
+
+    -- Карточка показывает значения выбранной ауры
+    function edit.Refresh()
+        local cfg = State.AuraConfig[edit.Name]
+        local c = edit.Controls
+        if c.Aura then c.Aura:Set(shortOf(edit.Name), false) end
+        if c.Hue then c.Hue:Set(cfg.Hue, false) end
+        if c.Saturation then c.Saturation:Set(cfg.Saturation, false) end
+        if c.Brightness then c.Brightness:Set(cfg.Brightness, false) end
+        if c.Swatch then c.Swatch:Set(swatchFor(cfg), false) end
+    end
+    function edit.Select(auraName)
+        edit.Name = auraName
+        edit.Refresh()
+    end
+    -- Запись в выбранную ауру через её невидимые элементы (обработчик + конфиг)
+    function edit.Apply(values)
+        local clean = cleanOf(edit.Name)
+        for _, kind in ipairs(KINDS) do
+            if values[kind.Key] ~= nil then hidden[kind.Prefix .. clean]:Set(values[kind.Key], true) end
+        end
+    end
 
     -----------------------
     -- ЛЕВАЯ КОЛОНКА
     -----------------------
-    tab:CreateSection("MAGIC CIRCLE AURA", "left")
-    tab:CreateToggle("Magic Circle Aura", "Rotating arcane rune circles and beams", "Aura_MagicCircleAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_MagicCircleAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_MagicCircleAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_MagicCircleAura", 1)
-
-    tab:CreateSection("ANGEL WINGS AURA", "left")
-    tab:CreateToggle("Angel Wings Aura", "Majestic celestial feather wings", "Aura_AngelWingsAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_AngelWingsAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_AngelWingsAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_AngelWingsAura", 1)
-
-    tab:CreateSection("DRACULA WINGS AURA", "left")
-    tab:CreateToggle("Dracula Wings Aura", "Gothic crimson bat wings with embers", "Aura_DraculaWingsAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_DraculaWingsAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_DraculaWingsAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_DraculaWingsAura", 1)
-
-    tab:CreateSection("FROZEN BLOOM AURA", "left")
-    tab:CreateToggle("Frozen Bloom Aura", "Crystalline frost shards and bloom", "Aura_FrozenBloomAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_FrozenBloomAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_FrozenBloomAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_FrozenBloomAura", 1)
+    tab:CreateSection("AURAS", "left")
+    local items = {}
+    for _, auraName in ipairs(AurasListNames) do
+        table.insert(items, {Name = shortOf(auraName), Flag = "Aura_" .. cleanOf(auraName)})
+    end
+    if tab.CreateToggleGrid then
+        tab:CreateToggleGrid(items, 2)
+    else
+        for _, item in ipairs(items) do tab:CreateToggle(item.Name, nil, item.Flag, false) end
+    end
+    tab:CreateButton("Turn Off All", "Reset", CONFIG.Colors.Accent, "ResetAuras")
 
     -----------------------
     -- ПРАВАЯ КОЛОНКА
     -----------------------
-    tab:CreateSection("ANGEL AURA", "right")
-    tab:CreateToggle("Angel Aura", "Floating halo, wing plumes and stars", "Aura_AngelAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_AngelAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_AngelAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_AngelAura", 1)
-
-    tab:CreateSection("STARLIGHT AURA", "right")
-    tab:CreateToggle("Starlight Aura", "Twinkling star cluster in orbit", "Aura_StarlightAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_StarlightAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_StarlightAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_StarlightAura", 1)
-
-    tab:CreateSection("HEAVENLY AURA", "right")
-    tab:CreateToggle("Heavenly Aura", "Holy aura with floating sparks", "Aura_HeavenlyAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_HeavenlyAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_HeavenlyAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_HeavenlyAura", 1)
-
-    tab:CreateSection("WIND AURA", "right")
-    tab:CreateToggle("Wind Aura", "Swirling atmospheric wind gusts", "Aura_WindAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_WindAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_WindAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_WindAura", 1)
-
-    tab:CreateSection("FLOW AURA", "right")
-    tab:CreateToggle("Flow Aura", "Smooth liquid aura flow with energy rings", "Aura_FlowAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_FlowAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_FlowAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_FlowAura", 1)
-
-    tab:CreateSection("STAR AURA", "right")
-    tab:CreateToggle("Star Aura", "Pulsing radiant starfield & rings", "Aura_StarAura", false)
-    tab:CreateSlider("Color (Hue)", "Color hue angle", 0, 360, 0, "AuraColor_StarAura", 5)
-    tab:CreateSlider("Saturation", "Color saturation percentage", 0, 100, 90, "AuraSat_StarAura", 1)
-    tab:CreateSlider("Brightness", "Color brightness percentage", 0, 100, 100, "AuraBri_StarAura", 1)
+    tab:CreateSection("COLOR", "right")
+    local shortNames = {}
+    for _, auraName in ipairs(AurasListNames) do table.insert(shortNames, shortOf(auraName)) end
+    edit.Controls.Aura = tab:CreateDropdown("Aura", "Which aura to recolor", shortNames, shortOf(edit.Name), function(short)
+        for _, auraName in ipairs(AurasListNames) do
+            if shortOf(auraName) == short then edit.Select(auraName) return end
+        end
+    end)
+    if tab.CreateSwatchRow then
+        edit.Controls.Swatch = tab:CreateSwatchRow("Color", HUES, "Original", function(name)
+            if name == "Original" then
+                edit.Apply({Hue = 0, Saturation = 90, Brightness = 100})
+            else
+                for _, swatch in ipairs(HUES) do
+                    if swatch.Name == name then edit.Apply({Hue = swatch.Hue}) break end
+                end
+            end
+        end)
+    end
+    edit.Controls.Hue = tab:CreateSlider("Hue", "Color hue angle", 0, 360, 0, function(v) edit.Apply({Hue = v}) end, 5)
+    edit.Controls.Saturation = tab:CreateSlider("Saturation", "Color saturation, %", 0, 100, 90, function(v) edit.Apply({Saturation = v}) end, 1)
+    edit.Controls.Brightness = tab:CreateSlider("Brightness", "Color brightness, %", 0, 100, 100, function(v) edit.Apply({Brightness = v}) end, 1)
+    tab:CreateButton("Original Color", "Reset", CONFIG.Colors.Accent, "AuraResetColor")
+    edit.Refresh()
 end
-
-
-    world:CreateSection("RESET CONTROLS", "right")
-    world:CreateButton("Reset All Lighting", "Restore original lighting and sky", CONFIG.Colors.Accent, "ResetLighting")
-    world:CreateButton("Reset All Auras", "Turn off all active auras", CONFIG.Colors.Accent, "ResetAuras")
 end
 function Module.Destroy()
     if State.Unloaded then return end
@@ -1956,11 +1357,11 @@ function Module.Destroy()
     for _,conn in ipairs(State.Connections) do pcall(function() conn:Disconnect() end) end
     table.clear(State.Connections)
     for name in pairs(State.Auras) do State.Auras[name] = false; pcall(VFX.ClearAura, name) end
+    pcall(clearWeather)
     pcall(VFX.UpdateWindLines, false)
     pcall(VFX.UpdateGroundFog, false)
-    State.ActiveSky = nil
-    State.ActiveShader = nil
-    State.ClearAtmosphere.Enabled = false
+    State.Amb.Preset = "Map"
+    State.Amb.NoMapFog, State.Amb.NoMapFX = false, false
     local owned = {}
     for obj in pairs(OwnedLighting) do table.insert(owned, obj) end
     for _,obj in ipairs(owned) do pcall(function() obj:Destroy() end) end
