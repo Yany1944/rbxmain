@@ -1,0 +1,31 @@
+# В существующий публичный блок 193-39-143-31.sslip.io ДО reverse_proxy Relay:
+handle_path /control/* {
+    @sessionApi path /session /beat /prices
+    handle @sessionApi {
+        reverse_proxy 127.0.0.1:8791
+    }
+    handle {
+        respond 404
+    }
+}
+# Существующий reverse_proxy 127.0.0.1:8787 заменить на:
+handle {
+    reverse_proxy 127.0.0.1:8787
+}
+
+# Существующий локальный блок 8090 заменить этим блоком (не добавлять дубль):
+http://127.0.0.1:8090 {
+    bind 127.0.0.1
+    reverse_proxy 127.0.0.1:8792
+}
+
+# Публичный HTTPS-хост панели (отдельный блок верхнего уровня). Только admin 8792:
+# вход пароль + TOTP, cookie Secure по X-Forwarded-Proto, лимиты входа по IP клиента.
+panel.193-39-143-31.sslip.io {
+	encode zstd gzip
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+	}
+	reverse_proxy 127.0.0.1:8792
+}

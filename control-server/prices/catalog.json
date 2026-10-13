@@ -1,0 +1,7206 @@
+{
+ "source": "MMV inventory dump",
+ "count": 850,
+ "items": [
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "2015",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=199026945",
+   "name": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "8bit",
+   "image": "http://www.roblox.com/asset/?id=198453482",
+   "name": "8bit"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Abduction_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=107510647616718",
+   "name": "Abduction",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Abstract",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365569428",
+   "name": "Abstract"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Ace",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546577",
+   "name": "Ace"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Adurite",
+   "image": "http://www.roblox.com/asset/?id=192492943",
+   "name": "Adurite"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "AduriteGun",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=175668921",
+   "name": "Adurite"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Aid",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203807397",
+   "name": "Juice"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Alex",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=546159020",
+   "name": "Alex"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Aliens_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800250906",
+   "name": "Aliens",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Classic",
+   "id": "AmericaGun",
+   "image": "http://www.roblox.com/asset/?id=164676043",
+   "name": "America"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "AmericaSword",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=446047742",
+   "name": "Old Glory"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Amerilaser",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=446050753",
+   "name": "Amerilaser"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Apoc_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11255501940",
+   "name": "Apocalypse",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Apoc_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254172968",
+   "name": "Apocalypse",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Aqua",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501208",
+   "name": "Aqua"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Aquarium_G_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=129460052425837",
+   "name": "Aquarium",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Aquarium_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=80900354672590",
+   "name": "Aquarium",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Arctic_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834443783",
+   "name": "Arctic",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Arctic_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834401547",
+   "name": "Arctic",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Asteroid",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=476599365",
+   "name": "Asteroid"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "AuroraGun",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=108635848059846",
+   "name": "Borealis",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "AuroraKnife",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=101343256002049",
+   "name": "Australis",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Aurora_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534875165",
+   "name": "Aurora",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Aurora_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304766165",
+   "name": "Aurora",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Aurora_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534860689",
+   "name": "Aurora",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Aurora_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304750877",
+   "name": "Aurora",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Bacon",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546467",
+   "name": "Bacon"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Bats",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873625",
+   "name": "Bats",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "BatsG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513741174",
+   "name": "Bats",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "BatsK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513732731",
+   "name": "Bats",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Bats_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=71258273720666",
+   "name": "Bats",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Bats_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5930729222",
+   "name": "Bats",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Bats_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=104747488009018",
+   "name": "Bats",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Bats_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=140366567839959",
+   "name": "Cats",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "BattleAxe",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133237368",
+   "name": "BattleAxe",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "BattleAxe2",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513535503",
+   "name": "BattleAxe II",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Batwing",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=196751515",
+   "name": "Glitch1"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Bauble",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=84481559639371",
+   "name": "Bauble",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "BaubleChroma",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=137938731902685",
+   "name": "Bauble",
+   "chroma": true,
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "BaubleKnife",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=111092946728824",
+   "name": "Ornament",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "BaubleKnifeChroma",
+   "event": "Christmas",
+   "image": "rbxassetid://74528014775455",
+   "name": "Ornament",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Beach_K_2023",
+   "image": "rbxassetid://13944136198",
+   "name": "Beach",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Beachy",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=120888453565511",
+   "name": "Beachy",
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "BeachyChroma",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=140314060642852",
+   "name": "Beachy",
+   "chroma": true,
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Bells_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635570486",
+   "name": "Bells",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "BigKill",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=162669041",
+   "name": "Big Kill"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Bio_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965298174",
+   "name": "Bio",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Bioblade",
+   "image": "http://www.roblox.com/asset/?id=4751540097",
+   "name": "Bioblade",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Biogun",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659627458",
+   "name": "Biogun",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Bit",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238549030",
+   "name": "Bit"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Blaster",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=386277381",
+   "name": "Blaster"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Bleached",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315500879",
+   "name": "Bleached"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Bleed",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315100702",
+   "name": "Rupture",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Blizzard",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=88928894807422",
+   "name": "Blizzard",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "BlizzardChroma",
+   "event": "Christmas",
+   "image": "rbxassetid://128221996859844",
+   "name": "Blizzard",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Classic",
+   "id": "BloodKnife",
+   "image": "http://www.roblox.com/asset/?id=144307188",
+   "name": "Blood"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Bloom",
+   "image": "rbxassetid://132419834610569",
+   "name": "Bloom",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Blossom",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=363150561",
+   "name": "Blossom"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Blossom_G",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12339377105",
+   "name": "Blossom",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Blossom_K_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=110160120309916",
+   "name": "Blossom",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "BlueSeer",
+   "image": "rbxassetid://3184139996",
+   "name": "Blue Seer"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Bluesteel",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=159947939",
+   "name": "Bluesteel"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "BluesteelGun",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=162668203",
+   "name": "Bluesteel"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Boneblade",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513505477",
+   "name": "Boneblade",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "BonebladeChroma",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513597845",
+   "name": "Boneblade",
+   "chroma": true,
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Bones",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873816",
+   "name": "Bones",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Bones2019",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210926347",
+   "name": "Bones",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Bones_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5872492951",
+   "name": "Bones",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Bones_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=76461209737867",
+   "name": "Bones",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Borders",
+   "image": "http://www.roblox.com/asset/?id=198453499",
+   "name": "Borders"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Brains",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873956",
+   "name": "Brains",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Brains2019",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210929184",
+   "name": "Brains",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Brains_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11284145298",
+   "name": "Brains",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Branches",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210943691",
+   "name": "Branches",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Broken_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12339323856",
+   "name": "Broken",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Brush",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365568602",
+   "name": "Brush"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Bubbles_K_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=138388933477235",
+   "name": "Bubbles",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Bunnies_K_2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=90549252812333",
+   "name": "Bunnies",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Bunny",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=387874365",
+   "name": "Bunny",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Butterflies_G_2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=135662872427976",
+   "name": "Butterflies",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Camo",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=160024789",
+   "name": "Camo"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "CamoKnife",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183606225",
+   "name": "Camo",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Candied_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834435627",
+   "name": "Candied",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Candied_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834384755",
+   "name": "Candied",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Candle_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5872491708",
+   "name": "Candle",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Candleflame",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7805833970",
+   "name": "Candleflame",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "CandleflameChroma",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/asset/?id=7806149582",
+   "name": "Candleflame",
+   "chroma": true,
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Candleflame_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=90595111293037",
+   "name": "Candleflame",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Candles_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=133654810681274",
+   "name": "Candles",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Candy",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332021011",
+   "name": "Candy",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "CandyCorn",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133337797",
+   "name": "CandyCorn",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "CandyCorn2019",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210934082",
+   "name": "Candy Corn",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "CandyCorn_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866454590",
+   "name": "Candy Corn",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "CandyCorn_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11255558166",
+   "name": "Candy Corn",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "CandyCorn_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=117473869340749",
+   "name": "Candy Corn",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "CandyCorn_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=129781304866793",
+   "name": "Candy Corn",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "CandyCorn_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866435364",
+   "name": "Candy Corn",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "CandyCorn_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254057417",
+   "name": "Candy Corn",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "CandyCorn_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=115093067149752",
+   "name": "Candy Corn",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "CandyCorn_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=86405207895194",
+   "name": "Candy Corn",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "CandySwirl_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534874602",
+   "name": "Candy Swirl",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "CandySwirl_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534860226",
+   "name": "Candy Swirl",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Cane",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331140746",
+   "name": "Cane",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "CaneGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497187",
+   "name": "Cane",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Cane_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669785546",
+   "name": "Cane",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Cane_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304768700",
+   "name": "Cane",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Cane_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669638508",
+   "name": "Cane",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Cane_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304750295",
+   "name": "Cane",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Canes_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635558982",
+   "name": "Canes",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Canes_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635574962",
+   "name": "Canes",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Cardboard",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235366729",
+   "name": "Cardboard"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Carrot",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=387874071",
+   "name": "Carrot",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Carrot_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16960082652",
+   "name": "Carrot",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Carrot_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965307410",
+   "name": "Carrot",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Carrot_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16959771850",
+   "name": "Carrot",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Carrots_K_2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=76914260444878",
+   "name": "Carrots",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Carved_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866457985",
+   "name": "Carved",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Carved_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866436906",
+   "name": "Carved",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Cat_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800253444",
+   "name": "Cat",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Caution",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546422",
+   "name": "Caution"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Cavern_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534875511",
+   "name": "Cavern",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Cavern_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534861110",
+   "name": "Cavern",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "Celestial",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=136673966529736",
+   "name": "Celestial",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Checker",
+   "image": "http://www.roblox.com/asset/?id=198461230",
+   "name": "Checker"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Cheddar",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203808317",
+   "name": "Cheddar"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Cheesy",
+   "image": "http://www.roblox.com/asset/?id=198455898",
+   "name": "Cheesy"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Cherries_G_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=96164363513384",
+   "name": "Cherries",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Cherry",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6711852603",
+   "name": "Cherry"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Chick_K_2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=116361515042274",
+   "name": "Chick",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Chill",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332022166",
+   "name": "Chill",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Chips",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473626317",
+   "name": "Blue"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Choco",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=387874991",
+   "name": "Choco",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "ChromaDarkbringer",
+   "image": "http://www.roblox.com/asset/?id=4751507011",
+   "name": "Darkbringer",
+   "chroma": true,
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "ChromaLightbringer",
+   "image": "http://www.roblox.com/asset/?id=4751507078",
+   "name": "Lightbringer",
+   "chroma": true,
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Chromatic_G_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965339774",
+   "name": "Chromatic",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Chromatic_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965304445",
+   "name": "Chromatic",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Circuit",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235366945",
+   "name": "Circuit"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Clan",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235366460",
+   "name": "Clan"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Clockwork",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=360609441",
+   "name": "Clockwork"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Clown",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501118",
+   "name": "Clown"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Clown_G",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659627976",
+   "name": "Clown",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Clown_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=71982363966070",
+   "name": "Clown",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Clownfish_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322197952",
+   "name": "Clownfish",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Clownfish_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322183619",
+   "name": "Clownfish",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Coal",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268699677",
+   "name": "Coal",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Coal_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669784920",
+   "name": "Coal",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Coal_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304769409",
+   "name": "Coal",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Coal_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834434264",
+   "name": "Coal",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Coal_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669638285",
+   "name": "Coal",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Coal_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304751659",
+   "name": "Coal",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Coal_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834390120",
+   "name": "Coal",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Coconut_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=75237025203058",
+   "name": "Coconut",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Cola",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546400",
+   "name": "Soda"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Cold",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=161309889",
+   "name": "Cold"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Combat",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183604570",
+   "name": "Combat",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Combat2",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4972196241",
+   "name": "Combat II",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Constellation",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=114197436469014",
+   "name": "Constellation",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "ConstellationChroma",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=98517109155878",
+   "name": "Constellation",
+   "chroma": true,
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Constellation_G_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=94311965719769",
+   "name": "Nightsky",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Constellation_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=113979322866878",
+   "name": "Nightstar",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Cookie_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304771148",
+   "name": "Cookie",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Cookie_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304752586",
+   "name": "Cookie",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Cookieblade",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121574620",
+   "name": "Cookieblade",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Copper",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183605392",
+   "name": "Copper",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Corl",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=546161858",
+   "name": "Corl"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "CottonCandy",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=435933179",
+   "name": "Cotton Candy"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Cracks_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800254737",
+   "name": "Cracks",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Cracks_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800224981",
+   "name": "Cracks",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Cupid_K_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=123955324398353",
+   "name": "Cupid",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Cursed_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=122855768693454",
+   "name": "Cursed",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Cursed_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=132565936309463",
+   "name": "Cursed",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Damp",
+   "image": "http://www.roblox.com/asset/?id=198461253",
+   "name": "Damp"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Dark_G_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091406343",
+   "name": "Darkgun",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Dark_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091343579",
+   "name": "Darkknife",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Darkbringer",
+   "image": "http://www.roblox.com/asset/?id=4751387674",
+   "name": "Darkbringer",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Darkness_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11255507374",
+   "name": "Darkness",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Darkness_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254081561",
+   "name": "Darkness",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Darkshot",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15080280688",
+   "name": "Darkshot",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Darksword",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15080267070",
+   "name": "Darksword",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Deathshard",
+   "image": "rbxassetid://3175017717",
+   "name": "Deathshard"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "DeathshardChroma",
+   "image": "rbxassetid://3187397317",
+   "name": "Deathshard",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Decorated_K_2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=124860763249593",
+   "name": "Decorated",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "DeepSea",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659634072",
+   "name": "Deep Sea",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "DefaultGun",
+   "image": "http://www.roblox.com/asset/?id=197518111",
+   "name": "Default Gun",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "DefaultKnife",
+   "image": "rbxassetid://584555920",
+   "name": "Default Knife",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Denis",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=546161062",
+   "name": "Denis"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Dew",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473626646",
+   "name": "Black"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Classic",
+   "id": "Disint",
+   "image": "http://www.roblox.com/asset/?id=54798135",
+   "name": "Laser"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Doge",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235371276",
+   "name": "Doge"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Dolphins_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=133219566412887",
+   "name": "Dolphins",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Donut",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235366815",
+   "name": "Donut"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Doritos",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473626740",
+   "name": "Purple"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Duckies_G_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=124567820488562",
+   "name": "Duckies",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Dungeon",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210920512",
+   "name": "Dungeon",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Eclipse_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091404278",
+   "name": "Eclipse",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Eco",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365567889",
+   "name": "Eco"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ecto",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133331679",
+   "name": "Ecto",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Eggblade",
+   "image": "http://www.roblox.com/asset/?id=6607512359",
+   "name": "Eggblade",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Eggs",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=387875405",
+   "name": "Egg",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "ElderwoodGun",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4468571736",
+   "name": "Elderwood Revolver",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "ElderwoodKnife",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254879631",
+   "name": "Elderwood Blade",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "ElderwoodKnifeChroma",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/asset/?id=11255021976",
+   "name": "Elderwood Blade",
+   "chroma": true,
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "ElderwoodScythe",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4468593654",
+   "name": "Elderwood Scythe",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Elf",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331746317",
+   "name": "Elf",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Elf2017",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268703023",
+   "name": "Elf",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "ElfGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332767999",
+   "name": "Elf",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Elf_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635569893",
+   "name": "Elf",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Elite",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=241095344",
+   "name": "Elite"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "EliteBlue",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1269374321",
+   "name": "Blue Elite",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "EliteGreen",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332754554",
+   "name": "Green Elite",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Emerald",
+   "image": "http://www.roblox.com/asset/?id=198461276",
+   "name": "Emerald"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Energized_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=114403390530326",
+   "name": "Energized",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Energized_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=86258299490709",
+   "name": "Energized",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Engraved",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203807690",
+   "name": "Engraved"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Eternal",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=538706317",
+   "name": "Eternal"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Eternal2",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2545253030",
+   "name": "Eternal II"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Eternal3",
+   "image": "rbxassetid://3281170430",
+   "name": "Eternal III",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Eternal4",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4999958740",
+   "name": "Eternal IV",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "EternalCane",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4488391411",
+   "name": "Eternalcane",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Euro",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=305504173",
+   "name": "Euro"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Eyeball_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254065007",
+   "name": "Eyeball",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Eyes_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866459380",
+   "name": "Watcher",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Eyes_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=90751163516480",
+   "name": "Eyes",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Eyes_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866438542",
+   "name": "Watcher",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Fade",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501640",
+   "name": "Fade"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "FallCamo_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800257544",
+   "name": "Fall Camo",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Fall_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=78153346812503",
+   "name": "Fall",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Fallout",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=175668592",
+   "name": "Fallout"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Fang",
+   "image": "rbxassetid://3187397768",
+   "name": "Fang"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "FangChroma",
+   "image": "rbxassetid://3187397850",
+   "name": "Fang",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Fanta",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473626025",
+   "name": "Orange"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Fireplace_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635558021",
+   "name": "Fireplace",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Flames",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=585873746",
+   "name": "Flames"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Floatie_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322194067",
+   "name": "Floatie",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Flora",
+   "image": "rbxassetid://139276091458016",
+   "name": "Flora",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Floral_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18323751219",
+   "name": "Floral",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Floral_G_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=107508982214346",
+   "name": "Floral",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Floral_K_2023",
+   "image": "rbxassetid://13944135218",
+   "name": "Floral",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "FlowerwoodGun",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16963894455",
+   "name": "Flowerwood Gun",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "FlowerwoodKnife",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16963860501",
+   "name": "Flowerwood",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Forest_G_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=78199422065424",
+   "name": "Forest",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Fragile_G_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965349193",
+   "name": "Fragile",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Fragile_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965294432",
+   "name": "Fragile",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Frostbite",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/asset/?id=4528373246",
+   "name": "Frostbite",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Frosted_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534866678",
+   "name": "Frosted",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Frosted_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534853444",
+   "name": "Frosted",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Frostfade_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635577623",
+   "name": "Frostfade",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Frostfade_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635565488",
+   "name": "Frostfade",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Frostflame_G_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=114781759936576",
+   "name": "Frostflame",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Frostflame_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=104988218477551",
+   "name": "Frostflame",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Frostsaber",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268934541",
+   "name": "Frostsaber",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Frosty",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268704507",
+   "name": "Frosty",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Frozen_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534873956",
+   "name": "Frozen",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Frozen_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635571468",
+   "name": "Frozen",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Frozen_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=90622014285727",
+   "name": "Frozen",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Frozen_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534857523",
+   "name": "Frozen",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Frozen_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635556891",
+   "name": "Frozen",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Frozen_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=108996627787763",
+   "name": "Frozen",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Fusion",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365569686",
+   "name": "Fusion"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Future",
+   "image": "http://www.roblox.com/asset/?id=197639041",
+   "name": "Future"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Galactic",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=173913533",
+   "name": "Galactic"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Galaxy",
+   "image": "http://www.roblox.com/asset/?id=192480941",
+   "name": "Galaxy"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Gemstone",
+   "image": "rbxassetid://3183657748",
+   "name": "Gemstone",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "GemstoneChroma",
+   "image": "rbxassetid://3183657875",
+   "name": "Gemstone",
+   "chroma": true,
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Ghastly_G_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091342564",
+   "name": "Ghastly",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Ghastly_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091407068",
+   "name": "Ghastly",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "GhostG2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513741407",
+   "name": "Ghost",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "GhostK2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513732969",
+   "name": "Ghost",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Classic",
+   "id": "GhostKnife",
+   "image": "http://www.roblox.com/asset/?id=144268841",
+   "name": "Ghost"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "GhostRbx_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11117375743",
+   "name": "Ghostly",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Ghostblade",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4217586790",
+   "name": "Ghostblade",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Ghostfire_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11284140034",
+   "name": "Ghostfire",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Ghosts_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866465099",
+   "name": "Ghosts",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Ghosts_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800251557",
+   "name": "Wraiths",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Ghosts_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866442790",
+   "name": "Ghosts",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Ghosts_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7808362279",
+   "name": "Wraiths",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ghosts_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091326116",
+   "name": "Ghosts",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ghosts_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=134681523511387",
+   "name": "Ghosts",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ghosty",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873080",
+   "name": "Ghosty",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Gift_G_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121867603",
+   "name": "Wrap",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Gift_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121854816",
+   "name": "Wrap",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Giftbag_G_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121864813",
+   "name": "Gift Bag",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Giftbag_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121847170",
+   "name": "Gift Bag",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Gifted",
+   "image": "http://www.roblox.com/asset/?id=197627734",
+   "name": "Gifted"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Gifts_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534867381",
+   "name": "Gifts",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Gifts_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534856285",
+   "name": "Gifts",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Gifts_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=129290011017110",
+   "name": "Gifts",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Giftwrap_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304754179",
+   "name": "Giftwrap",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Ginger",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331744703",
+   "name": "Ginger",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "GingerGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497038",
+   "name": "Ginger",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "GingerLuger",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2674983099",
+   "name": "Ginger Luger",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Ginger_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669785821",
+   "name": "Ginger",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Ginger_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669638742",
+   "name": "Ginger",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Gingerblade",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669336659",
+   "name": "Gingerblade",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "GingerbladeChroma",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2672351679",
+   "name": "Gingerblade",
+   "chroma": true,
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Gingerbread2017",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268705527",
+   "name": "Gingerbread",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Gingerbread_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534872116",
+   "name": "Gingerbread",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Gingerbread_G_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121860619",
+   "name": "Gingerbread",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Gingerbread_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304772140",
+   "name": "Gingerbread",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Gingerbread_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834442414",
+   "name": "Gingerbread",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Gingerbread_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=74908113882525",
+   "name": "Gingerbread",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Gingerbread_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534856940",
+   "name": "Gingerbread",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Gingerbread_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121850031",
+   "name": "Gingerbread",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Gingerbread_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834399071",
+   "name": "Gingerbread",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Gingerbread_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=134478959354477",
+   "name": "Gingerbread",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Gingercookie_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=99160839686845",
+   "name": "Gingercookie",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Gingercookie_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=111408683823094",
+   "name": "Gingercookie",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Gingerheart_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=115273559455814",
+   "name": "Gingerheart",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Gingermint_G",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11872179646",
+   "name": "Gingermint",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Gingermint_K",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11855306927",
+   "name": "Cookiecane",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Gingermint_KChroma",
+   "event": "Christmas",
+   "image": "rbxassetid://11979596437",
+   "name": "Cookiecane",
+   "chroma": true,
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Ancient",
+   "id": "Gingerscope",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15666596216",
+   "name": "Gingerscope",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Glowy_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091403551",
+   "name": "Glowy",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Classic",
+   "id": "GoldenGun",
+   "image": "http://www.roblox.com/asset/?id=147835357",
+   "name": "Golden"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Goo",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=237336076",
+   "name": "Goo"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Gothic_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800253970",
+   "name": "Gothic",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Gothic_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800221141",
+   "name": "Gothic",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Graffiti",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659634630",
+   "name": "Graffiti",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "GraveG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513731746",
+   "name": "Grave",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "GraveK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513728474",
+   "name": "Grave",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "GreenFire",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268706374",
+   "name": "Green Fire",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "GreenLuger",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332044679",
+   "name": "Green Luger",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "GreenMarble",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133366830",
+   "name": "Green Marble",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Grind",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=305503942",
+   "name": "Grind"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Classic",
+   "id": "Gun1",
+   "image": "http://www.roblox.com/asset/?id=144290769",
+   "name": "Cowboy"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "HL2",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546100",
+   "name": "HL2"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Hacker",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203819271",
+   "name": "Hacker"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Hallow",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531878205",
+   "name": "Hallow's Edge",
+   "year": "2016"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Hallowgun",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5877089721",
+   "name": "Hallowgun",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "HallowsBlade",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1132775323",
+   "name": "Hallow's Blade",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "Hallowscythe",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5877016863",
+   "name": "Hallowscythe",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Handsaw",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332042435",
+   "name": "Handsaw",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Hardened",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183605810",
+   "name": "Hardened",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Ancient",
+   "id": "Harvester",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800847534",
+   "name": "Harvester",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "HauntedG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513741901",
+   "name": "Haunted",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "HauntedHouse_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=90194465176219",
+   "name": "Haunted",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "HauntedK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513733741",
+   "name": "Haunted",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Haunted_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800222135",
+   "name": "Haunted",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Hazard_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11255505449",
+   "name": "Hazard",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Hazard_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254083234",
+   "name": "Hazard",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Hazmat",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501297",
+   "name": "Hazmat"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "HeartWand",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=118334707962654",
+   "name": "Heart Wand",
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "HeartWandChroma",
+   "event": "Valentines",
+   "image": "rbxassetid://112139581726305",
+   "name": "Heart Wand",
+   "chroma": true,
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Heart_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12339327069",
+   "name": "Heart",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Heartblade",
+   "image": "http://www.roblox.com/asset/?id=6413214382",
+   "name": "Heartblade",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Heartbreak_G_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=79235438948261",
+   "name": "Heartbreak",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Hearts",
+   "image": "https://www.roblox.com/asset/?id=363362737",
+   "name": "Hearts"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Hearts_K_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=99939659856909",
+   "name": "Hearts",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Heat",
+   "image": "rbxassetid://3187444758",
+   "name": "Heat"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "HeatChroma",
+   "image": "rbxassetid://3187444849",
+   "name": "Heat",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "HighTech",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659635055",
+   "name": "High Tech",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Hive",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501434",
+   "name": "Hive"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Holly_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669786261",
+   "name": "Holly",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Holly_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669638990",
+   "name": "Holly",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Hologram_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=108751717527377",
+   "name": "Hologram",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Hologram_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=77773918675860",
+   "name": "Hologram",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "HotChocolate_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=133307062463653",
+   "name": "Hot Chocolate",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Hunter_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254154978",
+   "name": "Hunter",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ice",
+   "image": "http://www.roblox.com/asset/?id=191976710",
+   "name": "Ice"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "IceCamo_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304767724",
+   "name": "Ice Camo",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "IceDragon",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=585846454",
+   "name": "Ice Dragon",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "IceShard",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268710824",
+   "name": "Ice Shard",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Icebeam",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8305000161",
+   "name": "Icebeam",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Iceblaster",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121579464",
+   "name": "Iceblaster",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "Icebreaker",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121572723",
+   "name": "Icebreaker",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Icecracker_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121848805",
+   "name": "Icecracker",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Icecream",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=87189663191639",
+   "name": "Icecream",
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "IcecreamChroma",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=96898758158389",
+   "name": "Icecream",
+   "chroma": true,
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Icedriller_G_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121866490",
+   "name": "Icedriller",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Iceflake",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304818186",
+   "name": "Iceflake",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Ancient",
+   "id": "Icepiercer",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11874071041",
+   "name": "Icepiercer",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "Icewing",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669997196",
+   "name": "Icewing",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Icicles_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669786044",
+   "name": "Icicles",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Icicles_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669639638",
+   "name": "Icicles",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Igloo_G_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=95517099886712",
+   "name": "Igloo",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Igloo_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=73203940450745",
+   "name": "Igloo",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Imbued",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=162668312",
+   "name": "Imbued"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Indy",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=305506951",
+   "name": "Indy"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Infected",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=200953094",
+   "name": "Infected"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Infected_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11255502768",
+   "name": "Infected",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Infected_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254175272",
+   "name": "Infected",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Infiltrator",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203806022",
+   "name": "Infiltrator"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Iron",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=160201541",
+   "name": "Iron"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "JD",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=566867312",
+   "name": "JD"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Jack",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315099010",
+   "name": "Jack",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Jack_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254093910",
+   "name": "Lantern",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Jellyfish_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322181701",
+   "name": "Jellyfish",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Jigsaw",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365569126",
+   "name": "Jigsaw"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Jinglegun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121678262",
+   "name": "Jinglegun",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Classic",
+   "id": "Knife1",
+   "image": "http://www.roblox.com/asset/?id=143820641",
+   "name": "Splitter"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Kool",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473625906",
+   "name": "Yellow"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Korblox",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501501",
+   "name": "Korblox"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Kraken_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=116059045830205",
+   "name": "Kraken",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Krypto",
+   "image": "http://www.roblox.com/asset/?id=198458841",
+   "name": "Krypto"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "LMFAO",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473626473",
+   "name": "Pink"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Laser",
+   "image": "rbxassetid://3187422496",
+   "name": "Laser"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "LaserChroma",
+   "image": "rbxassetid://3187422628",
+   "name": "Laser",
+   "chroma": true
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Latte_G_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15413116029",
+   "name": "Latte",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Latte_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15413114703",
+   "name": "Latte",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Lava_G_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=90170220549489",
+   "name": "Lava",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Lava_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=131417913843701",
+   "name": "Lava",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Leaf",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659636452",
+   "name": "Leaf",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Leaves_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=129970927613267",
+   "name": "Leaves",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Leaves_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091400883",
+   "name": "Leaves",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Leaves_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=73486056426142",
+   "name": "Leaves",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Lightbringer",
+   "image": "http://www.roblox.com/asset/?id=4751387063",
+   "name": "Lightbringer",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Lights_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534872673",
+   "name": "Lights",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Lights_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=104258636970738",
+   "name": "Lights",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Lights_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534858185",
+   "name": "Lights",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Lights_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=71228862432065",
+   "name": "Lights",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Linked",
+   "image": "http://www.roblox.com/asset/?id=198453528",
+   "name": "Linked"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Log",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365567962",
+   "name": "Log"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "Logchopper",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4528268775",
+   "name": "Logchopper",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Logcutter_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=71088901904009",
+   "name": "Logcutter",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Love",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=196750845",
+   "name": "Love"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "LoveGun",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203867650",
+   "name": "Love"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Love_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12339328595",
+   "name": "Love",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Lovely",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659635584",
+   "name": "Lovely",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Lucky",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365569265",
+   "name": "Lucky"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Luger",
+   "image": "rbxassetid://3187399148",
+   "name": "Luger"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "LugerChroma",
+   "image": "rbxassetid://3187399258",
+   "name": "Luger",
+   "chroma": true
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Lugercane",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4535482609",
+   "name": "Lugercane",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "MLG",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473626979",
+   "name": "Shiny"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "MagmaK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133317890",
+   "name": "Magma",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Magma_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800252572",
+   "name": "Magma",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Magma_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800225996",
+   "name": "Magma",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Makeshift",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11229837140",
+   "name": "Makeshift",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Marble_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965302237",
+   "name": "Marble",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Marina",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203808190",
+   "name": "Marina"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Marley",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473625785",
+   "name": "Green"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Meadow_G_2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=107321881182350",
+   "name": "Meadow",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Melon",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501369",
+   "name": "Melon"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Melon_G_2023",
+   "image": "rbxassetid://13944154336",
+   "name": "Melon",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Meltdown_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091340751",
+   "name": "Meltdown",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Midnight",
+   "image": "http://www.roblox.com/asset/?id=197664126",
+   "name": "Midnight"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Minty",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4528291487",
+   "name": "Minty",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Missing",
+   "image": "http://www.roblox.com/asset/?id=198455936",
+   "name": "Missing"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Mistletoe_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834438982",
+   "name": "Mistletoe",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Mistletoe_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834394793",
+   "name": "Mistletoe",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Molten",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203869308",
+   "name": "Molten"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "MoltenKnife",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235371809",
+   "name": "Molten"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Monster",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210941474",
+   "name": "Monster",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Monster_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=109292073070223",
+   "name": "Monster",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Moon_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800224197",
+   "name": "Moon",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Moonlight_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11284143055",
+   "name": "Moonlight",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Moons",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873154",
+   "name": "Moons",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Moons_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=91446990047399",
+   "name": "Moons",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Mummified",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210946577",
+   "name": "Mummified",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Mummy",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315155591",
+   "name": "Mummy",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "MummyG2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513741663",
+   "name": "Mummy",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "MummyK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133352032",
+   "name": "Mummy",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "MummyK2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513733542",
+   "name": "Mummy",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Mummy_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866463755",
+   "name": "Mummy",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Mummy_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866447521",
+   "name": "Mummy",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Musical",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365569566",
+   "name": "Musical"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Nebula",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6598123521",
+   "name": "Nebula",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Neon",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=159746637",
+   "name": "Neon"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Neon_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635560825",
+   "name": "Neon",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Neon_G_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=134429631587448",
+   "name": "Neon",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Neopolitan_K_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=73980008491741",
+   "name": "Neopolitan",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Nether",
+   "image": "http://www.roblox.com/asset/?id=197657098",
+   "name": "Nether"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "News",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546032",
+   "name": "News"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Night",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=159971385",
+   "name": "Night"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Nightblade",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=475478854",
+   "name": "Nightblade"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Nightfire",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659626966",
+   "name": "Nightfire",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "NikKnife",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2533350813",
+   "name": "Nik's Scythe"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Noodle_K_2023",
+   "image": "rbxassetid://13944133313",
+   "name": "Pool Noodle",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Nova",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235371686",
+   "name": "Nova"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Nuke_G_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965335931",
+   "name": "Nuke",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Nutcracker",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497657",
+   "name": "Nutcracker",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Ocean_G",
+   "image": "rbxassetid://13933165014",
+   "name": "Ocean",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Oily",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501170",
+   "name": "Oily"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ollie",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=305504399",
+   "name": "Ollie"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "OrangeMarble",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873011",
+   "name": "Orange Marble",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "OrangeSeer",
+   "image": "rbxassetid://3184139504",
+   "name": "Orange Seer"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ornament1",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331745428",
+   "name": "Ornament",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Ornament1Gun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497144",
+   "name": "Ornament1",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ornament2",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331745341",
+   "name": "Ornament2",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Ornament2Gun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497550",
+   "name": "Ornament2",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Ornaments_G_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121863515",
+   "name": "Ornaments",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ornaments_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121853160",
+   "name": "Ornaments",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Ornaments_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=132504094164819",
+   "name": "Ornaments",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Overseer",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=175668680",
+   "name": "Overseer"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "OverseerKnife",
+   "image": "http://www.roblox.com/asset/?id=198458910",
+   "name": "Overseer"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Painted_G_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965344675",
+   "name": "Painted",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Painted_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12965311567",
+   "name": "Painted",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Palms_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322192817",
+   "name": "Palms",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Palms_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322137551",
+   "name": "Palms",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Paper",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235366870",
+   "name": "Paper"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Passion",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=363150334",
+   "name": "Passion"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Patrick",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=383476085",
+   "name": "Patrick"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Paws_G_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=120089556380493",
+   "name": "Paws",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Pea",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238545971",
+   "name": "Pea"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Pearl_G",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322646152",
+   "name": "Pearlshine",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Pearl_K",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322621319",
+   "name": "Pearl",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Penguin_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=93320180084418",
+   "name": "Penguin",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Pepper",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473625645",
+   "name": "Brown"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Peppermint",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6076067750",
+   "name": "Peppermint",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Peppermint_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=73148873488539",
+   "name": "Peppermint",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Peppermint_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=84605926178412",
+   "name": "Peppermint",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Phantom",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133332075",
+   "name": "Phantom",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Phantom2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11229732037",
+   "name": "Phantom",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Classic",
+   "id": "Phaser",
+   "image": "http://www.roblox.com/asset/?id=144325423",
+   "name": "Phaser"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Pier_K_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=127570773123670",
+   "name": "Pier",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Pine_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534871260",
+   "name": "Pine",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Pine_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534855710",
+   "name": "Pine",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Pirate",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183639867",
+   "name": "Pirate",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Pixel",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365347166",
+   "name": "Pixel"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Plaid_G_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=121681210724670",
+   "name": "Plaid",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Plasmabeam",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=10014717343",
+   "name": "Plasmabeam",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Plasmablade",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=10014680882",
+   "name": "Plasmablade",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Plasmite",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=161369368",
+   "name": "Plasmite"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "PolarBear_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=120422092957504",
+   "name": "Polar Bear",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Pool_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=112511843095202",
+   "name": "Pool",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "PopArt_G_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=90526048501163",
+   "name": "Pop Art",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "PopArt_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=123269723073737",
+   "name": "Pop Art",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Popsicle_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322191060",
+   "name": "Popsicle",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Popsicle_K_2023",
+   "image": "rbxassetid://13944131578",
+   "name": "Popsicle",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Portal_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866461926",
+   "name": "Portal",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Portal_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866444722",
+   "name": "Portal",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Potion",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133366632",
+   "name": "Potion",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "PotionG2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513742133",
+   "name": "Potion",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "PotionK2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513733987",
+   "name": "Potion",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Predator",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203810176",
+   "name": "Predator"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "PredatorKnife",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235372015",
+   "name": "Predator"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Present",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268699212",
+   "name": "Present",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Present_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635553149",
+   "name": "Present",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Prism",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=306046703",
+   "name": "Prism"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Prismatic",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5360359935",
+   "name": "Prismatic",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "PumpkinPatch",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210931354",
+   "name": "Pumpkin",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "PumpkinPatch_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=117088166092009",
+   "name": "Pumpkin Patch",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "PumpkinPatch_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=119626042140839",
+   "name": "Pumpkin",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "PumpkinPie_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15413117611",
+   "name": "Pumpkin Pie",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Pumpkin_G_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091327743",
+   "name": "Pumpkin",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Pumpkin_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5872490600",
+   "name": "Pumpkin",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Pumpking",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133082421",
+   "name": "Pumpking",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "PurpleSeer",
+   "image": "rbxassetid://3184140119",
+   "name": "Purple Seer"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "RBKnife",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5984754897",
+   "name": "RB Knife",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "RIP",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210947993",
+   "name": "RIP",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Rainbow",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=159747377",
+   "name": "Rainbow"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "RainbowGun",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183640145",
+   "name": "Rainbow",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Rainbow_G",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12966354606",
+   "name": "Rainbow Gun",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Rainbow_K",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12966184630",
+   "name": "Rainbow",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "RandLuger",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=196751515",
+   "name": "Glitch2"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Raygun",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=139431943195380",
+   "name": "Raygun",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "RaygunChroma",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=83259634072260",
+   "name": "Raygun",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "RbxScary_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=14967668214",
+   "name": "Ghoulish",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "RedFire",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1269256860",
+   "name": "Red Fire",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "RedLuger",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332044583",
+   "name": "Red Luger",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "RedSeer",
+   "image": "rbxassetid://3184139367",
+   "name": "Red Seer"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Reindeer_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=109101361674956",
+   "name": "Reindeer",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Reindeer_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=122078592955794",
+   "name": "Reindeer",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Reptile",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=162672131",
+   "name": "Reptile"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Retro_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=85299848190695",
+   "name": "Retro",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ribbon_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635552019",
+   "name": "Ribbon",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Ribbons_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304754882",
+   "name": "Ribbons",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Ripper_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866460591",
+   "name": "Ripper",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Ripper_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5866441301",
+   "name": "Ripper",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Ritual_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=122021199074749",
+   "name": "Ritual",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Robot_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16959778188",
+   "name": "Robot",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Rose_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12339325736",
+   "name": "Rose",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Roses",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=363352002",
+   "name": "Roses"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Rune",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183607894",
+   "name": "Rune",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Runic_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254123390",
+   "name": "Curse",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Sakura_K",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=12339366064",
+   "name": "Sakura",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sand_K_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=138109619662236",
+   "name": "Sand",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Sands",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=119213058412452",
+   "name": "Sands",
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "SandsChroma",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=86168413958858",
+   "name": "Sands",
+   "chroma": true,
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sandy",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365568056",
+   "name": "Sandy"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Sandy_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18323752709",
+   "name": "Sandy",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Santa",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331746096",
+   "name": "Santa",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Santa2017",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268703618",
+   "name": "Santa",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "SantaGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332496861",
+   "name": "Santa",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Santa_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669785184",
+   "name": "Elf",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Santa_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635550625",
+   "name": "Santa",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Santa_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669637780",
+   "name": "Santa",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "SantasMagic",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4535483042",
+   "name": "Santa's Magic",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "SantasSpirit",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6123357775",
+   "name": "Santa's Spirit",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Saw",
+   "image": "rbxassetid://3187397991",
+   "name": "Saw"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SawChroma",
+   "image": "rbxassetid://3187398132",
+   "name": "Saw",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Scarf_K_2023",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15415482999",
+   "name": "Scarf",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Scratch",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873371",
+   "name": "Scratch",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "ScratchBlue",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133316381",
+   "name": "Scratch",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "Scythe",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=375690925",
+   "name": "Batwing",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SeerChroma",
+   "image": "rbxassetid://3184140321",
+   "name": "Seer",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Shaded",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659636085",
+   "name": "Shaded",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Classic",
+   "id": "ShadowKnife",
+   "image": "http://www.roblox.com/asset/?id=144070096",
+   "name": "Shadow"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Shark",
+   "image": "rbxassetid://3187421705",
+   "name": "Shark"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "SharkChroma",
+   "image": "rbxassetid://3187421856",
+   "name": "Shark",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Sharky_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322179563",
+   "name": "Sharky",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sidewinder",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=305503783",
+   "name": "Sidewinder"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "SilentNight_G_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121862034",
+   "name": "Silent Night",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "SilentNight_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6121851313",
+   "name": "Silent Night",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Sketch",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203808108",
+   "name": "Sketch"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "SketchYT",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=546161470",
+   "name": "Sketchy"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Skool",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=295269977",
+   "name": "Skool"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Skull_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091321393",
+   "name": "Etched",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Skulls",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210915060",
+   "name": "Skulls",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Skulls_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800220325",
+   "name": "Skulls",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Skyline_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=75608370390005",
+   "name": "Skyline",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Slashed_K_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5929317433",
+   "name": "Slashed",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Slasher",
+   "image": "rbxassetid://3187398274",
+   "name": "Slasher"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SlasherChroma",
+   "image": "rbxassetid://3187398385",
+   "name": "Slasher",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Slate",
+   "image": "http://www.roblox.com/asset/?id=198453556",
+   "name": "Slate"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Sleigh_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=74917318027165",
+   "name": "Sleigh",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "SlimeG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513742319",
+   "name": "Slime",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "SlimeK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513734227",
+   "name": "Slime",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "SlimyK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210932676",
+   "name": "Slimy",
+   "year": "2019"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "SnakebiteG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210925026",
+   "name": "Snakebite",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "SnakebiteK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210939388",
+   "name": "Snakebite",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Snoop",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=473626150",
+   "name": "Red"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SnowDagger",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=95328449981238",
+   "name": "Snow Dagger",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SnowDaggerChroma",
+   "event": "Christmas",
+   "image": "rbxassetid://88800167694751",
+   "name": "Snow Dagger",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Snowball_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=104416405402940",
+   "name": "Snowball",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Snowball_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=119914093248842",
+   "name": "Snowball",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Snowcannon",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=129186939023729",
+   "name": "Snowcannon",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "SnowcannonChroma",
+   "event": "Christmas",
+   "image": "rbxassetid://85283931666319",
+   "name": "Snowcannon",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Snowfall_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635568751",
+   "name": "Snowfall",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Snowflake",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268932977",
+   "name": "Snowflake",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Snowflake_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669786515",
+   "name": "Snowflake",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Snowflake_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834437796",
+   "name": "Snowflake",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Snowflake_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635575718",
+   "name": "Snowflake",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Snowflake_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669639913",
+   "name": "Snowflake",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Snowflake_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834397133",
+   "name": "Snowflake",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Snowflakes_G_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534866065",
+   "name": "Snowflakes",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Snowflakes_K_2019",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4534855045",
+   "name": "Snowflakes",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Snowflakes_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6123338102",
+   "name": "Snowflakes",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Snowglobe_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635576863",
+   "name": "Snowglobe",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Snowman",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331745799",
+   "name": "Snowman",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "SnowmanGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497603",
+   "name": "Snowman",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Snowman_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669786846",
+   "name": "Snowman",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Snowman_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304766932",
+   "name": "Snowman",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Snowman_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834436620",
+   "name": "Snowman",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Snowman_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635572427",
+   "name": "Snowman",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Snowman_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669640152",
+   "name": "Snowman",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Snowman_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304753468",
+   "name": "Snowman",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Snowman_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834391469",
+   "name": "Snowman",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Snowman_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=85751270338066",
+   "name": "Snowman",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Snowstorm",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=70973050894155",
+   "name": "Snowstorm",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SnowstormChroma",
+   "event": "Christmas",
+   "image": "rbxassetid://138236810069600",
+   "name": "Snowstorm",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Snowy",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332011125",
+   "name": "Snowy",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Snowy2017",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268705947",
+   "name": "Snowy",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Soda_G_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=132525981806780",
+   "name": "Soda",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Soda_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=89899263078420",
+   "name": "Soda",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Unique",
+   "id": "Sorry",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=197879343",
+   "name": "Corrupt"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Space",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183607442",
+   "name": "Space",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Sparkle",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203869110",
+   "name": "Sparkle"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle1",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310709709",
+   "name": "Sparkle1"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle10",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310715768",
+   "name": "Sparkle10"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle2",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310710191",
+   "name": "Sparkle2"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle3",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310710694",
+   "name": "Sparkle3"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle4",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310712788",
+   "name": "Sparkle4"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle5",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310713235",
+   "name": "Sparkle5"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle6",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310713648",
+   "name": "Sparkle6"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle7",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310714089",
+   "name": "Sparkle7"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle8",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310714407",
+   "name": "Sparkle8"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sparkle9",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=310715104",
+   "name": "Sparkle9"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Spearmint_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=81352860339620",
+   "name": "Spearmint",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Spearmint_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=98506456649552",
+   "name": "Spearmint",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Spectral_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800255531",
+   "name": "Spectral",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Spectral_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800226793",
+   "name": "Spectral",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Spectre2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11229779932",
+   "name": "Spectre",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Spectrum",
+   "image": "http://www.roblox.com/asset/?id=198458862",
+   "name": "Spectrum"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Spider",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315120760",
+   "name": "Spider",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Spider_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091399982",
+   "name": "Spider",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Spitfire",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=159971321",
+   "name": "Spitfire"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Splash",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235371439",
+   "name": "Splash"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Splash_G",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4659626370",
+   "name": "Splash",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Splat",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183639522",
+   "name": "Splat",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Splatter",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16964346058",
+   "name": "Splatter"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Spring_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16959775902",
+   "name": "Spring",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Squire",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315501560",
+   "name": "Squire"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Stainless",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235366771",
+   "name": "Stainless"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Stalker",
+   "image": "http://www.roblox.com/asset/?id=198455980",
+   "name": "Stalker"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Star",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203807904",
+   "name": "Star"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Starfish_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322189584",
+   "name": "Starfish",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Starfish_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322176343",
+   "name": "Starfish",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Starry_G_2020",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5930731295",
+   "name": "Starry",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Starry_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304772774",
+   "name": "Starry",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Starry_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304757707",
+   "name": "Starry",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Starry_K_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=130537925107449",
+   "name": "Starry",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Stars_G_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635574031",
+   "name": "Stars",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Stars_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635559978",
+   "name": "Stars",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Static",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=365568163",
+   "name": "Static"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Steel_G_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091341552",
+   "name": "Steel",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Steel_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091405483",
+   "name": "Steel",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "StickersH_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=100461386281007",
+   "name": "Stickers",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "StickersT2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=115280072896190",
+   "name": "Stickers",
+   "season": 1,
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "StickersX_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834432971",
+   "name": "Stickers",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "StickersX_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=127489830827583",
+   "name": "Stickers",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "StickersX_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834387858",
+   "name": "Stickers",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "StickersX_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=102283625659356",
+   "name": "Stickers",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Stickers_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800257010",
+   "name": "Stickers",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Stickers_G_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=108122054293502",
+   "name": "Stickers",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Stickers_G_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=75123474631661",
+   "name": "Stickers",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Stickers_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800229084",
+   "name": "Stickers",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Stickers_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254067158",
+   "name": "Stickers",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Stickers_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=120248733900674",
+   "name": "Stickers",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Stickers_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=98868784444742",
+   "name": "Stickers",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Stickers_X_G_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=91224254479440",
+   "name": "Stickers",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Stickers_X_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=83843575465564",
+   "name": "Stickers",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Stockings_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834440319",
+   "name": "Stockings",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Stockings_G_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=76288270695961",
+   "name": "Stockings",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Stockings_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6123335682",
+   "name": "Stockings",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Stockings_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834392930",
+   "name": "Stockings",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Storm_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=97369825731567",
+   "name": "Storm",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Strawberries_G_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=128646835922561",
+   "name": "Strawberries",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Strawberries_K_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=73897192147749",
+   "name": "Strawberries",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Striped_G_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=118530164125152",
+   "name": "Striped",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Striped_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=136747578920542",
+   "name": "Striped",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sub",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=546159250",
+   "name": "Sub"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Sugar",
+   "event": "Christmas",
+   "image": "rbxassetid://3215356000",
+   "name": "Sugar",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Summer_Stickers_G_2023",
+   "image": "rbxassetid://13944151909",
+   "name": "Stickers",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Summer_Stickers_K_2023",
+   "image": "rbxassetid://13944129977",
+   "name": "Stickers",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Sunny_G_2025",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=93906279038399",
+   "name": "Sunny",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "SunsetGun",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=129480661108374",
+   "name": "Sunrise",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "SunsetGunChroma",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=124766755976937",
+   "name": "Sunrise",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SunsetKnife",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=103526268515240",
+   "name": "Sunset",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SunsetKnifeChroma",
+   "event": "Summer",
+   "image": "rbxassetid://118232478609755",
+   "name": "Sunset",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Sunset_G_2023",
+   "image": "rbxassetid://13944156090",
+   "name": "Sun",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Sunset_G_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=120907601916735",
+   "name": "Sunset",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Survivors_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254180750",
+   "name": "Makeshift",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Sweater",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268704902",
+   "name": "Sweater",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Sweater_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669787088",
+   "name": "Sweater",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Sweater_G_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=118557229750245",
+   "name": "Sweater",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Sweater_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669640567",
+   "name": "Sweater",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Sweater_K_2025",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=102130993592804",
+   "name": "Sweater",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Sweet",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=126937716954396",
+   "name": "Sweet",
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SweetChroma",
+   "event": "Valentines",
+   "image": "rbxassetid://104484904779308",
+   "name": "Sweet",
+   "chroma": true,
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Sweet_K_2026",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=113677688954146",
+   "name": "Yummy",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Sweetheart",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=363150761",
+   "name": "Sweetheart"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Swirl_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304757110",
+   "name": "Swirl",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "SwirlyAxe",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304801000",
+   "name": "Swirly Axe",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "SwirlyBlade",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304805693",
+   "name": "Swirly Blade",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "SwirlyGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8305002569",
+   "name": "Swirly Gun",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "SwirlyGunChroma",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/asset/?id=8311453396",
+   "name": "Swirly Gun",
+   "chroma": true,
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "TNL",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=201542790",
+   "name": "TNL"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Tailslide",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=305506822",
+   "name": "Tailslide"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "TheSeer",
+   "image": "rbxassetid://3184139765",
+   "name": "Seer"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Tides",
+   "image": "rbxassetid://3187398809",
+   "name": "Tides"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "TidesChroma",
+   "image": "rbxassetid://3187398906",
+   "name": "Tides",
+   "chroma": true
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Tiger",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=3183606579",
+   "name": "Tiger",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Classic",
+   "id": "TimeKnife",
+   "image": "http://www.roblox.com/asset/?id=143917700",
+   "name": "Prince"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Tourist_K_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=135606903872678",
+   "name": "Tourist",
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "ToxicG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513742519",
+   "name": "Toxic",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "ToxicK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513734535",
+   "name": "Toxic",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Toy_G_2023",
+   "image": "rbxassetid://13944153112",
+   "name": "Toy",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Toy_K_2023",
+   "image": "rbxassetid://13944128440",
+   "name": "Toy",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "TravelerAxe",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15070870271",
+   "name": "Traveler's Axe",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "TravelerGun",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091442039",
+   "name": "Traveler's Gun",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "TravelerGunChroma",
+   "event": "Halloween",
+   "image": "rbxassetid://15097920149",
+   "name": "Traveler's Gun",
+   "chroma": true,
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Traveler_G_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091344462",
+   "name": "Traveler",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Traveler_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091407901",
+   "name": "Traveler",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Treat",
+   "event": "Valentines",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=131626924640663",
+   "name": "Treat",
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "TreatChroma",
+   "event": "Valentines",
+   "image": "rbxassetid://114308643779951",
+   "name": "Treat",
+   "chroma": true,
+   "season": 1,
+   "year": "2026"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Treats_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=76537883908961",
+   "name": "Treats",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Treats_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=115298865715727",
+   "name": "Treats",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Tree",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331745577",
+   "name": "Tree",
+   "year": "2015"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Tree2017",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268704124",
+   "name": "Tree",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "TreeGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497688",
+   "name": "Tree",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "TreeGun2023",
+   "event": "Christmas",
+   "image": "rbxassetid://15694357721",
+   "name": "Evergun",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "TreeGun2023Chroma",
+   "event": "Christmas",
+   "image": "rbxassetid://15694208971",
+   "name": "Evergun",
+   "chroma": true,
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "TreeKnife2023",
+   "event": "Christmas",
+   "image": "rbxassetid://15694357137",
+   "name": "Evergreen",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "TreeKnife2023Chroma",
+   "event": "Christmas",
+   "image": "rbxassetid://15694192241",
+   "name": "Evergreen",
+   "chroma": true,
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Tree_G_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834441321",
+   "name": "Tree",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Tree_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304756423",
+   "name": "Tree",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Tree_K_2022",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11834400185",
+   "name": "Tree",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Tree_K_2023",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15635563249",
+   "name": "Tree",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Trees_K_2020",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=6123336879",
+   "name": "Trees",
+   "year": "2020"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Tropical_K_2025",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=111291962899457",
+   "name": "Tropical",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Tulip",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=387874661",
+   "name": "Tulip",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Turkey2023",
+   "image": "rbxassetid://15413162319",
+   "name": "Turkey",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Turtle_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322166908",
+   "name": "Turtle",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Turtles_K_2026",
+   "event": "Summer",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=77271917200992",
+   "name": "Turtles",
+   "year": "2026"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "UFOKnife",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=77607127867154",
+   "name": "Alienbeam",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "UFOKnifeChroma",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=104256106059730",
+   "name": "Alienbeam",
+   "chroma": true,
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "UFOs_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=84030107970606",
+   "name": "UFOs",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "UFOs_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=97641024072972",
+   "name": "UFOs",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Universe",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546660",
+   "name": "Universe"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Valentine",
+   "image": "https://www.roblox.com/asset/?id=363362726",
+   "name": "Valentine"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Vampire",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873248",
+   "name": "Vampire",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Ancient",
+   "id": "VampireAxe",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=130837676383567",
+   "name": "Vampire's Axe",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "VampireG2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513742751",
+   "name": "Vampire",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "VampireGun",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=90274872705656",
+   "name": "Vampire's Gun",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "VampireGunChroma",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=85107391551890",
+   "name": "Vampire's Gun",
+   "chroma": true,
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "VampireK2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513734708",
+   "name": "Vampire",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Vampire_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11255503583",
+   "name": "Vampire",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Vampire_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254125546",
+   "name": "Vampire",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "VampiresEdge",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=5873256998",
+   "name": "Vampire's Edge",
+   "year": "2020"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Vines_G_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091402817",
+   "name": "Vines",
+   "year": "2023"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Vines_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091325210",
+   "name": "Vines",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Legendary",
+   "id": "Viper",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=160299600",
+   "name": "Viper"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Virtual",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=386276987",
+   "name": "Virtual"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "VoidRbx",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11548082732",
+   "name": "Void",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Vortex",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=235371508",
+   "name": "Vortex"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Wanwood",
+   "image": "http://www.roblox.com/asset/?id=192132094",
+   "name": "Wanwood"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Watcher_G_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800256309",
+   "name": "Watcher",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Watcher_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800227475",
+   "name": "Watcher",
+   "year": "2021"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "WaterBalloons_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18323751962",
+   "name": "Balloons",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "Watergun",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18351388416",
+   "name": "Watergun",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "WatergunChroma",
+   "image": "rbxassetid://18351465514",
+   "name": "Watergun",
+   "chroma": true,
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Waves_K",
+   "image": "rbxassetid://13933066522",
+   "name": "Waves",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Waves_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=18322178053",
+   "name": "Waves",
+   "season": 1
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Wavy_G_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16960077712",
+   "name": "Wavy",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Wavy_K_2024",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=16959755393",
+   "name": "Wavy",
+   "season": 1
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Web",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=315104004",
+   "name": "Web",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "WebbedG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210936652",
+   "name": "Webbed",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "WebbedK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210949599",
+   "name": "Webbed",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Webs",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133325465",
+   "name": "Webs",
+   "year": "2017"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Webs_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11284147880",
+   "name": "Webs",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Whiteout",
+   "image": "http://www.roblox.com/asset/?id=191788694",
+   "name": "Whiteout"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "WintersEdge",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1268708987",
+   "name": "Winter's Edge",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Witch",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873553",
+   "name": "Witch",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "WitchBrew_K_2024",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=108331177567412",
+   "name": "Witch's Brew",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Witch_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254115609",
+   "name": "Witchbrew",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Legendary",
+   "id": "Witched",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210938270",
+   "name": "Witched",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Wolf",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=531873487",
+   "name": "Wolf",
+   "year": "2016"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Wood_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091401811",
+   "name": "Wood",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Wooden",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=238546356",
+   "name": "Wooden"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "WraithGun",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=75233248021696",
+   "name": "Soul",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "WraithKnife",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=107190526940939",
+   "name": "Spirit",
+   "year": "2024"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Wraith_G_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11255504462",
+   "name": "Wraith",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Wraith_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254118399",
+   "name": "Wraith",
+   "year": "2022"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Wrapped",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=331745500",
+   "name": "Wrapped",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "WrappedGun",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332497103",
+   "name": "Wrapped",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "Wrapped_G_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669787533",
+   "name": "Wrapped",
+   "year": "2018"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "Wrapped_G_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=109929760056853",
+   "name": "Wrapped",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Wrapped_K_2018",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2669640357",
+   "name": "Wrapped",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Wrapped_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=72638846676083",
+   "name": "Wrapped",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Wreaths_K_2024",
+   "event": "Christmas",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=78432760615312",
+   "name": "Wreaths",
+   "year": "2024"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Xbox",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=439325100",
+   "name": "Xbox"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Godly",
+   "id": "XenoGun",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=96859273002742",
+   "name": "Xenoshot",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "XenoKnife",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=115021756767182",
+   "name": "Xenoknife",
+   "year": "2025"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "Xeno_G_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=139755862211442",
+   "name": "Xeno",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Xeno_K_2025",
+   "event": "Halloween",
+   "image": "rbxthumb://type=Asset&w=150&h=150&id=80492487454400",
+   "name": "Xeno",
+   "year": "2025"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "Xmas",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=332077449",
+   "name": "Xmas",
+   "year": "2015"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Common",
+   "id": "XmasStickers_G_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304770115",
+   "name": "Stickers",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "XmasStickers_K_2021",
+   "event": "Christmas",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=8304755417",
+   "name": "Stickers",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "YellowSeer",
+   "image": "rbxassetid://3184139648",
+   "name": "Yellow Seer"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Common",
+   "id": "Zombie",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=1133331875",
+   "name": "Zombie",
+   "year": "2017"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Godly",
+   "id": "ZombieBat",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11229814357",
+   "name": "Bat",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "ZombieG2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513743298",
+   "name": "Zombie",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "ZombieK2018",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=2513734908",
+   "name": "Zombie",
+   "year": "2018"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Zombie_K_2021",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=7800222975",
+   "name": "Zombie",
+   "year": "2021"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "Zombie_K_2023",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=15091339932",
+   "name": "Zombie",
+   "year": "2023"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Uncommon",
+   "id": "ZombifiedG",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210944924",
+   "name": "Zombified",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Uncommon",
+   "id": "ZombifiedK",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=4210928053",
+   "name": "Zombified",
+   "year": "2019"
+  },
+  {
+   "type": "Knife",
+   "rarity": "Rare",
+   "id": "Zombified_K_2022",
+   "event": "Halloween",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=11254182560",
+   "name": "Zombified",
+   "year": "2022"
+  },
+  {
+   "type": "Gun",
+   "rarity": "Rare",
+   "id": "iRevolver",
+   "image": "http://www.roblox.com/Thumbs/Asset.ashx?format=png&width=250&height=250&assetId=203809168",
+   "name": "iRevolver"
+  }
+ ]
+}

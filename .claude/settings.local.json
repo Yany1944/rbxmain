@@ -12,7 +12,20 @@
       "WebFetch(domain:docs.jnkie.com)",
       "Bash(cat /c/Users/Admin/.claude/projects/D--Tools-lua-rbxmain/memory/skin-sync-relay.md; ls /d/Tools/lua/rbxmain/Relay; cd /d/Tools/lua/rbxmain && sed -n 22880,22910p skinchanger.lua | cut -c1-140)",
       "Bash(awk 'NR>6 && /^}/ {print NR; exit}' skinchanger.lua)",
-      "Bash(grep -n \"^local [A-Z_]*_DATA\\\\|^local [A-Z_]* = {$\" skinchanger.lua)"
+      "Bash(grep -n \"^local [A-Z_]*_DATA\\\\|^local [A-Z_]* = {$\" skinchanger.lua)",
+      "Bash(unzip -l /c/Users/Admin/Desktop/upgrader-fabric-1.2.1-26.3.jar)",
+      "Bash(cd /d/Tools/lua/Obsid && ls -la && find . -path ./node_modules -prune -o -path ./.git -prune -o -type f -print | head -100)",
+      "Bash(unzip -p /c/Users/Admin/Desktop/upgrader-fabric-1.2.1-26.3.jar assets/upgrader/lang/en_us.json)",
+      "Bash(unzip -p /c/Users/Admin/Desktop/upgrader-fabric-1.2.1-26.3.jar net/execheinz/upgrader/value/UpgradeOdds.class)",
+      "Bash(grep -E '.{3,}')",
+      "Bash(unzip -p /c/Users/Admin/Desktop/upgrader-fabric-1.2.1-26.3.jar net/execheinz/upgrader/UpgraderConfig.class)",
+      "Bash(python -c \"import curl_cffi, bs4; print\\('deps ok', curl_cffi.__version__\\)\")",
+      "Bash(python -c \"import json;d=json.load\\(open\\('D:/Tools/lua/Obsid/Values/mm2_values.json',encoding='utf8'\\)\\);print\\(d['meta']\\);import itertools;print\\(list\\(itertools.islice\\(d['items'].items\\(\\),3\\)\\)\\)\")",
+      "Bash(ssh -o BatchMode=yes -i ~/.ssh/skin_relay root@193.39.143.31 'curl -s -o /tmp/sv.html -w \"%{http_code} %{size_download}\\\\n\" -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0 Safari/537.36\" https://supremevalues.com/mm2/godlies; grep -c \"_svPopup\\\\|itemcell\" /tmp/sv.html; head -c 300 /tmp/sv.html; rm -f /tmp/sv.html; python3 --version; python3 -c \"import curl_cffi\" 2>&1 | tail -1')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download}\\\\n\" -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0 Safari/537.36\" https://supremevalues.com/mm2/godlies)",
+      "Bash(curl -s -I https://supremevalues.com/mm2/godlies)",
+      "Bash(curl -s -A 'Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0 Safari/537.36' -o /c/Users/Admin/AppData/Local/Temp/claude/D--Tools-lua-rbxmain/9a679596-1d25-458e-8533-24a8188fdee4/scratchpad/sv_godlies.html https://supremevalues.com/mm2/godlies)",
+      "Read(//c/Users/Admin/AppData/Local/Temp/claude/D--Tools-lua-rbxmain/9a679596-1d25-458e-8533-24a8188fdee4/scratchpad/**)"
     ]
   }
 }
