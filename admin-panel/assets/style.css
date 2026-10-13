@@ -446,6 +446,8 @@ tr.is-open .chev { transform: rotate(90deg); }
 .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
 .avatar .icon { width: 55%; height: 55%; }
 .avatar.lg { width: 44px; height: 44px; }
+.avatar.xl { width: 60px; height: 60px; border-radius: var(--r-md); }
+.avatar.xl img { border-radius: var(--r-md); }
 .avatar.sm { width: 24px; height: 24px; }
 .avatar.xs { width: 20px; height: 20px; }
 .avatar.on::after {
@@ -467,6 +469,17 @@ tr.is-open .chev { transform: rotate(90deg); }
   vertical-align: middle;
 }
 .hwid.bad { background: var(--danger-soft); color: var(--danger-text); }
+/* Полный HWID экзекутора длинный: в таблицах — начало с многоточием, целиком в подсказке и карточке */
+.hwid.long { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
+.hwid-box {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 12px 14px;
+  border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--surface-2);
+}
+.hwid-box.bad { border-color: var(--danger-soft); }
+.hwid-box-text { flex: 1; min-width: 0; }
+.hwid-box-text span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.hwid-box code { display: block; font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink); word-break: break-all; }
+.hwid-box.bad code { color: var(--danger-text); }
 .version { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .version b { font-weight: 500; }
 .build { padding: 1px 6px; border-radius: var(--r-xs); background: var(--neutral-soft); color: var(--muted); font-family: var(--mono); font-size: 11.5px; line-height: 1.5; }
@@ -537,7 +550,9 @@ dialog::backdrop { background: var(--backdrop); }
 .drawer-inner { padding: 20px 24px 36px; }
 .drawer-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; color: var(--muted); font-size: 13px; font-weight: 500; }
 .drawer-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
-.drawer-head h2 { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 21px; font-weight: 600; letter-spacing: -0.2px; }
+.drawer-name { min-width: 0; }
+.drawer-head h2 { display: flex; align-items: baseline; gap: 8px; font-size: 22px; font-weight: 700; letter-spacing: -0.3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-head h2 .more { color: var(--faint); font-size: 15px; font-weight: 600; }
 .drawer-sub { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 13.5px; }
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 26px; }
 .drawer h3 { display: flex; align-items: center; gap: 8px; margin: 26px 0 10px; font-size: 14px; font-weight: 600; }

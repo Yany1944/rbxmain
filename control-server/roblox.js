@@ -31,7 +31,8 @@ export function createRoblox(options = {}) {
       const user = names.get(id), image = images.get(id);
       const avatar = image?.state === 'Completed' && AVATAR.test(image.imageUrl || '') ? image.imageUrl : null;
       // Без ответа users-API имя неизвестно: такую запись перепроверяем раньше
-      const partial = users.status === 'rejected' || thumbs.status === 'rejected';
+      // Аватар ещё рендерится (Pending) — тоже перепроверяем скоро, а не через 6 ч
+      const partial = users.status === 'rejected' || thumbs.status === 'rejected' || !avatar;
       cache.set(id, {at, ttl: partial ? FAIL_TTL : TTL, value: {name: user?.name || null, displayName: user?.displayName || null, avatar}});
     }
   }

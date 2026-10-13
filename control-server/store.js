@@ -23,6 +23,9 @@ export function openStore(path) {
     CREATE TABLE IF NOT EXISTS rate_limits(bucket TEXT PRIMARY KEY,start INTEGER NOT NULL,count INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS price_runs(id INTEGER PRIMARY KEY,started INTEGER NOT NULL,finished INTEGER,ok INTEGER,trigger TEXT NOT NULL,priced INTEGER,error TEXT NOT NULL DEFAULT '');
     PRAGMA user_version=1;`);
+  // Исходный HWID экзекутора для панели (блокировки по-прежнему по HMAC). Новая колонка
+  // со значением по умолчанию совместима с прежним релизом — откат не ломается.
+  if(!db.prepare('PRAGMA table_info(sessions)').all().some(c=>c.name==='hwid'))db.exec("ALTER TABLE sessions ADD COLUMN hwid TEXT NOT NULL DEFAULT ''");
   return {
     db,
     get(sql,...args) {return db.prepare(sql).get(...args);},

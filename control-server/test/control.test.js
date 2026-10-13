@@ -131,7 +131,7 @@ test('login rate limit is per client IP; HTTPS proxy gets a Secure cookie',async
 test('HWID ban by panel reference and Roblox profiles',async t=>{
   const f=await fixture(t);await f.login();await f.publish();
   assert.equal((await f.control('/session')).body.ok,true);
-  const state=(await f.admin('/api/state')).body;assert.equal(state.api,2);
+  const state=(await f.admin('/api/state')).body;assert.equal(state.api,3);
   const ref=state.sessions[0].hwid_ref;
   assert.equal((await f.admin('/api/bans',{kind:'hwid',ref:'0'.repeat(12),reason:'x'})).status,404);
   assert.equal((await f.admin('/api/bans',{kind:'hwid',ref,reason:'Device denial'})).status,200);
@@ -169,4 +169,16 @@ test('dashboard and its script are served only after login',async t=>{
   const cookie=await f.login();
   assert.equal((await get('/dashboard.html',cookie)).status,200);
   assert.equal((await get('/assets/live.js',cookie)).status,200);
+});
+test('panel sees the executor HWID in full and can ban by it',async t=>{
+  const f=await fixture(t);await f.login();await f.publish();
+  const raw='18742ce88d24ab8cadfd5e04f8d837567918a102c4234cdd6aed49f9d329c18742e603583596327d796508ba9077359f2763fb01f77403db7afb3c60d6175680';
+  assert.equal(raw.length,128);
+  assert.equal((await f.control('/session',{hwid:raw})).body.ok,true);
+  const s=(await f.admin('/api/state')).body.sessions[0];
+  assert.equal(s.hwid,raw);assert.match(s.hwid_ref,/^[a-f0-9]{12}$/);
+  assert.equal((await f.admin('/api/bans',{kind:'hwid',value:raw,reason:'Full HWID'})).status,200);
+  assert.equal((await f.admin('/api/state')).body.bans[0].reference,s.hwid_ref);
+  const denied=await f.control('/session',{hwid:raw,user:'777'});
+  assert.equal(denied.body.ok,false);assert.equal(denied.body.message,'Full HWID');
 });

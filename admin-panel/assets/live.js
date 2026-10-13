@@ -62,8 +62,8 @@
       s.active=!s.revoked&&s.expires>now;
       sessionsById.set(s.id,s);
       let d=devices.get(s.hwid_ref);
-      if(!d){d={ref:s.hwid_ref,sessions:[],accounts:new Map(),keys:new Set(),first:s.created,last:s.last_seen,active:0};devices.set(s.hwid_ref,d);}
-      d.sessions.push(s);d.keys.add(s.key_ref);
+      if(!d){d={ref:s.hwid_ref,raw:'',sessions:[],accounts:new Map(),keys:new Set(),first:s.created,last:s.last_seen,active:0};devices.set(s.hwid_ref,d);}
+      d.sessions.push(s);d.keys.add(s.key_ref);if(!d.raw&&s.hwid)d.raw=s.hwid;
       d.first=Math.min(d.first,s.created);d.last=Math.max(d.last,s.last_seen);if(s.active)d.active++;
       let a=d.accounts.get(s.user_id);
       if(!a){a={id:s.user_id,sessions:[],first:s.created,last:s.last_seen,active:0};d.accounts.set(s.user_id,a);}
@@ -92,7 +92,10 @@
     const sub=[p?.name?'@'+p.name:'',p?.name||p?.displayName?id:'',extra].filter(Boolean).join(' · ');
     return `<span class="who">${avatar(id,size,online)}<span class="who-text"><b>${esc(title)}</b>${sub?`<small>${esc(sub)}</small>`:''}</span></span>`;
   }
-  const hwid=(ref,bad=false)=>`<span class="hwid ${bad?'bad':''}">${esc(ref)}</span>`;
+  // Полный HWID из экзекутора; у старых сессий его нет — тогда начало HMAC устройства
+  const rawOf=ref=>model.devices.get(ref)?.raw||ref;
+  const hwid=(ref,bad=false)=>{const v=rawOf(ref);return `<span class="hwid ${bad?'bad':''} ${v.length>16?'long':''}" title="${esc(v)}">${esc(v)}</span>`;};
+  const hwidShort=ref=>{const v=rawOf(ref);return v.length>16?v.slice(0,12)+'…':v;};
   const version=v=>{const r=model.releases.get(Number(v));return `<span class="version"><b>${esc(r?.label||'Неизвестная')}</b><span class="build">${esc(v)}</span></span>`;};
   const versionText=r=>`${r.label} · ${r.version}`;
   const status=(text,tone='',title='')=>`<span class="status ${tone}" ${title?`title="${esc(title)}"`:''}>${esc(text)}</span>`;
@@ -215,7 +218,7 @@
       toolbar:()=>search('sessions','HWID, User ID или ник')+seg('sessions','status','Состояние',[['all','Все'],['active','В игре'],['ended','Завершённые']])+select('sessions','version','Версия',[['all','Все версии'],...data.releases.map(r=>[r.version,versionText(r)])])+count,
       results() {
         const v=view('sessions'),q=v.q.trim().toLowerCase();
-        const match=s=>(v.status==='all'||(v.status==='active')===s.active)&&(v.version==='all'||String(s.version)===String(v.version))&&(!q||s.hwid_ref.includes(q)||matchAccount(s.user_id,q));
+        const match=s=>(v.status==='all'||(v.status==='active')===s.active)&&(v.version==='all'||String(s.version)===String(v.version))&&(!q||s.hwid_ref.includes(q)||(s.hwid||'').toLowerCase().includes(q)||matchAccount(s.user_id,q));
         const groups=model.deviceList.map(d=>({d,sessions:d.sessions.filter(match)})).filter(g=>g.sessions.length);
         const {rows,pager}=paginate('sessions',groups,devicesText);
         const html=rows.map(({d,sessions})=>{
@@ -241,7 +244,7 @@
       toolbar:()=>search('users','HWID, User ID или ник')+seg('users','status','Состояние',[['all','Все'],['online','В игре'],['banned','Заблокированы']])+select('users','sort','Сортировка',[['last','По активности'],['first','Сначала новые'],['launches','По числу запусков']])+count,
       results() {
         const v=view('users'),q=v.q.trim().toLowerCase();
-        let list=model.deviceList.filter(d=>(v.status==='all'||(v.status==='online'?d.active>0:!!d.ban))&&(!q||d.ref.includes(q)||d.accountList.some(a=>matchAccount(a.id,q))));
+        let list=model.deviceList.filter(d=>(v.status==='all'||(v.status==='online'?d.active>0:!!d.ban))&&(!q||d.ref.includes(q)||d.raw.toLowerCase().includes(q)||d.accountList.some(a=>matchAccount(a.id,q))));
         if(v.sort==='first')list=[...list].sort((a,b)=>b.first-a.first);
         else if(v.sort==='launches')list=[...list].sort((a,b)=>b.sessions.length-a.sessions.length);
         const {rows,pager}=paginate('users',list,devicesText);
@@ -274,7 +277,7 @@
       results() {
         const v=view('bans'),q=v.q.trim().toLowerCase();
         const accountsOf=b=>b.kind==='hwid'?(model.devices.get(b.reference)?.accountList.map(a=>a.id)||[]):b.kind==='user'?[b.reference]:[];
-        const list=data.bans.filter(b=>(v.kind==='all'||(v.kind==='hwid')===(b.kind==='hwid'))&&(!q||b.reference.toLowerCase().includes(q)||b.reason.toLowerCase().includes(q)||accountsOf(b).some(id=>matchAccount(id,q))));
+        const list=data.bans.filter(b=>(v.kind==='all'||(v.kind==='hwid')===(b.kind==='hwid'))&&(!q||b.reference.toLowerCase().includes(q)||rawOf(b.reference).toLowerCase().includes(q)||b.reason.toLowerCase().includes(q)||accountsOf(b).some(id=>matchAccount(id,q))));
         const {rows,pager}=paginate('bans',list,n=>plural(n,'блокировка','блокировки','блокировок'));
         const html=rows.map(b=>{
           const ref=b.kind==='hwid'?(model.devices.has(b.reference)?b.reference:''):b.kind==='user'?[...(model.accountDevices.get(b.reference)||[])][0]||'':'';
@@ -337,13 +340,13 @@
   function logRef(l) {
     if(l.event==='session.open'||l.event==='session.revoke') {
       const s=model.sessionsById.get(l.detail);
-      if(s)return {html:`<div class="who">${avatar(s.user_id,'sm',s.active)}<span class="who-text"><b>${esc(accountName(s.user_id))}</b><small>${esc(s.hwid_ref)}</small></span></div>`,text:`${accountName(s.user_id)} ${s.user_id} ${s.hwid_ref}`,short:`${accountName(s.user_id)} · ${s.hwid_ref}`,open:s.hwid_ref};
+      if(s)return {html:`<div class="who">${avatar(s.user_id,'sm',s.active)}<span class="who-text"><b>${esc(accountName(s.user_id))}</b><small>${esc(hwidShort(s.hwid_ref))}</small></span></div>`,text:`${accountName(s.user_id)} ${s.user_id} ${rawOf(s.hwid_ref)}`,short:`${accountName(s.user_id)} · ${hwidShort(s.hwid_ref)}`,open:s.hwid_ref};
     }
     if(l.event.startsWith('release.')&&/^\d+$/.test(l.detail)){const r=model.releases.get(Number(l.detail));return {html:version(l.detail),text:`${r?.label||''} ${l.detail}`,short:r?`${r.label} · ${l.detail}`:l.detail};}
     if(l.event.startsWith('ban.')) {
       const b=model.bansById.get(l.detail);
       if(b&&b.kind==='user')return {html:who(b.reference,'sm'),text:`${accountName(b.reference)} ${b.reference}`,open:[...(model.accountDevices.get(b.reference)||[])][0]};
-      if(b){const d=model.devices.get(b.reference);return {html:`${hwid(b.reference,true)}${d?` <span class="muted" style="margin-left:6px">${esc(d.accountList.slice(0,2).map(a=>accountName(a.id)).join(', '))}</span>`:''}`,text:`${b.reference} ${d?d.accountList.map(a=>accountName(a.id)).join(' '):''}`,short:`${b.reference} · ${b.reason}`,open:d?b.reference:''};}
+      if(b){const d=model.devices.get(b.reference);return {html:`${hwid(b.reference,true)}${d?` <span class="muted" style="margin-left:6px">${esc(d.accountList.slice(0,2).map(a=>accountName(a.id)).join(', '))}</span>`:''}`,text:`${rawOf(b.reference)} ${d?d.accountList.map(a=>accountName(a.id)).join(' '):''}`,short:`${hwidShort(b.reference)} · ${b.reason}`,open:d?b.reference:''};}
       return {html:'<span class="faint">снята</span>',text:''};
     }
     if(l.event==='maintenance')return {html:l.detail==='true'?status('Включено','warn'):status('Выключено'),text:l.detail==='true'?'Включено':'Выключено'};
@@ -432,14 +435,18 @@
   function renderDrawer() {
     if(!drawerRef||!model)return;
     const d=model.devices.get(drawerRef),scroll=drawer.scrollTop;
-    const top=`<div class="drawer-top"><span>Пользователь</span><button type="button" class="icon-btn" data-action="close-drawer" aria-label="Закрыть">${icon('x')}</button></div><div class="drawer-head"><span class="tile lg ${d?.ban?'pink':d?.active?'green':''}">${icon('device')}</span><div><h2 id="drawerTitle">${esc(drawerRef)}<button type="button" class="icon-btn sm" data-action="copy" data-id="${esc(drawerRef)}" title="Скопировать HWID" aria-label="Скопировать HWID">${icon('copy')}</button></h2>${d?`<div class="drawer-sub">${deviceStatus(d)}${d.ban?`<span>${esc(d.ban.reason)}</span>`:`<span>${launches(d.sessions.length)} · ${plural(d.accountList.length,'аккаунт','аккаунта','аккаунтов')}</span>`}</div>`:''}</div></div>`;
+    // Заголовок — основной аккаунт устройства, как в Jnkie; HWID целиком отдельным блоком
+    const main=d?.accountList[0],more=d?d.accountList.length-1:0;
+    const top=`<div class="drawer-top"><span>Пользователь</span><button type="button" class="icon-btn" data-action="close-drawer" aria-label="Закрыть">${icon('x')}</button></div><div class="drawer-head">${main?avatar(main.id,'xl',main.active>0):`<span class="tile lg">${icon('device')}</span>`}<div class="drawer-name"><h2 id="drawerTitle">${esc(main?accountName(main.id):'Устройство')}${more?` <span class="more">+${more}</span>`:''}</h2>${d?`<div class="drawer-sub">${deviceStatus(d)}${d.ban?`<span>${esc(d.ban.reason)}</span>`:`<span>${launches(d.sessions.length)} · ${plural(d.accountList.length,'аккаунт','аккаунта','аккаунтов')}</span>`}</div>`:''}</div></div>`;
     if(!d){document.getElementById('drawerBody').innerHTML=top+empty('Устройство не найдено','Оно больше не встречается в сессиях за 30 дней.','device');return;}
+    const raw=d.raw||d.ref;
+    const hwidBox=`<div class="hwid-box ${d.ban?'bad':''}"><div class="hwid-box-text"><span>HWID${d.raw?'':' · начало хеша, сессии до обновления сервера'}</span><code>${esc(raw)}</code></div><button type="button" class="icon-btn" data-action="copy" data-id="${esc(raw)}" title="Скопировать HWID" aria-label="Скопировать HWID">${icon('copy')}</button></div>`;
     const canBanHwid=data.api>=2;
     const actions=[
       d.active?btn(`Завершить сессии (${d.active})`,'revoke-device',d.ref):'',
       d.ban?btn('Снять блокировку HWID','unban',d.ban.id):`<button type="button" class="btn btn-sm btn-danger" data-action="ban-hwid" data-id="${esc(d.ref)}" ${canBanHwid?'':'disabled title="Нужно обновить сервер Control"'}>${icon('ban')}Заблокировать HWID</button>`,
     ].join('');
-    const facts=`<div class="facts"><div class="fact"><span>Первый запуск</span><b>${esc(date(d.first))}</b></div><div class="fact"><span>Последняя связь</span><b>${agoText(d.last)}</b></div><div class="fact"><span>Запусков</span><b>${d.sessions.length}</b></div><div class="fact"><span>Аккаунтов</span><b>${d.accountList.length}</b></div></div><div class="keyline">Ключ Jnkie: ${[...d.keys].map(k=>`<span class="mono">${esc(k)}</span>`).join(', ')}</div>`;
+    const facts=`${hwidBox}<div class="facts"><div class="fact"><span>Первый запуск</span><b>${esc(date(d.first))}</b></div><div class="fact"><span>Последняя связь</span><b>${agoText(d.last)}</b></div><div class="fact"><span>Запусков</span><b>${d.sessions.length}</b></div><div class="fact"><span>Аккаунтов</span><b>${d.accountList.length}</b></div></div><div class="keyline">Ключ Jnkie: ${[...d.keys].map(k=>`<span class="mono">${esc(k)}</span>`).join(', ')}</div>`;
     const accounts=d.accountList.map(a=>{
       const ban=model.userBans.get(a.id);
       const other=(model.accountDevices.get(a.id)?.size||1)-1;
@@ -495,7 +502,7 @@
     toggle:id=>{expanded.has(id)?expanded.delete(id):expanded.add(id);renderResults();},
     open:id=>id&&openDrawer(id),
     'close-drawer':()=>drawer.close(),
-    copy:id=>navigator.clipboard?.writeText(id).then(()=>toast('HWID скопирован'),()=>toast('Не удалось скопировать','alert')),
+    copy:id=>navigator.clipboard?.writeText(id).then(()=>toast('Скопировано'),()=>toast('Не удалось скопировать','alert')),
     page:id=>{const [key,dir]=id.split(':');view(key).page+=Number(dir);renderResults();document.getElementById('toolbar')?.scrollIntoView({block:'nearest'});},
     async revoke(id,t){if(await confirmAction('Завершить сессию?','Скрипт у игрока выгрузится на следующей проверке.','Завершить',true))await perform(t,()=>api(`/api/sessions/${id}/revoke`,{}),'Сессия завершена');},
     async 'revoke-account'(id,t){
@@ -516,10 +523,11 @@
       if(values)await perform(t,()=>api('/api/releases',{label:values.label.trim(),version:values.version}),'Черновик создан');
     },
     async 'new-ban'(id,t){
-      const values=await showDialog('Новая блокировка',`<div class="field"><label for="f-kind">Найти устройство по</label><select class="select" id="f-kind" name="kind"><option value="user">Roblox User ID</option><option value="hwid">HWID</option></select></div>${field('value','Значение','maxlength="20" spellcheck="false"','По User ID блокируются все HWID, где запускался этот аккаунт. HWID — 12 символов из панели.')}${reasonField}`,'Заблокировать',true);
+      const values=await showDialog('Новая блокировка',`<div class="field"><label for="f-kind">Найти устройство по</label><select class="select" id="f-kind" name="kind"><option value="user">Roblox User ID</option><option value="hwid">HWID</option></select></div>${field('value','Значение','maxlength="128" spellcheck="false"','По User ID блокируются все HWID, где запускался этот аккаунт. HWID — полностью, как в панели.')}${reasonField}`,'Заблокировать',true);
       if(!values)return;
       const value=values.value.trim();
-      const body=values.kind==='hwid'?{kind:'hwid',ref:value.toLowerCase(),reason:values.reason}:{kind:'hwid',user:value,reason:values.reason};
+      // Полный HWID сервер хеширует сам; 12 hex-символов — короткая ссылка старых сессий
+      const body=values.kind!=='hwid'?{kind:'hwid',user:value,reason:values.reason}:/^[a-f0-9]{12}$/i.test(value)?{kind:'hwid',ref:value.toLowerCase(),reason:values.reason}:{kind:'hwid',value,reason:values.reason};
       await perform(t,()=>api('/api/bans',body),r=>r.count?`Заблокировано устройств: ${r.count}`:'Блокировка создана');
     },
     async 'ban-account'(id,t){
