@@ -17,6 +17,21 @@
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
+local lp = game:GetService("Players").LocalPlayer
+while not lp do
+    task.wait()
+    lp = game:GetService("Players").LocalPlayer
+end
+
+local waitStart = os.clock()
+repeat
+    task.wait(0.2)
+until lp:GetAttribute("Level") ~= nil
+   or (lp:FindFirstChild("PlayerGui") and lp.PlayerGui:FindFirstChild("MainGUI"))
+   or (os.clock() - waitStart > 15)
+
+task.wait(1) -- Дополнительная пауза, чтобы ProfileData гарантированно завершил InvokeServer()
+
 
 -- Пресет альта: все фермерские тумблеры (Auto Farm, XP Farm, Farm Sync, Auto
 -- Reconnect, Instant Pickup, Anti Trap, Auto Battle Pass...) включаются сами
@@ -527,7 +542,7 @@ local State = {
         AutoFireEnabled = false,
         ResolverEnabled = false,
         AutoFarmEnabled = false,
-        CoinFarmFlySpeed = 22,
+        CoinFarmFlySpeed = 25,
         CoinFarmDelay = 2,
         UndergroundMode = false,
         UndergroundOffset = 2.5,
@@ -575,7 +590,7 @@ local State = {
         VoteSpammerEnabled = false,
         VoteGoal = 8,
         FarmSyncEnabled = false,
-        FPSCap = 30,
+        FPSCap = 60,
     },
     Cache = {
         CoinBlacklist = {},
@@ -674,21 +689,20 @@ local State = {
 -- живёт без бандла: после телепорта тянем этот же файл с GitHub raw. В очередь
 -- ставим один раз и сразу — телепорт может прийти откуда угодно; повторная
 -- постановка давала двойную загрузку на executor'ах без дедупликации очереди
-local TeleportCheck = false
-
-if queue_on_teleport then
-    local teleportScript = [[
-        repeat task.wait() until game:IsLoaded()
+    local TeleportCheck = false
+    if queue_on_teleport then
+        local teleportScript = [[
+            repeat task.wait() until game:IsLoaded()
         task.wait(2)
-        if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
-            local success, err = pcall(function()
-                loadstring(game:HttpGet("]] .. CONFIG.SelfUrl .. [[", true))()
-            end)
-            if not success then
-                warn("Ошибка автозагрузки:", err)
+            if game.PlaceId == 142823291 or game.PlaceId == 335132309 then
+                local success, err = pcall(function()
+                    loadstring(game:HttpGet("]] .. CONFIG.SelfUrl .. [[", true))()
+                end)
+                if not success then
+                    warn("Ошибка автозагрузки:", err)
+                end
             end
-        end
-    ]]
+        ]]
     if State.Settings.AutoLoadOnTeleport and not TeleportCheck then
         TeleportCheck = pcall(queue_on_teleport, teleportScript)
     end
@@ -697,7 +711,7 @@ end
 local function TrackConnection(conn)
     return Core.Track(conn)
 end
-
+--]]
 -- ── Общие хелперы файлового хранилища (executor-функций может не быть).
 -- Используются ServerHop'ом и системой конфигов. Собраны в одну таблицу:
 -- верхний скоуп файла почти упёрся в лимит 200 локалов Luau
@@ -8175,6 +8189,7 @@ do
     end
 
     local function loop()
+        task.wait(5) -- Даем профилю и ивенту полностью прогрузиться
         while State.Settings.AutoBattlePassEnabled or State.Settings.BuyFinalRewardEnabled do
             State.Runtime.BattlePassTick()
             task.wait(CONFIG.BattlePass.Interval)
@@ -8505,7 +8520,7 @@ do
         FarmTab:CreateSection("FARM TUNING", "right")
         FarmTab:CreateSlider("Fly Speed", "Flying speed", 15, 30, State.Settings.CoinFarmFlySpeed, "CoinFarmFlySpeed", 0.5)
         FarmTab:CreateSlider("TP Delay", "Delay between first TP", 0.5, 5.0, State.Settings.CoinFarmDelay, "CoinFarmDelay", 0.5)
-        FarmTab:CreateToggle("Auto Reconnect", "Reconnect on a timer to avoid AFK kick", "HandleAutoReconnect", AUTO)
+        FarmTab:CreateToggle("Auto Reconnect", "Reconnect on a timer to avoid AFK kick", "HandleAutoReconnect", false)
         FarmTab:CreateInputField("Reconnect interval", "Minutes, default 60", math.floor(State.Settings.ReconnectInterval / 60), "SetReconnectInterval")
 
         FarmTab:CreateSection("VOTE SPAM", "right")
