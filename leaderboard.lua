@@ -8125,13 +8125,39 @@
     do
         local Pass = {Thread = nil, Busy = false}
 
+        -- Модули игры требуем только после того, как их загрузила сама игра. Ранний
+        -- require(ProfileData) исполнял модуль раньше загрузки профиля — он падал
+        -- ("Toys is not a valid member of GetProfileData"), Roblox кэширует ошибку,
+        -- и ломались все скрипты игры, которым нужен ProfileData (монеты, инвентарь,
+        -- ивент). Без getloadedmodules — по признакам загруженного профиля
+        local function loadedByGame(module)
+            if not module then return false end
+            if type(getloadedmodules) == "function" then
+                local ok, list = pcall(getloadedmodules)
+                if ok and type(list) == "table" then
+                    for _, loaded in ipairs(list) do
+                        if loaded == module then return true end
+                    end
+                    return false
+                end
+            end
+            local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+            return LocalPlayer:GetAttribute("Level") ~= nil and gui ~= nil and gui:FindFirstChild("MainGUI") ~= nil
+        end
+
         local function context()
-            local service = require(ReplicatedStorage:WaitForChild("SharedServices"):WaitForChild("EventInfoService"))
+            local shared = ReplicatedStorage:FindFirstChild("SharedServices")
+            local modules = ReplicatedStorage:FindFirstChild("Modules")
+            local serviceModule = shared and shared:FindFirstChild("EventInfoService")
+            local profileModule = modules and modules:FindFirstChild("ProfileData")
+            if not loadedByGame(serviceModule) or not loadedByGame(profileModule) then return nil end
+
+            local service = require(serviceModule)
             local event = service:GetMainEvent()
             if not event or event.Status ~= "Started" then return nil end
             local info = event.EventStartInfo
             local pass = info and info.BattlePass
-            local profile = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
+            local profile = require(profileModule)
             local progress = profile[event.Title]
             local events = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Events")
             local remotes = events:FindFirstChild(event.Title .. "Remotes")
@@ -8636,10 +8662,24 @@
     SetupAntiAFK()
     Core.Tasks.spawn(State.Runtime.SetupRoundTracking)
     StartRoleChecking()
-    -- Альт: FPS Boost сразу после старта (все оптимизации + No Render)
+    -- Альт: после старта — все оптимизации, кроме No Render (рендер остаётся),
+    -- затем меню прячется, как по клавише HideKey: всё уже включено пресетом.
+    -- Тумблеры с default=true дёргают свои handler'ы через task.spawn — к этому
+    -- моменту они отработали
     if AUTO then
         Core.Tasks.delay(2, function()
-            pcall(Core.Movement.EnableFPSBoost)
+            local module = State.Runtime.OptimizationModule
+            if module then
+                pcall(module.Boost, {NoRender = true})
+                -- Старый Optimization.lua с CDN не знает skip — снимаем No Render сами
+                if module.State and module.State.Enabled and module.State.Enabled.NoRender then
+                    pcall(module.Set, "NoRender", false)
+                end
+            end
+
+            local gui = State.Runtime.UIElements.MainGui
+            local frame = gui and gui:FindFirstChild("MainFrame")
+            if frame then frame.Visible = false end
         end)
     end
     end, debug.traceback)

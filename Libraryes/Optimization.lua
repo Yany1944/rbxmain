@@ -372,12 +372,15 @@ return function(env)
         return true
     end
 
-    function Module.Boost()
+    -- skip — необязательный набор ключей, которые не трогаем ({NoRender = true}:
+    -- лидерборд бустит альтов при старте, но рендер оставляет включённым)
+    function Module.Boost(skip)
+        skip = type(skip) == "table" and skip or {}
         -- No Render включаем последним: остальные контролы успевают обновиться.
         for _,option in ipairs(CONFIG.Options) do
-            if option.Key ~= "NoRender" then Module.Set(option.Key, true) end
+            if option.Key ~= "NoRender" and not skip[option.Key] then Module.Set(option.Key, true) end
         end
-        Module.Set("NoRender", true)
+        if not skip.NoRender then Module.Set("NoRender", true) end
     end
 
     function Module.BuildSection(tab)
