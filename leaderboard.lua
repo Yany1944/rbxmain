@@ -8506,7 +8506,7 @@
             VisualsTab:CreateSection("Misc", "right")
             VisualsTab:CreateToggle("Enable Notifications", "Show notifications", "NotificationsEnabled", false)
             VisualsTab:CreateToggle("Role Cards", "Show Murderer and Sheriff avatar", "AvatarDisplayEnabled", false)
-            VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly", false)
+            VisualsTab:CreateToggle("Disable UI", "Hide all UI except script GUI", "UIOnly", true)
     end
 
     do
