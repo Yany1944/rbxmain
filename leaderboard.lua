@@ -48,7 +48,37 @@ local CONFIG = {
     Notification = {
         Duration = 3,
         FadeTime = 0.4
-        }
+        },
+    -- Частоты фоновой работы. На ПК крутится много аккаунтов сразу, поэтому
+    -- всё, что не обязано идти каждый кадр, идёт реже
+    Perf = {
+        RoleCheckInterval  = 0.1,  -- сек: роли и подсветка ESP (роли меняются раз в раунд)
+        AntiFlingFullPass  = 0.1,  -- сек: полный проход коллизии; корпус — каждый кадр
+        AntiFlingPartsTTL  = 2,    -- сек: жизнь кэша частей персонажа (± разброс)
+        AntiFlingCleanup   = 1,    -- сек: чистка записей об удалённых частях
+        },
+    -- Подбор пистолета. Сервер засчитывает касание только после того, как у дропа
+    -- реплицировался TouchInterest — а он приходит на кадр позже самого GunDrop
+    GunPickup = {
+        TouchWait     = 1,      -- сек ждём появления TouchInterest у дропа
+        RetryInterval = 0.05,   -- пауза между повторными касаниями
+        Timeout       = 2,      -- сек до отказа, если сервер не выдаёт ган
+        },
+    -- Server Hop / Rejoin. Файлы общие для всех аккаунтов на ПК
+    ServerHop = {
+        VisitedFile      = "VioCFG/Violite/serverhop_visited.json", -- {jobId = os.time()}
+        CacheFile        = "VioCFG/Violite/serverhop_cache.json",   -- кэш списка серверов
+        VisitedLifetime  = 30 * 60,  -- сколько секунд считать сервер «только что посещённым»
+        VisitedLimit     = 250,      -- страховка от разрастания файла истории
+        CacheLifetime    = 240,      -- сколько секунд переиспользовать список серверов
+        MinPlayers       = 1,        -- пустые сервера чаще всего мертвы/приватны
+        MaxFillPercent   = 0.9,      -- не лезем в почти полный сервер (телепорт отвалится)
+        FetchLimit       = 100,      -- limit= в запросе к games.roblox.com
+        MaxPages         = 5,        -- максимум страниц пагинации за один хоп
+        TopPick          = 5,        -- из скольких лучших кандидатов тянем случайного
+        TeleportRetry    = 3,        -- сколько РАЗНЫХ серверов пробуем при явном отказе
+        TeleportTimeout  = 12,       -- сек ожидания вердикта по одному телепорту
+        },
 	}
 
 -- Сервисы объявляются один раз здесь; ниже по файлу используются как локали
@@ -63,6 +93,7 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
+local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 --[[
 pcall(function()
@@ -119,8 +150,12 @@ local State = {
     UndergroundMode = false,
     UndergroundOffset = 2.7,
     CoinBlacklist = {},
-    LastCacheTime = 0,
-    GodModeWithAutoFarm = true,
+    -- Сумки валюты текущего раунда: [BagName] = { Collected, Limit }.
+    -- Наполняются из Remotes.Gameplay.CoinsStarted / CoinCollected (см. БЛОК 11),
+    -- поэтому лимит и тип валюты подхватываются под любой ивент сами.
+    CoinBags = {},
+    CoinBagsLive = false,  -- false = данных с ремоутов в этом раунде ещё не было
+    CoinBagsGuiFallback = true, -- GUI-фолбэк валиден только до первого лобби после инжекта
 
     -- Auto-load script on teleport
     AutoLoadOnTeleport = true,
@@ -134,6 +169,10 @@ local State = {
     AutoReconnectEnabled = false,
     ReconnectInterval = 60 * 60, -- 60 минут в секундах
     ReconnectThread = nil,
+    AutoRejoinConnection = nil,
+    AutoRejoinTask = nil,
+    RejoinInProgress = false,     -- single-flight: два телепорта разом роняют клиент
+    ServerHopInProgress = false,
 
     -- Farm Sync — координация серверов между аккаунтами на одном ПК.
     -- Каждый инстанс пишет свой jobId в общий стор (папка VioCFG/Violite/FarmSync);
@@ -201,14 +240,13 @@ local State = {
     NoClipConnection = nil,
     NoClipRespawnConnection = nil,
     NoClipObjects = nil,
-    
-    -- GodMode
-    GodModeEnabled = false,
-    GodModeConnections = {},
-    healthConnection = nil,
-    damageBlockerConnection = nil,
-    stateConnection = nil,
-    
+    NoClipOriginal = nil,
+
+    -- Anti-Trap (замена GodMode, как в MainScript)
+    AntiTrapEnabled = false,
+    AntiTrapHooked = false,
+    AntiTrapConns = {},
+
     -- Role detection
     prevMurd = nil,
     prevSher = nil,
@@ -265,7 +303,6 @@ local State = {
         Ninja = Enum.KeyCode.Unknown,
         Floss = Enum.KeyCode.Unknown,
         ClickTP = Enum.KeyCode.Unknown,
-        GodMode = Enum.KeyCode.Unknown,
         FlingPlayer = Enum.KeyCode.Unknown,
         knifeThrow = Enum.KeyCode.Unknown,
         NoClip = Enum.KeyCode.Unknown,
@@ -298,25 +335,37 @@ if queue_on_teleport then
         end
     ]]
     --
-    -- Попытка 1: OnTeleport event
-    game.Players.LocalPlayer.OnTeleport:Connect(function(State)
-        if State == Enum.TeleportState.Started and not TeleportCheck then
-            TeleportCheck = true
-            queue_on_teleport(teleportScript)
-        end
-    end)
-    
-    -- Попытка 2: Сразу добавляем в очередь (для ручной смены серверов)
-    queue_on_teleport(teleportScript)
+    -- Ставим в очередь один раз и сразу: телепорт может прийти откуда угодно
+    -- (реджоин, хоп, кик игры). Повторная постановка на OnTeleport давала
+    -- двойную автозагрузку на тех executor'ах, где очередь не дедуплицируется
+    if not TeleportCheck then
+        TeleportCheck = pcall(queue_on_teleport, teleportScript)
+    end
 end
 --]]
 
+-- State.Connections — set { [conn] = true }: массив только рос (коннекты на
+-- каждый респавн копились за долгую сессию и держали старых персонажей),
+-- а из set'а отключённые раз в 30 с выметаются
 local function TrackConnection(conn)
     if conn then
-        table.insert(State.Connections, conn)
+        State.Connections[conn] = true
     end
     return conn
 end
+
+task.spawn(function()
+    while getgenv().MM2_Script do
+        task.wait(30)
+        -- GUI.lua кладёт свои коннекты массивом (table.insert) — понимаем оба вида
+        for k, v in pairs(State.Connections) do
+            local conn = (type(k) == "number") and v or k
+            if typeof(conn) ~= "RBXScriptConnection" or not conn.Connected then
+                State.Connections[k] = nil
+            end
+        end
+    end
+end)
 
 -- ============= COIN TRACER SYSTEM (С АНИМАЦИЕЙ) =============
 local CurrentCoinTracer = nil
@@ -678,21 +727,47 @@ local function CleanupMemory()
 
 end
 
+-- Функции фич объявлены ниже по файлу. Без forward-деклараций FullShutdown видел
+-- бы их как nil-глобали: первый же вызов падал внутри pcall, и всё остальное в
+-- группе не выключалось (автофарм продолжал крутиться после Shutdown).
+local StopAutoFarm, StopXPFarm, DisableNoClip, DisableAntiFling
+local ToggleInvisibility, DisableInstantPickup
+local HandleAutoRejoin, HandleAutoReconnect
+local SetAntiTrap, FarmSync, GUI
+
 local function FullShutdown()
     --print("[FullShutdown] Starting complete cleanup...")
 
+    -- Каждая фича гасится в своём pcall: ошибка одной не должна оставлять
+    -- остальные включёнными
+    local function safe(fn, ...)
+        if type(fn) == "function" then pcall(fn, ...) end
+    end
+
+    if State.AutoFarmEnabled then safe(StopAutoFarm) end
+    if State.XPFarmEnabled then safe(StopXPFarm) end
+    if State.NoClipEnabled then safe(DisableNoClip) end
+    if State.AntiFlingEnabled then safe(DisableAntiFling) end
+    -- Локал Fling объявлен ниже по файлу и здесь вне области видимости,
+    -- поэтому очистка вызывается через хук на State (ставится в блоке флинга).
+    safe(State.FlingCleanup)
+    if State.IsInvisible then safe(ToggleInvisibility) end
+    if State.InstantPickupEnabled then safe(DisableInstantPickup) end
+    if State.AntiTrapEnabled then safe(SetAntiTrap, false) end
+    if State.FarmSyncEnabled and FarmSync then safe(FarmSync.Stop) end
     pcall(function()
-        if State.AutoFarmEnabled then StopAutoFarm() end
-        if State.XPFarmEnabled then StopXPFarm() end
-        if State.NoClipEnabled then DisableNoClip() end
-        if State.AntiFlingEnabled then DisableAntiFling() end
-        -- Локал Fling объявлен ниже по файлу и здесь вне области видимости,
-        -- поэтому очистка вызывается через хук на State (ставится в блоке флинга).
-        if State.FlingCleanup then State.FlingCleanup() end
-        if State.GodModeEnabled then ToggleGodMode() end
-        if State.ToggleInvisibility then ToggleInvisibility() end
-        if State.InstantPickupEnabled then DisableInstantPickup() end
-        if State.VoteSpammerEnabled then StopVoteSpammer() end
+        if _G.VoteSpammer and _G.VoteSpammer.AutoSpam then _G.VoteSpammer:StopAutoSpam() end
+    end)
+
+    -- Авто-реджоин/реконнект гасим напрямую, а не только через хендлеры: после
+    -- Shutdown ErrorPrompt не должен утянуть клиент в телепорт
+    State.AutoRejoinEnabled = false
+    State.AutoReconnectEnabled = false
+    safe(HandleAutoRejoin, false)
+    safe(HandleAutoReconnect, false)
+    pcall(function()
+        if State.ReconnectThread then task.cancel(State.ReconnectThread) end
+        State.ReconnectThread = nil
     end)
 
     pcall(function()
@@ -732,33 +807,19 @@ local function FullShutdown()
         State.PlayerNicknamesCache = {}
     end)
 
-    pcall(function() GUI.Cleanup() end)
-
-    pcall(function()
-        if State.AutoRejoinEnabled then HandleAutoRejoin(false) end
-        if State.AutoReconnectEnabled then HandleAutoReconnect(false) end
-    end)
+    pcall(function() if GUI then GUI.Cleanup() end end)
 
     -- ✅ Очистка всех general connections
     pcall(function()
-        for _, connection in ipairs(State.Connections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
+        for k, v in pairs(State.Connections) do
+            local conn = (type(k) == "number") and v or k
+            if typeof(conn) == "RBXScriptConnection" and conn.Connected then
+                conn:Disconnect()
             end
         end
         State.Connections = {}
     end)
-    
-    -- ✅ Очистка GodMode connections (отдельное хранилище)
-    pcall(function()
-        for _, connection in ipairs(State.GodModeConnections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
-            end
-        end
-        State.GodModeConnections = {}
-    end)
-    
+
     -- ✅ Восстановление character settings
     pcall(function()
         local character = LocalPlayer.Character
@@ -768,42 +829,39 @@ local function FullShutdown()
                 humanoid.WalkSpeed = 16
                 humanoid.JumpPower = 50
             end
-            
-            local ff = character:FindFirstChild("ForceField")
-            if ff then ff:Destroy() end
         end
-        
+
         LocalPlayer.CameraMaxZoomDistance = 128
-        
+
         local camera = Workspace.CurrentCamera
         if camera then
             camera.FieldOfView = 70
         end
     end)
-    
+
     -- ✅ Восстановление FallenPartsDestroyHeight
     pcall(function()
         Workspace.FallenPartsDestroyHeight = State.FPDH
     end)
-    
+
     -- ✅ Очистка Keybinds
     pcall(function()
         for key, _ in pairs(State.Keybinds) do
             State.Keybinds[key] = Enum.KeyCode.Unknown
         end
     end)
-    
+
     -- ✅ Очистка UI State
     State.ClickTPActive = false
     State.ListeningForKeybind = nil
-    
+
     -- ✅ Очистка Notifications
     State.NotificationQueue = {}
     State.CurrentNotification = nil
-    
+
     -- ✅ Очистка Blacklist
     State.CoinBlacklist = {}
-    
+
     -- ✅ Очистка Role detection
     State.prevMurd = nil
     State.prevSher = nil
@@ -824,8 +882,10 @@ local function FullShutdown()
             State.UIElements[name] = nil
         end
     end)
-    
-    ScriptAlive = false
+
+    -- Снимаем guard: без этого повторный запуск скрипта после Shutdown
+    -- возможен только через реджоин
+    pcall(function() getgenv().MM2_Script = nil end)
     --print("[FullShutdown] ✅ Complete!")
 end
 
@@ -928,7 +988,7 @@ local function ApplyUIOptimization()
     pcall(function()
         local targetTable = OptimizationState.afkModeActive and OptimizationState.savedUIState or OptimizationState.savedUIOnlyState
         for _, gui in pairs(LocalPlayer.PlayerGui:GetChildren()) do
-            if gui:IsA("ScreenGui") and gui ~= MainGui then
+            if gui:IsA("ScreenGui") and gui ~= State.UIElements.MainGui then
                 if not targetTable[gui] then
                     targetTable[gui] = gui.Enabled
                 end
@@ -1768,6 +1828,11 @@ local function StartRoleChecking()
     end
 
     State.RoleCheckLoop = RunService.Heartbeat:Connect(function()
+        -- Роли меняются раз в раунд — проверять их каждый кадр на каждом из
+        -- десятка аккаунтов незачем
+        local now = os.clock()
+        if now < (State.NextRoleCheck or 0) then return end
+        State.NextRoleCheck = now + CONFIG.Perf.RoleCheckInterval
         pcall(function()
             local murder  = getMurder()
             local sheriff = getSheriff()
@@ -1863,7 +1928,7 @@ local function StartRoleChecking()
             end
         end)
     end)
-    table.insert(State.Connections, State.RoleCheckLoop)
+    TrackConnection(State.RoleCheckLoop)
 end
 
 ----------------------------------------------------------------
@@ -2144,7 +2209,7 @@ local function StartTrapTracking()
         end
     end)
     
-    table.insert(State.Connections, connection)
+    TrackConnection(connection)
 end
 
 -- Единая точка реакции: «текущий ган — вот этот» либо «гана нет».
@@ -2250,8 +2315,8 @@ local function SetupGunTracking()
 
     table.insert(State.GunTrackConns, addedConn)
     table.insert(State.GunTrackConns, removingConn)
-    table.insert(State.Connections, addedConn)
-    table.insert(State.Connections, removingConn)
+    TrackConnection(addedConn)
+    TrackConnection(removingConn)
 
     if State.GunReconcileThread then
         pcall(task.cancel, State.GunReconcileThread)
@@ -3163,9 +3228,53 @@ function Fling.RestoreCharCollision(char)
     Fling.StrippedChars[char] = nil
 end
 
-function Fling.StripCharCollision(char)
+-- Части персонажа для антифлинга: снимать коллизию нужно каждый кадр (Humanoid
+-- возвращает её корпусу), но GetDescendants на каждого игрока за кадр создавал
+-- десятки МБ мусора в секунду — на десятке аккаунтов это заметно. Состав частей
+-- кэшируем на AntiFlingPartsTTL (со случайным сдвигом, чтобы игроки не
+-- пересобирались в один кадр). Корпус — каждый кадр, остальное — полным
+-- проходом раз в AntiFlingFullPass
+Fling.CollisionPartsCache = setmetatable({}, {__mode = "k"})
+Fling.CoreParts = {HumanoidRootPart = true, Head = true, Torso = true, UpperTorso = true, LowerTorso = true}
+function Fling.CollisionParts(char)
+    local now = os.clock()
+    local entry = Fling.CollisionPartsCache[char]
+    if entry and now < entry.Expires then return entry end
+    local parts, core = {}, {}
     for _, obj in ipairs(char:GetDescendants()) do
         if obj:IsA("BasePart") then
+            parts[#parts + 1] = obj
+            if Fling.CoreParts[obj.Name] and obj.Parent == char then core[#core + 1] = obj end
+        end
+    end
+    local ttl = CONFIG.Perf.AntiFlingPartsTTL
+    entry = {Parts = parts, Core = core, Expires = now + ttl * (0.5 + math.random()), NextFull = 0}
+    Fling.CollisionPartsCache[char] = entry
+    return entry
+end
+
+-- Новая часть у персонажа (взятый инструмент, аксессуар) сразу сбрасывает кэш:
+-- иначе она оставалась бы твёрдой до истечения TTL — этим окном пользуются
+-- флинги, раскрученные через инструмент
+Fling.WatchedChars = setmetatable({}, {__mode = "k"})
+function Fling.WatchCharParts(char)
+    if Fling.WatchedChars[char] then return end
+    Fling.WatchedChars[char] = char.DescendantAdded:Connect(function(obj)
+        if obj:IsA("BasePart") then Fling.CollisionPartsCache[char] = nil end
+    end)
+end
+
+function Fling.StripCharCollision(char)
+    Fling.WatchCharParts(char)
+    local entry = Fling.CollisionParts(char)
+    local now = os.clock()
+    local list = entry.Core
+    if not Fling.StrippedChars[char] or now >= entry.NextFull then
+        entry.NextFull = now + CONFIG.Perf.AntiFlingFullPass
+        list = entry.Parts
+    end
+    for _, obj in ipairs(list) do
+        if obj.Parent then
             if Fling.AntiFlingCollision[obj] == nil then
                 Fling.AntiFlingCollision[obj] = obj.CanCollide
             end
@@ -3216,6 +3325,10 @@ function Fling.UpdateAntiFling()
         end
     end
 
+    -- Чистка удалённых частей — раз в AntiFlingCleanup: таблица держит части всех
+    -- игроков (сотни), обход каждый кадр стоил дороже самой защиты
+    if now < (Fling.NextCleanup or 0) then return end
+    Fling.NextCleanup = now + CONFIG.Perf.AntiFlingCleanup
     for part in pairs(Fling.AntiFlingCollision) do
         if not part.Parent then
             Fling.AntiFlingCollision[part] = nil
@@ -3226,6 +3339,12 @@ function Fling.UpdateAntiFling()
         if not char.Parent then
             Fling.FlingerSeen[char] = nil
             Fling.StrippedChars[char] = nil
+        end
+    end
+    for char, conn in pairs(Fling.WatchedChars) do
+        if not char.Parent then
+            pcall(function() conn:Disconnect() end)
+            Fling.WatchedChars[char] = nil
         end
     end
 end
@@ -3242,12 +3361,16 @@ local function EnableAntiFling()
 end
 
 -- DisableAntiFling() - Отключение защиты
-local function DisableAntiFling()
+function DisableAntiFling()
     State.AntiFlingEnabled = false
 
     if Fling.AntiFlingConn then
         Fling.AntiFlingConn:Disconnect()
         Fling.AntiFlingConn = nil
+    end
+    for char, conn in pairs(Fling.WatchedChars) do
+        pcall(function() conn:Disconnect() end)
+        Fling.WatchedChars[char] = nil
     end
 
     Fling.RestoreAntiFlingCollision()
@@ -3509,20 +3632,6 @@ LocalPlayer.CharacterAdded:Connect(function(character)
     end
 end)
 
--- Наблюдатель (запасной вариант)
-task.spawn(function()
-    while ScriptAlive do
-        task.wait(1)
-        if not ScriptAlive then break end
-        if State.WalkFlingEnabledByUser and not State.WalkFlingActive then
-            local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-                WalkFlingStart()
-            end
-        end
-    end
-end)
-
 ToggleWalkFling = function()
     if State.WalkFlingEnabledByUser then
         WalkFlingStop(false)
@@ -3568,6 +3677,12 @@ local function EnableNoClip()
     State.NoClipEnabled = true
 
     local NoClipObjects = {}
+    -- Исходный CanCollide каждой части до ноклипа. Выключение раньше ставило true
+    -- ВСЕМ частям: у R15 руки/ноги по умолчанию без коллизии, а в MM2 они на
+    -- физических суставах — упираясь в пол, вжимали тело в землю (автофарм
+    -- выключает ноклип в конце каждого раунда)
+    local originalCollide = setmetatable({}, {__mode = "k"})
+    State.NoClipOriginal = originalCollide
     -- Персонаж, под который собран список. Пересобираем не только по
     -- CharacterAdded: флинг и прочие фичи могут подменить/дополнить части, а
     -- пустой список молча выключал ноклип навсегда.
@@ -3580,6 +3695,7 @@ local function EnableNoClip()
         for _, obj in ipairs(character:GetChildren()) do
             if obj:IsA("BasePart") then
                 table.insert(NoClipObjects, obj)
+                if originalCollide[obj] == nil then originalCollide[obj] = obj.CanCollide end
             end
         end
     end
@@ -3622,7 +3738,7 @@ local function EnableNoClip()
 end
 
 -- DisableNoClip() - Отключение NoClip
-local function DisableNoClip()
+function DisableNoClip()
     if not State.NoClipEnabled then return end
     State.NoClipEnabled = false
     
@@ -3638,17 +3754,25 @@ local function DisableNoClip()
     
     if State.NoClipObjects then
         local character = LocalPlayer.Character
+        local original = State.NoClipOriginal or {}
         if character then
             for i = 1, #State.NoClipObjects do
                 local part = State.NoClipObjects[i]
                 if part and part.Parent then
-                    if part.Name ~= "HumanoidRootPart" then
-                        part.CanCollide = true
+                    -- Возвращаем как было; для неизвестной части — как у Humanoid
+                    -- по умолчанию: коллизия только у торса и головы (корень без
+                    -- снимка не трогаем — его вернёт снимок флинга ниже)
+                    local saved = original[part]
+                    if saved == nil and part.Name ~= "HumanoidRootPart" then
+                        saved = part.Name == "Head" or part.Name == "Torso"
+                            or part.Name == "UpperTorso" or part.Name == "LowerTorso"
                     end
+                    if saved ~= nil then part.CanCollide = saved end
                 end
             end
         end
-        
+        State.NoClipOriginal = nil
+
         table.clear(State.NoClipObjects)
         State.NoClipObjects = nil
     end
@@ -3675,63 +3799,114 @@ end
 -- БЛОК 11: AUTO FARM SYSTEM (СТРОКИ 1181-1600)
 -- ══════════════════════════════════════════════════════════════════════════════
 
-local coinLabelCache = nil
-local lastCacheTime = 0
+-- ─── Сумки валюты ───────────────────────────────────────────────────────────
+-- Раньше счётчик читался из рамки GUI "Coin" с порогом 40, но в ивентах MM2
+-- меняется и валюта (Coin → Candy, SnowToken, BeachBall...), и лимит сумки
+-- (Candy = 50). Поэтому слушаем те же ремоуты, что и GUI игры
+-- (MainGUI.Game.CoinBags.CoinBagContainerScript):
+--   CoinsStarted(bags)              — старт раунда: { [Bag] = {CollectionLimit, CollectedAmount, CurrencyID} }
+--   CoinCollected(bag, got, limit)  — после каждой подобранной монеты
+-- Монета на карте несёт атрибут CoinID == имя её сумки, так что монеты
+-- заполненной сумки можно пропускать, а не возить персонажа впустую.
 
-local function GetCollectedCoinsCount()
-    -- УРОВЕНЬ 1: Проверка кэша (2 секунды)
-    if coinLabelCache and coinLabelCache.Parent and (tick() - lastCacheTime) < 2 then
-        local success, value = pcall(function()
-            return tonumber(coinLabelCache.Text) or 0
-        end)
-        if success then
-            return value
-        end
-    end
-
-    -- ✅ УРОВЕНЬ 2: Прямой путь - "Coin" вместо "SnowToken"
-    local success, coins = pcall(function()
-        local label = LocalPlayer.PlayerGui
-            :FindFirstChild("MainGUI")
-            :FindFirstChild("Game")
-            :FindFirstChild("CoinBags")
-            :FindFirstChild("Container")
-            :FindFirstChild("Coin")
-            :FindFirstChild("CurrencyFrame")
-            :FindFirstChild("Icon")
-            :FindFirstChild("Coins")
-
-        if label then
-            coinLabelCache = label
-            lastCacheTime = tick()
-            return tonumber(label.Text) or 0
-        end
-        return 0
-    end)
-
-    if success and coins >= 0 then  -- ✅ >= 0 вместо > 0
-        return coins
-    end
-
-    -- УРОВЕНЬ 3: Fallback - GetDescendants поиск максимального значения
-    local maxValue = 0
+local function SetupCoinBagTracking()
+    local gameplay = nil
     pcall(function()
-        for _, gui in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
-            if gui:IsA("TextLabel") and gui.Name == "Coins" then
-                local path = gui:GetFullName()
-                if path:match("CurrencyFrame.Icon.Coins") then
-                    local value = tonumber(gui.Text) or 0
-                    if value > maxValue then
-                        maxValue = value
-                        coinLabelCache = gui
-                        lastCacheTime = tick()
+        gameplay = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Gameplay", 10)
+    end)
+    if not gameplay then return end
+
+    local started = gameplay:FindFirstChild("CoinsStarted")
+    local collected = gameplay:FindFirstChild("CoinCollected")
+
+    if started then
+        TrackConnection(started.OnClientEvent:Connect(function(bags)
+            local fresh = {}
+            if type(bags) == "table" then
+                for name, info in pairs(bags) do
+                    if type(info) == "table" then
+                        fresh[tostring(name)] = {
+                            Collected = tonumber(info.CollectedAmount) or 0,
+                            Limit = tonumber(info.CollectionLimit),
+                        }
                     end
                 end
             end
+            State.CoinBags = fresh
+            State.CoinBagsLive = true
+        end))
+    end
+
+    if collected then
+        TrackConnection(collected.OnClientEvent:Connect(function(bagName, got, limit)
+            if type(bagName) ~= "string" then return end
+            local bag = State.CoinBags[bagName] or {}
+            bag.Collected = tonumber(got) or bag.Collected or 0
+            bag.Limit = tonumber(limit) or bag.Limit
+            State.CoinBags[bagName] = bag
+            State.CoinBagsLive = true
+        end))
+    end
+end
+
+-- Сброс между раундами: иначе «полная» сумка прошлого раунда успеет сработать
+-- в начале следующего раньше, чем придёт новый CoinsStarted
+local function ResetCoinBags()
+    State.CoinBags = {}
+    State.CoinBagsLive = false
+    State.CoinBagsGuiFallback = false
+end
+
+-- Фолбэк для инжекта посреди раунда (CoinsStarted уже пролетел): видимые рамки
+-- сумок в GUI игры. Лимита там нет, но есть надпись "Full!". После первого же
+-- лобби фолбэк выключается — игра не сбрасывает "Full!" до следующего раунда,
+-- а свежий CoinsStarted к тому моменту уже точно придёт.
+local function ReadBagsFromGui()
+    local bags = {}
+    if not State.CoinBagsGuiFallback then return bags end
+    pcall(function()
+        local container = LocalPlayer.PlayerGui.MainGUI.Game.CoinBags.Container
+        for _, frame in ipairs(container:GetChildren()) do
+            if frame:IsA("Frame") and frame.Visible then
+                local full = frame:FindFirstChild("Full")
+                bags[frame.Name] = { Full = full ~= nil and full.Visible }
+            end
         end
     end)
+    return bags
+end
 
-    return maxValue
+local function IsBagFull(bagName)
+    if State.CoinBagsLive then
+        local bag = State.CoinBags[bagName]
+        return bag ~= nil and bag.Limit ~= nil and bag.Collected >= bag.Limit
+    end
+    local bag = ReadBagsFromGui()[bagName]
+    return bag ~= nil and bag.Full
+end
+
+-- true, когда собирать больше нечего: все активные сумки раунда заполнены
+local function AreAllBagsFull()
+    local any = false
+    if State.CoinBagsLive then
+        for _, bag in pairs(State.CoinBags) do
+            any = true
+            if not (bag.Limit and bag.Collected >= bag.Limit) then return false end
+        end
+        return any
+    end
+    for _, bag in pairs(ReadBagsFromGui()) do
+        any = true
+        if not bag.Full then return false end
+    end
+    return any
+end
+
+-- Монету можно брать, если её сумка ещё не полная
+local function IsCoinWanted(coin)
+    local bagName = coin:GetAttribute("CoinID")
+    if type(bagName) ~= "string" then return true end
+    return not IsBagFull(bagName)
 end
 
 local function AddCoinToBlacklist(coin)
@@ -3751,146 +3926,16 @@ local function CleanupCoinBlacklist()
     --print(("[Auto Farm] 🧹 Удалено %d мёртвых ссылок"):format(cleaned))
 end
 
--- ResetCharacter() - Ресет с сохранением GodMode
+-- ResetCharacter() - Ресет персонажа (GodMode убран, ждать восстановления нечего)
 local function ResetCharacter()
-    --print("[Auto Farm] 🔄 Делаю ресет...")
-    
-    local wasGodModeEnabled = State.GodModeEnabled
-    
-    if wasGodModeEnabled then
-        --print("[Auto Farm] 🛡️ GodMode был включен, временно отключаю...")
-        State.GodModeEnabled = false
-        
-        -- ✅ Отключаем ВСЕ connections
-        if State.healthConnection then
-            State.healthConnection:Disconnect()
-            State.healthConnection = nil
-        end
-        if State.stateConnection then
-            State.stateConnection:Disconnect()
-            State.stateConnection = nil
-        end
-        if State.damageBlockerConnection then
-            State.damageBlockerConnection:Disconnect()
-            State.damageBlockerConnection = nil
-        end
-        
-        for _, connection in ipairs(State.GodModeConnections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
-            end
-        end
-        State.GodModeConnections = {}  -- ✅ Очищаем таблицу
-        
-        -- Возвращаем нормальное здоровье
-        local character = LocalPlayer.Character
-        if character then
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                pcall(function()
-                    humanoid.MaxHealth = 100
-                    humanoid.Health = 100
-                end)
-            end
-            
-            local ff = character:FindFirstChild("ForceField")
-            if ff then
-                ff:Destroy()
-            end
-        end
-    end
-    
-    -- ✅ ДЕЛАЕМ РЕСЕТ
     pcall(function()
         local character = LocalPlayer.Character
-        if character then
-            local humanoid = character:FindFirstChild("Humanoid")
-            if humanoid then
-                humanoid.Health = 0
-            end
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.Health = 0
         end
     end)
-    
-    -- ✅ ЖДЁМ НОВОГО ПЕРСОНАЖА
-    if wasGodModeEnabled then
-        task.spawn(function()
-            -- ✅ ВАЖНО: проверяем что автофарм всё ещё работает
-            if not State.AutoFarmEnabled then
-                --print("[Auto Farm] ⚠️ Автофарм выключен, прерываю восстановление GodMode")
-                return
-            end
-            
-            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-            
-            -- ✅ Проверка ещё раз перед восстановлением
-            if not State.AutoFarmEnabled then
-                return
-            end
-            
-            --print("[Auto Farm] ⏳ Новый персонаж появился, жду Humanoid...")
-            
-            local humanoid = character:WaitForChild("Humanoid", 10)
-            if not humanoid then
-                --print("[Auto Farm] ⚠️ Humanoid не найден за 10 секунд!")
-                return
-            end
-            
-            -- ✅ Финальная проверка
-            if not State.AutoFarmEnabled then
-                return
-            end
-            
-            task.wait(0.5)
-            
-            --print("[Auto Farm] 🛡️ Humanoid найден, восстанавливаю GodMode...")
-            
-            State.GodModeEnabled = true
-            
-            if ApplyGodMode then ApplyGodMode() end
-            if SetupHealthProtection then SetupHealthProtection() end
-            if SetupDamageBlocker then SetupDamageBlocker() end
-            
-            -- ✅ Очищаем старые connections перед созданием новых
-            for _, connection in ipairs(State.GodModeConnections) do
-                if connection and connection.Connected then
-                    connection:Disconnect()
-                end
-            end
-            State.GodModeConnections = {}
-            
-            -- HP monitoring
-            local godModeConnection = RunService.Heartbeat:Connect(function()
-                if State.GodModeEnabled and LocalPlayer.Character then
-                    local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                    if hum then
-                        if hum.Health ~= math.huge then
-                            hum.Health = math.huge
-                        end
-                        local state = hum:GetState()
-                        if state == Enum.HumanoidStateType.Dead then
-                            hum:ChangeState(Enum.HumanoidStateType.Running)
-                        end
-                    end
-                end
-            end)
-            table.insert(State.GodModeConnections, godModeConnection)
-            
-            -- Respawn protection
-            local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(newChar)
-                if State.GodModeEnabled then
-                    task.wait(0.5)
-                    if ApplyGodMode then ApplyGodMode() end
-                    if SetupHealthProtection then SetupHealthProtection() end
-                    if SetupDamageBlocker then SetupDamageBlocker() end
-                end
-            end)
-            table.insert(State.GodModeConnections, respawnConnection)
-            
-            --print("[Auto Farm] ✅ GodMode восстановлен!")
-        end)
-    end
 end
-
 
 local function FloatCharacter()
     local character = LocalPlayer.Character
@@ -4006,11 +4051,6 @@ local function FindSafeAFKSpot()
 end
 
 
-local ToggleInvisibility
-local InitializeVisibleParts
-
-local InvisibilityConnection = nil
-local VisibleParts = {}
 
 local function FindNearestCoin()
     local character = LocalPlayer.Character
@@ -4037,7 +4077,8 @@ local function FindNearestCoin()
         if coin:IsA("BasePart") 
            and coin.Name == "Coin_Server"
            and coin:FindFirstChildWhichIsA("TouchTransmitter") 
-           and not State.CoinBlacklist[coin] then
+           and not State.CoinBlacklist[coin]
+           and IsCoinWanted(coin) then
 
             local coinVisual = coin:FindFirstChild("CoinVisual")
             if coinVisual then
@@ -4081,7 +4122,8 @@ local function FindBetterCoin(currentCoin, currentDistance, threshold)
            and coin:IsA("BasePart") 
            and coin.Name == "Coin_Server"
            and coin:FindFirstChildWhichIsA("TouchTransmitter") 
-           and not State.CoinBlacklist[coin] then
+           and not State.CoinBlacklist[coin]
+           and IsCoinWanted(coin) then
 
             local coinVisual = coin:FindFirstChild("CoinVisual")
             if coinVisual then
@@ -4204,7 +4246,6 @@ end
 local shootMurderer
 local InstantKillAll
 local knifeThrow
-local ToggleGodMode 
 
 local function CountPlayersWithKnife()
     local count = 0
@@ -4226,54 +4267,6 @@ local function CountPlayersWithKnife()
     
     return count
 end
---[[
-local function DiagnoseAutoFarm()
-    print("=== AUTO FARM DIAGNOSTICS ===")
-    
-    -- Проверка 1: Карта и контейнер
-    local map = getMap()
-    print("✓ Map found:", map ~= nil)
-    if map then
-        local container = map:FindFirstChild("CoinContainer")
-        print("✓ CoinContainer:", container ~= nil)
-        if container then
-            local coins = 0
-            for _, child in ipairs(container:GetChildren()) do
-                if child.Name == "Coin_Server" then coins = coins + 1 end
-            end
-            print("✓ Coins in container:", coins)
-        end
-    end
-    
-    -- Проверка 2: GUI и валюта
-    pcall(function()
-        local container = LocalPlayer.PlayerGui.MainGUI.Game.CoinBags.Container
-        print("\n=== ACTIVE CURRENCY ===")
-        for _, child in ipairs(container:GetChildren()) do
-            if child:IsA("Frame") and child.Visible then
-                local coinsLabel = child:FindFirstChild("CurrencyFrame", true)
-                if coinsLabel then
-                    coinsLabel = coinsLabel:FindFirstChild("Icon", true)
-                    if coinsLabel then
-                        coinsLabel = coinsLabel:FindFirstChild("Coins")
-                        if coinsLabel then
-                            print("✓ Active:", child.Name, "=", coinsLabel.Text)
-                        end
-                    end
-                end
-            end
-        end
-    end)
-    
-    -- Проверка 3: Функции
-    print("\n=== FUNCTION TEST ===")
-    print("✓ GetCollectedCoinsCount():", GetCollectedCoinsCount())
-    print("✓ FindNearestCoin():", FindNearestCoin())
-    print("✓ CoinBlacklist size:", #State.CoinBlacklist)
-    
-    print("=== END DIAGNOSTICS ===")
-end
---]]
 
 -- StartAutoFarm() - Запуск авто фарма (с интеграцией XP Farm)
 local function StartAutoFarm()
@@ -4288,12 +4281,7 @@ local function StartAutoFarm()
     
     State.CoinFarmThread = task.spawn(function()
         local allowFly = false
-        
-        if State.GodModeWithAutoFarm and not State.GodModeEnabled then
-            pcall(function()
-                --ToggleGodMode()
-            end)
-        end
+        local wasInRound = false
 
         if State.AutoFarmEnabled and not State.IsInvisible and not State.AutoVoteSuppressInvis then
             pcall(function()
@@ -4325,6 +4313,11 @@ local function StartAutoFarm()
             
             if not murdererExists then
                 --print("[DEBUG] ⏳ Нет мурдерера, жду раунд...")
+                -- Раунд закончился: сумки прошлого раунда больше не актуальны
+                if wasInRound or State.CoinBagsGuiFallback then
+                    wasInRound = false
+                    ResetCoinBags()
+                end
                 State.CoinBlacklist = {}
                 noCoinsAttempts = 0
                 allowFly = false
@@ -4340,9 +4333,9 @@ local function StartAutoFarm()
                 continue
             end
             
-            local currentCoins = GetCollectedCoinsCount()
-            
-            if currentCoins >= 40 then
+            wasInRound = true
+
+            if AreAllBagsFull() then
                 noCoinsAttempts = maxNoCoinsAttempts
             else
                 local coin = FindNearestCoin()
@@ -4390,8 +4383,6 @@ local function StartAutoFarm()
 
                                 
                                 task.wait(0.2)
-                                coinLabelCache = nil
-                                local coinsAfter = GetCollectedCoinsCount()
                                 
                                 RemoveCoinTracer()
                                 AddCoinToBlacklist(coin)
@@ -4424,7 +4415,6 @@ local function StartAutoFarm()
                                 end
                             end
                             
-                            coinLabelCache = nil
                             RemoveCoinTracer()
                             
                             if currentTargetCoin then
@@ -4483,6 +4473,7 @@ local function StartAutoFarm()
                         repeat
                             task.wait(1)
                         until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
+                        ResetCoinBags()
                         
                     else
                         -- XP Farm выключен: просто ресет
@@ -4490,38 +4481,17 @@ local function StartAutoFarm()
                             UnfloatCharacter()
                         end)
                         
-                        if State.GodModeWithAutoFarm and State.GodModeEnabled then
-                            pcall(function()
-                                --ToggleGodMode()
-                            end)
-                        end
-                        
                         ResetCharacter()
                         State.CoinBlacklist = {}
                         noCoinsAttempts = 0
                         allowFly = false
                         
-                        task.wait(2)
-                        
-                        if State.GodModeWithAutoFarm then
-                            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                            local humanoid = character:WaitForChild("Humanoid", 5)
-                            
-                            if humanoid then
-                                task.wait(1)
-                                
-                                if not State.GodModeEnabled then
-                                    pcall(function()
-                                        --ToggleGodMode()
-                                    end)
-                                end
-                                task.wait(0.3)
-                            end
-                        end          
+                        task.wait(1)
                         -- Ждём конца раунда
                         repeat
                             task.wait(1)
                         until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
+                        ResetCoinBags()
                     end
                     
                     -- Общий cleanup после Snowball
@@ -4557,10 +4527,7 @@ local function StartAutoFarm()
                 elseif State.XPFarmEnabled then
                     --print("[Auto Farm] ⏳ XP Farm включен, передаю управление...")
                     
-                    currentCoins = GetCollectedCoinsCount()
-                    --print("[Auto Farm] 💰 Собрано монет: " .. currentCoins .. "/50")
-                    
-                    if currentCoins >= 40 then
+                    if AreAllBagsFull() then
                         character = LocalPlayer.Character
                         if character then
                             humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
@@ -4750,6 +4717,7 @@ local function StartAutoFarm()
                     repeat
                         task.wait(1)
                     until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
+                    ResetCoinBags()
                     
                     if not State.AutoFarmEnabled then
                         break
@@ -4768,32 +4736,11 @@ local function StartAutoFarm()
                         continue
                     end
                     
-                    if State.GodModeWithAutoFarm and State.GodModeEnabled then
-                        pcall(function()
-                            --ToggleGodMode()
-                        end)
-                    end
-
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
 
-                    task.wait(2)
-
-                    if State.GodModeWithAutoFarm then
-                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                        local humanoid = character:WaitForChild("Humanoid", 5)
-                        
-                        if humanoid then
-                            task.wait(1)
-                            
-                            if not State.GodModeEnabled then
-                                pcall(function()
-                                    --ToggleGodMode()
-                                end)
-                            end
-                        end
-                    end
+                    task.wait(1)
 
                     repeat
                         if not State.IsInvisible and not State.AutoVoteSuppressInvis then
@@ -4819,43 +4766,18 @@ local function StartAutoFarm()
                         UnfloatCharacter()
                     end)
 
-                    -- ✅ Выключаем годмод перед ресетом
-                    if State.GodModeWithAutoFarm and State.GodModeEnabled then
-                        pcall(function()
-                            --ToggleGodMode()  -- Выключаем только если был включен автофармом
-                        end)
-                        --print("[Auto Farm] 🛡️ GodMode автоматически выключен")
-                    end
-                    
                     ResetCharacter()
                     State.CoinBlacklist = {}
                     noCoinsAttempts = 0
                     allowFly = false
 
-                    task.wait(2)
-
-                    -- ✅ ИСПРАВЛЕННЫЙ КОД: Включаем годмод после респавна
-                    if State.GodModeWithAutoFarm then  -- ✅ БЕЗ проверки State.GodModeEnabled!
-                        -- Ждём появления персонажа
-                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                        local humanoid = character:WaitForChild("Humanoid", 5)
-
-                        if humanoid then
-                            task.wait(1)  -- Даём серверу инициализировать персонажа
-
-                            if not State.GodModeEnabled then
-                                pcall(function()
-                                    --ToggleGodMode()
-                                end)
-                                --print("[Auto Farm] 🛡️ GodMode повторно включен после респавна")
-                            end
-                        end
-                    end
+                    task.wait(1)
 
                     --print("[Auto Farm] ⏳ Жду конца текущего раунда...")
                     repeat
                         task.wait(1)
                     until getMurderForAutoFarm() == nil or not State.AutoFarmEnabled
+                    ResetCoinBags()
 
                     if not State.AutoFarmEnabled then
                         --print("[Auto Farm] ⚠️ Автофарм был выключен во время ожидания")
@@ -4891,7 +4813,7 @@ local function StartAutoFarm()
 end
 
 -- ✅ ОБНОВЛЁННАЯ StopAutoFarm с правильным cleanup
-local function StopAutoFarm()
+function StopAutoFarm()
     RemoveCoinTracer()
     State.AutoFarmEnabled = false
 
@@ -4902,10 +4824,6 @@ local function StopAutoFarm()
 
     pcall(UnfloatCharacter)
     pcall(DisableNoClip)
-    
-    -- ✅ ДОБАВЛЕНО: очистка кэша
-    coinLabelCache = nil
-    lastCacheTime = 0
     
     State.CoinBlacklist = {}
     State.spawnAtPlayer = spawnAtPlayerOriginalState
@@ -4924,7 +4842,7 @@ local function StartXPFarm()
     --print("[XP Farm] ✅ Включен (интегрирован с Auto Farm)")
 end
 
-local function StopXPFarm()
+function StopXPFarm()
     State.XPFarmEnabled = false
     pcall(function()
         UnfloatCharacter()
@@ -4970,175 +4888,92 @@ local function CheckAndPrestige()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- БЛОК 12: GODMODE SYSTEM (СТРОКИ 1601-1800)
+-- БЛОК 12: ANTI-TRAP (заменил GodMode, порт из MainScript)
 -- ══════════════════════════════════════════════════════════════════════════════
-local ApplyGodMode, SetupHealthProtection, SetupDamageBlocker
+-- Ловушка убийцы (перк Trap) действует только на клиенте жертвы. Сервер шлёт
+-- TrapSystem.TrapHitLocal, игровой TrapScriptClient ставит WalkSpeed 0.01 и
+-- JumpPower 1 на 4 с, показывает TrapGUI и шлёт TrapReplicate (по нему убийца
+-- видит сработавшую ловушку).
+-- Соединения игры НЕ глушим через getconnections():Disable() — на срабатывании
+-- ловушки клиент от этого падал целиком. Вместо этого свой обработчик в том же
+-- кадре снимает замедление и окно, а TrapReplicate режет хук __namecall.
+-- Без hookmetamethod — только снятие замедления.
+do
+    local anti = { Handler = nil, Watch = nil, Replicate = nil }
 
--- ApplyGodMode() - Установка Health = math.huge
-ApplyGodMode = function()
-    if not State.GodModeEnabled then return end
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    pcall(function()
-        humanoid.MaxHealth = math.huge
-        humanoid.Health = math.huge
-        
-        if not character:FindFirstChild("ForceField") then
-            local ff = Instance.new("ForceField")
-            ff.Visible = false
-            ff.Parent = character
-        end
-        
-        if State.WalkSpeed ~= 18 then
+    local function trapSystem()
+        return ReplicatedStorage:FindFirstChild("TrapSystem")
+    end
+
+    -- Хук ставится один раз и не снимается (снятие сорвало бы чужие хуки поверх),
+    -- поэтому при выключенной фиче и после Shutdown он прозрачен
+    local function hookReplicate(system)
+        anti.Replicate = system:FindFirstChild("TrapReplicate")
+        if State.AntiTrapHooked then return end
+        if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then return end
+        local wrap = type(newcclosure) == "function" and newcclosure or function(fn) return fn end
+        local ok = pcall(function()
+            local old
+            old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+                if self == anti.Replicate and anti.Replicate ~= nil
+                    and State.AntiTrapEnabled and getnamecallmethod() == "FireServer" then
+                    return
+                end
+                return old(self, ...)
+            end))
+        end)
+        State.AntiTrapHooked = ok
+    end
+
+    -- Игровой обработчик уже замедлил — возвращаем свои значения
+    local function undoTrap()
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
             humanoid.WalkSpeed = State.WalkSpeed
-        end
-        if State.JumpPower ~= 50 then
             humanoid.JumpPower = State.JumpPower
         end
-    end)
-end
+        local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        local trapGui = gui and gui:FindFirstChild("TrapGUI")
+        if trapGui then trapGui:Destroy() end
+    end
 
--- SetupHealthProtection() - Защита Health/StateChanged
-SetupHealthProtection = function()
-    if State.healthConnection then
-        State.healthConnection:Disconnect()
-    end
-    
-    if State.stateConnection then
-        State.stateConnection:Disconnect()
-    end
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    State.stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
-        if State.GodModeEnabled then
-            if newState == Enum.HumanoidStateType.Dead then
-                humanoid:ChangeState(Enum.HumanoidStateType.Running)
-                humanoid.Health = math.huge
-            end
-        end
-    end)
-    table.insert(State.Connections, State.stateConnection)
-    
-    State.healthConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
-        if State.GodModeEnabled and humanoid.Health < math.huge then
-            humanoid.Health = math.huge
-        end
-    end)
-    
-    table.insert(State.Connections, State.healthConnection)
-end
--- SetupDamageBlocker() - Блокировка Ragdoll/CreatorTag
-SetupDamageBlocker = function()
-    if State.damageBlockerConnection then
-        State.damageBlockerConnection:Disconnect()
-    end
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    State.damageBlockerConnection = character.ChildAdded:Connect(function(child)
-        if State.GodModeEnabled then
-            if child.Name == "Ragdoll" or child.Name == "CreatorTag" or 
-               (child:IsA("ObjectValue") and child.Name == "creator") then
-                task.spawn(function()
-                    child:Destroy()
-                end)
-            end
-        end
-    end)
-    
-    table.insert(State.Connections, State.damageBlockerConnection)
-end
+    SetAntiTrap = function(enabled)
+        State.AntiTrapEnabled = enabled == true
+        if anti.Handler then pcall(function() anti.Handler:Disconnect() end); anti.Handler = nil end
+        if anti.Watch then pcall(task.cancel, anti.Watch); anti.Watch = nil end
+        if not State.AntiTrapEnabled then return end
 
--- ToggleGodMode() - Включение/отключение
-ToggleGodMode = function()
-    State.GodModeEnabled = not State.GodModeEnabled
-    if State.GodModeEnabled then
-        if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
-        end
-        
-        ApplyGodMode()
-        SetupHealthProtection()
-        SetupDamageBlocker()
-        
-        -- HP monitoring
-        local godModeConnection = RunService.Heartbeat:Connect(function()
-            if State.GodModeEnabled and LocalPlayer.Character then
-                local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    if humanoid.Health ~= math.huge then
-                        humanoid.Health = math.huge
-                    end
-                    local state = humanoid:GetState()
-                    if state == Enum.HumanoidStateType.Dead then
-                        humanoid:ChangeState(Enum.HumanoidStateType.Running)
-                    end
+        local system = trapSystem()
+        local remote = system and system:FindFirstChild("TrapHitLocal")
+        if not remote then
+            -- Система ловушек ещё не загружена — ждём её в фоне
+            anti.Watch = task.spawn(function()
+                local found = ReplicatedStorage:WaitForChild("TrapSystem", 60)
+                if found and found:WaitForChild("TrapHitLocal", 10) and State.AntiTrapEnabled then
+                    anti.Watch = nil
+                    SetAntiTrap(true)
                 end
-            end
+            end)
+            return
+        end
+        pcall(hookReplicate, system)
+        -- Игровой обработчик подключён раньше и отрабатывает первым; defer — в том же
+        -- кадре после него. Через 4 с игра сама ставит JumpPower 50 — возвращаем свой
+        anti.Handler = TrackConnection(remote.OnClientEvent:Connect(function()
+            task.defer(function() pcall(undoTrap) end)
+            task.delay(4.1, function()
+                if State.AntiTrapEnabled then pcall(undoTrap) end
+            end)
+        end))
+        -- Включили, уже сидя в ловушке
+        pcall(function()
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.WalkSpeed < 0.1 then undoTrap() end
         end)
-        table.insert(State.GodModeConnections, godModeConnection)  -- ✅ В ОТДЕЛЬНОЕ хранилище
-        
-        local respawnConnection = LocalPlayer.CharacterAdded:Connect(function(character)
-            if State.GodModeEnabled then
-                task.wait(0.5)
-                ApplyGodMode()
-                SetupHealthProtection()
-                SetupDamageBlocker()
-            end
-        end)
-        table.insert(State.GodModeConnections, respawnConnection)
-    else
-        if State.NotificationsEnabled then
-            ShowNotification("<font color=\"rgb(220,220,220)\">GodMode</font> <font color=\"rgb(255, 85, 85)\">OFF</font>",CONFIG.Colors.Text)
-        end
-        
-        -- Отключаем локальные connections
-        if State.healthConnection then
-            State.healthConnection:Disconnect()
-            State.healthConnection = nil
-        end
-        if State.stateConnection then
-            State.stateConnection:Disconnect()
-            State.stateConnection = nil
-        end
-        if State.damageBlockerConnection then
-            State.damageBlockerConnection:Disconnect()
-            State.damageBlockerConnection = nil
-        end
-        
-        -- ✅ Очищаем ТОЛЬКО GodMode connections
-        for _, connection in ipairs(State.GodModeConnections) do
-            if connection and connection.Connected then
-                connection:Disconnect()
-            end
-        end
-        State.GodModeConnections = {}
-        
-        -- Восстанавливаем персонажа
-        local character = LocalPlayer.Character
-        if character then
-            local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid.MaxHealth = 100
-                humanoid.Health = 100
-            end
-            local ff = character:FindFirstChild("ForceField")
-            if ff then
-                ff:Destroy()
-            end
-        end
     end
+    State.SetAntiTrap = SetAntiTrap
 end
 
 ----------------------------------------------------------------
@@ -5286,7 +5121,7 @@ local function SetupPlayerNicknamesTracking()
         end)
     end)
     
-    table.insert(State.Connections, nicknamesConnection)
+    TrackConnection(nicknamesConnection)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -5720,10 +5555,18 @@ local function pickupGun(silent)
         return false
     end
 
-    -- Последовательность 0 → пауза → 1 оставлена как была: она рабочая
+    -- Касание засчитывается только через TouchInterest, а он приходит на кадр
+    -- позже самого GunDrop (см. CONFIG.GunPickup) — ждём его покадрово
+    local deadline = os.clock() + CONFIG.GunPickup.TouchWait
+    while gun.Parent and not gun:FindFirstChildOfClass("TouchTransmitter") and os.clock() < deadline do
+        task.wait()
+    end
+    if not gun.Parent then return false end
+
+    -- Сервер реагирует на начало касания: 0 и 1 шлём сразу, без паузы между ними
+    -- (замер в MainScript: ~0.15 с до подбора против ~0.41 с с паузой)
     pcall(function()
         firetouchinterest(hrp, gun, 0)
-        task.wait(0.1)
         firetouchinterest(hrp, gun, 1)
     end)
 
@@ -5770,13 +5613,18 @@ State.TryInstantPickup = function(gun)
     State.GunPickupBusy = true
     State.GunPickupTried = gun
 
+    -- Первое касание — сразу после появления TouchInterest (ждёт pickupGun), дальше
+    -- частые повторы на случай потерянного пакета: промах первой попытки раньше
+    -- стоил 0.15 с гонки с живыми игроками
+    local cfg = CONFIG.GunPickup
     local success = false
-    for _ = 1, 5 do
+    local deadline = os.clock() + cfg.TouchWait + cfg.Timeout
+    while os.clock() < deadline do
         if not State.InstantPickupEnabled then break end
         if not gun.Parent or State.CurrentGunDrop ~= gun then break end
 
         pickupGun(true)
-        task.wait(0.15)
+        task.wait(cfg.RetryInterval)
 
         if hasGunInInventory() then
             success = true
@@ -5816,7 +5664,7 @@ local function EnableInstantPickup()
     end)
 end
 
-local function DisableInstantPickup()
+function DisableInstantPickup()
     State.InstantPickupEnabled = false
     State.GunPickupTried = nil
     State.GunPickupBusy = false
@@ -5918,117 +5766,120 @@ local function TeleportToMouse()
     end
 end
 
--- ============= Глобальные переменные для невидимости =============
-local InvisibilityConnection = nil
-local VisibleParts = {} -- Список только видимых частей (Transparency == 0)
+-- ============= Невидимость (порт из MainScript) =============
+-- Раньше корень возвращался через RenderStepped:Wait() внутри Heartbeat: при
+-- deferred-сигналах он мог провисеть на 200000 studs вниз во время физики, а
+-- прозрачность переписывалась у всех потомков каждый кадр. Теперь возврат —
+-- первым на RenderStep и страховкой на PreSimulation, прозрачность ставится
+-- один раз на персонажа (новые части ловит DescendantAdded), а при выключении
+-- возвращаются исходные значения, а не жёсткий 0.
+local Invis = {
+    Connection = nil,
+    PreSim = nil,
+    Added = nil,
+    Character = nil,
+    Frame = nil,
+    Transparency = setmetatable({}, { __mode = "k" }), -- part → исходная прозрачность
+    BindName = "MM2_InvisibilityRestore",
+    Depth = 200000, -- юнитов вниз, чтобы скрыть от сервера
+}
 
--- ============= Инициализация видимых частей =============
-InitializeVisibleParts = function()
-    VisibleParts = {}
-    local Character = LocalPlayer.Character
-    if not Character then return end
-    
-    -- Собираем только части с прозрачностью 0 (полностью видимые)
-    for _, part in pairs(Character:GetDescendants()) do
-        if part:IsA('BasePart') and part.Transparency == 0 then
-            table.insert(VisibleParts, part)
+local function isInvisPart(part)
+    return (part:IsA("BasePart") and part.Name ~= "HumanoidRootPart") or part:IsA("Decal")
+end
+
+local function setCharacterTransparency(char, value)
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if isInvisPart(part) then
+            if value == 0 then
+                local original = Invis.Transparency[part]
+                if original ~= nil then part.Transparency = original; Invis.Transparency[part] = nil end
+            else
+                if Invis.Transparency[part] == nil then Invis.Transparency[part] = part.Transparency end
+                part.Transparency = value
+            end
         end
     end
 end
 
--- ============= Функция переключения невидимости =============
+function Invis.Restore()
+    local frame = Invis.Frame
+    if not frame then return end
+    Invis.Frame = nil
+    if frame.Root.Parent then frame.Root.CFrame = frame.CFrame end
+    if frame.Humanoid.Parent then frame.Humanoid.CameraOffset = frame.Offset end
+end
+
 ToggleInvisibility = function()
     State.IsInvisible = not State.IsInvisible
-    
+
     if State.IsInvisible then
-        
-        -- Отключаем старое подключение если есть
-        if InvisibilityConnection then
-            InvisibilityConnection:Disconnect()
-        end
-        
-        -- Инициализируем список видимых частей
-        InitializeVisibleParts()
-        
-        -- Создаем цикл невидимости
-        InvisibilityConnection = game:GetService('RunService').Heartbeat:Connect(function()
+        if Invis.Connection then Invis.Connection:Disconnect() end
+        if Invis.PreSim then Invis.PreSim:Disconnect() end
+        pcall(function() RunService:UnbindFromRenderStep(Invis.BindName) end)
+        pcall(function()
+            RunService:BindToRenderStep(Invis.BindName, Enum.RenderPriority.First.Value, function()
+                pcall(Invis.Restore)
+            end)
+        end)
+        Invis.PreSim = TrackConnection(RunService.PreSimulation:Connect(function()
+            pcall(Invis.Restore)
+        end))
+
+        Invis.Connection = TrackConnection(RunService.Heartbeat:Connect(function()
             if not State.IsInvisible then return end
-            
+
             local Character = LocalPlayer.Character
             if not Character then return end
-            
-            local RootPart = Character:FindFirstChild('HumanoidRootPart')
-            local Humanoid = Character:FindFirstChild('Humanoid')
+
+            local RootPart = Character:FindFirstChild("HumanoidRootPart")
+            local Humanoid = Character:FindFirstChild("Humanoid")
             if not RootPart or not Humanoid then return end
-            
-            -- ✅ ОБНОВЛЯЕМ ПРОЗРАЧНОСТЬ КАЖДЫЙ КАДР
-            for _, part in pairs(Character:GetDescendants()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                    part.Transparency = 0.5
-                elseif part:IsA("Decal") then
-                    part.Transparency = 0.5
-                end
+
+            if Invis.Character ~= Character then
+                Invis.Character = Character
+                setCharacterTransparency(Character, 0.5)
+                if Invis.Added then Invis.Added:Disconnect() end
+                Invis.Added = TrackConnection(Character.DescendantAdded:Connect(function(part)
+                    if isInvisPart(part) then
+                        Invis.Transparency[part] = part.Transparency
+                        part.Transparency = 0.5
+                    end
+                end))
             end
-            
-            -- Сохраняем текущую позицию и смещение камеры
+
+            -- Heartbeat может сработать дважды без отрисовки: сначала вернуть прошлый сдвиг
+            Invis.Restore()
+
             local OriginalCFrame = RootPart.CFrame
             local OriginalCameraOffset = Humanoid.CameraOffset
-            
-            -- Перемещаем персонажа вниз на 200000 единиц
-            local NewCFrame = OriginalCFrame * CFrame.new(0, -200000, 0)
-            local RelativePosition = NewCFrame:ToObjectSpace(CFrame.new(OriginalCFrame.Position)).Position
+            local NewCFrame = OriginalCFrame * CFrame.new(0, -Invis.Depth, 0)
 
-            -- Применяем новую позицию и корректируем камеру
+            Invis.Frame = { Root = RootPart, Humanoid = Humanoid, CFrame = OriginalCFrame, Offset = OriginalCameraOffset }
             RootPart.CFrame = NewCFrame
-            Humanoid.CameraOffset = RelativePosition
+            Humanoid.CameraOffset = NewCFrame:ToObjectSpace(CFrame.new(OriginalCFrame.Position)).Position
+        end))
 
-            -- Ждем следующего кадра
-            game:GetService('RunService').RenderStepped:Wait()
-
-            -- Возвращаем персонажа на исходную позицию
-            RootPart.CFrame = OriginalCFrame
-            Humanoid.CameraOffset = OriginalCameraOffset
-        end)
-        
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
         end
     else
-        
-        -- Отключаем цикл невидимости
-        if InvisibilityConnection then
-            InvisibilityConnection:Disconnect()
-            InvisibilityConnection = nil
-        end
-        
-        -- Возвращаем прозрачность всех частей на 0
-        local Character = LocalPlayer.Character
-        if Character then
-            for _, part in pairs(Character:GetDescendants()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                    part.Transparency = 0
-                elseif part:IsA("Decal") then
-                    part.Transparency = 0
-                end
-            end
-        end
-        
-        -- Очищаем список (он теперь не нужен, но оставим для совместимости)
-        VisibleParts = {}
-        
-        -- Сбрасываем смещение камеры
-        if Character then
-            local Humanoid = Character:FindFirstChild('Humanoid')
-            if Humanoid then
-                Humanoid.CameraOffset = Vector3.new(0, 0, 0)
-            end
-        end
-        
+        if Invis.Connection then Invis.Connection:Disconnect(); Invis.Connection = nil end
+        if Invis.PreSim then Invis.PreSim:Disconnect(); Invis.PreSim = nil end
+        pcall(function() RunService:UnbindFromRenderStep(Invis.BindName) end)
+        Invis.Character = nil
+        if Invis.Added then Invis.Added:Disconnect(); Invis.Added = nil end
+        pcall(Invis.Restore)
+        for part, value in pairs(Invis.Transparency) do pcall(function() part.Transparency = value end) end
+        table.clear(Invis.Transparency)
+
         if State.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(220,220,220)\">Invisibility</font> <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
         end
     end
 end
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- БЛОК 17: KEYBIND SYSTEM (СТРОКИ 2931-3050)
@@ -6097,14 +5948,65 @@ local function SetupAntiAFK()
     TrackConnection(State.IdledConnection)
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- REJOIN v2 — перезаход без вылета (порт из MainScript)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Старая версия роняла клиент: через 2 с она всегда дожимала вторым Teleport()
+-- поверх ещё летящего TeleportToPlaceInstance — два телепорта одновременно и
+-- есть краш. Теперь: одна попытка за раз, перезаход в тот же инстанс только
+-- пока соединение живо, фолбэк на Teleport — лишь после реального отказа
+-- (TeleportInitFailed), а не по таймеру.
 local function Rejoin()
-    task.wait(0.5)
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-    end)
-    task.wait(2)
-    pcall(function()
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    if State.RejoinInProgress then return end
+    State.RejoinInProgress = true
+
+    task.spawn(function()
+        local timeout = CONFIG.ServerHop.TeleportTimeout
+        local failed = false
+        local conn
+
+        -- Единственный достоверный сигнал провала телепорта на клиенте
+        pcall(function()
+            conn = TeleportService.TeleportInitFailed:Connect(function(player)
+                if player == LocalPlayer then failed = true end
+            end)
+        end)
+
+        -- Реплика отвалилась (кик/дисконнект) — заходить в тот же JobId
+        -- бессмысленно: инстанс нас ещё держит, и телепорт зависает
+        local connectionAlive = false
+        pcall(function()
+            connectionAlive = game:GetService("NetworkClient")
+                :FindFirstChildWhichIsA("ClientReplicator") ~= nil
+        end)
+
+        local jobId = game.JobId
+        local instanceTried = false
+
+        if connectionAlive and type(jobId) == "string" and jobId ~= "" then
+            instanceTried = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
+            end)
+            -- Ждём вердикт. Принятый телепорт убьёт этот тред вместе с клиентом
+            if instanceTried then
+                local elapsed = 0
+                while elapsed < timeout and not failed do
+                    task.wait(0.25)
+                    elapsed += 0.25
+                end
+            end
+        end
+
+        -- Фолбэк: инстанс-перезаход не запускался или явно отказал
+        if (not instanceTried) or failed then
+            pcall(function()
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end)
+            task.wait(timeout)
+        end
+
+        if conn then pcall(function() conn:Disconnect() end) end
+        State.RejoinInProgress = false
     end)
 end
 State.Rejoin = Rejoin
@@ -6318,7 +6220,6 @@ function VoteSpammer.new()
     self.CurrentVotingSession = 0
     self.TeleportedThisSession = false
     self.CurrentTargetPad = nil
-    self.GodModeWasDisabled = false  -- Флаг что мы выключали GodMode
     self.InvisibilityWasDisabled = false  -- Флаг что мы выключали инвиз
 
     return self
@@ -6375,7 +6276,6 @@ function VoteSpammer:StartAutoSpam()
     end
     
     self.AutoSpam = true
-    self.GodModeWasDisabled = false
     self.InvisibilityWasDisabled = false
     State.AutoVoteSuppressInvis = false
 
@@ -6398,22 +6298,6 @@ function VoteSpammer:StartAutoSpam()
                     self.TeleportedThisSession = false
                     self.CurrentTargetPad = nil
                     
-                    -- ✅ Включаем GodMode обратно (голосование закончилось)
-                    if self.GodModeWasDisabled and State.GodModeWithAutoFarm then
-                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                        local humanoid = character:WaitForChild("Humanoid", 5)
-                        
-                        if humanoid then
-                            task.wait(1)
-                            
-                            if not State.GodModeEnabled then
-                                pcall(function()
-                                    --ToggleGodMode()
-                                end)
-                            end
-                        end
-                        self.GodModeWasDisabled = false
-                    end
                     -- ✅ Включаем инвиз обратно (голосование закончилось без достижения цели)
                     if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
                         task.wait(0.3)
@@ -6433,15 +6317,6 @@ function VoteSpammer:StartAutoSpam()
                 self.CurrentVotingSession = self.CurrentVotingSession + 1
                 local targetPad = self:GetTargetPad()
                 
-                -- ✅ Выключаем GodMode перед началом голосования
-                if State.GodModeWithAutoFarm and State.GodModeEnabled then
-                    pcall(function()
-                        --ToggleGodMode()
-                    end)
-                    self.GodModeWasDisabled = true
-                    task.wait(0.3)
-                end
-
                 -- ✅ Выключаем инвиз и подавляем авто-инвиз AutoFarm на время голосования
                 State.AutoVoteSuppressInvis = true
                 if State.IsInvisible then
@@ -6470,22 +6345,6 @@ function VoteSpammer:StartAutoSpam()
             -- Цель достигнута
             if targetPad.Votes >= self.VoteGoal then
                 if not self.IsGoalReached then
-                    -- ✅ Включаем GodMode обратно (цель достигнута)
-                    if self.GodModeWasDisabled and State.GodModeWithAutoFarm then
-                        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                        local humanoid = character:WaitForChild("Humanoid", 5)
-                        
-                        if humanoid then
-                            task.wait(1)
-                            
-                            if not State.GodModeEnabled then
-                                pcall(function()
-                                    --ToggleGodMode()
-                                end)
-                            end
-                        end
-                        self.GodModeWasDisabled = false
-                    end
                     -- ✅ Включаем инвиз обратно (цель достигнута)
                     if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
                         task.wait(0.3)
@@ -6527,22 +6386,6 @@ function VoteSpammer:StopAutoSpam()
     
     self.AutoSpam = false
     
-    -- ✅ Включаем GodMode обратно при остановке
-    if self.GodModeWasDisabled and State.GodModeWithAutoFarm then
-        local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local humanoid = character:WaitForChild("Humanoid", 5)
-        
-        if humanoid then
-            task.wait(1)
-            
-            if not State.GodModeEnabled then
-                pcall(function()
-                    --ToggleGodMode()
-                end)
-            end
-        end
-        self.GodModeWasDisabled = false
-    end
     -- ✅ Восстанавливаем инвиз при остановке (если выключали)
     if self.InvisibilityWasDisabled and State.AutoFarmEnabled and not State.IsInvisible then
         task.wait(0.3)
@@ -6572,144 +6415,231 @@ local function ToggleVoteSpammer(enabled)
     end
 end
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- SERVER HOP v3 (порт из MainScript)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Общая на ПК история посещённых серверов (VioCFG/Violite/serverhop_visited.json):
+-- все аккаунты видят, где уже были остальные, и не скачут по одним и тем же
+-- инстансам — это напрямую помогает Farm Sync. Плюс кэш списка серверов,
+-- single-flight и ожидание TeleportInitFailed вместо слепых повторов.
+-- Авто-реконнект здесь больше не выключается: при неудачном телепорте аккаунт
+-- раньше оставался без него до перезапуска скрипта.
 local function ServerHop()
-    
-    -- Конфигурация
-    local CONFIG = {
-        MIN_PLAYERS = 1,
-        MAX_PLAYERS_THRESHOLD = 0.95, -- Не заходить на почти полные серверы
-        MAX_ATTEMPTS = 10,
-        RETRY_DELAY = 1
-    }
-    
-    -- Получение списка серверов
-    local function GetServers()
-        local servers = {}
-        local cursor = ""
-        local attempts = 0
-        
-        while attempts < 3 do -- Максимум 3 страницы (300 серверов)
-            local url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
-                game.PlaceId
-            )
-            
-            if cursor ~= "" then
-                url = url .. "&cursor=" .. cursor
+    if State.ServerHopInProgress then return false end
+    State.ServerHopInProgress = true
+
+    task.spawn(function()
+        local SH = CONFIG.ServerHop
+        local now = os.time()
+
+        local function notify(color, text)
+            if State.NotificationsEnabled then
+                ShowNotification(
+                    string.format("<font color=\"%s\">ServerHop: </font><font color=\"rgb(220,220,220)\">%s</font>", color, text),
+                    CONFIG.Colors.Text
+                )
             end
-            
-            local success, response = pcall(function()
-                return game:HttpGet(url)
+        end
+
+        local function loadJSON(path, default)
+            local ok, data = pcall(function()
+                if isfile and isfile(path) then
+                    return HttpService:JSONDecode(readfile(path))
+                end
+                return nil
             end)
-            
-            if not success then
-                warn("[ServerHop] Ошибка загрузки серверов:", response)
-                break
-            end
-            
-            local data = HttpService:JSONDecode(response)
-            
-            if data and data.data then
-                for _, server in ipairs(data.data) do
-                    -- Фильтрация: не текущий сервер, есть игроки, не переполнен
-                    if server.id ~= game.JobId 
-                        and server.playing >= CONFIG.MIN_PLAYERS 
-                        and server.playing < (server.maxPlayers * CONFIG.MAX_PLAYERS_THRESHOLD) then
-                        table.insert(servers, server)
-                    end
+            if ok and type(data) == "table" then return data end
+            return default
+        end
+
+        local function saveJSON(path, data)
+            pcall(function()
+                if not writefile then return end
+                if makefolder and isfolder then
+                    if not isfolder("VioCFG") then makefolder("VioCFG") end
+                    if not isfolder("VioCFG/Violite") then makefolder("VioCFG/Violite") end
+                end
+                writefile(path, HttpService:JSONEncode(data))
+            end)
+        end
+
+        -- ── История посещений: {jobId = timestamp}, протухает по времени ─────
+        local visited = {}
+        do
+            local ordered = {}
+            for jobId, stamp in pairs(loadJSON(SH.VisitedFile, {})) do
+                if type(jobId) == "string" and type(stamp) == "number"
+                    and (now - stamp) < SH.VisitedLifetime then
+                    table.insert(ordered, { id = jobId, t = stamp })
                 end
             end
-            
-            -- Если нашли достаточно серверов - хватит
-            if #servers >= 10 then
-                break
+            -- Свежие — вперёд, хвост сверх лимита выбрасываем, чтобы файл не рос
+            table.sort(ordered, function(a, b) return a.t > b.t end)
+            for i = 1, math.min(#ordered, SH.VisitedLimit) do
+                visited[ordered[i].id] = ordered[i].t
             end
-            
-            cursor = data.nextPageCursor or ""
-            if cursor == "" then break end
-            
-            attempts = attempts + 1
-            task.wait(0.1)
         end
-        
-        return servers
-    end
-    
-    -- Выбор лучшего сервера (предпочтение серверам с меньшим заполнением)
-    local function SelectBestServer(servers)
-        if #servers == 0 then return nil end
-        
-        -- Сортировка по количеству игроков (предпочтение менее заполненным)
-        table.sort(servers, function(a, b)
-            local fillA = a.playing / a.maxPlayers
-            local fillB = b.playing / b.maxPlayers
-            return fillA < fillB
-        end)
-        
-        -- Выбираем случайный из топ-5 лучших серверов
-        local topCount = math.min(5, #servers)
-        return servers[math.random(1, topCount)]
-    end
-    
-    -- Телепортация
-    local function TeleportToJob(jobId)
-        -- Cleanup активных threads чтобы не было fork "старого" Rejoin после teleport
+
+        local function markVisited(jobId)
+            if type(jobId) == "string" and jobId ~= "" then
+                visited[jobId] = os.time()
+                saveJSON(SH.VisitedFile, visited)
+            end
+        end
+
+        -- Текущий сервер тоже в историю, иначе пинг-понг A → B → A
+        markVisited(game.JobId)
+
+        -- ── Получение списка серверов ────────────────────────────────────────
+        local function fetchServers()
+            local list, cursor, pages = {}, nil, 0
+            repeat
+                local url = string.format(
+                    "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=%d",
+                    game.PlaceId, SH.FetchLimit
+                )
+                if cursor then url = url .. "&cursor=" .. cursor end
+                local ok, page = pcall(function()
+                    return HttpService:JSONDecode(game:HttpGet(url))
+                end)
+                if not ok or type(page) ~= "table" or type(page.data) ~= "table" then break end
+
+                for _, srv in ipairs(page.data) do
+                    if type(srv.id) == "string" and type(srv.playing) == "number"
+                        and type(srv.maxPlayers) == "number" then
+                        table.insert(list, { id = srv.id, playing = srv.playing, maxPlayers = srv.maxPlayers })
+                    end
+                end
+
+                cursor = page.nextPageCursor
+                pages += 1
+                task.wait(0.15)
+            until (not cursor) or pages >= SH.MaxPages
+            return list
+        end
+
+        -- ── Кэш списка серверов (общий для аккаунтов — меньше запросов к API) ─
+        local cache = loadJSON(SH.CacheFile, nil)
+        local cacheValid = cache
+            and cache.place == game.PlaceId
+            and type(cache.servers) == "table"
+            and #cache.servers > 0
+            and (now - (tonumber(cache.timestamp) or 0)) < SH.CacheLifetime
+
+        local servers
+        if cacheValid then
+            servers = cache.servers
+        else
+            servers = fetchServers()
+            if #servers > 0 then
+                saveJSON(SH.CacheFile, { place = game.PlaceId, timestamp = now, servers = servers })
+            elseif cache and cache.place == game.PlaceId and type(cache.servers) == "table" then
+                -- API не ответил — лучше протухший список, чем ничего
+                servers = cache.servers
+            end
+        end
+
+        if type(servers) ~= "table" or #servers == 0 then
+            notify("rgb(255, 85, 85)", "Failed to fetch servers")
+            State.ServerHopInProgress = false
+            return
+        end
+
+        -- ── Отбор кандидатов ─────────────────────────────────────────────────
+        local function score(playing, maxPlayers)
+            local value = (1 - playing / maxPlayers) * 100
+            if playing >= 2 and playing <= 6 then value = value + 50 end
+            return value
+        end
+
+        local function collect(strict)
+            local out = {}
+            for _, srv in ipairs(servers) do
+                local pass = srv.id ~= game.JobId
+                    and srv.playing > 0
+                    and srv.playing < srv.maxPlayers
+                    and not visited[srv.id]
+                if pass and strict then
+                    pass = srv.playing >= SH.MinPlayers
+                        and srv.playing < srv.maxPlayers * SH.MaxFillPercent
+                end
+                if pass then
+                    table.insert(out, {
+                        id = srv.id, playing = srv.playing, maxPlayers = srv.maxPlayers,
+                        score = score(srv.playing, srv.maxPlayers),
+                    })
+                end
+            end
+            return out
+        end
+
+        local candidates = collect(true)
+        if #candidates == 0 then candidates = collect(false) end
+        if #candidates == 0 then
+            -- Все известные сервера недавно посещены — без сброса истории хоп
+            -- встал бы намертво
+            visited = {}
+            markVisited(game.JobId)
+            candidates = collect(true)
+            if #candidates == 0 then candidates = collect(false) end
+        end
+
+        if #candidates == 0 then
+            notify("rgb(255, 85, 85)", "No suitable servers found")
+            State.ServerHopInProgress = false
+            return
+        end
+
+        table.sort(candidates, function(a, b) return a.score > b.score end)
+
+        -- ── Телепорт ─────────────────────────────────────────────────────────
+        local failed = false
+        local conn
         pcall(function()
-            if State.ReconnectThread then
-                task.cancel(State.ReconnectThread)
-                State.ReconnectThread = nil
-            end
-            State.AutoReconnectEnabled = false
-            if State.VoteSpammerThread then
-                pcall(task.cancel, State.VoteSpammerThread)
-                State.VoteSpammerThread = nil
-            end
+            conn = TeleportService.TeleportInitFailed:Connect(function(player)
+                if player == LocalPlayer then failed = true end
+            end)
         end)
 
-        for attempt = 1, 3 do
-            local success, err = pcall(function()
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
+        for _ = 1, SH.TeleportRetry do
+            if #candidates == 0 then break end
+
+            -- Случайный из топа — чтобы аккаунты не сваливались в один сервер
+            local target = table.remove(candidates, math.random(1, math.min(SH.TopPick, #candidates)))
+            if not target then break end
+
+            -- Пишем ДО телепорта: после успешного телепорта код уже не отработает
+            markVisited(target.id)
+            notify("rgb(85, 255, 120)", string.format("Joining %d/%d players", target.playing, target.maxPlayers))
+
+            failed = false
+            local started = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, target.id, LocalPlayer)
             end)
 
-            if success then
-                return true
-            else
-                warn("[ServerHop] Попытка", attempt, "не удалась:", err)
-                task.wait(CONFIG.RETRY_DELAY)
+            if started then
+                local elapsed = 0
+                while elapsed < SH.TeleportTimeout and not failed do
+                    task.wait(0.25)
+                    elapsed += 0.25
+                end
+                -- Отказа не было — телепорт принят. Второй телепорт поверх первого
+                -- и есть причина вылетов
+                if not failed then break end
             end
+
+            -- Явный отказ: сервер умер/полон, список протух — сбрасываем кэш
+            saveJSON(SH.CacheFile, { place = game.PlaceId, timestamp = 0, servers = {} })
+            task.wait(1)
         end
-        return false
-    end
-    
-    -- ═══════════════════════════════════════════════════════════
-    -- ОСНОВНАЯ ЛОГИКА
-    -- ═══════════════════════════════════════════════════════════
-    
-    print("[ServerHop] Поиск серверов...")
-    
-    local servers = GetServers()
-    
-    if #servers == 0 then
-        warn("[ServerHop] Не найдено подходящих серверов!")
-        return false
-    end
-    
-    print("[ServerHop] Найдено серверов:", #servers)
-    
-    local selectedServer = SelectBestServer(servers)
-    
-    if not selectedServer then
-        warn("[ServerHop] Не удалось выбрать сервер!")
-        return false
-    end
-    
-    print(string.format(
-        "[ServerHop] Подключение к серверу: %d/%d игроков",
-        selectedServer.playing,
-        selectedServer.maxPlayers
-    ))
-    
-    return TeleportToJob(selectedServer.id)
+
+        if conn then pcall(function() conn:Disconnect() end) end
+        if failed then
+            notify("rgb(255, 85, 85)", "Teleport failed, try again")
+        end
+        State.ServerHopInProgress = false
+    end)
+    return true
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -6727,7 +6657,7 @@ end
 -- всей группы уходит ровно один, «глобально худший» (пришёл на сервер позже;
 -- тай-брейк — больший userId). Так за тик хопает строго один, без разбегания.
 
-local FarmSync = {}
+FarmSync = {}
 do
     local FOLDERS   = {"VioCFG", "VioCFG/Violite"}   -- папка конфигов Violite
     local SYNC_DIR  = "VioCFG/Violite/FarmSync"
@@ -7108,10 +7038,6 @@ local function HandleActionInput(input)
         State.ClickTPActive = true
     end
 
-    if input.KeyCode == State.Keybinds.GodMode and State.Keybinds.GodMode ~= Enum.KeyCode.Unknown then
-        ToggleGodMode()
-    end
-
     if input.KeyCode == State.Keybinds.FlingPlayer and State.Keybinds.FlingPlayer ~= Enum.KeyCode.Unknown then
         if State.SelectedPlayerForFling then
             local targetPlayer = getPlayerByName(State.SelectedPlayerForFling)
@@ -7135,290 +7061,82 @@ local function HandleActionInput(input)
 end
 
 -- Auto Rejoin on Disconnect
-local function HandleAutoRejoin(enabled)
+function HandleAutoRejoin(enabled)
     State.AutoRejoinEnabled = enabled
-    
-    if enabled then
-        task.spawn(function()
-            repeat task.wait() until game.CoreGui:FindFirstChild('RobloxPromptGui')
-            
-            local promptOverlay = game.CoreGui.RobloxPromptGui.promptOverlay
-            local connection
-            
-            connection = promptOverlay.ChildAdded:Connect(function(prompt)
-                if State.AutoRejoinEnabled and prompt.Name == 'ErrorPrompt' then
-                    task.wait(0.5)
-                    Rejoin()
-                end
-            end)
-            
-            getgenv().AutoRejoinConnection = connection
-            TrackConnection(connection)
-        end)
-    else
-        if getgenv().AutoRejoinConnection then
-            getgenv().AutoRejoinConnection:Disconnect()
-            getgenv().AutoRejoinConnection = nil
-        end
+    if State.AutoRejoinTask then pcall(task.cancel, State.AutoRejoinTask); State.AutoRejoinTask = nil end
+
+    -- Пересоздаём коннект с нуля: без этого повторное включение тумблера вешало
+    -- второй ChildAdded, и на один ErrorPrompt Rejoin вызывался дважды
+    if State.AutoRejoinConnection then
+        pcall(function() State.AutoRejoinConnection:Disconnect() end)
+        State.AutoRejoinConnection = nil
     end
+
+    if not enabled then return end
+
+    State.AutoRejoinTask = task.spawn(function()
+        local promptGui
+        local waited = 0
+        -- Ограниченное ожидание: на части executor'ов RobloxPromptGui нет вовсе,
+        -- и бесконечный repeat висел бы до конца сессии
+        repeat
+            promptGui = CoreGui:FindFirstChild("RobloxPromptGui")
+            if promptGui then break end
+            task.wait(0.25)
+            waited += 0.25
+        until waited >= 30
+        State.AutoRejoinTask = nil
+
+        if not State.AutoRejoinEnabled then return end
+        local overlay = promptGui and promptGui:FindFirstChild("promptOverlay")
+        if not overlay then
+            warn("[Auto Rejoin] RobloxPromptGui не найден — автореджоин недоступен")
+            return
+        end
+
+        State.AutoRejoinConnection = TrackConnection(overlay.ChildAdded:Connect(function(prompt)
+            if State.AutoRejoinEnabled and prompt.Name == "ErrorPrompt" then
+                task.wait(0.5)
+                Rejoin() -- сам разберётся: соединение мертво → обычный Teleport
+            end
+        end))
+    end)
 end
 
 local DEFAULT_INTERVAL = 60 * 60
 
--- Функция для установки интервала
+-- Интервал только сохраняется: цикл реконнекта читает его на каждом тике.
+-- Раньше здесь вызывался HandleAutoReconnect, объявленный ниже, — смена
+-- интервала при включённом реконнекте падала с ошибкой
 local function SetReconnectInterval(minutes)
     local mins = tonumber(minutes) or 60
-    State.ReconnectInterval = mins * 60
+    State.ReconnectInterval = math.max(1, mins) * 60
     print(string.format("[Auto Reconnect] Interval: %d min (%d sec)", mins, State.ReconnectInterval))
-    if State.AutoReconnectEnabled then
-        HandleAutoReconnect(true) -- перезапуск с новым интервалом
-    end
 end
 
-local function HandleAutoReconnect(enabled)
-    -- Всегда сначала отменяем предыдущий thread (даже при enabled=true)
-    if State.ReconnectThread then
-        pcall(task.cancel, State.ReconnectThread)
-        State.ReconnectThread = nil
-    end
+function HandleAutoReconnect(enabled)
+    -- Тред мог уже завершиться сам — task.cancel по мёртвому треду кидает
+    if State.ReconnectThread then pcall(task.cancel, State.ReconnectThread); State.ReconnectThread = nil end
     State.AutoReconnectEnabled = enabled
     if not enabled then return end
 
-    local interval = State.ReconnectInterval or DEFAULT_INTERVAL
-    State.ReconnectThread = task.delay(interval, function()
-        if State.AutoReconnectEnabled then
-            State.ReconnectThread = nil
-            Rejoin()
+    State.ReconnectThread = task.spawn(function()
+        local elapsed = 0
+        while State.AutoReconnectEnabled do
+            task.wait(1)
+            elapsed += 1
+            if elapsed >= (State.ReconnectInterval or DEFAULT_INTERVAL) then
+                -- Удачный телепорт оборвёт тред сам; если сервер отказал —
+                -- не глохнем, а пробуем снова через интервал
+                elapsed = 0
+                Rejoin()
+            end
         end
     end)
-end
--- ══════════════════════════════════════════════════════════════════════════════
--- СВОДКА СЕССИИ (инфо-блок в левом нижнем углу сайдбара нового GUI)
--- ══════════════════════════════════════════════════════════════════════════════
-
--- Источник баланса — лейбл шопа PlayerGui.CrossPlatform.Shop...Coins.Amount.
--- Корень бага с «43k»: в шаблоне StarterGui у этого лейбла зашита дизайн-тайм
--- заглушка "43,000" (проверено на живом клиенте). Сразу после инжекта копия в
--- PlayerGui ещё держит её, и старая логика фиксировала 43000 как базу; когда
--- приходил реальный баланс, разница улетала в Coins/h. Симметрично ломалось при
--- телепорте/серверхопе — GUI пересоздаётся и заглушка возвращается.
---
--- Поэтому база (StartCoins + StartedAt) НЕ ставится при загрузке. Значение
--- считается настоящим, только если выполнено хоть одно:
---   * игра при нас записала Text в лейбл (ловим GetPropertyChangedSignal);
---   * текст отличается от заглушки шаблона;
---   * истёк TrustTimeout — сдаёмся и верим тому, что видим.
--- Плюс любой неправдоподобный скачок баланса (в любую сторону) не идёт в
--- статистику, а сдвигает базу — см. GetRateText.
-State.Session = {
-    Version    = "2.2",
-    StartedAt  = nil,
-    StartCoins = nil,
-
-    -- Тайминги/пороги счётчика
-    BaselineStableFor = 2,    -- сек: столько баланс должен не меняться, чтобы стать базой
-    TrustTimeout      = 20,   -- сек: после этого верим лейблу без доказательств
-    RateWarmup        = 30,   -- сек: короче этого окна Coins/h не показываем — цифра бессмысленна
-    MaxGainPerSec     = 30,   -- потолок правдоподобного прироста монет в секунду
-    JumpSlack         = 300,  -- разовая надбавка к потолку (награда за раунд, лаг опроса)
-
-    _label       = nil,       -- закэшированный TextLabel баланса
-    _labelAt     = nil,       -- когда этот инстанс лейбла был подхвачен
-    _labelDirty  = false,     -- игра уже писала в Text => значению можно верить
-    _placeholder = nil,       -- дизайн-тайм заглушка из StarterGui ("43,000"), false если не прочли
-    _pending     = nil,       -- кандидат в базу
-    _pendingAt   = nil,
-    _lastCoins   = nil,       -- предыдущее доверенное чтение (для отсева скачков)
-    _lastAt      = nil,
-}
-
-function State.Session.FormatThousands(n)
-    local s = tostring(math.floor(n))
-    local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-    return (out:gsub("^,", ""))
-end
-
--- Подхват лейбла баланса + разовое чтение заглушки из шаблона StarterGui.
--- Лейбл пересоздаётся при телепорте/перезагрузке GUI, поэтому кэш инвалидируем
--- по .Parent и при смене инстанса сбрасываем «доверие» к нему.
-function State.Session.GetLabel()
-    local S = State.Session
-    if S._label and S._label.Parent then return S._label end
-
-    local ok, label = pcall(function()
-        return LocalPlayer.PlayerGui
-            .CrossPlatform.Shop.Medium.Title.Coins.Container.Amount
-    end)
-    if not ok or typeof(label) ~= "Instance" then return nil end
-
-    -- Заглушка шаблона читается один раз: она одна и та же на весь сеанс
-    if S._placeholder == nil then
-        local ok2, def = pcall(function()
-            return tostring(game:GetService("StarterGui")
-                .CrossPlatform.Shop.Medium.Title.Coins.Container.Amount.Text)
-        end)
-        S._placeholder = (ok2 and type(def) == "string" and def ~= "") and def or false
-    end
-
-    S._label      = label
-    S._labelAt    = tick()
-    S._labelDirty = false
-    -- Первая же запись Text игрой = в лейбле настоящий баланс, а не заглушка
-    pcall(function()
-        TrackConnection(label:GetPropertyChangedSignal("Text"):Connect(function()
-            S._labelDirty = true
-        end))
-    end)
-    return label
-end
-
--- Читает баланс. Возвращает nil, пока значению нельзя верить (заглушка шаблона),
--- чтобы ни COINS, ни COINS/H не показали фиктивные 43k. Базу не трогает.
-function State.Session.ReadCoins()
-    local S = State.Session
-    local label = S.GetLabel()
-    if not label then return nil end
-
-    local ok, text = pcall(function() return tostring(label.Text) end)
-    if not ok or type(text) ~= "string" then return nil end
-
-    -- Пока игра ни разу не писала в лейбл, а текст совпадает с заглушкой —
-    -- баланс ещё не пришёл. Через TrustTimeout перестаём упрямиться: у игрока
-    -- может быть ровно столько монет, и события Text мы могли не застать.
-    if not S._labelDirty and S._placeholder and text == S._placeholder
-        and (tick() - (S._labelAt or 0)) < S.TrustTimeout then
-        return nil
-    end
-
-    return S.ParseAmount(text)
-end
-
--- "8,781" → 8781, "1.2M" → 1200000. Шоп при больших балансах сокращает число,
--- поэтому просто вырезать не-цифры нельзя: "1.2M" превратилось бы в 12.
-function State.Session.ParseAmount(text)
-    local digits, suffix = text:match("([%d%.,%s]+)%s*([KkMmBb]?)")
-    if not digits then return nil end
-    -- Разделитель тысяч убираем, десятичную точку оставляем (её даёт только
-    -- сокращённая запись вида 1.2M — в полной записи точек не бывает)
-    digits = digits:gsub("[,%s]", "")
-    local value = tonumber(digits)
-    if type(value) ~= "number" then return nil end
-    local mult = ({ k = 1e3, m = 1e6, b = 1e9 })[suffix:lower()]
-    if mult then value = value * mult end
-    return math.floor(value)
-end
-
--- База фиксируется, когда выполнено любое из условий:
---   a) игра при нас записала Text — значение гарантированно настоящее;
---   b) баланс не менялся BaselineStableFor секунд (инжект в простое);
---   c) истёк TrustTimeout — берём что есть, чтобы счётчик не завис на «—»
---      при инжекте прямо посреди фарма, когда баланс тикает каждую секунду.
--- StartedAt стартует тем же моментом, что и StartCoins.
-function State.Session.EnsureBaseline(coins)
-    local S = State.Session
-    if S.StartCoins then return end
-    local now = tick()
-
-    local settled = S._labelDirty
-    if not settled then
-        if S._pending ~= coins then
-            S._pending, S._pendingAt = coins, now
-        elseif (now - (S._pendingAt or now)) >= S.BaselineStableFor then
-            settled = true
-        end
-        if (now - (S._labelAt or now)) >= S.TrustTimeout then
-            settled = true
-        end
-    end
-    if not settled then return end
-
-    S.StartCoins = coins
-    S.StartedAt  = now
-    S._lastCoins = coins
-    S._lastAt    = now
-    S._pending, S._pendingAt = nil, nil
-end
-
--- Сброс сессии: точка отсчёта Coins/h переезжает на текущий момент.
--- Вызывается при включении автофарма (монеты к этому времени уже загружены).
--- Если баланс ещё не доверенный — базу не выдумываем, её поставит EnsureBaseline.
-function State.Session.MarkFarmStart()
-    local S = State.Session
-    local coins = S.ReadCoins()
-    S._pending, S._pendingAt = nil, nil
-    if not coins then
-        S.StartCoins, S.StartedAt = nil, nil
-        S._lastCoins, S._lastAt = nil, nil
-        return
-    end
-    S.StartedAt  = tick()
-    S.StartCoins = coins
-    S._lastCoins = coins
-    S._lastAt    = S.StartedAt
-end
-
-function State.Session.GetCoinsText()
-    local coins = State.Session.ReadCoins()
-    if not coins then return nil end
-    return State.Session.FormatThousands(coins)
-end
-
-function State.Session.GetRateText()
-    local S = State.Session
-    local coins = S.ReadCoins()
-    if not coins then return nil end            -- баланс ещё не доверенный
-    S.EnsureBaseline(coins)
-    if not S.StartCoins then return "—" end     -- база ещё устаканивается
-
-    local now = tick()
-
-    -- Отсев артефактов данных. Любой скачок, который физически нельзя нафармить
-    -- за прошедшее время (догрузка баланса, возврат заглушки после телепорта),
-    -- и любое падение баланса (покупка в шопе) не идут в статистику: базу
-    -- сдвигаем на ту же дельту, поэтому уже накопленный gained и время сессии
-    -- сохраняются, а сам скачок в Coins/h не попадает.
-    local dt    = math.max(now - (S._lastAt or now), 0.001)
-    local delta = coins - (S._lastCoins or coins)
-    if delta < 0 or delta > (S.MaxGainPerSec * dt + S.JumpSlack) then
-        S.StartCoins = S.StartCoins + delta
-    end
-    S._lastCoins, S._lastAt = coins, now
-
-    -- Пока окно измерения короче RateWarmup, экстраполяция в час даёт мусор
-    -- (одна монета на второй секунде = 1800/ч). Честнее показать прочерк.
-    local elapsed = now - S.StartedAt
-    if elapsed < S.RateWarmup then return "—" end
-
-    local gained = coins - S.StartCoins
-    if gained < 0 then gained = 0 end
-    return S.FormatThousands(gained / (elapsed / 3600))
-end
-
-function State.Session.GetRole()
-    local name = LocalPlayer and LocalPlayer.Name
-    if name and State.PlayerData then
-        local data = State.PlayerData[name]
-        if data and type(data.Role) == "string" and data.Role ~= "" then
-            return data.Role
-        end
-    end
-    local ok, role = pcall(function()
-        local char = LocalPlayer.Character
-        local bp = LocalPlayer:FindFirstChild("Backpack")
-        local function has(item)
-            return (char and char:FindFirstChild(item) ~= nil)
-                or (bp and bp:FindFirstChild(item) ~= nil)
-        end
-        if has("Knife") then return "Murderer" end
-        if has("Gun") then return "Sheriff" end
-        return "Innocent"
-    end)
-    if ok then return role end
-    return nil
 end
 
 -- А ТЕПЕРЬ создаём GUI с Handlers
-local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
+GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/Libraryes/GUI.lua"))()({
     CONFIG = CONFIG,
     State = State,
     Players = Players,
@@ -7426,10 +7144,7 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
     TweenService = TweenService,
     UserInputService = UserInputService,
     LocalPlayer = LocalPlayer,
-    TrackConnection = function(conn)
-        if conn then table.insert(State.Connections, conn) end
-        return conn
-    end,
+    TrackConnection = TrackConnection,
     ShowNotification = ShowNotification,
     Handlers = {
         -- Character
@@ -7483,8 +7198,6 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.AutoFarmEnabled = on
             if on then
                 State.CoinBlacklist = {}
-                State.StartSessionCoins = GetCollectedCoinsCount()
-                State.Session.MarkFarmStart()   -- точка отсчёта Coins/h
                 ShowNotification("Auto Farm: <font color=\"rgb(168,228,160)\">ON</font>", CONFIG.Colors.Text)
                 StartAutoFarm()
             else
@@ -7552,19 +7265,11 @@ local GUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Yany1944/
             State.AutoLoadOnTeleport = on
         end,
 
-        -- ── Сводка для инфо-блока в сайдбаре ─────────────────────────────
-        GetCoins        = function() return State.Session.GetCoinsText() end,
-        GetCoinsPerHour = function() return State.Session.GetRateText() end,
-        GetVersion      = function() return State.Session.Version end,
-        GetRole         = function() return State.Session.GetRole() end,
+        AntiTrap = function(on) SetAntiTrap(on) end,
     }
 })
 
 GUI.Init()
-
--- Отдельного счётчика монет в хедере больше нет: баланс, роль и Coins/h
--- показывает инфо-блок в левом нижнем углу сайдбара (State.Session ниже,
--- значения отдаются через Handlers.GetCoins / GetRole / GetCoinsPerHour).
 
 ----------------------------------------------------------------
 -- СОЗДАНИЕ ВКЛАДОК И ПРИВЯЗКА К Handlers
@@ -7588,7 +7293,6 @@ do
         MainTab:CreateSection("TELEPORT & OTHER", "right")
         MainTab:CreateKeybindButton("Click TP (Hold Key + LMB)", "clicktp", "ClickTP")
         MainTab:CreateKeybindButton("Toggle NoClip", "NoClip", "NoClip")
-        MainTab:CreateKeybindButton("Toggle GodMode", "godmode", "GodMode")
         ----------------------------------------------------------------------------
         MainTab:CreateButton("", "Fast respawn", CONFIG.Colors.Accent, "RespawnPlr")
 end
@@ -7623,6 +7327,7 @@ do
         CombatTab:CreateKeybindButton("Shoot Murderer", "shootmurderer", "ShootMurderer")
         CombatTab:CreateKeybindButton("Pickup Dropped Gun", "pickupgun", "PickupGun")
         CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", _G.AUTOEXEC_ENABLED)
+        CombatTab:CreateToggle("Anti Trap", "Traps don't slow you or alert murderer", "AntiTrap", _G.AUTOEXEC_ENABLED)
 end
 
 do
@@ -7715,6 +7420,7 @@ pcall(function()
     ApplyFOV(State.CameraFOV)
 end)
 SetupAntiAFK()
+task.spawn(SetupCoinBagTracking)
 StartRoleChecking()
 if _G.AUTOEXEC_ENABLED then
     task.spawn(function()
