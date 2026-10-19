@@ -328,6 +328,26 @@
                 TopPick          = 5,        -- из скольких лучших кандидатов тянем случайного
                 TeleportRetry    = 3,        -- сколько РАЗНЫХ серверов пробуем при явном отказе
                 TeleportTimeout  = 12,       -- сек ожидания вердикта по одному телепорту
+                -- Rejoin в тот же сервер: после кика сервер ещё держит наш слот
+                RejoinPersist    = 180,      -- сек пробуем тот же JobId, потом — любой сервер
+                RejoinTimeout    = 20,       -- сек ожидания вердикта одной попытки
+                RejoinRetry      = 5,        -- сек паузы между попытками
+            },
+            -- Farm Sync: аккаунты на одном ПК, обмен через файлы (см. БЛОК 18.5)
+            FarmSync = {
+                Dir           = "VioCFG/Violite/FarmSync",               -- <userId>.json — статус аккаунта
+                ControlFile   = "VioCFG/Violite/farmsync_control.json",  -- цель и общие настройки
+                Tick          = 1,     -- сек: статус, чтение настроек и решения
+                StaleTTL      = 15,    -- сек без heartbeat — аккаунта на сервере нет
+                DoneTTL       = 5,     -- сек без heartbeat — в ожидании конца раунда не ждём его
+                OwnerGrace    = 300,   -- сек: владелец не на цели — потом цель истекает
+                HopCooldown   = 25,    -- сек между хопами Avoid
+                JoinStagger   = 3,     -- сек разноса входа на цель между аккаунтами
+                JoinRetryFull = 60,    -- сек до повтора, если цель полна
+                JoinRetry     = 30,    -- сек до повтора после прочих отказов
+                FlingSlot     = 10,    -- сек: смена аккаунта, который флингует постороннего
+                FlingCooldown = 10,    -- сек между флингами одного постороннего
+                KillEvery     = 2,     -- сек между ударами мурдерера по посторонним
             },
             -- Плавный зум при ViewClip: в режиме Invisicam PlayerModule не гоняет пружину
             -- ZoomController (она вызывается только из Poppercam) — повторяем её поверх камеры
@@ -589,7 +609,8 @@
             BuyFinalRewardEnabled = false,
             VoteSpammerEnabled = false,
             VoteGoal = 8,
-            FarmSyncEnabled = false,
+            FarmSyncMode = CONFIG.AutoExec and "Avoid" or "Off", -- Off | Avoid | Follow (общий для всех аккаунтов ПК)
+            FarmSyncClearStrangers = false,  -- на целевом сервере трогать посторонних
             FPSCap = 60,
         },
         Cache = {
@@ -4268,6 +4289,7 @@
         BagsLive = false,      -- false = в этом раунде данных с ремоутов ещё не было
         BagsGuiFallback = true,-- GUI-фолбэк валиден только до первого лобби после инжекта
         Mode = nil,            -- "Classic" | "Infection" | "FreezeTag" (nil — не знаем)
+        Done = false,          -- в этом раунде собирать больше нечего (статус для Farm Sync)
     }
 
     local function AddCoinToBlacklist(coin)
@@ -4486,6 +4508,19 @@
 
     -- Пока пользователь флингует (кнопки Fling Murderer/Sheriff/Selected), фарм не
     -- пишет CFrame и снимает левитацию — иначе флинг перебивается каждый кадр
+    -- Farm Sync объявлен ниже по файлу — обращаемся через State.Runtime.
+    -- IsOurs: игрок — наш аккаунт (его не флингуем и не стреляем в него)
+    function Farm.IsOurs(player)
+        local sync = State.Runtime.FarmSync
+        return sync ~= nil and sync.IsOurs ~= nil and sync.IsOurs(player)
+    end
+
+    -- На сервере есть наши, которые ещё собирают: действие, заканчивающее раунд, ждёт
+    function Farm.OursStillCollecting()
+        local sync = State.Runtime.FarmSync
+        return sync ~= nil and sync.CoopActive ~= nil and sync.CoopActive() and not sync.AllOursDone()
+    end
+
     function Farm.FlingBusy()
         return Fling.SessionActive == true or State.Runtime.IsFlingInProgress == true
     end
@@ -4548,6 +4583,7 @@
 
     -- Раунд закончился: сумки и чёрный список больше не актуальны, с левитации — в лобби
     function Farm.OnRoundEnd()
+        Farm.Done = false
         Farm.ResetBags()
         Farm.ReturnToLobby()
         CleanupCoinBlacklist()
@@ -4810,7 +4846,8 @@
                 Farm.WaitFlingIdle()
                 if Farm.IsParticipant() then return end   -- новый раунд, мы снова в игре
                 local murderer = getMurderForAutoFarm()
-                if not murderer or murderer == LocalPlayer then break end
+                -- Мурдерер — наш аккаунт: его смерть закончит раунд остальным нашим
+                if not murderer or murderer == LocalPlayer or Farm.IsOurs(murderer) then break end
                 local root = murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart")
                 if root and root.AssemblyLinearVelocity.Magnitude > 500 then
                     task.wait(1)            -- уже летит — не мешаем
@@ -4860,7 +4897,8 @@
         while Farm.RoundActive() and State.Settings.AutoFarmEnabled do
             Farm.WaitFlingIdle()
             if Farm.IsZombie(LocalPlayer) then
-                pcall(function() InstantKillAll(true) end)
+                -- Наши выжившие ещё собирают — их не добиваем
+                if not Farm.OursStillCollecting() then pcall(function() InstantKillAll(true) end) end
                 task.wait(cfg.KillAllEvery)
             elseif not Farm.IsParticipant() then
                 break
@@ -4920,7 +4958,7 @@
             while Farm.RoundActive() and State.Settings.AutoFarmEnabled and State.Settings.XPFarmEnabled and shots < 30 do
                 Farm.WaitFlingIdle()
                 local target = getMurderForAutoFarm()
-                if not target or not LocalPlayer.Character then break end
+                if not target or not LocalPlayer.Character or Farm.IsOurs(target) then break end
                 if not target.Character then
                     task.wait(0.5)
                 elseif State.Settings.CanShootMurderer then
@@ -4937,7 +4975,7 @@
             while Farm.RoundActive() and State.Settings.AutoFarmEnabled and State.Settings.XPFarmEnabled and attempts < 10 do
                 Farm.WaitFlingIdle()
                 local target = getMurderForAutoFarm()
-                if not target then break end
+                if not target or Farm.IsOurs(target) then break end
                 local root = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
                 if not root then
                     task.wait(0.5)
@@ -4974,6 +5012,7 @@
                 State.Cache.CoinBlacklist = {}
                 ctx.noCoins = 0
                 ctx.allowFly = false
+                Farm.Done = false
             end
 
             Farm.InvisibleWhileWaiting()
@@ -5020,13 +5059,18 @@
                 end
 
                 if ctx.noCoins >= ctx.maxNoCoins then
+                    Farm.Done = true
                     pcall(DisableNoClip)
                     local mode = Farm.RoundMode()
+                    local sync = State.Runtime.FarmSync
 
                     if mode == "Infection" then
                         Farm.InfectionEndgame()
                     elseif mode == "FreezeTag" then
                         Farm.WaitRoundEnd()
+                    elseif sync and sync.CoopActive() then
+                        -- На сервере есть наши: конец раунда по общему правилу Farm Sync
+                        sync.CoopEndgame()
                     elseif State.Settings.XPFarmEnabled then
                         Farm.XPEndgame()
                     else
@@ -7064,61 +7108,90 @@
     --      ещё летящего TeleportToPlaceInstance — два телепорта одновременно
     --      и есть тот самый краш;
     --   2) она вызывалась прямо в потоке клика по кнопке и делала там task.wait.
-    -- Теперь: одна попытка за раз (single-flight), инстанс-перезаход только пока
-    -- соединение с сервером живо, фолбэк на обычный Teleport — исключительно после
-    -- реального отказа (TeleportInitFailed), а не по таймеру.
+    -- Теперь: одна попытка за раз (single-flight), фолбэк на обычный Teleport —
+    -- исключительно после реального отказа (TeleportInitFailed), а не по таймеру.
+    --
+    -- Общий замок телепортов: Rejoin, Server Hop, Farm Sync (хоп и вход на целевой
+    -- сервер), престиж и Auto Reconnect идут через него. Раньше у Rejoin и Server Hop
+    -- были разные флаги, и два телепорта могли стартовать одновременно — тот самый краш.
+    -- Try ждёт вердикт: TeleportInitFailed с TeleportResult (GameFull, GameEnded...)
+    -- или таймаут; принятый телепорт этот поток уже не переживёт
+    State.Runtime.TeleportLock = {Owner = nil, Failed = nil}
+    do
+        local Lock = State.Runtime.TeleportLock
+        Core.Connect(TeleportService.TeleportInitFailed, function(player, result, message)
+            if player ~= LocalPlayer then return end
+            local name = "Failure"
+            pcall(function() name = result.Name end)
+            Lock.Failed = {Result = name, Message = tostring(message or "")}
+        end)
+
+        function Lock.Acquire(owner)
+            if Lock.Owner then return false end
+            Lock.Owner = owner
+            return true
+        end
+
+        function Lock.Release(owner)
+            if Lock.Owner == owner then Lock.Owner = nil end
+        end
+
+        -- jobId = nil — обычный Teleport в случайный сервер. Возвращает true, если
+        -- отказа не было (телепорт принят или завис), иначе false и имя TeleportResult
+        function Lock.Try(placeId, jobId, timeout)
+            Lock.Failed = nil
+            local started = pcall(function()
+                if jobId then
+                    TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer)
+                else
+                    TeleportService:Teleport(placeId, LocalPlayer)
+                end
+            end)
+            if not started then return false, "Failure" end
+            local elapsed = 0
+            while elapsed < (timeout or CONFIG.ServerHop.TeleportTimeout) and not Lock.Failed do
+                task.wait(0.25)
+                elapsed += 0.25
+            end
+            if Lock.Failed then return false, Lock.Failed.Result end
+            return true
+        end
+    end
+
+    -- Rejoin всегда возвращает в тот же сервер (Auto Rejoin после кика — тоже, вне
+    -- зависимости от Farm Sync). После обрыва сервер какое-то время держит наш слот,
+    -- и первые попытки отказывают — повторяем по одной, пока не выйдет RejoinPersist.
+    -- Сервер закрыт (GameEnded/GameNotFound) или время вышло — обычный Teleport,
+    -- а на целевой сервер (если он есть) вернёт Farm Sync
     local function Rejoin()
-        if State.Runtime.RejoinInProgress then return end
+        local Lock = State.Runtime.TeleportLock
+        if State.Runtime.RejoinInProgress or not Lock.Acquire("Rejoin") then return end
         State.Runtime.RejoinInProgress = true
 
         Core.Tasks.spawn(function()
-            local failed = false
-            local conn
-
-            -- Единственный достоверный сигнал провала телепорта на клиенте.
-            pcall(function()
-                conn = Core.Connect(TeleportService.TeleportInitFailed, function(player)
-                    if player == LocalPlayer then failed = true end
-                end)
-            end)
-
-            -- Если реплика уже отвалилась (кик/дисконнект), то заходить в тот же
-            -- JobId бессмысленно — инстанс нас ещё держит, и телепорт зависает.
-            local connectionAlive = false
-            pcall(function()
-                connectionAlive = game:GetService("NetworkClient")
-                    :FindFirstChildWhichIsA("ClientReplicator") ~= nil
-            end)
-
+            local SH = CONFIG.ServerHop
             local jobId = game.JobId
-            local instanceTried = false
+            local placeId = game.PlaceId
+            local deadline = os.clock() + SH.RejoinPersist
 
-            if connectionAlive and type(jobId) == "string" and jobId ~= "" then
-                instanceTried = pcall(function()
-                    TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer)
-                end)
-
-                -- Ждём вердикт. Если телепорт принят — этот тред умрёт вместе с
-                -- клиентом, и дальше мы просто не дойдём.
-                if instanceTried then
-                    local elapsed = 0
-                    while elapsed < CONFIG.ServerHop.TeleportTimeout and not failed do
-                        task.wait(0.25)
-                        elapsed += 0.25
+            if type(jobId) == "string" and jobId ~= "" then
+                while os.clock() < deadline do
+                    local accepted, result = Lock.Try(placeId, jobId, SH.RejoinTimeout)
+                    if accepted then
+                        -- Отказа нет, но мы всё ещё здесь: телепорт завис. Следующая
+                        -- попытка — только после паузы, не поверх летящего
+                        task.wait(SH.RejoinRetry)
+                    elseif result == "GameEnded" or result == "GameNotFound" or result == "Unauthorized" then
+                        break
+                    else
+                        task.wait(result == "Flooded" and SH.RejoinRetry * 2 or SH.RejoinRetry)
                     end
                 end
             end
 
-            -- Фолбэк: либо инстанс-перезаход не запускался, либо он явно отказал.
-            if (not instanceTried) or failed then
-                pcall(function()
-                    TeleportService:Teleport(game.PlaceId, LocalPlayer)
-                end)
-                task.wait(CONFIG.ServerHop.TeleportTimeout)
-            end
-
-            if conn then pcall(function() conn:Disconnect() end) end
+            Lock.Try(placeId, nil, SH.TeleportTimeout)
             State.Runtime.RejoinInProgress = false
+            Lock.Release("Rejoin")
         end)
     end
 
@@ -7204,7 +7277,8 @@
     -- SERVER HOP v3
     -- ══════════════════════════════════════════════════════════════════════════════
     local function ServerHop()
-        if State.Runtime.ServerHopInProgress then
+        local Lock = State.Runtime.TeleportLock
+        if State.Runtime.ServerHopInProgress or not Lock.Acquire("ServerHop") then
             if State.Settings.NotificationsEnabled then
                 ShowNotification(
                     "<font color=\"rgb(255, 170, 50)\">ServerHop: </font><font color=\"rgb(220,220,220)\">Already searching...</font>",
@@ -7333,6 +7407,7 @@
             if type(servers) ~= "table" or #servers == 0 then
                 notify("rgb(255, 85, 85)", "Failed to fetch servers")
                 State.Runtime.ServerHopInProgress = false
+                Lock.Release("ServerHop")
                 return
             end
 
@@ -7343,10 +7418,18 @@
                 return score
             end
 
+            -- Сервера, где уже сидят наши аккаунты (Farm Sync), — не кандидаты: два
+            -- альта, уходящие с одного сервера, не должны встретиться на новом
+            local occupied = {}
+            if State.Runtime.FarmSync and State.Runtime.FarmSync.OccupiedJobs then
+                pcall(function() occupied = State.Runtime.FarmSync.OccupiedJobs() end)
+            end
+
             local function Collect(skipVisited, strict)
                 local out = {}
                 for _, srv in ipairs(servers) do
                     local pass = srv.id ~= game.JobId
+                        and not occupied[srv.id]
                         and srv.playing > 0
                         and srv.playing < srv.maxPlayers
 
@@ -7382,6 +7465,7 @@
             if #candidates == 0 then
                 notify("rgb(255, 85, 85)", "No suitable servers found")
                 State.Runtime.ServerHopInProgress = false
+                Lock.Release("ServerHop")
                 return
             end
 
@@ -7389,12 +7473,6 @@
 
             -- ── Телепорт ─────────────────────────────────────────────────────────
             local failed = false
-            local conn
-            pcall(function()
-                conn = Core.Connect(TeleportService.TeleportInitFailed, function(player)
-                    if player == LocalPlayer then failed = true end
-                end)
-            end)
 
             for attempt = 1, SH.TeleportRetry do
                 if #candidates == 0 then break end
@@ -7411,21 +7489,11 @@
                     target.playing, target.maxPlayers, target.score
                 ))
 
-                failed = false
-                local started = pcall(function()
-                    TeleportService:TeleportToPlaceInstance(game.PlaceId, target.id, LocalPlayer)
-                end)
-
-                if started then
-                    local elapsed = 0
-                    while elapsed < SH.TeleportTimeout and not failed do
-                        task.wait(0.25)
-                        elapsed += 0.25
-                    end
-                    -- Отказа не было: телепорт принят. Второй телепорт поверх первого
-                    -- — ровно та причина вылетов, из-за которой всё это переписывалось.
-                    if not failed then break end
-                end
+                -- Отказа не было: телепорт принят. Второй телепорт поверх первого
+                -- — ровно та причина вылетов, из-за которой всё это переписывалось.
+                local accepted = Lock.Try(game.PlaceId, target.id, SH.TeleportTimeout)
+                failed = not accepted
+                if accepted then break end
 
                 -- Явный отказ: сервер умер/полон. Список серверов протух — сбрасываем
                 -- кэш, чтобы следующий хоп сходил в API заново.
@@ -7433,12 +7501,11 @@
                 task.wait(1)
             end
 
-            if conn then pcall(function() conn:Disconnect() end) end
-
             if failed then
                 notify("rgb(255, 85, 85)", "Teleport failed, try again")
             end
             State.Runtime.ServerHopInProgress = false
+            Lock.Release("ServerHop")
         end)
     end
 
@@ -7662,12 +7729,17 @@
 
             State.Runtime.ReconnectThread = Core.Tasks.spawn(function()
                 local elapsed = 0
+                -- Разброс ±10%: альты, запущенные вместе, не реконнектятся одной минутой
+                local jitter = 0.9 + math.random() * 0.2
 
                 while State.Settings.AutoReconnectEnabled do
                     task.wait(1)
                     elapsed += 1
 
-                    if elapsed >= (State.Settings.ReconnectInterval or DEFAULT_INTERVAL) then
+                    -- На целевом сервере Farm Sync реконнект ждёт: реджоин отдаёт слот
+                    local sync = State.Runtime.FarmSync
+                    local holdsSlot = sync and sync.OnActiveTarget and sync.OnActiveTarget()
+                    if not holdsSlot and elapsed >= (State.Settings.ReconnectInterval or DEFAULT_INTERVAL) * jitter then
                         Rejoin()
                         return
                     end
@@ -7682,243 +7754,762 @@
         end
     end
     -- ══════════════════════════════════════════════════════════════════════════════
-    -- БЛОК 18.5: FARM SYNC — координация серверов между аккаунтами (один ПК)
+    -- БЛОК 18.5: FARM SYNC — координация аккаунтов на одном ПК
     -- ══════════════════════════════════════════════════════════════════════════════
-    -- Задача: в реальном времени знать, какой аккаунт на каком сервере сидит, и не
-    -- давать двум своим аккаунтам фармить на одном инстансе. Канал обмена — файлы в
-    -- папке executor'а VioCFG/Violite/FarmSync (все инстансы на одном ПК видят одну ФС).
+    -- Канал обмена — файлы в папке executor'а (все клиенты на ПК видят одну ФС).
+    -- Каждый файл пишет только его владелец, поэтому записи не затирают друг друга:
+    --   • FarmSync/<userId>.json — статус аккаунта (сервер, роль, статус, сумки).
+    --     Файл не удаляется: все такие файлы — белый список «наших» аккаунтов;
+    --   • farmsync_control.json — один на ПК: режим, Clear Strangers, целевой сервер,
+    --     «владелец ищет сервер» и список аккаунтов (roster). Пишется только по действию
+    --     пользователя: у каждого поля своя метка времени, при записи меняем лишь своё
+    --     поле — одно изменение не откатит другое. Аккаунты читают файл раз в Tick
+    --     и применяют поля новее уже применённых — тумблер действует сразу на всех.
     --
-    -- Модель без гонок записи: каждый аккаунт пишет ТОЛЬКО свой файл <userId>.json и
-    -- читает чужие. Если у executor'а нет listfiles — мягкая деградация на единый
-    -- файл farmsync.json (read-modify-write с прунингом протухших записей).
+    -- Режимы: Off — только статус; Avoid — один наш аккаунт на сервер (лишние уходят
+    -- в безопасный момент: сумка полна, лобби, смерть); Follow — все идут на целевой
+    -- сервер, без живой цели — как Avoid. Цель жива, пока владелец на ней, ищет новый
+    -- сервер сам (Server Hop руками) или отсутствует меньше OwnerGrace.
     --
-    -- Разрешение конфликта: если на моём game.JobId есть другой свежий аккаунт — из
-    -- всей группы уходит ровно один, «глобально худший» (пришёл на сервер позже;
-    -- тай-брейк — больший userId). Так за тик хопает строго один, без разбегания.
+    -- На одном сервере с нашими: действие, заканчивающее раунд (KillAll мурдерера,
+    -- его ресет), ждёт, пока все наши закончат сбор; своих не флингуем и не стреляем.
+    -- Clear Strangers (только на целевом сервере): мурдерер режет посторонних, шериф
+    -- в них стреляет (оба — параллельно со сбором), остальные флингуют по очереди.
 
     local FarmSync = {}
     State.Runtime.FarmSync = FarmSync
-    do
-        local FOLDERS   = {"VioCFG", "VioCFG/Violite"}   -- папка конфигов Violite
-        local SYNC_DIR  = "VioCFG/Violite/FarmSync"
-        local ONE_FILE  = "VioCFG/Violite/farmsync.json"   -- фолбэк без listfiles
-
-        local HEARTBEAT_INTERVAL = 4    -- как часто пишем свой статус (сек)
-        local STALE_TTL          = 15   -- запись старше — аккаунт считается ушедшим
-        local HOP_COOLDOWN        = 25  -- не хопать по синку чаще, чем раз в N сек
-
-        -- Фиче-детект executor-функций (набор отличается между исполнителями)
+    do (function()
+        local SC = CONFIG.FarmSync
+        local myId = LocalPlayer.UserId
+        local myKey = tostring(myId)
+        local myName = LocalPlayer.Name
+        local myFile = SC.Dir .. "/" .. myKey .. ".json"
         local hasList = type(listfiles) == "function"
-        local hasDel  = type(delfile) == "function"
 
-        local myUserId = LocalPlayer.UserId
-        local myName   = LocalPlayer.Name
-        local myFile   = SYNC_DIR .. "/" .. tostring(myUserId) .. ".json"
+        local S = {
+            Running = false,
+            Control = {},          -- последнее прочитанное содержимое control-файла
+            Applied = {},          -- [поле] = метка уже применённого значения
+            Records = {},          -- [userId] = статус другого аккаунта (и неактивные)
+            Since = os.time(),     -- когда пришли на текущий сервер (тай-брейк Avoid)
+            SinceJob = nil,
+            LastOnTarget = 0,      -- когда последний раз были на цели LastOnJob
+            LastOnJob = nil,
+            Teleporting = false,
+            JoinKey = nil,         -- цель, для которой посчитан JoinAt
+            JoinAt = 0,
+            LastHop = 0,
+            NextRoster = 0,
+            NextKill = 0,
+            FlingCooldown = {},
+            Threads = {},
+        }
 
-        -- Момент, когда мы впервые оказались на текущем сервере (для тай-брейка).
-        local currentJobId = nil
-        local sinceOnJob   = os.time()
-
-        -- Гарантируем наличие папок хранилища
-        pcall(function()
-            if type(makefolder) == "function" then
-                for _, dir in ipairs(FOLDERS) do
-                    if type(isfolder) ~= "function" or not isfolder(dir) then makefolder(dir) end
-                end
-                if hasList and (type(isfolder) ~= "function" or not isfolder(SYNC_DIR)) then
-                    makefolder(SYNC_DIR)
-                end
-            end
-        end)
-
-        local function encode(t)
-            local ok, s = pcall(function() return HttpService:JSONEncode(t) end)
-            return ok and s or nil
-        end
-
-        local function decode(s)
-            local ok, t = pcall(function() return HttpService:JSONDecode(s) end)
-            return ok and t or nil
-        end
-
-        -- Прочитать все записи из стора в виде массива {userId,name,placeId,jobId,since,heartbeat}
-        local function readAll()
-            local out = {}
-            if hasList then
-                local ok, files = pcall(listfiles, SYNC_DIR)
-                if ok and type(files) == "table" then
-                    for _, path in ipairs(files) do
-                        if type(path) == "string" and path:sub(-5) == ".json" then
-                            local okr, content = pcall(readfile, path)
-                            if okr and type(content) == "string" then
-                                local rec = decode(content)
-                                if type(rec) == "table" and rec.userId then
-                                    out[#out + 1] = rec
-                                end
-                            end
-                        end
-                    end
-                end
-            else
-                local okr, content = pcall(function()
-                    return (type(isfile) == "function" and isfile(ONE_FILE)) and readfile(ONE_FILE) or nil
-                end)
-                if okr and type(content) == "string" then
-                    local map = decode(content)
-                    if type(map) == "table" then
-                        for _, rec in pairs(map) do
-                            if type(rec) == "table" and rec.userId then
-                                out[#out + 1] = rec
-                            end
-                        end
-                    end
-                end
-            end
-            return out
-        end
-
-        -- Записать/обновить свою запись. В режиме listfiles — атомарно свой файл.
-        -- В фолбэке — read-modify-write общего файла с прунингом протухших.
-        local function writeRecord(rec)
-            local now = os.time()
-            if hasList then
-                local s = encode(rec)
-                if s then pcall(writefile, myFile, s) end
-            else
-                local map = {}
-                local okr, content = pcall(function()
-                    return (type(isfile) == "function" and isfile(ONE_FILE)) and readfile(ONE_FILE) or nil
-                end)
-                if okr and type(content) == "string" then map = decode(content) or {} end
-                if type(map) ~= "table" then map = {} end
-                for k, r in pairs(map) do
-                    if type(r) ~= "table" or (now - (r.heartbeat or 0)) > STALE_TTL then
-                        map[k] = nil
-                    end
-                end
-                map[tostring(rec.userId)] = rec
-                local s = encode(map)
-                if s then pcall(writefile, ONE_FILE, s) end
+        local function notify(text)
+            if State.Settings.NotificationsEnabled then
+                ShowNotification("Farm Sync: " .. text, CONFIG.Colors.Text)
             end
         end
 
-        -- Удалить свою запись (при выключении синка или перед уходом с сервера)
-        local function removeSelf()
-            pcall(function()
-                if hasList then
-                    if hasDel and type(isfile) == "function" and isfile(myFile) then
-                        delfile(myFile)
-                    end
+        local function nowMs()
+            local ok, value = pcall(function() return DateTime.now().UnixTimestampMillis end)
+            return ok and value or os.time() * 1000
+        end
+
+        -- nil — файла нет; false — не прочитался (другой клиент пишет его прямо сейчас)
+        local function readJSON(path)
+            local ok, content = pcall(function()
+                if type(isfile) == "function" and not isfile(path) then return nil end
+                return readfile(path)
+            end)
+            if not ok then return false end
+            if type(content) ~= "string" then return nil end
+            local okDecode, data = pcall(function() return HttpService:JSONDecode(content) end)
+            if okDecode and type(data) == "table" then return data end
+            return false
+        end
+
+        local function writeJSON(path, data)
+            local ok, text = pcall(function() return HttpService:JSONEncode(data) end)
+            if ok and text and type(writefile) == "function" then pcall(writefile, path, text) end
+        end
+
+        Files.EnsureFoldersFor(myFile)
+        Files.EnsureFoldersFor(SC.ControlFile)
+
+        local function field(name)
+            local entry = S.Control[name]
+            if type(entry) == "table" and entry.at then return entry.value, entry.at end
+            return nil, nil
+        end
+
+        local function readControl()
+            for _ = 1, 5 do
+                local data = readJSON(SC.ControlFile)
+                if data ~= false then return data end
+                task.wait(0.05)
+            end
+            return false
+        end
+
+        -- Запись своих полей поверх свежего файла. Файл не прочитался — берём последнюю
+        -- прочитанную копию, а не пустую таблицу: иначе затёрли бы чужие поля
+        local function writeFields(values)
+            local data = readControl()
+            if data == false then data = table.clone(S.Control) end
+            data = data or {}
+            local at = nowMs()
+            for name, value in pairs(values) do
+                if name == "roster" then
+                    data.roster = value
                 else
-                    local content = (type(isfile) == "function" and isfile(ONE_FILE)) and readfile(ONE_FILE) or nil
-                    if type(content) == "string" then
-                        local map = decode(content)
-                        if type(map) == "table" then
-                            map[tostring(myUserId)] = nil
-                            local s = encode(map)
-                            if s then writefile(ONE_FILE, s) end
-                        end
+                    data[name] = {value = value, at = at, by = myId}
+                    S.Applied[name] = at
+                end
+            end
+            writeJSON(SC.ControlFile, data)
+            S.Control = data
+        end
+
+        -- Поля новее применённых → в State.Settings; GUI подтягивает значения сам
+        local function applyControl(syncGui)
+            local changed = false
+            local mode, modeAt = field("mode")
+            if modeAt and modeAt > (S.Applied.mode or 0) then
+                S.Applied.mode = modeAt
+                if mode == "Off" or mode == "Avoid" or mode == "Follow" then
+                    changed = changed or State.Settings.FarmSyncMode ~= mode
+                    State.Settings.FarmSyncMode = mode
+                end
+            end
+            local clear, clearAt = field("clearStrangers")
+            if clearAt and clearAt > (S.Applied.clearStrangers or 0) then
+                S.Applied.clearStrangers = clearAt
+                changed = changed or State.Settings.FarmSyncClearStrangers ~= (clear == true)
+                State.Settings.FarmSyncClearStrangers = clear == true
+            end
+            if changed and syncGui and Core.SyncControls then pcall(Core.SyncControls) end
+        end
+
+        -- Свой аккаунт в roster: по нему читаем статусы без listfiles. Две записи в
+        -- одну секунду могут потерять одну — проверка раз в 10 с это чинит
+        local function ensureRoster(now)
+            if now < S.NextRoster then return end
+            S.NextRoster = now + 10
+            local roster = type(S.Control.roster) == "table" and S.Control.roster or {}
+            if roster[myKey] ~= myName then
+                local copy = table.clone(roster)
+                copy[myKey] = myName
+                writeFields({roster = copy})
+            end
+        end
+
+        local function readRecords()
+            local keys = {}
+            for key in pairs(type(S.Control.roster) == "table" and S.Control.roster or {}) do keys[key] = true end
+            for key in pairs(S.Records) do keys[key] = true end
+            if hasList then
+                pcall(function()
+                    for _, path in ipairs(listfiles(SC.Dir)) do
+                        local key = tostring(path):match("(%d+)%.json$")
+                        if key then keys[key] = true end
                     end
+                end)
+            end
+            for key in pairs(keys) do
+                if key ~= myKey then
+                    local rec = readJSON(SC.Dir .. "/" .. key .. ".json")
+                    -- false — файл пишется прямо сейчас: остаётся прошлая запись
+                    if type(rec) == "table" and rec.userId then S.Records[key] = rec end
+                end
+            end
+        end
+
+        local function fresh(rec, ttl)
+            return rec.active ~= false and os.time() - (tonumber(rec.heartbeat) or 0) <= (ttl or SC.StaleTTL)
+        end
+
+        local function holds(name)
+            local character = LocalPlayer.Character
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            return (character and character:FindFirstChild(name)) or (backpack and backpack:FindFirstChild(name))
+        end
+
+        local function myRole()
+            if not Farm.RoundActive() then return nil end
+            if Farm.IsZombie(LocalPlayer) then return "Zombie" end
+            if holds("Knife") then return "Murderer" end
+            if holds("Gun") then return "Sheriff" end
+            return "Innocent"
+        end
+
+        -- collecting — собирает; всё остальное для «конца раунда» считается законченным
+        local function myStatus()
+            if S.Teleporting then return "teleporting" end
+            if not State.Settings.AutoFarmEnabled then return "idle" end
+            if not Farm.RoundActive() then return "lobby" end
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            if not humanoid or humanoid.Health <= 0 or not Farm.IsParticipant() then return "dead" end
+            if Farm.Done then return "done" end
+            return "collecting"
+        end
+
+        local function bagsText()
+            local parts = {}
+            for name, bag in pairs(Farm.Bags) do
+                table.insert(parts, string.format("%s %d/%s", name, tonumber(bag.Collected) or 0, bag.Limit and tostring(bag.Limit) or "?"))
+            end
+            table.sort(parts)
+            return table.concat(parts, ", ")
+        end
+
+        -- Свой статус. since и время на цели переживают телепорт и перезапуск скрипта
+        do
+            local old = readJSON(myFile)
+            if type(old) == "table" then
+                if old.jobId == game.JobId and tonumber(old.since) then S.Since = tonumber(old.since) end
+                S.LastOnTarget = tonumber(old.lastOnTargetAt) or 0
+                S.LastOnJob = old.lastOnJob
+            end
+            S.SinceJob = game.JobId
+        end
+
+        local function writeSelf()
+            local jobId = game.JobId
+            if jobId ~= S.SinceJob then
+                S.SinceJob = jobId
+                S.Since = os.time()
+            end
+            local target = field("target")
+            if type(target) == "table" and target.jobId == jobId and not S.Teleporting then
+                S.LastOnTarget = os.time()
+                S.LastOnJob = jobId
+            end
+            writeJSON(myFile, {
+                userId = myId, name = myName, placeId = game.PlaceId,
+                jobId = S.Teleporting and "" or jobId,
+                since = S.Since, heartbeat = os.time(),
+                lastOnTargetAt = S.LastOnTarget, lastOnJob = S.LastOnJob,
+                role = myRole(), status = myStatus(), bags = bagsText(),
+                voting = State.Runtime.AutoVoteSuppressInvis == true,
+                active = S.Running,
+            })
+        end
+
+        -- ── Публичные проверки (их зовут фарм, ServerHop, реконнект, престиж) ──────
+        function FarmSync.IsOurs(player)
+            if not player then return false end
+            if player == LocalPlayer then return true end
+            local key = tostring(player.UserId)
+            local roster = S.Control.roster
+            return S.Records[key] ~= nil or (type(roster) == "table" and roster[key] ~= nil)
+        end
+
+        -- Цель и жива ли она: владелец на ней; или ищет новый сервер сам и его скрипт
+        -- жив; или отсутствует меньше OwnerGrace (вылет, реджоин)
+        function FarmSync.Target()
+            local target = field("target")
+            if type(target) ~= "table" or type(target.jobId) ~= "string" then return nil, false end
+            local now = os.time()
+            local ownerKey = tostring(target.ownerId)
+            local onIt, lastOn, beat = false, 0, 0
+            if ownerKey == myKey then
+                onIt = game.JobId == target.jobId and not S.Teleporting
+                lastOn = S.LastOnJob == target.jobId and S.LastOnTarget or 0
+                beat = now
+            else
+                local owner = S.Records[ownerKey]
+                if owner then
+                    onIt = fresh(owner) and owner.jobId == target.jobId
+                    lastOn = owner.lastOnJob == target.jobId and (tonumber(owner.lastOnTargetAt) or 0) or 0
+                    beat = owner.active ~= false and (tonumber(owner.heartbeat) or 0) or 0
+                end
+            end
+            if onIt then return target, true end
+            local since = math.max(lastOn, tonumber(target.setAt) or 0)
+            if field("ownerSearching") == true then since = math.max(since, beat) end
+            return target, now - since <= SC.OwnerGrace
+        end
+
+        function FarmSync.OnActiveTarget()
+            if State.Settings.FarmSyncMode ~= "Follow" then return false end
+            local target, alive = FarmSync.Target()
+            return alive and target.jobId == game.JobId and not S.Teleporting
+        end
+
+        -- Другие наши на этом сервере (свежий статус)
+        function FarmSync.CoopActive()
+            for _, rec in pairs(S.Records) do
+                if fresh(rec) and rec.jobId == game.JobId then return true end
+            end
+            return false
+        end
+
+        -- Все наши на сервере закончили: кто молчит дольше DoneTTL — не ждём
+        function FarmSync.AllOursDone()
+            local now = os.time()
+            for _, rec in pairs(S.Records) do
+                if fresh(rec) and rec.jobId == game.JobId and rec.status == "collecting"
+                    and now - (tonumber(rec.heartbeat) or 0) <= SC.DoneTTL then
+                    return false
+                end
+            end
+            return true
+        end
+
+        function FarmSync.OccupiedJobs()
+            local jobs = {}
+            for _, rec in pairs(S.Records) do
+                if fresh(rec) and type(rec.jobId) == "string" and rec.jobId ~= "" then jobs[rec.jobId] = true end
+            end
+            return jobs
+        end
+
+        -- ── Решения по серверу ─────────────────────────────────────────────────────
+        -- Уходить можно, когда собирать нечего: вне раунда, сумка полна, мы мертвы
+        local function safeMoment()
+            return not State.Settings.AutoFarmEnabled or not Farm.RoundActive() or Farm.Done or not Farm.IsParticipant()
+        end
+
+        local function myIndex()
+            local keys = {myKey}
+            for key in pairs(S.Records) do table.insert(keys, key) end
+            table.sort(keys, function(a, b) return tonumber(a) < tonumber(b) end)
+            for index, key in ipairs(keys) do
+                if key == myKey then return index - 1 end
+            end
+            return 0
+        end
+
+        -- Avoid: на сервере несколько наших — уходит ровно один, «худший» (пришёл
+        -- позже; тай-брейк — больший userId), и только в безопасный момент
+        local function avoidStep(now)
+            if now - S.LastHop < SC.HopCooldown then return end
+            local others, loseToAll = 0, true
+            for _, rec in pairs(S.Records) do
+                if fresh(rec) and rec.jobId == game.JobId and rec.placeId == game.PlaceId then
+                    others += 1
+                    local theirs = tonumber(rec.since) or 0
+                    local worse
+                    if S.Since ~= theirs then worse = S.Since > theirs else worse = myId > (tonumber(rec.userId) or 0) end
+                    if not worse then loseToAll = false end
+                end
+            end
+            if others == 0 or not loseToAll or not safeMoment() then return end
+            S.LastHop = now
+            notify("<font color=\"rgb(255,170,50)\">another account is here → hop</font>")
+            ServerHop()
+        end
+
+        local function joinStep(target, now)
+            local key = target.jobId .. ":" .. tostring(target.setAt)
+            if S.JoinKey ~= key then
+                S.JoinKey = key
+                S.JoinAt = now + myIndex() * SC.JoinStagger
+            end
+            if now < S.JoinAt or not safeMoment() then return end
+
+            local Lock = State.Runtime.TeleportLock
+            if not Lock.Acquire("FarmSync") then return end
+            S.Teleporting = true
+            pcall(writeSelf)
+            notify("<font color=\"rgb(85,255,120)\">joining target server</font>")
+            local accepted, result = Lock.Try(tonumber(target.placeId) or game.PlaceId, target.jobId, CONFIG.ServerHop.TeleportTimeout)
+            S.Teleporting = false
+            Lock.Release("FarmSync")
+            local after = os.time()
+
+            if accepted then
+                S.JoinAt = after + SC.JoinRetry   -- мы всё ещё здесь: телепорт завис
+            elseif result == "GameFull" then
+                S.JoinAt = after + SC.JoinRetryFull
+                notify("<font color=\"rgb(255,170,50)\">target is full, retry in " .. SC.JoinRetryFull .. "s</font>")
+            elseif result == "GameEnded" or result == "GameNotFound" or result == "Unauthorized" then
+                local current = field("target")
+                if type(current) == "table" and current.jobId == target.jobId then
+                    writeFields({target = false, ownerSearching = false})
+                    notify("<font color=\"rgb(255,85,85)\">target server is closed — cleared</font>")
+                end
+            else
+                S.JoinAt = after + SC.JoinRetry
+            end
+        end
+
+        local function syncTick()
+            local now = os.time()
+            local control = readControl()
+            if type(control) == "table" then
+                S.Control = control
+                applyControl(true)
+            end
+            ensureRoster(now)
+            readRecords()
+            writeSelf()
+
+            local mode = State.Settings.FarmSyncMode
+            if mode == "Off" then return end
+            local target, alive = FarmSync.Target()
+            if mode == "Follow" and alive then
+                if target.jobId == game.JobId then return end          -- на цели Avoid не работает
+                if tostring(target.ownerId) == myKey and field("ownerSearching") == true then return end
+                joinStep(target, now)
+                -- Цель полна или отказала: пока ждём повтора, на своём сервере — Avoid
+                if S.JoinAt - os.time() > 20 then avoidStep(now) end
+                return
+            end
+            avoidStep(now)
+        end
+
+        -- ── Конец раунда рядом с нашими (Classic, сумка полна) ─────────────────────
+        -- Ждём на левитации над картой. Мурдерер — наш: когда закончат все наши, он
+        -- режет всех (KillAll), без ножа — ресет. Мурдерер посторонний: выходим из
+        -- раунда ресетом, если только мы не держим ган для Clear Strangers
+        function FarmSync.CoopEndgame()
+            local function float()
+                local character = LocalPlayer.Character
+                local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                local spot = hrp and FindSafeAFKSpot()
+                if spot then
+                    hrp.CFrame = spot + Vector3.new(0, 5, 0)
+                    task.wait(0.3)
+                    FloatCharacter()
+                end
+            end
+
+            local murderer = getMurderForAutoFarm()
+            local iAmMurderer = murderer == LocalPlayer
+            local strangerMurderer = murderer ~= nil and not FarmSync.IsOurs(murderer)
+            local hunting = holds("Gun") and FarmSync.OnActiveTarget() and State.Settings.FarmSyncClearStrangers
+            if strangerMurderer and not hunting then
+                pcall(UnfloatCharacter)
+                ResetCharacter()
+                Farm.WaitRoundEnd()
+                return
+            end
+
+            float()
+            while Farm.RoundActive() and State.Settings.AutoFarmEnabled do
+                if Farm.FlingBusy() then
+                    Farm.WaitFlingIdle()   -- флинг посторонних (Clear Strangers)
+                    if not Farm.RoundActive() then break end
+                    float()
+                end
+                if iAmMurderer and FarmSync.AllOursDone() then
+                    pcall(function() InstantKillAll(true) end)
+                    task.wait(2)
+                    -- Ножа не было или кто-то выжил: наши закончили — ресет кончит раунд
+                    if Farm.RoundActive() and getMurderForAutoFarm() == LocalPlayer then
+                        pcall(UnfloatCharacter)
+                        ResetCharacter()
+                    end
+                    break
+                end
+                task.wait(0.5)
+            end
+            Farm.WaitRoundEnd()
+        end
+
+        -- ── Clear Strangers ────────────────────────────────────────────────────────
+        local function strangers()
+            local list = {}
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and not FarmSync.IsOurs(player) then
+                    local character = player.Character
+                    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                    if humanoid and humanoid.Health > 0 and character:FindFirstChild("HumanoidRootPart") then
+                        table.insert(list, player)
+                    end
+                end
+            end
+            table.sort(list, function(a, b) return a.UserId < b.UserId end)
+            return list
+        end
+
+        -- Копия выстрела шерифа (Magic: вылет рядом с целью — работает и из-под карты
+        -- в Underground Mode), но целью — выбранный посторонний, а не мурдерер
+        function FarmSync.ShootStranger(target)
+            local Aim = State.Runtime.SheriffAim
+            if not State.Settings.CanShootMurderer or os.clock() < Aim.NextShot then return false end
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local targetChar = target and target.Character
+            local targetHRP = targetChar and targetChar:FindFirstChild("HumanoidRootPart")
+            if not humanoid or humanoid.Health <= 0 or not targetHRP then return false end
+
+            local gun = character:FindFirstChild("Gun")
+            if not gun then
+                local backpack = LocalPlayer:FindFirstChild("Backpack")
+                local stored = backpack and backpack:FindFirstChild("Gun")
+                if not stored then return false end
+                humanoid:EquipTool(stored)
+                task.wait(0.03)
+                gun = character:FindFirstChild("Gun")
+                if not gun then return false end
+            end
+
+            local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+            local predicted = computeAimPoint(targetChar, targetHRP, targetHum, Aim.Ping() + CONFIG.SheriffAim.ServerLead)
+            local velocity = targetHRP.AssemblyLinearVelocity
+            local flat = Vector3.new(velocity.X, 0, velocity.Z)
+            local preferred = {}
+            if flat.Magnitude > 2 then
+                table.insert(preferred, flat)
+                table.insert(preferred, -flat)
+            end
+            table.insert(preferred, -targetHRP.CFrame.LookVector)
+            local origin = State.Runtime.FindClearOrigin(predicted, targetChar, preferred, 4)
+            return State.Runtime.FireSheriffShot(gun, origin, {aim = predicted, chance = 0}, false, "Magic", true)
+        end
+
+        local function killStrangers(list)
+            local handleTouched = GetKnifeHandleTouched()
+            if not handleTouched then return end
+            for _, player in ipairs(list) do
+                local character = player.Character
+                local part = character and (character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso"))
+                if part then
+                    pcall(function() handleTouched:FireServer(part) end)
+                    task.wait(0.05)
+                end
+            end
+        end
+
+        -- Флингует один наш аккаунт: из свободных (лобби, сумка полна, мёртв; не на
+        -- паде голосования) все считают одинаково — userId постороннего + номер окна
+        -- FlingSlot. Не вышло — в следующем окне попробует другой
+        local function freeStatus(status, voting)
+            return not voting and (status == "lobby" or status == "done" or status == "dead" or status == "idle")
+        end
+
+        local function flingStep(list)
+            if Farm.FlingBusy() or not freeStatus(myStatus(), State.Runtime.AutoVoteSuppressInvis == true) then return end
+            local flingers = {myId}
+            for _, rec in pairs(S.Records) do
+                if fresh(rec, SC.DoneTTL) and rec.jobId == game.JobId and freeStatus(rec.status, rec.voting == true) then
+                    table.insert(flingers, tonumber(rec.userId))
+                end
+            end
+            table.sort(flingers)
+            local slot = math.floor(os.time() / SC.FlingSlot)
+            for _, player in ipairs(list) do
+                if flingers[(player.UserId + slot) % #flingers + 1] == myId
+                    and os.clock() >= (S.FlingCooldown[player.UserId] or 0) then
+                    local root = player.Character:FindFirstChild("HumanoidRootPart")
+                    if root and root.AssemblyLinearVelocity.Magnitude < Fling.FlungSpeed then
+                        S.FlingCooldown[player.UserId] = os.clock() + SC.FlingCooldown
+                        pcall(FlingPlayer, player)
+                        return
+                    end
+                end
+            end
+        end
+
+        local function hostileStep()
+            if not State.Settings.FarmSyncClearStrangers or not FarmSync.OnActiveTarget() then return end
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            if not humanoid or humanoid.Health <= 0 then return end
+            local list = strangers()
+            if #list == 0 then return end
+
+            if Farm.RoundActive() and holds("Knife") then
+                if os.clock() >= S.NextKill then
+                    S.NextKill = os.clock() + SC.KillEvery
+                    killStrangers(list)
+                end
+            elseif Farm.RoundActive() and holds("Gun") then
+                -- Посторонний мурдерер — первым: убиваем сразу, он убивает наших
+                local murderer = getMurderForAutoFarm()
+                local target = list[1]
+                for _, player in ipairs(list) do
+                    if player == murderer then target = player; break end
+                end
+                FarmSync.ShootStranger(target)
+            else
+                flingStep(list)
+            end
+        end
+
+        -- ── Вкладка Sync ───────────────────────────────────────────────────────────
+        local ROLE_COLORS = {Murderer = "255,85,85", Zombie = "255,85,85", Sheriff = "50,150,255", Innocent = "85,255,120"}
+
+        local function line(rec, isMe, target, now)
+            local where
+            if not isMe and not fresh(rec) then
+                where = "<font color=\"rgb(150,150,150)\">offline</font>"
+            elseif rec.status == "teleporting" then
+                where = "<font color=\"rgb(255,170,50)\">teleporting</font>"
+            elseif target and rec.jobId == target.jobId then
+                where = "<font color=\"rgb(85,255,120)\">target</font>"
+            elseif rec.jobId == game.JobId then
+                where = "here"
+            else
+                where = "<font color=\"rgb(150,150,150)\">other</font>"
+            end
+            local role = rec.role and string.format(" · <font color=\"rgb(%s)\">%s</font>", ROLE_COLORS[rec.role] or "220,220,220", rec.role) or ""
+            local bags = (rec.bags and rec.bags ~= "") and (" · " .. rec.bags) or ""
+            return string.format("<b>%s</b>%s · %s%s · %s%s", rec.name or "?", isMe and " (me)" or "", where, role, rec.status or "?", bags)
+        end
+
+        function FarmSync.Lines()
+            local now = os.time()
+            local target, alive = FarmSync.Target()
+            local lines = {}
+            if target then
+                local state
+                if not alive then
+                    state = "<font color=\"rgb(255,85,85)\">expired</font>"
+                elseif field("ownerSearching") == true then
+                    state = "<font color=\"rgb(255,170,50)\">owner searching</font>"
+                else
+                    state = "<font color=\"rgb(85,255,120)\">active</font>"
+                end
+                table.insert(lines, string.format("Target: <b>%s</b> · %s… · %s", tostring(target.ownerName), target.jobId:sub(1, 8), state))
+            else
+                table.insert(lines, "Target: none")
+            end
+
+            local me = {name = myName, jobId = S.Teleporting and "" or game.JobId, role = myRole(), status = myStatus(), bags = bagsText()}
+            table.insert(lines, line(me, true, alive and target or nil, now))
+            local others = {}
+            for _, rec in pairs(S.Records) do
+                -- Давно молчащие аккаунты в белом списке остаются, но в таблице не нужны
+                if now - (tonumber(rec.heartbeat) or 0) < 3600 then table.insert(others, rec) end
+            end
+            table.sort(others, function(a, b) return tostring(a.name) < tostring(b.name) end)
+            for _, rec in ipairs(others) do table.insert(lines, line(rec, false, alive and target or nil, now)) end
+            return lines
+        end
+
+        function FarmSync.BuildTable(tab, getTokens)
+            local host = tab:CreateHost(nil)
+            Core.New("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4)}, host)
+            local labels = {}
+            local face = Notify.font(Enum.FontWeight.Medium)
+            local thread = Core.Tasks.spawn(function()
+                while Core.Alive and host.Parent do
+                    local tokens = getTokens and getTokens() or {}
+                    local lines = FarmSync.Lines()
+                    for index, text in ipairs(lines) do
+                        local label = labels[index]
+                        if not label then
+                            label = Core.New("TextLabel", {
+                                BackgroundTransparency = 1, RichText = true, TextWrapped = true,
+                                TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13,
+                                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                                LayoutOrder = index,
+                            }, host)
+                            if face then label.FontFace = face else label.Font = Enum.Font.GothamMedium end
+                            labels[index] = label
+                        end
+                        label.TextColor3 = tokens.Text or CONFIG.Colors.Text
+                        label.Text = text
+                        label.Visible = true
+                    end
+                    for index = #lines + 1, #labels do labels[index].Visible = false end
+                    task.wait(1)
                 end
             end)
+            table.insert(S.Threads, thread)
         end
 
-        -- true, если запись r должна «остаться» приоритетнее нас (т.е. мы хуже неё).
-        -- Хуже = пришли на сервер позже (больше since); тай-брейк — больший userId.
-        local function iAmWorseThan(r)
-            local rSince = r.since or 0
-            if sinceOnJob ~= rSince then
-                return sinceOnJob > rSince
-            end
-            return myUserId > (r.userId or 0)
+        -- ── Обработчики GUI ────────────────────────────────────────────────────────
+        -- Тумблеры пишут поле, только если значение и правда новое: начальный вызов
+        -- handler'а при создании тумблера ничего не пишет
+        function FarmSync.SetMode(mode)
+            if mode ~= "Off" and mode ~= "Avoid" and mode ~= "Follow" then return end
+            if mode == State.Settings.FarmSyncMode and field("mode") == mode then return end
+            State.Settings.FarmSyncMode = mode
+            writeFields({mode = mode})
+            notify("mode <b>" .. mode .. "</b> (all accounts)")
         end
 
-        -- Одна итерация: обновить свой статус, проверить коллизию, при нужде — хопнуть.
-        local function step()
-            local now   = os.time()
-            local jobId = game.JobId
+        function FarmSync.SetClearStrangers(on)
+            on = on == true
+            if on == State.Settings.FarmSyncClearStrangers and field("clearStrangers") == on then return end
+            State.Settings.FarmSyncClearStrangers = on
+            writeFields({clearStrangers = on})
+        end
 
-            -- Сменился сервер (после хопа/телепорта) — обновляем «время прихода»
-            if jobId ~= currentJobId then
-                currentJobId = jobId
-                sinceOnJob   = now
+        function FarmSync.SetTarget()
+            if game.PrivateServerId ~= "" or game.PrivateServerOwnerId ~= 0 then
+                ShowNotification("<font color=\"rgb(255,85,85)\">Error: </font><font color=\"rgb(220,220,220)\">private server can't be a target</font>", CONFIG.Colors.Text)
+                return
             end
-
-            writeRecord({
-                userId    = myUserId,
-                name      = myName,
-                placeId   = game.PlaceId,
-                jobId     = jobId,
-                since     = sinceOnJob,
-                heartbeat = now,
+            S.LastOnTarget, S.LastOnJob = os.time(), game.JobId
+            State.Settings.FarmSyncMode = "Follow"
+            writeFields({
+                target = {placeId = game.PlaceId, jobId = game.JobId, ownerId = myId, ownerName = myName, setAt = os.time()},
+                ownerSearching = false,
+                mode = "Follow",
             })
+            if Core.SyncControls then pcall(Core.SyncControls) end
+            ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">this server is the target</font>", CONFIG.Colors.Text)
+        end
 
-            -- Ищем свежие чужие аккаунты на моём сервере. Уходим только если мы
-            -- проигрываем ВСЕМ из группы — тогда за тик хопает ровно «худший».
-            local othersOnJob = 0
-            local loseToAll   = true
+        function FarmSync.ClearTarget()
+            writeFields({target = false, ownerSearching = false})
+            ShowNotification("Farm Sync: <font color=\"rgb(255,170,50)\">target cleared</font>", CONFIG.Colors.Text)
+        end
 
-            for _, r in ipairs(readAll()) do
-                if r.userId ~= myUserId
-                    and r.placeId == game.PlaceId
-                    and r.jobId == jobId
-                    and (now - (r.heartbeat or 0)) <= STALE_TTL then
-
-                    othersOnJob = othersOnJob + 1
-                    if not iAmWorseThan(r) then
-                        loseToAll = false
-                    end
-                end
+        function FarmSync.ReturnToTarget()
+            local target = field("target")
+            if type(target) ~= "table" then
+                ShowNotification("Farm Sync: no target", CONFIG.Colors.Text)
+                return
             end
+            writeFields({ownerSearching = false})
+            S.JoinAt = 0
+            ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">returning to target</font>", CONFIG.Colors.Text)
+        end
 
-            if othersOnJob > 0 and loseToAll then
-                if (now - (State.Runtime.FarmSyncLastHop or 0)) >= HOP_COOLDOWN then
-                    State.Runtime.FarmSyncLastHop = now
-                    if State.Settings.NotificationsEnabled then
-                        ShowNotification(
-                            "Farm Sync: <font color=\"rgb(255,170,50)\">сервер занят другим аккаунтом → hop</font>",
-                            CONFIG.Colors.Text
-                        )
-                    end
-                    removeSelf()      -- мы уходим — не мешаем остальным своей записью
-                    ServerHop()       -- асинхронный v3: сам ждёт вердикт телепорта
-                    return
-                end
+        -- Server Hop нажат руками: владелец живой цели ищет новый сервер — альты
+        -- остаются, а его самого назад не тянет (Return to Target / Set Target)
+        function FarmSync.OnManualHop()
+            local target, alive = FarmSync.Target()
+            if alive and tostring(target.ownerId) == myKey and field("ownerSearching") ~= true then
+                writeFields({ownerSearching = true})
             end
         end
 
         function FarmSync.Start()
-            if State.Runtime.FarmSyncThread then return end
-            State.Settings.FarmSyncEnabled = true
-            currentJobId = game.JobId
-            sinceOnJob   = os.time()
-
-            State.Runtime.FarmSyncThread = Core.Tasks.spawn(function()
-                while State.Settings.FarmSyncEnabled do
-                    pcall(step)
-                    -- Джиттер разносит записи инстансов по времени (меньше гонок в
-                    -- фолбэк-режиме единого файла).
-                    task.wait(HEARTBEAT_INTERVAL + math.random() * 2)
+            if S.Running then return end
+            S.Running = true
+            table.insert(S.Threads, Core.Tasks.spawn(function()
+                while S.Running do
+                    local ok, err = pcall(syncTick)
+                    if not ok then warn("[Farm Sync] " .. tostring(err)) end
+                    task.wait(SC.Tick)
                 end
-            end)
-
-            if State.Settings.NotificationsEnabled then
-                ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">ON</font>", CONFIG.Colors.Text)
-            end
+            end))
+            table.insert(S.Threads, Core.Tasks.spawn(function()
+                while S.Running do
+                    local ok, err = pcall(hostileStep)
+                    if not ok then warn("[Farm Sync] " .. tostring(err)) end
+                    task.wait(0.25)
+                end
+            end))
         end
 
+        -- Выгрузка: запись остаётся (белый список), но помечена неактивной
         function FarmSync.Stop()
-            State.Settings.FarmSyncEnabled = false
-            if State.Runtime.FarmSyncThread then
-                pcall(task.cancel, State.Runtime.FarmSyncThread)
-                State.Runtime.FarmSyncThread = nil
-            end
-            removeSelf()
-            if State.Settings.NotificationsEnabled then
-                ShowNotification("Farm Sync: <font color=\"rgb(255,85,85)\">OFF</font>", CONFIG.Colors.Text)
+            if not S.Running then return end
+            S.Running = false
+            for _, thread in ipairs(S.Threads) do Core.Tasks.cancel(thread) end
+            table.clear(S.Threads)
+            pcall(writeSelf)
+        end
+
+        -- Настройки с прошлого запуска — до создания GUI: тумблеры встанут как в файле
+        do
+            local control = readControl()
+            if type(control) == "table" then
+                S.Control = control
+                applyControl(false)
             end
         end
-    end
+    end)() end
 
     -- ══════════════════════════════════════════════════════════════════════════════
     -- БЛОК 18.6: AUTO VOTE SPAM — голосование за приоритетную карту
@@ -8089,6 +8680,9 @@
         local busy = false
         State.Runtime.CheckAndPrestige = function()
             if not State.Settings.AutoPrestigeEnabled or busy then return end
+            -- На целевом сервере Farm Sync престиж ждёт: его реджоин отдаёт слот
+            local sync = State.Runtime.FarmSync
+            if sync and sync.OnActiveTarget and sync.OnActiveTarget() then return end
             local remote = nil
             pcall(function()
                 remote = ReplicatedStorage.Remotes.Inventory:FindFirstChild("Prestige")
@@ -8366,11 +8960,18 @@
             -- Server
             Rejoin = Rejoin,
             ExecInf = ExecuteInf,
-            ServerHop = ServerHop,
-            FarmSync = function(on)
-                if not State.Runtime.FarmSync then return end
-                if on then State.Runtime.FarmSync.Start() else State.Runtime.FarmSync.Stop() end
+            -- Кнопка: владелец цели, ушедший руками, ищет новый сервер (альты остаются)
+            ServerHop = function()
+                pcall(FarmSync.OnManualHop)
+                ServerHop()
             end,
+
+            -- Farm Sync (вкладка Sync): изменения расходятся на все аккаунты ПК
+            FarmSyncMode = function(mode) FarmSync.SetMode(mode) end,
+            FarmSyncClearStrangers = function(on) FarmSync.SetClearStrangers(on) end,
+            FarmSyncSetTarget = function() FarmSync.SetTarget() end,
+            FarmSyncReturn = function() FarmSync.ReturnToTarget() end,
+            FarmSyncClear = function() FarmSync.ClearTarget() end,
             SpeedGlitchTool = SpeedGlitch,
             HandleAutoRejoin = HandleAutoRejoin,
             HandleAutoReconnect = HandleAutoReconnect,
@@ -8582,12 +9183,26 @@
     end
 
     do
+        local SyncTab = GUI.CreateTab("Sync")
+
+            SyncTab:CreateSection("FARM SYNC")
+            SyncTab:CreateSegmentedRow("Mode", "Avoid: one account per server; Follow: all go to the target", {"Off", "Avoid", "Follow"}, State.Settings.FarmSyncMode, "FarmSyncMode")
+            SyncTab:CreateToggle("Clear Strangers", "On the target: kill, shoot and fling non-own players", "FarmSyncClearStrangers", State.Settings.FarmSyncClearStrangers)
+            SyncTab:CreateSection("TARGET SERVER")
+            SyncTab:CreateButton("", "Set Current Server as Target", Color3.fromRGB(100, 200, 100), "FarmSyncSetTarget")
+            SyncTab:CreateButton("", "Return to Target", CONFIG.Colors.Accent, "FarmSyncReturn")
+            SyncTab:CreateButton("", "Clear Target", Color3.fromRGB(255, 85, 85), "FarmSyncClear")
+
+            SyncTab:CreateSection("ACCOUNTS", "right")
+            FarmSync.BuildTable(SyncTab, GUI.GetThemeTokens)
+    end
+
+    do
         local UtilityTab = GUI.CreateTab("Server")
 
             UtilityTab:CreateSection("SERVER MANAGEMENT")
             UtilityTab:CreateButton("", "Rejoin Server", CONFIG.Colors.Accent, "Rejoin")
             UtilityTab:CreateButton("", "Server Hop", Color3.fromRGB(100, 200, 100), "ServerHop")
-            UtilityTab:CreateToggle("Farm Sync", "Auto server-hop if another of your accounts is on the same server", "FarmSync", AUTO)
             UtilityTab:CreateToggle("Auto Rejoin on Disconnect", "Rejoin automatically if kicked or dropped", "HandleAutoRejoin", true)
             UtilityTab:CreateButton("", "Execute Infinite Yield", CONFIG.Colors.Accent, "ExecInf")
             if UtilityTab.CreateThemeDropdown then
@@ -8611,7 +9226,7 @@
                 HandleAutoRejoin = "AutoRejoinEnabled", HandleAutoReconnect = "AutoReconnectEnabled",
                 SmartCollect = "SmartCollectEnabled", AutoPrestige = "AutoPrestigeEnabled",
                 AutoBattlePass = "AutoBattlePassEnabled", BuyFinalReward = "BuyFinalRewardEnabled",
-                VoteSpammer = "VoteSpammerEnabled", FarmSync = "FarmSyncEnabled",
+                VoteSpammer = "VoteSpammerEnabled",
             }
             for flag, element in pairs(GUI.Flags) do
                 local key = aliases[flag] or flag
@@ -8662,6 +9277,9 @@
     SetupAntiAFK()
     Core.Tasks.spawn(State.Runtime.SetupRoundTracking)
     StartRoleChecking()
+    -- Farm Sync работает всегда: статус аккаунта — это и белый список для остальных.
+    -- Режим (Off/Avoid/Follow) — из общего файла настроек, без него — пресет
+    FarmSync.Start()
     -- Альт: после старта — все оптимизации, кроме No Render (рендер остаётся),
     -- затем меню прячется, как по клавише HideKey: всё уже включено пресетом.
     -- Тумблеры с default=true дёргают свои handler'ы через task.spawn — к этому
