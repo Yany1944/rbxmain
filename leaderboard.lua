@@ -333,6 +333,12 @@
                 RejoinTimeout    = 20,       -- сек ожидания вердикта одной попытки
                 RejoinRetry      = 5,        -- сек паузы между попытками
             },
+            -- Хук __namecall у Anti Trap: ставится, когда игра догрузила персонажа
+            -- (ранний хук ломал загрузку после телепорта — см. hookReplicate)
+            AntiTrapHook = {
+                LoadTimeout = 60,   -- сек ждём персонажа, потом ставим всё равно
+                SettleDelay = 5,    -- сек после появления персонажа: экран загрузки дорабатывает
+            },
             -- Farm Sync: аккаунты на одном ПК, обмен через файлы (см. БЛОК 18.5)
             FarmSync = {
                 Dir           = "VioCFG/Violite/FarmSync",               -- <userId>.json — статус аккаунта
@@ -2370,30 +2376,53 @@
     -- обработчик в том же кадре снимает замедление и окно, а TrapReplicate режет хук
     -- __namecall — убийца сигнала не получает. Без hookmetamethod — только снятие замедления
     do
-        local anti = {Handler = nil, Watch = nil, Hooked = false, Replicate = nil}
+        local anti = {Handler = nil, Watch = nil, Hooked = false, Pending = false, Replicate = nil}
 
         local function trapSystem()
             return ReplicatedStorage:FindFirstChild("TrapSystem")
         end
 
         -- Хук ставится один раз и снять его нельзя без риска сорвать чужие хуки поверх
-        -- (как в skinchanger), поэтому при выключенной фиче и после выгрузки он прозрачен
+        -- (как в skinchanger), поэтому при выключенной фиче и после выгрузки он прозрачен.
+        -- Ставим его только после загрузки персонажа: через хук идёт КАЖДЫЙ вызов
+        -- метода в игре, и на части executor'ов вызов, ушедший в ожидание внутри
+        -- newcclosure (WaitForChild, InvokeServer), возвращает сам объект вместо
+        -- результата. При автозагрузке после телепорта хук вставал раньше, чем игра
+        -- догружалась: SwimController получал модель персонажа вместо корня
+        -- («Position is not a valid member of Model», каждый кадр), экран загрузки
+        -- падал в JoinFriend («attempt to get length of a Instance value») и висел
+        -- на «loading character». Ручной запуск после загрузки этого не задевал
+        local function characterLoaded()
+            local character = LocalPlayer.Character
+            return character ~= nil and character:FindFirstChildOfClass("Humanoid") ~= nil
+                and character:FindFirstChild("HumanoidRootPart") ~= nil
+        end
+
         local function hookReplicate(system)
             anti.Replicate = system:FindFirstChild("TrapReplicate")
-            if anti.Hooked then return end
+            if anti.Hooked or anti.Pending then return end
             if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then return end
-            local wrap = type(newcclosure) == "function" and newcclosure or function(fn) return fn end
-            local ok = pcall(function()
-                local old
-                old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
-                    if self == anti.Replicate and anti.Replicate ~= nil and Core.Alive
-                        and State.Settings.AntiTrapEnabled and getnamecallmethod() == "FireServer" then
-                        return
-                    end
-                    return old(self, ...)
-                end))
+            anti.Pending = true
+            Core.Tasks.spawn(function()
+                local deadline = os.clock() + CONFIG.AntiTrapHook.LoadTimeout
+                while not characterLoaded() and os.clock() < deadline do task.wait(0.5) end
+                task.wait(CONFIG.AntiTrapHook.SettleDelay)
+                anti.Pending = false
+                -- Выключили, пока ждали: хук поставит следующее включение
+                if anti.Hooked or not Core.Alive or not State.Settings.AntiTrapEnabled then return end
+                local wrap = type(newcclosure) == "function" and newcclosure or function(fn) return fn end
+                local ok = pcall(function()
+                    local old
+                    old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+                        if self == anti.Replicate and anti.Replicate ~= nil and Core.Alive
+                            and State.Settings.AntiTrapEnabled and getnamecallmethod() == "FireServer" then
+                            return
+                        end
+                        return old(self, ...)
+                    end))
+                end)
+                anti.Hooked = ok
             end)
-            anti.Hooked = ok
         end
 
         -- Игровой обработчик уже замедлил — возвращаем как было
