@@ -9348,7 +9348,7 @@
             CombatTab:CreateToggle("Instant Pickup Gun", "Auto pickup gun when dropped", "InstantPickup", AUTO)
 
             CombatTab:CreateSection("PROTECTION", "right")
-            CombatTab:CreateToggle("Anti Trap", "Traps don't slow you or alert murderer", "AntiTrap", AUTO)
+            CombatTab:CreateToggle("Anti Trap", "Traps don't slow you or alert murderer", "AntiTrap", false)
     end
 
     do
