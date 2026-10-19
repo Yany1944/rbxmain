@@ -354,6 +354,15 @@
                 FlingSlot     = 10,    -- сек: смена аккаунта, который флингует постороннего
                 FlingCooldown = 10,    -- сек между флингами одного постороннего
                 KillEvery     = 2,     -- сек между ударами мурдерера по посторонним
+                -- Coin Split: монеты делятся между нашими аккаунтами на одном сервере
+                CoinSplit = {
+                    Enabled   = true,
+                    Margin    = 10,    -- studs: монета «своя», если мы не дальше других на столько
+                    SameCoin  = 1.5,   -- studs: заявка на эту же монету
+                    ClaimTTL  = 4,     -- сек без обновления — заявка аккаунта не действует
+                    Refresh   = 1,     -- сек между обновлениями своей заявки в полёте
+                    PeerCache = 0.3,   -- сек: кэш прочитанных заявок
+                },
             },
             -- Плавный зум при ViewClip: в режиме Invisicam PlayerModule не гоняет пружину
             -- ZoomController (она вызывается только из Poppercam) — повторяем её поверх камеры
@@ -4613,11 +4622,102 @@
     -- Раунд закончился: сумки и чёрный список больше не актуальны, с левитации — в лобби
     function Farm.OnRoundEnd()
         Farm.Done = false
+        Farm.Unclaim()
         Farm.ResetBags()
         Farm.ReturnToLobby()
         CleanupCoinBlacklist()
     end
 
+    -- ─── Coin Split: монеты между нашими аккаунтами на одном сервере ────────────
+    -- Каждый наш аккаунт, который собирает, публикует через Farm Sync заявку:
+    -- монету, к которой летит, и время заявки. Выбор монеты:
+    --   • монета, на которую заявился другой наш, — не наша;
+    --   • «своя» монета — до которой мы не дальше, чем любой другой наш аккаунт от
+    --     СВОЕЙ цели (там он будет через секунду-две), плюс Margin. Карта сама
+    --     делится на зоны вокруг аккаунтов, и никто не летит через полкарты за
+    --     монетой, которую по пути заберёт другой;
+    --   • своих нет — пограничная: где проигрыш ближайшему нашему минимален, а не
+    --     простой. Все монеты под чужими заявками — ждём, это не «монеты кончились»;
+    --   • аккаунт с полной сумкой этого типа монеты в дележе не участвует.
+    -- Две заявки на одну монету в один миг: остаётся более ранняя (тай-брейк —
+    -- меньший userId), второй аккаунт сворачивает в полёте.
+    function Farm.SplitPeers()
+        local sync = State.Runtime.FarmSync
+        if not CONFIG.FarmSync.CoinSplit.Enabled or not sync or not sync.CoinPeers then return nil end
+        local peers = sync.CoinPeers()
+        return #peers > 0 and peers or nil
+    end
+
+    -- claimant — другой наш, заявившийся на монету; otherBest — расстояние до неё
+    -- от ближайшего другого нашего (от его цели, без цели — от него самого)
+    function Farm.PeerView(peers, coin)
+        local cfg = CONFIG.FarmSync.CoinSplit
+        local position = coin.Position
+        local bag = coin:GetAttribute("CoinID")
+        local claimant, otherBest = nil, math.huge
+        for _, peer in ipairs(peers) do
+            if not (type(bag) == "string" and peer.Full[bag]) then
+                if peer.Target and (peer.Target - position).Magnitude <= cfg.SameCoin
+                    and (not claimant or peer.At < claimant.At) then
+                    claimant = peer
+                end
+                local distance = ((peer.Target or peer.Position) - position).Magnitude
+                if distance < otherBest then otherBest = distance end
+            end
+        end
+        return claimant, otherBest
+    end
+
+    -- Монету в полёте перехватил другой наш с более ранней заявкой
+    function Farm.CoinTaken(coin)
+        local peers = Farm.SplitPeers()
+        if not peers then return false end
+        local claimant = Farm.PeerView(peers, coin)
+        if not claimant then return false end
+        local mine = State.Runtime.FarmSync.MyClaimAt()
+        return not mine or claimant.At < mine or (claimant.At == mine and claimant.UserId < LocalPlayer.UserId)
+    end
+
+    function Farm.FullBags()
+        local full = {}
+        for name, bag in pairs(Farm.Bags) do
+            if bag.Limit and bag.Collected >= bag.Limit then table.insert(full, name) end
+        end
+        return full
+    end
+
+    function Farm.Claim(coin, hrp)
+        local sync = State.Runtime.FarmSync
+        if CONFIG.FarmSync.CoinSplit.Enabled and sync and sync.ClaimCoin and coin and hrp then
+            pcall(sync.ClaimCoin, coin.Position, hrp.Position, Farm.FullBags())
+        end
+    end
+
+    function Farm.Unclaim()
+        local sync = State.Runtime.FarmSync
+        if sync and sync.ClearClaim then pcall(sync.ClearClaim) end
+    end
+
+    function Farm.CoinValid(coin)
+        return coin:IsA("BasePart")
+            and coin.Name == "Coin_Server"
+            and coin:FindFirstChildWhichIsA("TouchTransmitter") ~= nil
+            and not State.Cache.CoinBlacklist[coin]
+            and Farm.IsCoinWanted(coin)
+            and coin:FindFirstChild("CoinVisual") ~= nil
+    end
+
+    function Farm.CoinRoot()
+        local coinContainer = nil
+        pcall(function()
+            local map = getMap()
+            if map then coinContainer = map:FindFirstChild("CoinContainer") end
+        end)
+        return coinContainer or Workspace
+    end
+
+    -- Возвращает монету и расстояние; третье значение true — монеты есть, но все
+    -- под заявками других наших (ждать, а не считать сумку собранной)
     local function FindNearestCoin()
         local character = LocalPlayer.Character
         if not character then return nil end
@@ -4625,41 +4725,44 @@
         local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
         if not humanoidRootPart then return nil end
 
-        local closestCoin = nil
-        local closestDistance = math.huge
         local hrpPosition = humanoidRootPart.Position
+        local peers = Farm.SplitPeers()
+        local margin = CONFIG.FarmSync.CoinSplit.Margin
+        local closestCoin, closestDistance = nil, math.huge
+        local borderCoin, borderDistance, borderLoss = nil, math.huge, math.huge
+        local blocked = false
 
-        local coinContainer = nil
-        pcall(function()
-            local map = getMap()
-            if map then
-                coinContainer = map:FindFirstChild("CoinContainer")
-            end
-        end)
-
-        local searchRoot = coinContainer or Workspace
-
-        for _, coin in ipairs(searchRoot:GetDescendants()) do
-            if coin:IsA("BasePart")
-            and coin.Name == "Coin_Server"
-            and coin:FindFirstChildWhichIsA("TouchTransmitter")
-            and not State.Cache.CoinBlacklist[coin]
-            and Farm.IsCoinWanted(coin) then
-
-                if coin:FindFirstChild("CoinVisual") then
-                    local distance = (coin.Position - hrpPosition).Magnitude
+        for _, coin in ipairs(Farm.CoinRoot():GetDescendants()) do
+            if Farm.CoinValid(coin) then
+                local distance = (coin.Position - hrpPosition).Magnitude
+                if not peers then
                     if distance < closestDistance then
                         closestDistance = distance
                         closestCoin = coin
+                    end
+                else
+                    local claimant, otherBest = Farm.PeerView(peers, coin)
+                    if claimant then
+                        blocked = true
+                    elseif distance <= otherBest + margin then
+                        if distance < closestDistance then
+                            closestDistance = distance
+                            closestCoin = coin
+                        end
+                    elseif distance - otherBest < borderLoss then
+                        borderLoss = distance - otherBest
+                        borderCoin, borderDistance = coin, distance
                     end
                 end
             end
         end
 
-        return closestCoin, closestDistance
+        if closestCoin then return closestCoin, closestDistance end
+        if borderCoin then return borderCoin, borderDistance end
+        return nil, math.huge, blocked
     end
 
-    -- Быстрая проверка на более близкую монету
+    -- Быстрая проверка на более близкую монету (с Coin Split — только среди своих)
     local function FindBetterCoin(currentCoin, currentDistance, threshold)
         threshold = threshold or 10 -- Минимальная разница в studs для смены цели
 
@@ -4670,28 +4773,16 @@
         if not humanoidRootPart then return nil end
 
         local hrpPosition = humanoidRootPart.Position
+        local peers = Farm.SplitPeers()
+        local margin = CONFIG.FarmSync.CoinSplit.Margin
 
-        local coinContainer = nil
-        pcall(function()
-            local map = getMap()
-            if map then
-                coinContainer = map:FindFirstChild("CoinContainer")
-            end
-        end)
-
-        local searchRoot = coinContainer or Workspace
-
-        for _, coin in ipairs(searchRoot:GetDescendants()) do
-            if coin ~= currentCoin
-            and coin:IsA("BasePart")
-            and coin.Name == "Coin_Server"
-            and coin:FindFirstChildWhichIsA("TouchTransmitter")
-            and not State.Cache.CoinBlacklist[coin]
-            and Farm.IsCoinWanted(coin) then
-
-                if coin:FindFirstChild("CoinVisual") then
-                    local distance = (coin.Position - hrpPosition).Magnitude
-                    if distance < (currentDistance - threshold) then
+        for _, coin in ipairs(Farm.CoinRoot():GetDescendants()) do
+            if coin ~= currentCoin and Farm.CoinValid(coin) then
+                local distance = (coin.Position - hrpPosition).Magnitude
+                if distance < (currentDistance - threshold) then
+                    if not peers then return coin, distance end
+                    local claimant, otherBest = Farm.PeerView(peers, coin)
+                    if not claimant and distance <= otherBest + margin then
                         return coin, distance
                     end
                 end
@@ -4769,6 +4860,15 @@
             if currentTime - lastCheckTime >= checkInterval then
                 lastCheckTime = currentTime
 
+                -- Coin Split: монету перехватил другой наш — сворачиваем к своей
+                if Farm.CoinTaken(coin) then
+                    local nextCoin = FindNearestCoin()
+                    if nextCoin and nextCoin ~= coin then return "switch", nextCoin end
+                    return false, nil
+                end
+                local sync = State.Runtime.FarmSync
+                if sync and sync.TouchClaim then pcall(sync.TouchClaim, humanoidRootPart.Position) end
+
                 local currentDistance = (humanoidRootPart.Position - coin.Position).Magnitude
                 local betterCoin = FindBetterCoin(coin, currentDistance, 10)
                 if betterCoin then
@@ -4812,14 +4912,17 @@
 
     -- ─── Сбор одной монеты (первая — телепортом, дальше — полётом) ─────────────
     function Farm.CollectStep(ctx, character, humanoidRootPart)
-        local coin = FindNearestCoin()
+        local coin, _, blocked = FindNearestCoin()
         if not coin then
-            ctx.noCoins += 1
+            Farm.Unclaim()
+            -- Монеты есть, но их забрали заявками другие наши: ждём новых, не «конец»
+            if blocked then ctx.noCoins = 0 else ctx.noCoins += 1 end
             if ctx.noCoins < ctx.maxNoCoins then task.wait(0.3) end
             return
         end
         ctx.noCoins = 0
 
+        Farm.Claim(coin, humanoidRootPart)
         CreateCoinTracer(character, coin)
 
         pcall(function()
@@ -4850,6 +4953,7 @@
                 while target and redirects < 5 do
                     local result, newTarget = SmoothFlyToCoin(target, humanoidRootPart, State.Settings.CoinFarmFlySpeed)
                     if result == "switch" and newTarget then
+                        Farm.Claim(newTarget, humanoidRootPart)
                         RemoveCoinTracer()
                         CreateCoinTracer(character, newTarget)
                         target = newTarget
@@ -4866,6 +4970,7 @@
 
     -- ─── Не участник раунда: флинг мурдерера вместо ожидания конца раунда ──────
     function Farm.SpectatorPhase()
+        Farm.Unclaim()
         pcall(DisableNoClip)
         pcall(UnfloatCharacter)
         if Farm.RoundMode() == "Classic" then
@@ -5089,6 +5194,7 @@
 
                 if ctx.noCoins >= ctx.maxNoCoins then
                     Farm.Done = true
+                    Farm.Unclaim()
                     pcall(DisableNoClip)
                     local mode = Farm.RoundMode()
                     local sync = State.Runtime.FarmSync
@@ -5125,6 +5231,7 @@
 
     local function StopAutoFarm()
         RemoveCoinTracer()
+        Farm.Unclaim()
         State.Settings.AutoFarmEnabled = false
 
         if State.Runtime.CoinFarmThread then
@@ -8093,6 +8200,91 @@
                 if fresh(rec) and type(rec.jobId) == "string" and rec.jobId ~= "" then jobs[rec.jobId] = true end
             end
             return jobs
+        end
+
+        -- ── Coin Split: заявки на монеты (см. «Coin Split» в блоке фарма) ─────────
+        -- Claims/<userId>.json: к какой монете летим (target), где мы (pos), какие
+        -- сумки полны. at — момент заявки (приоритет в споре за одну монету), seen —
+        -- последнее обновление (заявка живёт ClaimTTL после него). Время — общие
+        -- для ПК миллисекунды DateTime
+        local claimFile = SC.Dir .. "/Claims/" .. myKey .. ".json"
+        Files.EnsureFoldersFor(claimFile)
+        S.Claim = nil          -- своя заявка: {At, Seen, Target, Full}
+        S.ClaimCleared = false
+        S.PeerClaims = {}      -- [userId] = последняя прочитанная заявка
+        S.PeerCache, S.PeerCacheAt = nil, 0
+
+        local function packVector(v) return {v.X, v.Y, v.Z} end
+        local function unpackVector(t)
+            if type(t) ~= "table" then return nil end
+            local x, y, z = tonumber(t[1]), tonumber(t[2]), tonumber(t[3])
+            return (x and y and z) and Vector3.new(x, y, z) or nil
+        end
+
+        local function writeClaim(position)
+            local claim = S.Claim
+            writeJSON(claimFile, {
+                userId = myId, jobId = game.JobId, collecting = true,
+                at = claim.At, seen = claim.Seen,
+                target = packVector(claim.Target), pos = packVector(position), full = claim.Full,
+            })
+        end
+
+        function FarmSync.ClaimCoin(target, position, full)
+            local now = nowMs()
+            S.Claim = {At = now, Seen = now, Target = target, Full = full or {}}
+            S.ClaimCleared = false
+            writeClaim(position)
+        end
+
+        -- В полёте: заявка жива, пока её обновляют (момент заявки не меняется)
+        function FarmSync.TouchClaim(position)
+            local claim = S.Claim
+            if not claim then return end
+            local now = nowMs()
+            if now - claim.Seen < SC.CoinSplit.Refresh * 1000 then return end
+            claim.Seen = now
+            writeClaim(position)
+        end
+
+        function FarmSync.ClearClaim()
+            S.Claim = nil
+            if S.ClaimCleared then return end
+            S.ClaimCleared = true
+            writeJSON(claimFile, {userId = myId, jobId = game.JobId, collecting = false, seen = nowMs()})
+        end
+
+        function FarmSync.MyClaimAt()
+            return S.Claim and S.Claim.At or nil
+        end
+
+        -- Живые заявки наших на этом сервере. Файл читается посреди записи — берём
+        -- прошлую заявку этого аккаунта
+        function FarmSync.CoinPeers()
+            local clock = os.clock()
+            if S.PeerCache and clock - S.PeerCacheAt < SC.CoinSplit.PeerCache then return S.PeerCache end
+            local peers, now = {}, nowMs()
+            for key, rec in pairs(S.Records) do
+                if fresh(rec) and rec.jobId == game.JobId then
+                    local claim = readJSON(SC.Dir .. "/Claims/" .. key .. ".json")
+                    if claim == false then claim = S.PeerClaims[key] end
+                    if type(claim) == "table" then
+                        S.PeerClaims[key] = claim
+                        local position = unpackVector(claim.pos)
+                        if claim.collecting == true and claim.jobId == game.JobId and position
+                            and now - (tonumber(claim.seen) or 0) <= SC.CoinSplit.ClaimTTL * 1000 then
+                            local full = {}
+                            for _, name in ipairs(type(claim.full) == "table" and claim.full or {}) do full[tostring(name)] = true end
+                            table.insert(peers, {
+                                UserId = tonumber(claim.userId) or 0, At = tonumber(claim.at) or 0,
+                                Position = position, Target = unpackVector(claim.target), Full = full,
+                            })
+                        end
+                    end
+                end
+            end
+            S.PeerCache, S.PeerCacheAt = peers, clock
+            return peers
         end
 
         -- ── Решения по серверу ─────────────────────────────────────────────────────
