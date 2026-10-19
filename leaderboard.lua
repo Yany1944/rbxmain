@@ -7114,7 +7114,11 @@ end
 
 local respawning = {}
 
-local function respawn(plr)
+-- targetCFrame — куда поставить нового персонажа (Auto Vote: точка на паде);
+-- без него — туда, где стоял старый. Поворот всегда только по горизонтали:
+-- раньше копировался полный CFrame, и наклонённый/лежащий персонаж (или
+-- повёрнутая часть пада) возвращался лёжа и проваливался в пол
+local function respawn(plr, targetCFrame)
     local char = plr.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -7126,7 +7130,11 @@ local function respawn(plr)
     end
     respawning[plr.UserId] = true
 
-    local ogpos = hrp.CFrame
+    local source = targetCFrame or hrp.CFrame
+    local look = Vector3.new(source.LookVector.X, 0, source.LookVector.Z)
+    local ogpos = look.Magnitude > 1e-3
+        and CFrame.lookAt(source.Position, source.Position + look)
+        or CFrame.new(source.Position)
     local ogpos2 = workspace.CurrentCamera.CFrame
 
     -- Уникальный ID для этого респавна
@@ -7159,6 +7167,8 @@ local function respawn(plr)
             workspace.CurrentCamera.CFrame = ogpos2
 
             task.wait(0.05)
+            newHrp.AssemblyLinearVelocity = Vector3.zero
+            newHrp.AssemblyAngularVelocity = Vector3.zero
             newHrp.Anchored = false
         end
 
@@ -7953,6 +7963,34 @@ do
         return best
     end
 
+    -- Где стоять на паде. Часть Pad повёрнута на 90° по X (её «верх» смотрит
+    -- вбок) и без коллизии, а пол лобби — ниже её центра. Раньше персонажа ставили
+    -- в CFrame пада +3: он копировал поворот (лёжа) и проваливался в пол. Теперь
+    -- луч вниз до настоящего пола (без падов и персонажей) и стоячий CFrame на
+    -- высоте корня R15/R6: пол + HipHeight + половина корня
+    local floorParams = RaycastParams.new()
+    floorParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local function standCFrame(part, character)
+        local exclude = {part.Parent and part.Parent.Parent or part}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.Character then table.insert(exclude, player.Character) end
+        end
+        floorParams.FilterDescendantsInstances = exclude
+
+        local center = part.Position
+        local floorY = center.Y
+        local hit = Workspace:Raycast(center + Vector3.new(0, 10, 0), Vector3.new(0, -40, 0), floorParams)
+        if hit then floorY = hit.Position.Y end
+
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        local hip = humanoid and humanoid.HipHeight or 2
+        if humanoid and humanoid.RigType == Enum.HumanoidRigType.R6 then hip = 2 end
+        local rootHalf = root and root.Size.Y / 2 or 1
+        return CFrame.new(center.X, floorY + hip + rootHalf + 0.1, center.Z)
+    end
+
     -- Конец голосования (цель достигнута / пады погасли / выключили): инвиз — обратно
     local function releaseInvis()
         State.Runtime.AutoVoteSuppressInvis = false
@@ -8001,12 +8039,15 @@ do
             local hrp = character and character:FindFirstChild("HumanoidRootPart")
             if not hrp then task.wait(0.5); continue end
 
+            local stand = standCFrame(pad.Part, character)
             if not Vote.Teleported then
-                hrp.CFrame = pad.Part.CFrame + Vector3.new(0, 3, 0)
+                hrp.CFrame = stand
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
                 Vote.Teleported = true
                 task.wait(0.4)
             end
-            respawn(LocalPlayer)
+            respawn(LocalPlayer, stand)
             task.wait(0.4)
         end
         releaseInvis()
