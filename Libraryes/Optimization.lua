@@ -16,8 +16,11 @@ return function(env)
     local TweenService = game:GetService("TweenService")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local LocalPlayer = Players.LocalPlayer
+    -- Кап FPS Unlocker'а задаёт хост: MainScript — 9999 (по умолчанию), лидерборд —
+    -- низкий, чтобы пачка альтов на одном ПК не съедала CPU/GPU
+    local fpsCap = math.clamp(math.floor(tonumber(env.FPSCap) or 9999), 5, 9999)
     local CONFIG = {
-        FPSCap = 9999,
+        FPSCap = fpsCap,
         AntiGlare = {BrightnessScale = 0.2, Ambient = Color3.fromRGB(0, 0, 0)},
         AnimationInterval = 0.2,
         -- Монеты: тег визуала, который крутит игровой CoinVisualizer (UpdateCoins на
@@ -36,7 +39,7 @@ return function(env)
             {Key = "RemoveDeadBodies", Label = "Remove Dead Bodies", Hint = "Hide ragdolls of killed players"},
             {Key = "NoShadows", Label = "No Shadows", Hint = "Disable global and part shadows"},
             {Key = "RemoveReflections", Label = "Remove Reflections", Hint = "Disable part, environment and water reflections"},
-            {Key = "FPSUnlocker", Label = "FPS Unlocker", Hint = "Remove the framerate cap (9999)"},
+            {Key = "FPSUnlocker", Label = "FPS Unlocker", Hint = fpsCap >= 9999 and "Remove the framerate cap (9999)" or ("Set the framerate cap (" .. fpsCap .. ")")},
             {Key = "PlasticMaterials", Label = "Plastic Materials", Hint = "Use smooth plastic for world geometry"},
         },
     }
@@ -356,6 +359,17 @@ return function(env)
         end
         setControl(key, State.Enabled[key] == true)
         return State.Enabled[key] == enabled
+    end
+
+    -- Смена капа на лету: если FPS Unlocker уже включён — применяем сразу
+    function Module.SetFPSCap(cap)
+        cap = tonumber(cap)
+        if not cap then return false end
+        CONFIG.FPSCap = math.clamp(math.floor(cap), 5, 9999)
+        if State.Enabled.FPSUnlocker and type(setfpscap) == "function" then
+            return pcall(setfpscap, CONFIG.FPSCap)
+        end
+        return true
     end
 
     function Module.Boost()
