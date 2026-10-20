@@ -354,6 +354,8 @@
                 FlingSlot     = 10,    -- сек: смена аккаунта, который флингует постороннего
                 FlingCooldown = 10,    -- сек между флингами одного постороннего
                 KillEvery     = 2,     -- сек между ударами мурдерера по посторонним
+                -- Группы аккаунтов: у каждой своя цель (третья группа — ещё одна буква)
+                Groups        = {"A", "B"},
                 -- Coin Split: монеты делятся между нашими аккаунтами на одном сервере
                 CoinSplit = {
                     Enabled   = true,
@@ -362,6 +364,15 @@
                     ClaimTTL  = 4,     -- сек без обновления — заявка аккаунта не действует
                     Refresh   = 1,     -- сек между обновлениями своей заявки в полёте
                     PeerCache = 0.3,   -- сек: кэш прочитанных заявок
+                    Taken     = 1.5,   -- сек: собранная монета занята (сервер убирает её через пинг)
+                },
+                -- Teleport Collect: монету выбирают по очереди («револьвер», см. БЛОК 18.5)
+                Queue = {
+                    Window = 0.2,      -- сек: окно выбора одного аккаунта
+                    Guard  = 0.1,      -- сек: выбор только в начале окна — запись успеет до следующего
+                    Delay  = 2,        -- сек: вход в очередь и выход действуют через столько после метки
+                    TTL    = 4,        -- сек без обновления файла — аккаунта в очереди нет
+                    Stall  = 10,       -- сек сверх паузы без своего окна — выбираем без очереди
                 },
             },
             -- Плавный зум при ViewClip: в режиме Invisicam PlayerModule не гоняет пружину
@@ -626,6 +637,7 @@
             VoteGoal = 8,
             FarmSyncMode = CONFIG.AutoExec and "Avoid" or "Off", -- Off | Avoid | Follow (общий для всех аккаунтов ПК)
             FarmSyncClearStrangers = false,  -- на целевом сервере трогать посторонних
+            FarmSyncTeleportCollect = false, -- на целевом сервере монеты телепортом (общий для ПК)
             FPSCap = 60,
         },
         Cache = {
@@ -4640,18 +4652,24 @@
     --     монетой, которую по пути заберёт другой;
     --   • своих нет — пограничная: где проигрыш ближайшему нашему минимален, а не
     --     простой. Все монеты под чужими заявками — ждём на месте (Farm.Hold);
-    --   • аккаунт с полной сумкой этого типа монеты в дележе не участвует.
+    --   • аккаунт с полной сумкой этого типа монеты в дележе не участвует;
+    --   • монета, которую другой наш только что собрал, занята Taken секунд: сервер
+    --     убирает её через пинг, и без этого соседи летели к пустому месту.
     -- Две заявки на одну монету в один миг: остаётся более ранняя (тай-брейк —
     -- меньший userId), второй аккаунт сворачивает в полёте.
     function Farm.SplitPeers()
         local sync = State.Runtime.FarmSync
         if not CONFIG.FarmSync.CoinSplit.Enabled or not sync or not sync.CoinPeers then return nil end
         local peers = sync.CoinPeers()
-        return #peers > 0 and peers or nil
+        return (#peers > 0 or #peers.Taken > 0) and peers or nil
     end
 
-    -- claimant — другой наш, заявившийся на монету; otherBest — расстояние до неё
-    -- от ближайшего другого нашего (от его цели, без цели — от него самого)
+    -- Собранная монета для заявок: раньше любой живой заявки
+    Farm.TakenClaim = {At = 0, UserId = 0}
+
+    -- claimant — другой наш, заявившийся на монету (или собравший её); otherBest —
+    -- расстояние до неё от ближайшего другого нашего (от его цели, без цели — от
+    -- него самого)
     function Farm.PeerView(peers, coin)
         local cfg = CONFIG.FarmSync.CoinSplit
         local position = coin.Position
@@ -4666,6 +4684,9 @@
                 local distance = ((peer.Target or peer.Position) - position).Magnitude
                 if distance < otherBest then otherBest = distance end
             end
+        end
+        for _, taken in ipairs(peers.Taken) do
+            if (taken - position).Magnitude <= cfg.SameCoin then return Farm.TakenClaim, otherBest end
         end
         return claimant, otherBest
     end
@@ -4700,6 +4721,13 @@
         if sync and sync.ClearClaim then pcall(sync.ClearClaim) end
     end
 
+    -- Монета собрана: больше к ней не летим, и другие наши — тоже (Taken)
+    function Farm.CoinDone(coin)
+        AddCoinToBlacklist(coin)
+        local sync = State.Runtime.FarmSync
+        if CONFIG.FarmSync.CoinSplit.Enabled and sync and sync.MarkTaken then pcall(sync.MarkTaken, coin.Position) end
+    end
+
     function Farm.CoinValid(coin)
         return coin:IsA("BasePart")
             and coin.Name == "Coin_Server"
@@ -4720,7 +4748,26 @@
 
     -- Пауза в сборе без падения: во время сбора включён ноклип (а в Underground Mode
     -- мы и вовсе под картой), и персонаж без управления проваливается в пустоту и
-    -- умирает. Держим его на месте так же, как в полёте, — CFrame каждый кадр
+    -- умирает. Держим его на месте так же, как в полёте, — CFrame каждый кадр.
+    -- done() зовётся каждый кадр: true — пауза кончилась; hold — где держать
+    -- (по умолчанию — где стоим)
+    function Farm.HoldUntil(done, hold)
+        local character = LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp or not State.Settings.NoClipEnabled then
+            repeat task.wait() until done() or Farm.FlingBusy() or not State.Settings.AutoFarmEnabled
+            return
+        end
+        hold = hold or hrp.CFrame
+        repeat
+            if Farm.FlingBusy() or not State.Settings.AutoFarmEnabled or not hrp.Parent then break end
+            hrp.CFrame = hold
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            task.wait()
+        until done()
+    end
+
     function Farm.Hold(seconds)
         local character = LocalPlayer.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -4728,15 +4775,8 @@
             task.wait(seconds)
             return
         end
-        local hold = hrp.CFrame
         local deadline = os.clock() + seconds
-        repeat
-            if Farm.FlingBusy() or not State.Settings.AutoFarmEnabled or not hrp.Parent then break end
-            hrp.CFrame = hold
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-            task.wait()
-        until os.clock() >= deadline
+        Farm.HoldUntil(function() return os.clock() >= deadline end)
     end
 
     -- Возвращает монету и расстояние; nil — свободных монет нет
@@ -4931,8 +4971,141 @@
     local InstantKillAll
     local knifeThrow
 
+    -- ─── Teleport Collect: монеты телепортом на целевом сервере ─────────────────
+    -- Вместо полёта — телепорт к монете и касание, затем пауза длиной в перелёт до
+    -- неё (Fly Speed; со Smart Collect — не дольше 2-3 с); персонаж держится на
+    -- точке монеты. Первая монета раунда — как прежде, без паузы. Монету выбирают
+    -- по очереди (револьвер Farm Sync): в своё окно аккаунт видит заявки всех, кто
+    -- выбирал до него, и берёт ближайшую свободную, без зон. Следующую выбирает в
+    -- последнее своё окно паузы — очередь не замедляет сбор.
+    function Farm.TeleportMode()
+        local sync = State.Runtime.FarmSync
+        return sync ~= nil and sync.TeleportMode ~= nil and sync.TeleportMode()
+    end
+
+    -- Точка монеты — та же, что у полёта: под ней в Underground Mode, иначе над ней
+    function Farm.CoinPoint(coin)
+        if State.Settings.UndergroundMode then
+            return CFrame.new(coin.Position - Vector3.new(0, State.Settings.UndergroundOffset, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+        end
+        return CFrame.new(coin.Position + Vector3.new(0, 1, 0))
+    end
+
+    -- Ближайшая монета, которую не заняли и не собрали другие наши
+    function Farm.NearestFreeCoin(position)
+        local peers = Farm.SplitPeers()
+        local best, bestDistance = nil, math.huge
+        for _, coin in ipairs(Farm.CoinRoot():GetDescendants()) do
+            if Farm.CoinValid(coin) and not (peers and Farm.PeerView(peers, coin)) then
+                local distance = (coin.Position - position).Magnitude
+                if distance < bestDistance then best, bestDistance = coin, distance end
+            end
+        end
+        return best
+    end
+
+    -- Держим персонажа на hold до deadline (мс часов ПК) и выбираем монету в свою
+    -- очередь. Пауза кончилась, а своего окна не было — ждём его и сразу дальше.
+    -- nil — выбора нет: раунд кончился, сумки полны, режим выключен, нас убили,
+    -- флинг; без свободных монет ждём их на месте
+    function Farm.PauseAndPick(hrp, hold, deadline)
+        local sync = State.Runtime.FarmSync
+        local stallAt = deadline + CONFIG.FarmSync.Queue.Stall * 1000
+        local picked, stop, nextCheck, lastFrame = nil, false, 0, os.clock()
+        Farm.HoldUntil(function()
+            local clock = os.clock()
+            -- Клиент висел: это время в ожидание своего окна не входит (после фриза
+            -- место в очереди возвращается через Delay — это не тупик)
+            if clock - lastFrame > 1 then stallAt += (clock - lastFrame) * 1000 end
+            lastFrame = clock
+            if clock >= nextCheck then
+                nextCheck = clock + 0.25
+                local humanoid = hrp.Parent and hrp.Parent:FindFirstChildOfClass("Humanoid")
+                if not humanoid or humanoid.Health <= 0 or not Farm.RoundActive() or not Farm.IsParticipant()
+                    or Farm.AreAllBagsFull() or not Farm.TeleportMode() then
+                    stop = true
+                    return true
+                end
+            end
+            -- Монету, выбранную в паузе, забрали — выбираем в следующее своё окно
+            if picked and not Farm.CoinValid(picked) then picked = nil end
+            local now = sync.Now()
+            if not picked and sync.TakeTurn(deadline, now >= stallAt) then
+                picked = Farm.NearestFreeCoin(hold.Position)
+                if picked then
+                    Farm.Claim(picked, hrp)
+                    CreateCoinTracer(LocalPlayer.Character, picked)
+                else
+                    Farm.Unclaim()
+                end
+            end
+            sync.TouchClaim(hold.Position)
+            return picked ~= nil and now >= deadline
+        end, hold)
+        if stop then return nil end
+        return picked
+    end
+
+    -- Касание сразу после телепорта сервер может не засчитать: наша новая позиция
+    -- до него ещё не дошла. Монета осталась — касаемся ещё раз
+    function Farm.TeleportTouch(hrp, coin)
+        Farm.Touch(hrp, coin)
+        task.wait(0.2)
+        if coin.Parent and coin:FindFirstChildWhichIsA("TouchTransmitter") and hrp.Parent then
+            Farm.Touch(hrp, coin)
+        end
+    end
+
+    function Farm.TeleportStep(ctx, character, humanoidRootPart)
+        local sync = State.Runtime.FarmSync
+        -- Невидимость сдвигает персонажа под карту каждый кадр — держать его на
+        -- точке она не даёт; снимаем до первого выбора, как перед первой монетой
+        if State.Settings.AutoFarmEnabled and State.Settings.IsInvisible then
+            pcall(function() ToggleInvisibility() end)
+        end
+        EnableNoClip()
+        sync.QueueRefresh()
+
+        -- Монета, выбранная в прошлой паузе: её могли забрать посторонние, а при
+        -- лаге — и наш с более ранней заявкой. Тогда — ближайшее своё окно
+        local coin = ctx.nextCoin
+        ctx.nextCoin = nil
+        if coin and (not Farm.CoinValid(coin) or Farm.CoinTaken(coin)) then coin = nil end
+        if not coin then
+            coin = Farm.PauseAndPick(humanoidRootPart, humanoidRootPart.CFrame, sync.Now())
+            if not coin then return end
+        end
+
+        if Farm.FlingBusy() or not State.Settings.AutoFarmEnabled then return end
+        local point = Farm.CoinPoint(coin)
+        local from = humanoidRootPart.Position
+        humanoidRootPart.CFrame = point
+        humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+        humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+        ctx.lastTeleport = tick()
+        Core.Tasks.spawn(Farm.TeleportTouch, humanoidRootPart, coin)
+        RemoveCoinTracer()
+        -- Заявка больше не нужна: собранную монету держит Taken, а на её точке
+        -- может появиться новая
+        Farm.Unclaim()
+        Farm.CoinDone(coin)
+
+        local pause = 0.2
+        if ctx.allowFly then
+            pause = Farm.FlightDuration((point.Position - from).Magnitude, State.Settings.CoinFarmFlySpeed)
+        end
+        ctx.allowFly = true
+        ctx.nextCoin = Farm.PauseAndPick(humanoidRootPart, point, sync.Now() + pause * 1000)
+    end
+
     -- ─── Сбор одной монеты (первая — телепортом, дальше — полётом) ─────────────
     function Farm.CollectStep(ctx, character, humanoidRootPart)
+        if Farm.TeleportMode() then
+            Farm.TeleportStep(ctx, character, humanoidRootPart)
+            return
+        end
+        ctx.nextCoin = nil
+
         local coin = FindNearestCoin()
         if not coin then
             -- Свободных монет нет (карту выбрали, или все под заявками наших) — это не
@@ -4964,15 +5137,16 @@
                     Farm.Touch(humanoidRootPart, coin)
                     task.wait(0.2)
                     RemoveCoinTracer()
-                    AddCoinToBlacklist(coin)
+                    Farm.CoinDone(coin)
                     ctx.allowFly = true
                 end
             else
                 EnableNoClip()
                 local target = coin
                 local redirects = 0
+                local result, newTarget
                 while target and redirects < 5 do
-                    local result, newTarget = SmoothFlyToCoin(target, humanoidRootPart, State.Settings.CoinFarmFlySpeed)
+                    result, newTarget = SmoothFlyToCoin(target, humanoidRootPart, State.Settings.CoinFarmFlySpeed)
                     if result == "switch" and newTarget then
                         Farm.Claim(newTarget, humanoidRootPart)
                         RemoveCoinTracer()
@@ -4984,7 +5158,12 @@
                     end
                 end
                 RemoveCoinTracer()
-                if target then AddCoinToBlacklist(target) end
+                -- Долетели — монета собрана; полёт сорвался — просто не летим к ней снова
+                if target and result == true then
+                    Farm.CoinDone(target)
+                elseif target then
+                    AddCoinToBlacklist(target)
+                end
             end
         end)
     end
@@ -5166,6 +5345,7 @@
             local function resetRound()
                 State.Cache.CoinBlacklist = {}
                 ctx.allowFly = false
+                ctx.nextCoin = nil      -- Teleport Collect: монета, выбранная в паузе
                 Farm.Done = false
             end
 
@@ -7920,21 +8100,27 @@
     -- Каждый файл пишет только его владелец, поэтому записи не затирают друг друга:
     --   • FarmSync/<userId>.json — статус аккаунта (сервер, роль, статус, сумки).
     --     Файл не удаляется: все такие файлы — белый список «наших» аккаунтов;
-    --   • farmsync_control.json — один на ПК: режим, Clear Strangers, целевой сервер,
-    --     «владелец ищет сервер» и список аккаунтов (roster). Пишется только по действию
-    --     пользователя: у каждого поля своя метка времени, при записи меняем лишь своё
-    --     поле — одно изменение не откатит другое. Аккаунты читают файл раз в Tick
-    --     и применяют поля новее уже применённых — тумблер действует сразу на всех.
+    --   • farmsync_control.json — один на ПК: режим, Clear Strangers, Teleport Collect,
+    --     группы аккаунтов, цель и «владелец ищет сервер» каждой группы, список
+    --     аккаунтов (roster). Пишется только по действию пользователя: у каждого поля
+    --     своя метка времени, при записи меняем лишь своё поле — одно изменение не
+    --     откатит другое. Аккаунты читают файл раз в Tick и применяют поля новее уже
+    --     применённых — тумблер действует сразу на всех;
+    --   • FarmSync/Claims/<userId>.json — заявка на монету и место в очереди (Coin Split,
+    --     револьвер Teleport Collect).
     --
     -- Режимы: Off — только статус; Avoid — один наш аккаунт на сервер (лишние уходят
-    -- в безопасный момент: сумка полна, лобби, смерть); Follow — все идут на целевой
-    -- сервер, без живой цели — как Avoid. Цель жива, пока владелец на ней, ищет новый
-    -- сервер сам (Server Hop руками) или отсутствует меньше OwnerGrace.
+    -- в безопасный момент: сумка полна, лобби, смерть); Follow — каждая группа (A, B)
+    -- идёт на свой целевой сервер; без группы или без живой цели — как Avoid. Цель
+    -- жива, пока владелец (из её группы) на ней, ищет новый сервер сам (Server Hop
+    -- руками) или отсутствует меньше OwnerGrace. Чужую цель (другой группы) наш
+    -- аккаунт покидает всегда, в безопасный момент.
     --
-    -- На одном сервере с нашими: действие, заканчивающее раунд (KillAll мурдерера,
-    -- его ресет), ждёт, пока все наши закончат сбор; своих не флингуем и не стреляем.
-    -- Clear Strangers (только на целевом сервере): мурдерер режет посторонних, шериф
-    -- в них стреляет (оба — параллельно со сбором), остальные флингуют по очереди.
+    -- На одном сервере с нашими (любой группы): действие, заканчивающее раунд (KillAll
+    -- мурдерера, его ресет), ждёт, пока все наши закончат сбор; своих не флингуем и не
+    -- стреляем. Clear Strangers (только на цели своей группы): мурдерер режет
+    -- посторонних, шериф в них стреляет (оба — параллельно со сбором), остальные
+    -- флингуют по очереди.
 
     local FarmSync = {}
     State.Runtime.FarmSync = FarmSync
@@ -7950,6 +8136,7 @@
             Running = false,
             Control = {},          -- последнее прочитанное содержимое control-файла
             Applied = {},          -- [поле] = метка уже применённого значения
+            Pending = {},          -- [поле] = своя запись, ещё не подтверждённая чтением
             Records = {},          -- [userId] = статус другого аккаунта (и неактивные)
             Since = os.time(),     -- когда пришли на текущий сервер (тай-брейк Avoid)
             SinceJob = nil,
@@ -8012,9 +8199,16 @@
             return false
         end
 
+        -- Группа аккаунта (поле "group.<userId>"); nil — без группы
+        local function groupOf(key)
+            local group = field("group." .. tostring(key))
+            return table.find(SC.Groups, group) and group or nil
+        end
+        local function myGroup() return groupOf(myKey) end
+
         -- Запись своих полей поверх свежего файла. Файл не прочитался — берём последнюю
         -- прочитанную копию, а не пустую таблицу: иначе затёрли бы чужие поля
-        local function writeFields(values)
+        local function writeFields(values, tries)
             local data = readControl()
             if data == false then data = table.clone(S.Control) end
             data = data or {}
@@ -8025,10 +8219,30 @@
                 else
                     data[name] = {value = value, at = at, by = myId}
                     S.Applied[name] = at
+                    S.Pending[name] = {Value = value, At = at, Sent = os.clock(), Tries = tries or 0}
                 end
             end
             writeJSON(SC.ControlFile, data)
             S.Control = data
+        end
+
+        -- Файл пишут все клиенты ПК: другой мог прочитать его до нашей записи и
+        -- записать после — поле пропало (в файле метка старше нашей). Пишем заново
+        local function confirmWrites()
+            local lost, tries = {}, 0
+            for name, pending in pairs(S.Pending) do
+                local _, at = field(name)
+                if at and at >= pending.At then
+                    S.Pending[name] = nil
+                elseif os.clock() - pending.Sent >= 2 then
+                    S.Pending[name] = nil
+                    if pending.Tries < 3 then
+                        lost[name] = pending.Value
+                        tries = math.max(tries, pending.Tries + 1)
+                    end
+                end
+            end
+            if next(lost) then writeFields(lost, tries) end
         end
 
         -- Поля новее применённых → в State.Settings; GUI подтягивает значения сам
@@ -8047,6 +8261,12 @@
                 S.Applied.clearStrangers = clearAt
                 changed = changed or State.Settings.FarmSyncClearStrangers ~= (clear == true)
                 State.Settings.FarmSyncClearStrangers = clear == true
+            end
+            local teleport, teleportAt = field("teleportCollect")
+            if teleportAt and teleportAt > (S.Applied.teleportCollect or 0) then
+                S.Applied.teleportCollect = teleportAt
+                changed = changed or State.Settings.FarmSyncTeleportCollect ~= (teleport == true)
+                State.Settings.FarmSyncTeleportCollect = teleport == true
             end
             if changed and syncGui and Core.SyncControls then pcall(Core.SyncControls) end
         end
@@ -8141,7 +8361,8 @@
                 S.SinceJob = jobId
                 S.Since = os.time()
             end
-            local target = field("target")
+            local group = myGroup()
+            local target = group and field("target." .. group)
             if type(target) == "table" and target.jobId == jobId and not S.Teleporting then
                 S.LastOnTarget = os.time()
                 S.LastOnJob = jobId
@@ -8166,36 +8387,55 @@
             return S.Records[key] ~= nil or (type(roster) == "table" and roster[key] ~= nil)
         end
 
-        -- Цель и жива ли она: владелец на ней; или ищет новый сервер сам и его скрипт
-        -- жив; или отсутствует меньше OwnerGrace (вылет, реджоин)
-        function FarmSync.Target()
-            local target = field("target")
+        -- Цель группы (без group — своей) и жива ли она: владелец на ней; или ищет
+        -- новый сервер сам и его скрипт жив; или отсутствует меньше OwnerGrace (вылет,
+        -- реджоин). Владелец, переведённый в другую группу, для цели отсутствует
+        function FarmSync.Target(group)
+            group = group or myGroup()
+            if not group then return nil, false end
+            local target = field("target." .. group)
             if type(target) ~= "table" or type(target.jobId) ~= "string" then return nil, false end
             local now = os.time()
             local ownerKey = tostring(target.ownerId)
+            local inGroup = groupOf(ownerKey) == group
             local onIt, lastOn, beat = false, 0, 0
             if ownerKey == myKey then
-                onIt = game.JobId == target.jobId and not S.Teleporting
+                onIt = inGroup and game.JobId == target.jobId and not S.Teleporting
                 lastOn = S.LastOnJob == target.jobId and S.LastOnTarget or 0
-                beat = now
+                beat = inGroup and now or 0
             else
                 local owner = S.Records[ownerKey]
                 if owner then
-                    onIt = fresh(owner) and owner.jobId == target.jobId
+                    onIt = inGroup and fresh(owner) and owner.jobId == target.jobId
                     lastOn = owner.lastOnJob == target.jobId and (tonumber(owner.lastOnTargetAt) or 0) or 0
-                    beat = owner.active ~= false and (tonumber(owner.heartbeat) or 0) or 0
+                    beat = (inGroup and owner.active ~= false) and (tonumber(owner.heartbeat) or 0) or 0
                 end
             end
             if onIt then return target, true end
             local since = math.max(lastOn, tonumber(target.setAt) or 0)
-            if field("ownerSearching") == true then since = math.max(since, beat) end
+            if field("ownerSearching." .. group) == true then since = math.max(since, beat) end
             return target, now - since <= SC.OwnerGrace
+        end
+
+        -- Группа, чья живая цель — этот сервер (только в Follow: в Avoid целей нет)
+        local function targetGroupOf(jobId)
+            if State.Settings.FarmSyncMode ~= "Follow" then return nil end
+            for _, group in ipairs(SC.Groups) do
+                local target, alive = FarmSync.Target(group)
+                if alive and target.jobId == jobId then return group end
+            end
+            return nil
         end
 
         function FarmSync.OnActiveTarget()
             if State.Settings.FarmSyncMode ~= "Follow" then return false end
             local target, alive = FarmSync.Target()
             return alive and target.jobId == game.JobId and not S.Teleporting
+        end
+
+        -- Teleport Collect работает только на цели своей группы
+        function FarmSync.TeleportMode()
+            return State.Settings.FarmSyncTeleportCollect == true and FarmSync.OnActiveTarget()
         end
 
         -- Другие наши на этом сервере (свежий статус)
@@ -8218,25 +8458,40 @@
             return true
         end
 
+        -- Сервера с нашими и живые цели групп: хопу туда нельзя
         function FarmSync.OccupiedJobs()
             local jobs = {}
             for _, rec in pairs(S.Records) do
                 if fresh(rec) and type(rec.jobId) == "string" and rec.jobId ~= "" then jobs[rec.jobId] = true end
+            end
+            for _, group in ipairs(SC.Groups) do
+                local target, alive = FarmSync.Target(group)
+                if alive then jobs[target.jobId] = true end
             end
             return jobs
         end
 
         -- ── Coin Split: заявки на монеты (см. «Coin Split» в блоке фарма) ─────────
         -- Claims/<userId>.json: к какой монете летим (target), где мы (pos), какие
-        -- сумки полны. at — момент заявки (приоритет в споре за одну монету), seen —
-        -- последнее обновление (заявка живёт ClaimTTL после него). Время — общие
-        -- для ПК миллисекунды DateTime
+        -- сумки полны, какие монеты только что собрали (taken), место в очереди
+        -- Teleport Collect (queue, queueAt — момент его смены). at — момент заявки
+        -- (приоритет в споре за одну монету), seen — последнее обновление заявки
+        -- (живёт ClaimTTL после него), beat — последняя запись файла (очередь живёт
+        -- Queue.TTL после неё). Время — общие для ПК миллисекунды DateTime
+        local QC = SC.Queue
         local claimFile = SC.Dir .. "/Claims/" .. myKey .. ".json"
         Files.EnsureFoldersFor(claimFile)
         S.Claim = nil          -- своя заявка: {At, Seen, Target, Full}
         S.ClaimCleared = false
+        S.ClaimPos = nil       -- где были при последней заявке
+        S.Taken = {}           -- собранные монеты: {x, y, z, мс}
+        S.Queue = {On = false, At = 0}
+        S.Beat = 0             -- последняя запись файла
+        S.TurnUsed = nil       -- окно, в котором уже выбирали
         S.PeerClaims = {}      -- [userId] = последняя прочитанная заявка
-        S.PeerCache, S.PeerCacheAt = nil, 0
+        S.PeerReadAt = {}      -- [userId] = когда она прочитана (мс)
+        S.PeerFailSince = {}   -- [userId] = с какого момента файл не читается (мс)
+        S.View, S.ViewAt = nil, 0
 
         local function packVector(v) return {v.X, v.Y, v.Z} end
         local function unpackVector(t)
@@ -8246,11 +8501,22 @@
         end
 
         local function writeClaim(position)
-            local claim = S.Claim
+            if position then S.ClaimPos = position end
+            local claim, now, taken = S.Claim, nowMs(), {}
+            -- Файл молчал дольше TTL (фриз клиента) — остальные уже выкинули нас из
+            -- очереди по метке; возвращаемся как новый участник, через Delay
+            if S.Queue.On and now - S.Beat >= QC.TTL * 1000 then S.Queue.At = now end
+            S.Beat = now
+            for _, entry in ipairs(S.Taken) do
+                if now - entry[4] <= SC.CoinSplit.Taken * 1000 then table.insert(taken, entry) end
+            end
+            S.Taken = taken
             writeJSON(claimFile, {
-                userId = myId, jobId = game.JobId, collecting = true,
-                at = claim.At, seen = claim.Seen,
-                target = packVector(claim.Target), pos = packVector(position), full = claim.Full,
+                userId = myId, jobId = game.JobId, beat = now,
+                collecting = claim ~= nil, at = claim and claim.At, seen = claim and claim.Seen or now,
+                target = claim and packVector(claim.Target), full = claim and claim.Full,
+                pos = S.ClaimPos and packVector(S.ClaimPos), taken = taken,
+                queue = S.Queue.On, queueAt = S.Queue.At,
             })
         end
 
@@ -8275,40 +8541,176 @@
             S.Claim = nil
             if S.ClaimCleared then return end
             S.ClaimCleared = true
-            writeJSON(claimFile, {userId = myId, jobId = game.JobId, collecting = false, seen = nowMs()})
+            writeClaim()
+        end
+
+        -- Монета собрана: Taken секунд она занята и для других наших
+        function FarmSync.MarkTaken(position)
+            table.insert(S.Taken, {position.X, position.Y, position.Z, nowMs()})
+            writeClaim()
         end
 
         function FarmSync.MyClaimAt()
             return S.Claim and S.Claim.At or nil
         end
 
-        -- Живые заявки наших на этом сервере. Файл читается посреди записи — берём
-        -- прошлую заявку этого аккаунта
-        function FarmSync.CoinPeers()
+        FarmSync.Now = nowMs
+
+        -- Заявки наших на этом сервере: Peers — живые заявки (Peers.Taken — собранные
+        -- монеты), Queue — места в очереди. Файл читается посреди записи — берём
+        -- прошлую заявку этого аккаунта; её нет или она старше секунды — состав
+        -- очереди ненадёжен (Unsure), выбирать по нему нельзя. Файл, который не
+        -- читается дольше TTL (битая запись упавшего клиента), не держит очередь —
+        -- его аккаунт и сам не выбирает. Ушедший с сервера читается, пока его место
+        -- в очереди не истечёт по метке: иначе одни аккаунты уже выкинули бы его из
+        -- очереди, а другие ещё нет
+        local function readClaims(force)
             local clock = os.clock()
-            if S.PeerCache and clock - S.PeerCacheAt < SC.CoinSplit.PeerCache then return S.PeerCache end
-            local peers, now = {}, nowMs()
+            if S.View and not force and clock - S.ViewAt < SC.CoinSplit.PeerCache then return S.View end
+            local now, keys = nowMs(), {}
             for key, rec in pairs(S.Records) do
-                if fresh(rec) and rec.jobId == game.JobId then
-                    local claim = readJSON(SC.Dir .. "/Claims/" .. key .. ".json")
-                    if claim == false then claim = S.PeerClaims[key] end
-                    if type(claim) == "table" then
-                        S.PeerClaims[key] = claim
+                if fresh(rec) and rec.jobId == game.JobId then keys[key] = true end
+            end
+            for key, claim in pairs(S.PeerClaims) do
+                if claim.jobId == game.JobId and now - (tonumber(claim.beat) or 0) <= (QC.TTL + QC.Delay) * 1000 then
+                    keys[key] = true
+                end
+            end
+
+            local peers, taken, queue, unsure = {}, {}, {}, false
+            for key in pairs(keys) do
+                local claim = readJSON(SC.Dir .. "/Claims/" .. key .. ".json")
+                if claim == false then
+                    claim = S.PeerClaims[key]
+                    S.PeerFailSince[key] = S.PeerFailSince[key] or now
+                    if (not claim or now - (S.PeerReadAt[key] or 0) > 1000)
+                        and now - S.PeerFailSince[key] < QC.TTL * 1000 then
+                        unsure = true
+                    end
+                else
+                    S.PeerFailSince[key] = nil
+                    if type(claim) == "table" then S.PeerReadAt[key] = now end
+                end
+                if type(claim) == "table" then
+                    S.PeerClaims[key] = claim
+                    if claim.jobId == game.JobId then
+                        local userId = tonumber(claim.userId) or 0
                         local position = unpackVector(claim.pos)
-                        if claim.collecting == true and claim.jobId == game.JobId and position
+                        if claim.collecting == true and position
                             and now - (tonumber(claim.seen) or 0) <= SC.CoinSplit.ClaimTTL * 1000 then
                             local full = {}
                             for _, name in ipairs(type(claim.full) == "table" and claim.full or {}) do full[tostring(name)] = true end
                             table.insert(peers, {
-                                UserId = tonumber(claim.userId) or 0, At = tonumber(claim.at) or 0,
+                                UserId = userId, At = tonumber(claim.at) or 0,
                                 Position = position, Target = unpackVector(claim.target), Full = full,
+                            })
+                        end
+                        for _, entry in ipairs(type(claim.taken) == "table" and claim.taken or {}) do
+                            local at = type(entry) == "table" and tonumber(entry[4])
+                            local where = at and now - at <= SC.CoinSplit.Taken * 1000 and unpackVector(entry)
+                            if where then table.insert(taken, where) end
+                        end
+                        if tonumber(claim.queueAt) then
+                            table.insert(queue, {
+                                UserId = userId, On = claim.queue == true,
+                                At = tonumber(claim.queueAt), Beat = tonumber(claim.beat) or 0,
                             })
                         end
                     end
                 end
             end
-            S.PeerCache, S.PeerCacheAt = peers, clock
-            return peers
+            peers.Taken = taken
+            S.View, S.ViewAt = {Peers = peers, Queue = queue, Unsure = unsure}, clock
+            return S.View
+        end
+
+        -- force — без кэша (свой ход в очереди)
+        function FarmSync.CoinPeers(force)
+            return readClaims(force).Peers
+        end
+
+        -- ── Револьвер: выбор монеты по очереди (Teleport Collect) ──────────────────
+        -- Время (общие часы ПК) делится на окна Queue.Window; окна по кругу
+        -- принадлежат участникам очереди — нашим на этом сервере в Teleport Collect,
+        -- которые ждут раунда или собирают (порядок — по userId; к старту раунда
+        -- очередь уже собрана). Монету выбирают только в своё окно и только в его
+        -- начале (Guard): заявка успевает в файл до окна следующего, а он перечитывает
+        -- заявки и видит всех, кто выбирал до него. Пауза у каждого своя, общего
+        -- кулдауна нет. Вход в очередь и выход действуют через Delay после метки в
+        -- файле — к этому времени её прочитали все, и хозяин каждого окна у всех один.
+        -- Закончивший сбор или умерший до Delay просто не пользуется своими окнами;
+        -- молчащий дольше TTL выпадает (тоже по метке).
+        local function inQueue(on, at, T)
+            if on then return T >= at + QC.Delay * 1000 end
+            return T < at + QC.Delay * 1000
+        end
+
+        -- Хозяин окна index: участники на момент его начала. Живость (beat) — тоже
+        -- на начало окна; для окон впереди — на сейчас: beat к ним ещё обновится
+        local function windowOwner(view, index, now)
+            local T = index * QC.Window * 1000
+            local live = math.min(T, now)
+            local list = {}
+            -- Себя — по тому же правилу, что видят другие: после фриза дольше TTL нас
+            -- в очереди уже нет, пока не запишем файл заново
+            if live < S.Beat + QC.TTL * 1000 and inQueue(S.Queue.On, S.Queue.At, T) then table.insert(list, myId) end
+            for _, entry in ipairs(view.Queue) do
+                if live < entry.Beat + QC.TTL * 1000 and inQueue(entry.On, entry.At, T) then
+                    table.insert(list, entry.UserId)
+                end
+            end
+            if #list == 0 then return nil end
+            table.sort(list)
+            return list[index % #list + 1]
+        end
+
+        -- В очереди — пока на цели в Teleport Collect ждём раунда или собираем. Пока
+        -- в очереди, файл обновляется (beat) не реже раза в секунду
+        function FarmSync.QueueRefresh()
+            local status = myStatus()
+            local on = S.Running and FarmSync.TeleportMode() and (status == "lobby" or status == "collecting")
+            local now = nowMs()
+            if on ~= S.Queue.On then
+                S.Queue = {On = on, At = now}
+                writeClaim()
+            elseif on and now - S.Beat >= 1000 then
+                writeClaim()
+            end
+        end
+
+        -- Пора ли выбирать, если пауза кончается в deadline (мс): в последнее своё
+        -- окно, начавшееся до deadline; такого нет — в первое после. Других в очереди
+        -- нет (или ждём дольше Stall: force) — в deadline, без окон
+        local function turnNow(view, now, deadline, force)
+            local W = QC.Window * 1000
+            local index = math.floor(now / W)
+            if index == S.TurnUsed then return false end
+            local others = false
+            for _, entry in ipairs(view.Queue) do
+                if now < entry.Beat + QC.TTL * 1000 and (entry.On or inQueue(false, entry.At, now)) then
+                    others = true
+                    break
+                end
+            end
+            -- Файл не прочитался — может, это и был другой участник: ждём чтения
+            if view.Unsure and not force then return false end
+            if force or not others then return now >= deadline end
+            if windowOwner(view, index, now) ~= myId or now - index * W > QC.Guard * 1000 then return false end
+            if now >= deadline then return true end
+            for later = index + 1, math.floor(deadline / W) do
+                if windowOwner(view, later, now) == myId then return false end
+            end
+            return true
+        end
+
+        -- true — ход наш: заявки уже перечитаны, монету выбрать и заявить сразу,
+        -- без yield'ов, пока окно не кончилось
+        function FarmSync.TakeTurn(deadline, force)
+            if not turnNow(readClaims(), nowMs(), deadline, force) then return false end
+            local now = nowMs()
+            if not turnNow(readClaims(true), now, deadline, force) then return false end
+            S.TurnUsed = math.floor(now / (QC.Window * 1000))
+            return true
         end
 
         -- ── Решения по серверу ─────────────────────────────────────────────────────
@@ -8317,9 +8719,12 @@
             return not State.Settings.AutoFarmEnabled or not Farm.RoundActive() or Farm.Done or not Farm.IsParticipant()
         end
 
-        local function myIndex()
+        -- Номер в группе: разнос входа на цель между её аккаунтами
+        local function myIndex(group)
             local keys = {myKey}
-            for key in pairs(S.Records) do table.insert(keys, key) end
+            for key in pairs(S.Records) do
+                if groupOf(key) == group then table.insert(keys, key) end
+            end
             table.sort(keys, function(a, b) return tonumber(a) < tonumber(b) end)
             for index, key in ipairs(keys) do
                 if key == myKey then return index - 1 end
@@ -8328,9 +8733,19 @@
         end
 
         -- Avoid: на сервере несколько наших — уходит ровно один, «худший» (пришёл
-        -- позже; тай-брейк — больший userId), и только в безопасный момент
+        -- позже; тай-брейк — больший userId), и только в безопасный момент. Чужую
+        -- цель (другой группы, или мы без группы) покидаем всегда: пришедший раньше
+        -- её участников иначе сидел бы там вечно — участники со своей цели не уходят
         local function avoidStep(now)
             if now - S.LastHop < SC.HopCooldown then return end
+            local foreign = targetGroupOf(game.JobId)
+            if foreign and foreign ~= myGroup() then
+                if not safeMoment() then return end
+                S.LastHop = now
+                notify("<font color=\"rgb(255,170,50)\">group " .. foreign .. "'s target → hop</font>")
+                ServerHop()
+                return
+            end
             local others, loseToAll = 0, true
             for _, rec in pairs(S.Records) do
                 if fresh(rec) and rec.jobId == game.JobId and rec.placeId == game.PlaceId then
@@ -8347,11 +8762,11 @@
             ServerHop()
         end
 
-        local function joinStep(target, now)
-            local key = target.jobId .. ":" .. tostring(target.setAt)
+        local function joinStep(target, group, now)
+            local key = group .. ":" .. target.jobId .. ":" .. tostring(target.setAt)
             if S.JoinKey ~= key then
                 S.JoinKey = key
-                S.JoinAt = now + myIndex() * SC.JoinStagger
+                S.JoinAt = now + myIndex(group) * SC.JoinStagger
             end
             if now < S.JoinAt or not safeMoment() then return end
 
@@ -8359,7 +8774,7 @@
             if not Lock.Acquire("FarmSync") then return end
             S.Teleporting = true
             pcall(writeSelf)
-            notify("<font color=\"rgb(85,255,120)\">joining target server</font>")
+            notify("<font color=\"rgb(85,255,120)\">joining group " .. group .. "'s target</font>")
             local accepted, result = Lock.Try(tonumber(target.placeId) or game.PlaceId, target.jobId, CONFIG.ServerHop.TeleportTimeout)
             S.Teleporting = false
             Lock.Release("FarmSync")
@@ -8371,10 +8786,10 @@
                 S.JoinAt = after + SC.JoinRetryFull
                 notify("<font color=\"rgb(255,170,50)\">target is full, retry in " .. SC.JoinRetryFull .. "s</font>")
             elseif result == "GameEnded" or result == "GameNotFound" or result == "Unauthorized" then
-                local current = field("target")
+                local current = field("target." .. group)
                 if type(current) == "table" and current.jobId == target.jobId then
-                    writeFields({target = false, ownerSearching = false})
-                    notify("<font color=\"rgb(255,85,85)\">target server is closed — cleared</font>")
+                    writeFields({["target." .. group] = false, ["ownerSearching." .. group] = false})
+                    notify("<font color=\"rgb(255,85,85)\">group " .. group .. "'s target is closed — cleared</font>")
                 end
             else
                 S.JoinAt = after + SC.JoinRetry
@@ -8388,17 +8803,20 @@
                 S.Control = control
                 applyControl(true)
             end
+            confirmWrites()
             ensureRoster(now)
             readRecords()
             writeSelf()
+            FarmSync.QueueRefresh()     -- место в очереди Teleport Collect
 
             local mode = State.Settings.FarmSyncMode
             if mode == "Off" then return end
-            local target, alive = FarmSync.Target()
+            local group = myGroup()
+            local target, alive = FarmSync.Target(group)
             if mode == "Follow" and alive then
                 if target.jobId == game.JobId then return end          -- на цели Avoid не работает
-                if tostring(target.ownerId) == myKey and field("ownerSearching") == true then return end
-                joinStep(target, now)
+                if tostring(target.ownerId) == myKey and field("ownerSearching." .. group) == true then return end
+                joinStep(target, group, now)
                 -- Цель полна или отказала: пока ждём повтора, на своём сервере — Avoid
                 if S.JoinAt - os.time() > 20 then avoidStep(now) end
                 return
@@ -8578,15 +8996,36 @@
 
         -- ── Вкладка Sync ───────────────────────────────────────────────────────────
         local ROLE_COLORS = {Murderer = "255,85,85", Zombie = "255,85,85", Sheriff = "50,150,255", Innocent = "85,255,120"}
+        local NO_GROUP = "—"
 
-        local function line(rec, isMe, target, now)
+        -- Аккаунты таблицы: мы и те, кто подавал голос за последний час (давно
+        -- молчащие остаются в белом списке, но в таблице не нужны)
+        local function tableAccounts()
+            local now = os.time()
+            local list = {}
+            for _, rec in pairs(S.Records) do
+                if now - (tonumber(rec.heartbeat) or 0) < 3600 then table.insert(list, rec) end
+            end
+            table.sort(list, function(a, b) return tostring(a.name) < tostring(b.name) end)
+            table.insert(list, 1, {
+                userId = myId, name = myName, jobId = S.Teleporting and "" or game.JobId,
+                role = myRole(), status = myStatus(), bags = bagsText(), me = true,
+            })
+            return list
+        end
+
+        -- targets: [jobId] = группа, чья это живая цель. Цель своей группы — зелёная,
+        -- чужой — оранжевая (аккаунт там в гостях и уйдёт)
+        local function line(rec, targets)
             local where
-            if not isMe and not fresh(rec) then
+            local onTarget = targets[rec.jobId]
+            if not rec.me and not fresh(rec) then
                 where = "<font color=\"rgb(150,150,150)\">offline</font>"
             elseif rec.status == "teleporting" then
                 where = "<font color=\"rgb(255,170,50)\">teleporting</font>"
-            elseif target and rec.jobId == target.jobId then
-                where = "<font color=\"rgb(85,255,120)\">target</font>"
+            elseif onTarget then
+                local own = onTarget == groupOf(rec.userId)
+                where = string.format("<font color=\"rgb(%s)\">target %s</font>", own and "85,255,120" or "255,170,50", onTarget)
             elseif rec.jobId == game.JobId then
                 where = "here"
             else
@@ -8594,65 +9033,108 @@
             end
             local role = rec.role and string.format(" · <font color=\"rgb(%s)\">%s</font>", ROLE_COLORS[rec.role] or "220,220,220", rec.role) or ""
             local bags = (rec.bags and rec.bags ~= "") and (" · " .. rec.bags) or ""
-            return string.format("<b>%s</b>%s · %s%s · %s%s", rec.name or "?", isMe and " (me)" or "", where, role, rec.status or "?", bags)
+            return string.format("<b>%s</b>%s · %s%s · %s%s", rec.name or "?", rec.me and " (me)" or "", where, role, rec.status or "?", bags)
         end
 
-        function FarmSync.Lines()
-            local now = os.time()
-            local target, alive = FarmSync.Target()
-            local lines = {}
-            if target then
-                local state
-                if not alive then
-                    state = "<font color=\"rgb(255,85,85)\">expired</font>"
-                elseif field("ownerSearching") == true then
-                    state = "<font color=\"rgb(255,170,50)\">owner searching</font>"
-                else
-                    state = "<font color=\"rgb(85,255,120)\">active</font>"
-                end
-                table.insert(lines, string.format("Target: <b>%s</b> · %s… · %s", tostring(target.ownerName), target.jobId:sub(1, 8), state))
+        local function targetLine(group, target, alive)
+            if not target then return string.format("Target %s: none", group) end
+            local state
+            if not alive then
+                state = "<font color=\"rgb(255,85,85)\">expired</font>"
+            elseif field("ownerSearching." .. group) == true then
+                state = "<font color=\"rgb(255,170,50)\">owner searching</font>"
             else
-                table.insert(lines, "Target: none")
+                state = "<font color=\"rgb(85,255,120)\">active</font>"
             end
-
-            local me = {name = myName, jobId = S.Teleporting and "" or game.JobId, role = myRole(), status = myStatus(), bags = bagsText()}
-            table.insert(lines, line(me, true, alive and target or nil, now))
-            local others = {}
-            for _, rec in pairs(S.Records) do
-                -- Давно молчащие аккаунты в белом списке остаются, но в таблице не нужны
-                if now - (tonumber(rec.heartbeat) or 0) < 3600 then table.insert(others, rec) end
-            end
-            table.sort(others, function(a, b) return tostring(a.name) < tostring(b.name) end)
-            for _, rec in ipairs(others) do table.insert(lines, line(rec, false, alive and target or nil, now)) end
-            return lines
+            return string.format("Target %s: <b>%s</b> · %s… · %s", group, tostring(target.ownerName), target.jobId:sub(1, 8), state)
         end
 
-        function FarmSync.BuildTable(tab, getTokens)
+        -- Строка на цель каждой группы, затем аккаунты: {Key, Group, Text}
+        function FarmSync.TableData()
+            local heads, targets = {}, {}
+            for _, group in ipairs(SC.Groups) do
+                local target, alive = FarmSync.Target(group)
+                table.insert(heads, targetLine(group, target, alive))
+                if alive then targets[target.jobId] = group end
+            end
+            local rows = {}
+            for _, rec in ipairs(tableAccounts()) do
+                table.insert(rows, {Key = tostring(rec.userId), Group = groupOf(rec.userId), Text = line(rec, targets)})
+            end
+            return heads, rows
+        end
+
+        -- У строки аккаунта — переключатель группы «— A B» (segmented — фабрика
+        -- сегментной панели GUI): меню любого аккаунта правит группы всех на ПК
+        function FarmSync.BuildTable(tab, getTokens, segmented)
             local host = tab:CreateHost(nil)
             Core.New("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4)}, host)
-            local labels = {}
             local face = Notify.font(Enum.FontWeight.Medium)
+            local heads, rows = {}, {}
+
+            local function newLabel(parent, order)
+                local label = Core.New("TextLabel", {
+                    BackgroundTransparency = 1, RichText = true, TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13,
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                    LayoutOrder = order,
+                }, parent)
+                if face then label.FontFace = face else label.Font = Enum.Font.GothamMedium end
+                return label
+            end
+
+            local function newRow(key)
+                local frame = Core.New("Frame", {
+                    BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                }, host)
+                local row = {Frame = frame, Label = newLabel(frame, 0)}
+                local ok, panel = pcall(function() return segmented and segmented(frame, {Name = "Group", Height = 22, TextSize = 12}) end)
+                if ok and panel then
+                    local options = {NO_GROUP}
+                    for _, group in ipairs(SC.Groups) do table.insert(options, group) end
+                    for index, option in ipairs(options) do
+                        panel:Add(option, option, 24, index, function(choice)
+                            panel:Set(choice)
+                            FarmSync.SetGroup(key, choice ~= NO_GROUP and choice or nil)
+                        end)
+                    end
+                    panel.Root.AnchorPoint = Vector2.new(1, 0)
+                    panel.Root.Position = UDim2.new(1, 0, 0, 0)
+                    row.Label.Size = UDim2.new(1, -(panel.Root.Size.X.Offset + 8), 0, 0)
+                    row.Panel = panel
+                end
+                rows[key] = row
+                return row
+            end
+
             local thread = Core.Tasks.spawn(function()
                 while Core.Alive and host.Parent do
                     local tokens = getTokens and getTokens() or {}
-                    local lines = FarmSync.Lines()
-                    for index, text in ipairs(lines) do
-                        local label = labels[index]
-                        if not label then
-                            label = Core.New("TextLabel", {
-                                BackgroundTransparency = 1, RichText = true, TextWrapped = true,
-                                TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13,
-                                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                                LayoutOrder = index,
-                            }, host)
-                            if face then label.FontFace = face else label.Font = Enum.Font.GothamMedium end
-                            labels[index] = label
-                        end
-                        label.TextColor3 = tokens.Text or CONFIG.Colors.Text
-                        label.Text = text
-                        label.Visible = true
+                    local color = tokens.Text or CONFIG.Colors.Text
+                    local headLines, list = FarmSync.TableData()
+                    for index, text in ipairs(headLines) do
+                        heads[index] = heads[index] or newLabel(host, index)
+                        heads[index].TextColor3 = color
+                        heads[index].Text = text
                     end
-                    for index = #lines + 1, #labels do labels[index].Visible = false end
+                    local shown = {}
+                    for index, entry in ipairs(list) do
+                        local row = rows[entry.Key] or newRow(entry.Key)
+                        shown[entry.Key] = true
+                        row.Frame.LayoutOrder = 100 + index
+                        row.Frame.Visible = true
+                        row.Label.TextColor3 = color
+                        if row.Panel then
+                            row.Label.Text = entry.Text
+                            local value = entry.Group or NO_GROUP
+                            if row.Panel.Value ~= value then row.Panel:Set(value, false) end
+                        else
+                            row.Label.Text = (entry.Group and ("[" .. entry.Group .. "] ") or "") .. entry.Text
+                        end
+                    end
+                    for key, row in pairs(rows) do
+                        if not shown[key] then row.Frame.Visible = false end
+                    end
                     task.wait(1)
                 end
             end)
@@ -8677,44 +9159,120 @@
             writeFields({clearStrangers = on})
         end
 
+        function FarmSync.SetTeleportCollect(on)
+            on = on == true
+            if on == State.Settings.FarmSyncTeleportCollect and field("teleportCollect") == on then return end
+            State.Settings.FarmSyncTeleportCollect = on
+            writeFields({teleportCollect = on})
+        end
+
+        -- Группа аккаунта key (nil — без группы). Владелец цели, переведённый в
+        -- другую группу, для неё отсутствует: цель истечёт через OwnerGrace
+        function FarmSync.SetGroup(key, group)
+            key = tostring(key)
+            if group ~= nil and not table.find(SC.Groups, group) then return end
+            if groupOf(key) == group then return end
+            writeFields({["group." .. key] = group or false})
+            local rec = key == myKey and {name = myName} or S.Records[key]
+            notify(string.format("<b>%s</b> → %s", tostring(rec and rec.name or key), group and ("group " .. group) or "no group"))
+        end
+
+        -- Все аккаунты таблицы — поровну по группам (по порядку userId). Владельцы
+        -- целей остаются в группе своей цели: иначе цель осталась бы без владельца
+        function FarmSync.SplitGroups()
+            local counts, values, owners, rest = {}, {}, {}, {}
+            for _, group in ipairs(SC.Groups) do
+                counts[group] = 0
+                local target = field("target." .. group)
+                if type(target) == "table" then owners[tostring(target.ownerId)] = group end
+            end
+            for _, rec in ipairs(tableAccounts()) do
+                local key = tostring(rec.userId)
+                local group = owners[key]
+                if group then
+                    counts[group] += 1
+                    values["group." .. key] = group
+                else
+                    table.insert(rest, tonumber(key))
+                end
+            end
+            table.sort(rest)
+            for _, userId in ipairs(rest) do
+                local best = SC.Groups[1]
+                for _, group in ipairs(SC.Groups) do
+                    if counts[group] < counts[best] then best = group end
+                end
+                counts[best] += 1
+                values["group." .. tostring(userId)] = best
+            end
+            writeFields(values)
+            local parts = {}
+            for _, group in ipairs(SC.Groups) do table.insert(parts, group .. " " .. counts[group]) end
+            notify("groups: " .. table.concat(parts, ", "))
+        end
+
+        -- Кнопки цели действуют только на группу нажавшего
+        local function pressedGroup()
+            local group = myGroup()
+            if not group then
+                ShowNotification("Farm Sync: <font color=\"rgb(255,170,50)\">this account has no group</font>", CONFIG.Colors.Text)
+            end
+            return group
+        end
+
         function FarmSync.SetTarget()
+            local group = pressedGroup()
+            if not group then return end
             if game.PrivateServerId ~= "" or game.PrivateServerOwnerId ~= 0 then
                 ShowNotification("<font color=\"rgb(255,85,85)\">Error: </font><font color=\"rgb(220,220,220)\">private server can't be a target</font>", CONFIG.Colors.Text)
                 return
             end
+            -- Две группы на одном сервере — ровно то, от чего группы спасают
+            for _, other in ipairs(SC.Groups) do
+                local target, alive = FarmSync.Target(other)
+                if other ~= group and alive and target.jobId == game.JobId then
+                    ShowNotification("<font color=\"rgb(255,85,85)\">Error: </font><font color=\"rgb(220,220,220)\">this server is group " .. other .. "'s target</font>", CONFIG.Colors.Text)
+                    return
+                end
+            end
             S.LastOnTarget, S.LastOnJob = os.time(), game.JobId
             State.Settings.FarmSyncMode = "Follow"
             writeFields({
-                target = {placeId = game.PlaceId, jobId = game.JobId, ownerId = myId, ownerName = myName, setAt = os.time()},
-                ownerSearching = false,
+                ["target." .. group] = {placeId = game.PlaceId, jobId = game.JobId, ownerId = myId, ownerName = myName, setAt = os.time()},
+                ["ownerSearching." .. group] = false,
                 mode = "Follow",
             })
             if Core.SyncControls then pcall(Core.SyncControls) end
-            ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">this server is the target</font>", CONFIG.Colors.Text)
+            ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">this server is group " .. group .. "'s target</font>", CONFIG.Colors.Text)
         end
 
         function FarmSync.ClearTarget()
-            writeFields({target = false, ownerSearching = false})
-            ShowNotification("Farm Sync: <font color=\"rgb(255,170,50)\">target cleared</font>", CONFIG.Colors.Text)
+            local group = pressedGroup()
+            if not group then return end
+            writeFields({["target." .. group] = false, ["ownerSearching." .. group] = false})
+            ShowNotification("Farm Sync: <font color=\"rgb(255,170,50)\">group " .. group .. "'s target cleared</font>", CONFIG.Colors.Text)
         end
 
         function FarmSync.ReturnToTarget()
-            local target = field("target")
-            if type(target) ~= "table" then
-                ShowNotification("Farm Sync: no target", CONFIG.Colors.Text)
+            local group = pressedGroup()
+            if not group then return end
+            if type(field("target." .. group)) ~= "table" then
+                ShowNotification("Farm Sync: group " .. group .. " has no target", CONFIG.Colors.Text)
                 return
             end
-            writeFields({ownerSearching = false})
+            writeFields({["ownerSearching." .. group] = false})
             S.JoinAt = 0
-            ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">returning to target</font>", CONFIG.Colors.Text)
+            ShowNotification("Farm Sync: <font color=\"rgb(85,255,120)\">returning to group " .. group .. "'s target</font>", CONFIG.Colors.Text)
         end
 
         -- Server Hop нажат руками: владелец живой цели ищет новый сервер — альты
-        -- остаются, а его самого назад не тянет (Return to Target / Set Target)
+        -- его группы остаются, а его самого назад не тянет (Return to Target / Set Target)
         function FarmSync.OnManualHop()
-            local target, alive = FarmSync.Target()
-            if alive and tostring(target.ownerId) == myKey and field("ownerSearching") ~= true then
-                writeFields({ownerSearching = true})
+            local group = myGroup()
+            if not group then return end
+            local target, alive = FarmSync.Target(group)
+            if alive and tostring(target.ownerId) == myKey and field("ownerSearching." .. group) ~= true then
+                writeFields({["ownerSearching." .. group] = true})
             end
         end
 
@@ -8737,13 +9295,18 @@
             end))
         end
 
-        -- Выгрузка: запись остаётся (белый список), но помечена неактивной
+        -- Выгрузка: запись остаётся (белый список), но помечена неактивной; из
+        -- очереди Teleport Collect выходим по метке, как обычно
         function FarmSync.Stop()
             if not S.Running then return end
             S.Running = false
             for _, thread in ipairs(S.Threads) do Core.Tasks.cancel(thread) end
             table.clear(S.Threads)
             pcall(writeSelf)
+            if S.Queue.On then
+                S.Queue = {On = false, At = nowMs()}
+                pcall(writeClaim)
+            end
         end
 
         -- Настройки с прошлого запуска — до создания GUI: тумблеры встанут как в файле
@@ -9214,6 +9777,8 @@
             -- Farm Sync (вкладка Sync): изменения расходятся на все аккаунты ПК
             FarmSyncMode = function(mode) FarmSync.SetMode(mode) end,
             FarmSyncClearStrangers = function(on) FarmSync.SetClearStrangers(on) end,
+            FarmSyncTeleportCollect = function(on) FarmSync.SetTeleportCollect(on) end,
+            FarmSyncSplit = function() FarmSync.SplitGroups() end,
             FarmSyncSetTarget = function() FarmSync.SetTarget() end,
             FarmSyncReturn = function() FarmSync.ReturnToTarget() end,
             FarmSyncClear = function() FarmSync.ClearTarget() end,
@@ -9431,15 +9996,18 @@
         local SyncTab = GUI.CreateTab("Sync")
 
             SyncTab:CreateSection("FARM SYNC")
-            SyncTab:CreateSegmentedRow("Mode", "Avoid: one account per server; Follow: all go to the target", {"Off", "Avoid", "Follow"}, State.Settings.FarmSyncMode, "FarmSyncMode")
+            SyncTab:CreateSegmentedRow("Mode", "Avoid: one account per server; Follow: each group goes to its target", {"Off", "Avoid", "Follow"}, State.Settings.FarmSyncMode, "FarmSyncMode")
             SyncTab:CreateToggle("Clear Strangers", "On the target: kill, shoot and fling non-own players", "FarmSyncClearStrangers", State.Settings.FarmSyncClearStrangers)
-            SyncTab:CreateSection("TARGET SERVER")
+            SyncTab:CreateToggle("Teleport Collect", "On the target: coins by teleport, in turn; pause = flight time", "FarmSyncTeleportCollect", State.Settings.FarmSyncTeleportCollect)
+            SyncTab:CreateSection("TARGET SERVER (YOUR GROUP)")
             SyncTab:CreateButton("", "Set Current Server as Target", Color3.fromRGB(100, 200, 100), "FarmSyncSetTarget")
             SyncTab:CreateButton("", "Return to Target", CONFIG.Colors.Accent, "FarmSyncReturn")
             SyncTab:CreateButton("", "Clear Target", Color3.fromRGB(255, 85, 85), "FarmSyncClear")
+            SyncTab:CreateSection("GROUPS")
+            SyncTab:CreateButton("", "Split Accounts into Groups", CONFIG.Colors.Accent, "FarmSyncSplit")
 
             SyncTab:CreateSection("ACCOUNTS", "right")
-            FarmSync.BuildTable(SyncTab, GUI.GetThemeTokens)
+            FarmSync.BuildTable(SyncTab, GUI.GetThemeTokens, GUI.CreateSegmentedPanel)
     end
 
     do
