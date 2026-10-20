@@ -9284,6 +9284,16 @@
                     Bags = bags,
                 })
             end
+            -- Свой аккаунт первым, дальше по группам (A, B…), без группы — в конце;
+            -- внутри группы — по имени
+            local rank = {}
+            for index, group in ipairs(SC.Groups) do rank[group] = index end
+            table.sort(rows, function(a, b)
+                if a.Me ~= b.Me then return a.Me end
+                local ra, rb = rank[a.Group] or #SC.Groups + 1, rank[b.Group] or #SC.Groups + 1
+                if ra ~= rb then return ra < rb end
+                return a.Name:lower() < b.Name:lower()
+            end)
             return targets, rows
         end
 
