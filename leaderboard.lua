@@ -4920,12 +4920,19 @@
 
     -- ─── Скорость сбора (CONFIG.CoinCollect) ────────────────────────────────────
     -- Сервер сравнивает соседние ЗАСЧИТАННЫЕ монеты: расстояние между ними и время.
-    -- Отсчёт — от прихода CoinCollected прошлой монеты (сервер засчитал её раньше —
-    -- запас на пинг) и от её места. Пока прошлая монета ещё не засчитана (касание
-    -- было, CoinCollected не пришёл), отсчёт — от касания: иначе следующая монета
-    -- считалась бы от позапрошлой
-    Farm.LastCoin = nil   -- {Pos, At}: последняя засчитанная (At — os.clock прихода CoinCollected)
-    Farm.Touched = {}     -- наши касания, ещё не засчитанные: {Coin, Pos, At}, по порядку
+    -- Какая из наших монет засчитана, клиент знает не точно: CoinCollected приходит
+    -- ~0.3 с после касания, касание может не засчитаться, монету может забрать
+    -- другой. Поэтому отсчёт консервативный: монету можно засчитать, только когда
+    -- истекло время от КАЖДОЙ возможной прошлой — последней засчитанной (по приходу
+    -- CoinCollected, т.е. с запасом на пинг) и всех наших касаний за последние 3 с
+    Farm.LastCoin = nil   -- {Pos, At, Coin}: последняя засчитанная (At — os.clock прихода CoinCollected)
+    Farm.Touched = {}     -- недавние наши касания: {Coin, Pos, At}, по порядку
+
+    -- Монету засчитали (или забрали): сервер поставил Collected или убрал её
+    function Farm.CoinGone(coin)
+        return coin:GetAttribute("Collected") == true or not coin.Parent
+            or not coin:FindFirstChildWhichIsA("TouchTransmitter")
+    end
 
     function Farm.NoteTouch(coin)
         local now = os.clock()
@@ -4935,43 +4942,59 @@
             return
         end
         table.insert(Farm.Touched, {Coin = coin, Pos = coin.Position, At = now})
-        if #Farm.Touched > 8 then table.remove(Farm.Touched, 1) end
+        while #Farm.Touched > 0 and (#Farm.Touched > 8 or now - Farm.Touched[1].At >= 3) do
+            table.remove(Farm.Touched, 1)
+        end
     end
 
-    -- CoinCollected: засчитана самая ранняя из недавних наших монет; касания без
-    -- засчёта дольше 3 с — потерялись. Без касания (пролетели сквозь монету) —
+    -- CoinCollected: засчитана наша монета, которая уже исчезла (Collected/убрана);
+    -- такой нет — самая ранняя из недавних. Без касаний (пролетели сквозь монету) —
     -- монета там, где мы
     function Farm.OnCoinCollected()
         local now = os.clock()
-        local position
-        while #Farm.Touched > 0 do
-            local entry = table.remove(Farm.Touched, 1)
-            if now - entry.At < 3 then
-                position = entry.Pos
+        local index = nil
+        for i, entry in ipairs(Farm.Touched) do
+            if now - entry.At < 3 and Farm.CoinGone(entry.Coin) then
+                index = i
                 break
             end
         end
+        if not index then
+            for i, entry in ipairs(Farm.Touched) do
+                if now - entry.At < 3 then
+                    index = i
+                    break
+                end
+            end
+        end
+        local entry = index and table.remove(Farm.Touched, index)
+        local position = entry and entry.Pos
         if not position then
             local character = LocalPlayer.Character
             local hrp = character and character:FindFirstChild("HumanoidRootPart")
             position = hrp and hrp.Position
         end
-        if position then Farm.LastCoin = {Pos = position, At = now} end
+        if position then Farm.LastCoin = {Pos = position, At = now, Coin = entry and entry.Coin} end
         Farm.CollectedAt = now
     end
 
     -- Когда (os.clock) монету в position можно засчитать: не быстрее MaxSpeed от
-    -- прошлой. cap — Teleport Collect: ещё и не быстрее Fly Speed (Smart Collect с
-    -- этим потолком), как перелёт
+    -- каждой возможной прошлой. cap — Teleport Collect: ещё и не быстрее Fly Speed
+    -- (Smart Collect с этим потолком), как перелёт
     function Farm.CoinReadyAt(position, cap)
-        local ref = Farm.LastCoin
-        local pending = Farm.Touched[#Farm.Touched]
-        if pending and os.clock() - pending.At < 3 and (not ref or pending.At > ref.At) then ref = pending end
-        if not ref then return 0 end
-        local hop = (position - ref.Pos).Magnitude
-        local need = hop / CONFIG.CoinCollect.MaxSpeed
-        if cap then need = math.max(need, Farm.FlightDuration(hop, State.Settings.CoinFarmFlySpeed, cap)) end
-        return ref.At + need
+        local now = os.clock()
+        local readyAt = 0
+        local function after(ref)
+            local hop = (position - ref.Pos).Magnitude
+            local need = hop / CONFIG.CoinCollect.MaxSpeed
+            if cap then need = math.max(need, Farm.FlightDuration(hop, State.Settings.CoinFarmFlySpeed, cap)) end
+            readyAt = math.max(readyAt, ref.At + need)
+        end
+        if Farm.LastCoin then after(Farm.LastCoin) end
+        for _, entry in ipairs(Farm.Touched) do
+            if now - entry.At < 3 then after(entry) end
+        end
+        return readyAt
     end
 
     -- SmoothFlyToCoin() - Плавный полёт к монете
@@ -5056,7 +5079,7 @@
             -- Касание — у самой монеты (дальше TouchRadius сервер его не засчитает) и не
             -- раньше, чем её можно засчитать
             if not collectionAttempted and (coin.Position - currentPos).Magnitude <= CONFIG.CoinCollect.TouchRadius
-                and os.clock() >= Farm.CoinReadyAt(coin.Position) then
+                and os.clock() >= Farm.CoinReadyAt(coin.Position) and not Farm.CoinGone(coin) then
                 collectionAttempted = true
                 Farm.NoteTouch(coin)
                 Core.Tasks.spawn(Farm.Touch, humanoidRootPart, coin)
@@ -5071,9 +5094,9 @@
             and State.Settings.AutoFarmEnabled and not Farm.FlingBusy() then
             local giveUp = os.clock() + 3
             Farm.HoldUntil(function()
-                return not coin.Parent or os.clock() >= giveUp or os.clock() >= Farm.CoinReadyAt(coin.Position)
+                return Farm.CoinGone(coin) or os.clock() >= giveUp or os.clock() >= Farm.CoinReadyAt(coin.Position)
             end, Farm.HoldFrame(targetPos))
-            if coin.Parent and os.clock() >= Farm.CoinReadyAt(coin.Position) then
+            if not Farm.CoinGone(coin) and os.clock() >= Farm.CoinReadyAt(coin.Position) then
                 Farm.NoteTouch(coin)
                 Core.Tasks.spawn(Farm.Touch, humanoidRootPart, coin)
             end
@@ -5186,24 +5209,26 @@
     -- TouchFirst после прыжка (раньше сервер ещё видит нас на старом месте и молча
     -- его теряет) и не раньше, чем монету можно засчитать; дальше повтор каждые
     -- TouchRetry, пока монету не засчитают (CoinCollected, атрибут Collected, монета
-    -- исчезла), но не дольше TouchTimeout. cap — потолок Smart Collect (Teleport
-    -- Collect), nil — только MaxSpeed. true — засчитана
+    -- исчезла), но не дольше TouchTimeout. Без firetouchinterest — просто ждём на
+    -- точке: не в Underground Mode тело засчитывает монету само. cap — потолок Smart
+    -- Collect (Teleport Collect), nil — только MaxSpeed. true — засчитана
     function Farm.TeleportTouch(hrp, coin, point, cap)
         local cfg = CONFIG.CoinCollect
-        if not firetouchinterest then return false end
+        local canTouch = firetouchinterest ~= nil
         local landed = os.clock()
         local touchAt, firstAt, pressed, counted = nil, nil, false, false
         Farm.HoldUntil(function()
             local clock = os.clock()
-            -- Засчитана: CoinCollected после нашего касания; или монеты уже нет — не в
-            -- Underground Mode тело засчитывает её само по прилёту
-            if (firstAt and (Farm.CollectedAt or 0) > firstAt) or coin:GetAttribute("Collected") == true
-                or not coin.Parent or not coin:FindFirstChildWhichIsA("TouchTransmitter") then
+            -- Засчитана: CoinCollected засчитал именно эту монету; или монеты уже нет —
+            -- не в Underground Mode тело засчитывает её само по прилёту
+            local last = Farm.LastCoin
+            if (last and last.Coin == coin and last.At >= landed) or Farm.CoinGone(coin) then
                 counted = true
                 return true
             end
             if firstAt and clock - firstAt > cfg.TouchTimeout then return true end
             if clock - landed > cfg.TouchFirst + cfg.TouchTimeout + 3 then return true end
+            if not canTouch then return false end
             if pressed then
                 if clock >= touchAt + 0.05 then
                     pressed = false
@@ -5256,6 +5281,8 @@
         humanoidRootPart.CFrame = point
         humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
         humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+        -- Не в Underground Mode тело касается монеты само — это и есть касание
+        if not State.Settings.UndergroundMode then Farm.NoteTouch(coin) end
         ctx.allowFly = true
         ctx.lastTeleport = tick()
         RemoveCoinTracer()
@@ -5298,8 +5325,14 @@
                     pcall(function() ToggleInvisibility() end)
                 end
                 local targetCFrame = coin.CFrame + Vector3.new(0, 2, 0)
+                -- Первая монета — тоже не быстрее MaxSpeed от прошлой засчитанной (тело
+                -- над монетой касается её само, сразу по прилёту)
+                local wait = Farm.CoinReadyAt(coin.Position) - os.clock()
+                if wait > 0 then task.wait(math.min(wait, 10)) end
+                if Farm.FlingBusy() or not coin.Parent then return end
                 if targetCFrame.Position.Y > -500 and targetCFrame.Position.Y < 10000 then
                     humanoidRootPart.CFrame = targetCFrame
+                    Farm.NoteTouch(coin)
                     ctx.lastTeleport = tick()
                     -- Касание сразу после телепорта не засчитывается никогда — касаемся
                     -- с повторами, как в Teleport Collect, держась на точке
