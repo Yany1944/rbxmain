@@ -4623,6 +4623,8 @@
     function Farm.OnRoundEnd()
         Farm.Done = false
         Farm.Unclaim()
+        -- Раунд мог кончиться посреди сбора: ноклип нужен только на карте
+        pcall(DisableNoClip)
         Farm.ResetBags()
         Farm.ReturnToLobby()
         CleanupCoinBlacklist()
@@ -4637,7 +4639,7 @@
     --     делится на зоны вокруг аккаунтов, и никто не летит через полкарты за
     --     монетой, которую по пути заберёт другой;
     --   • своих нет — пограничная: где проигрыш ближайшему нашему минимален, а не
-    --     простой. Все монеты под чужими заявками — ждём, это не «монеты кончились»;
+    --     простой. Все монеты под чужими заявками — ждём на месте (Farm.Hold);
     --   • аккаунт с полной сумкой этого типа монеты в дележе не участвует.
     -- Две заявки на одну монету в один миг: остаётся более ранняя (тай-брейк —
     -- меньший userId), второй аккаунт сворачивает в полёте.
@@ -4716,8 +4718,28 @@
         return coinContainer or Workspace
     end
 
-    -- Возвращает монету и расстояние; третье значение true — монеты есть, но все
-    -- под заявками других наших (ждать, а не считать сумку собранной)
+    -- Пауза в сборе без падения: во время сбора включён ноклип (а в Underground Mode
+    -- мы и вовсе под картой), и персонаж без управления проваливается в пустоту и
+    -- умирает. Держим его на месте так же, как в полёте, — CFrame каждый кадр
+    function Farm.Hold(seconds)
+        local character = LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp or not State.Settings.NoClipEnabled then
+            task.wait(seconds)
+            return
+        end
+        local hold = hrp.CFrame
+        local deadline = os.clock() + seconds
+        repeat
+            if Farm.FlingBusy() or not State.Settings.AutoFarmEnabled or not hrp.Parent then break end
+            hrp.CFrame = hold
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            task.wait()
+        until os.clock() >= deadline
+    end
+
+    -- Возвращает монету и расстояние; nil — свободных монет нет
     local function FindNearestCoin()
         local character = LocalPlayer.Character
         if not character then return nil end
@@ -4730,7 +4752,6 @@
         local margin = CONFIG.FarmSync.CoinSplit.Margin
         local closestCoin, closestDistance = nil, math.huge
         local borderCoin, borderDistance, borderLoss = nil, math.huge, math.huge
-        local blocked = false
 
         for _, coin in ipairs(Farm.CoinRoot():GetDescendants()) do
             if Farm.CoinValid(coin) then
@@ -4743,7 +4764,7 @@
                 else
                     local claimant, otherBest = Farm.PeerView(peers, coin)
                     if claimant then
-                        blocked = true
+                        -- монета другого нашего
                     elseif distance <= otherBest + margin then
                         if distance < closestDistance then
                             closestDistance = distance
@@ -4759,7 +4780,7 @@
 
         if closestCoin then return closestCoin, closestDistance end
         if borderCoin then return borderCoin, borderDistance end
-        return nil, math.huge, blocked
+        return nil, math.huge
     end
 
     -- Быстрая проверка на более близкую монету (с Coin Split — только среди своих)
@@ -4912,15 +4933,15 @@
 
     -- ─── Сбор одной монеты (первая — телепортом, дальше — полётом) ─────────────
     function Farm.CollectStep(ctx, character, humanoidRootPart)
-        local coin, _, blocked = FindNearestCoin()
+        local coin = FindNearestCoin()
         if not coin then
+            -- Свободных монет нет (карту выбрали, или все под заявками наших) — это не
+            -- «сумка собрана»: конец сбора решают только полные сумки и конец раунда.
+            -- Держимся на месте и ждём новые монеты
             Farm.Unclaim()
-            -- Монеты есть, но их забрали заявками другие наши: ждём новых, не «конец»
-            if blocked then ctx.noCoins = 0 else ctx.noCoins += 1 end
-            if ctx.noCoins < ctx.maxNoCoins then task.wait(0.3) end
+            Farm.Hold(0.3)
             return
         end
-        ctx.noCoins = 0
 
         Farm.Claim(coin, humanoidRootPart)
         CreateCoinTracer(character, coin)
@@ -5140,11 +5161,10 @@
         State.Cache.CoinBlacklist = {}
 
         State.Runtime.CoinFarmThread = Core.Tasks.spawn(function()
-            local ctx = {allowFly = false, noCoins = 0, maxNoCoins = 4, lastTeleport = 0, inRound = false}
+            local ctx = {allowFly = false, lastTeleport = 0, inRound = false}
 
             local function resetRound()
                 State.Cache.CoinBlacklist = {}
-                ctx.noCoins = 0
                 ctx.allowFly = false
                 Farm.Done = false
             end
@@ -5186,13 +5206,11 @@
                     continue
                 end
 
-                if Farm.AreAllBagsFull() then
-                    ctx.noCoins = ctx.maxNoCoins
-                else
+                -- Сбор кончается только полными сумками (данные с ремоутов игры) или
+                -- концом раунда (цикл выше). Пустая карта — не конец: монеты появятся
+                if not Farm.AreAllBagsFull() then
                     Farm.CollectStep(ctx, character, humanoidRootPart)
-                end
-
-                if ctx.noCoins >= ctx.maxNoCoins then
+                else
                     Farm.Done = true
                     Farm.Unclaim()
                     pcall(DisableNoClip)
