@@ -7349,6 +7349,9 @@
         end)
     end
 
+    -- Снаружи (другой скрипт в executor'е): getgenv().MM2_Runtime.Rejoin()
+    Core.Rejoin = Rejoin
+
     local function ExecuteInf()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
     end
@@ -7663,6 +7666,9 @@
         end)
     end
 
+
+    -- Снаружи: getgenv().MM2_Runtime.ServerHop()
+    Core.ServerHop = ServerHop
 
     local function SpeedGlitch()
         local player = Players.LocalPlayer
