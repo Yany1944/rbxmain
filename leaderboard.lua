@@ -9270,11 +9270,18 @@
                 else
                     where, kind = "Other server", "Off"
                 end
+                -- Сумки коротко: «12/40 3/50» — в колонке ~350 px длинные имена валют не влезают
+                local bags = nil
+                if type(rec.bags) == "string" and rec.bags ~= "" then
+                    local values = {}
+                    for amount in rec.bags:gmatch("(%d+/[%d%?]+)") do table.insert(values, amount) end
+                    bags = #values > 0 and table.concat(values, " ") or nil
+                end
                 table.insert(rows, {
                     Key = tostring(rec.userId), Name = tostring(rec.name or "?"), Me = rec.me == true,
                     Group = group, Where = where, Kind = kind, Offline = kind == "Off" and where == "Offline",
                     Role = rec.role, Status = STATUS_TEXT[rec.status] or tostring(rec.status or "?"),
-                    Bags = (rec.bags and rec.bags ~= "") and rec.bags or nil,
+                    Bags = bags,
                 })
             end
             return targets, rows
@@ -9342,16 +9349,17 @@
                         BorderSizePixel = 0, Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, EDGE, 0, 15),
                     }, row)
                     Core.New("UICorner", {CornerRadius = UDim.new(1, 0)}, item.Dot)
-                    left = EDGE + 16
+                    left = EDGE + 18
                 end
-                -- 9 + 20 + 18 + 9 = ROW: как у строки с описанием в библиотеке
+                -- 9 + 20 + 18 + 9 = ROW: как у строки с описанием в библиотеке; точка
+                -- сдвигает обе строки (как точка автозагрузки в списке конфигов)
                 item.Title = label(row, {
                     Font = FONT.Bold, TextSize = TS.Title, TextColor3 = T.Text,
                     Position = UDim2.new(0, left, 0, 9), Size = UDim2.new(1, -(left + reserved), 0, 20),
                 })
                 item.Desc = label(row, {
                     Font = FONT.Body, TextSize = TS.Desc, TextColor3 = T.TextDark,
-                    Position = UDim2.new(0, EDGE, 0, 29), Size = UDim2.new(1, -(EDGE + reserved), 0, 18),
+                    Position = UDim2.new(0, left, 0, 29), Size = UDim2.new(1, -(left + reserved), 0, 18),
                 })
                 return item
             end
@@ -9434,11 +9442,12 @@
                     shown[entry.Key] = true
                     item.Row.LayoutOrder = index
                     item.Row.Visible = true
+                    -- Место — цветом точки; свой аккаунт — акцентным ником, как активный
+                    -- конфиг в списке конфигов; в описании цветная только роль
                     item.Dot.BackgroundColor3 = kindColor(entry.Kind)
-                    local muted = hex(T.TextDark)
-                    item.Title.TextColor3 = entry.Offline and T.TextDark or T.Text
-                    item.Title.Text = entry.Name .. (entry.Me and string.format(' <font color="%s">· you</font>', muted) or "")
-                    local parts = {string.format('<font color="%s">%s</font>', hex(kindColor(entry.Kind)), entry.Where)}
+                    item.Title.TextColor3 = entry.Me and T.AccentText or (entry.Offline and T.TextDark or T.Text)
+                    item.Title.Text = entry.Name
+                    local parts = {entry.Where}
                     if entry.Role then
                         table.insert(parts, string.format('<font color="%s">%s</font>', hex(kindColor(ROLE_KINDS[entry.Role] or "Off")), entry.Role))
                     end
@@ -9458,6 +9467,8 @@
                 end
             end
 
+            -- Цвета видов и роли в RichText перекраска темы не находит — обновляем сразу
+            if gui.OnThemeChanged then gui.OnThemeChanged(function() pcall(refresh) end) end
             local thread = Core.Tasks.spawn(function()
                 while Core.Alive and accountsHost.Parent do
                     local ok, err = pcall(refresh)
