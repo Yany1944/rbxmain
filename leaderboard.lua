@@ -4783,6 +4783,8 @@
         local finished = false
         repeat
             if Farm.FlingBusy() or not State.Settings.AutoFarmEnabled or not hrp.Parent then break end
+            -- Персонажа переставил кто-то другой (сервер, конец раунда) — не тянем назад
+            if (hrp.Position - hold.Position).Magnitude > 10 then break end
             hrp.CFrame = hold
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
@@ -5004,10 +5006,11 @@
     -- не быстрее полёта: от прошлого телепорта до следующего проходит не меньше
     -- времени перелёта ЭТОГО прыжка (Fly Speed; со Smart Collect — не дольше 2-3 с),
     -- и всё это время персонаж держится на точке собранной монеты — сервер на каждом
-    -- прыжке видит скорость полёта. Первая монета раунда — как прежде, сразу. Монету
-    -- выбирают по очереди (револьвер Farm Sync): в своё окно аккаунт видит заявки
-    -- всех, кто выбирал до него, и берёт ближайшую свободную, без зон. Выбор — в
-    -- первое своё окно после телепорта: ожидание окна идёт внутри времени перелёта.
+    -- прыжке видит скорость полёта. Первая монета раунда — как у полёта: не раньше
+    -- TP Delay после прошлого телепорта. Монету выбирают по очереди (револьвер Farm
+    -- Sync): в своё окно аккаунт видит заявки всех, кто выбирал до него, и берёт
+    -- ближайшую свободную, без зон. Выбор — в первое своё окно после телепорта:
+    -- ожидание окна идёт внутри времени перелёта.
     function Farm.TeleportMode()
         local sync = State.Runtime.FarmSync
         return sync ~= nil and sync.TeleportMode ~= nil and sync.TeleportMode()
@@ -5035,13 +5038,14 @@
     end
 
     -- Держим персонажа на hold, выбираем монету в своё окно и ждём, пока прыжок к
-    -- ней не станет не быстрее полёта. from — откуда и когда (мс часов ПК) был
-    -- прошлый прыжок; nil — первая монета раунда, прыжок сразу. Выбранную монету
-    -- забрали — выбираем заново, время перелёта считается уже до новой. nil —
+    -- ней не станет не быстрее полёта. from — откуда и когда (os.clock) был прошлый
+    -- прыжок; nil — первая монета раунда: прыжок не раньше notBefore. Выбранную
+    -- монету забрали — выбираем заново, время перелёта считается уже до новой. nil —
     -- прыгать нельзя: раунд кончился, сумки полны, режим выключен, нас убили, флинг
     -- (пауза прервана раньше срока — тоже nil: следующий шаг досчитает её от того
-    -- же прыжка); без свободных монет ждём их на месте
-    function Farm.PauseAndPick(hrp, hold, from)
+    -- же прыжка); без свободных монет ждём их на месте. Время прыжка — по os.clock:
+    -- часы ПК (окна очереди) может сдвинуть синхронизация времени
+    function Farm.PauseAndPick(hrp, hold, from, notBefore)
         local sync = State.Runtime.FarmSync
         local stallAt = sync.Now() + CONFIG.FarmSync.Queue.Stall * 1000
         local picked, readyAt, ready = nil, 0, false
@@ -5070,17 +5074,17 @@
                 if picked then
                     Farm.Claim(picked, hrp)
                     CreateCoinTracer(LocalPlayer.Character, picked)
-                    readyAt = now
+                    readyAt = notBefore or 0
                     if from then
                         local hop = (Farm.CoinPoint(picked).Position - from.Pos).Magnitude
-                        readyAt = from.At + Farm.FlightDuration(hop, State.Settings.CoinFarmFlySpeed) * 1000
+                        readyAt = from.At + Farm.FlightDuration(hop, State.Settings.CoinFarmFlySpeed)
                     end
                 else
                     Farm.Unclaim()
                 end
             end
             sync.TouchClaim(hold.Position)
-            ready = picked ~= nil and now >= readyAt
+            ready = picked ~= nil and os.clock() >= readyAt
             return ready
         end, hold)
         if stop or not ready then return nil end
@@ -5117,24 +5121,31 @@
         if State.Settings.AutoFarmEnabled and State.Settings.IsInvisible then
             pcall(function() ToggleInvisibility() end)
         end
-        EnableNoClip()
         sync.QueueRefresh()
 
         -- Откуда прыгаем: прошлый телепорт этого раунда (ctx.tpAt); пришли полётом —
-        -- перелёт отсчитываем с этой минуты; первая монета раунда — прыжок сразу
+        -- перелёт отсчитываем с этой минуты. Первая монета раунда — как у полёта:
+        -- телепорт не раньше TP Delay после прошлого, и до него персонажа не держим
+        -- (ноклип — только с первой монеты, как у полёта)
         local hold = Farm.HoldFrame(humanoidRootPart.Position)
-        local from = nil
-        if not ctx.tpAt and ctx.allowFly then ctx.tpAt = sync.Now() end
-        if ctx.tpAt then from = {Pos = hold.Position, At = ctx.tpAt} end
+        local from, notBefore = nil, nil
+        if ctx.allowFly then
+            EnableNoClip()
+            if not ctx.tpAt then ctx.tpAt = os.clock() end
+            from = {Pos = hold.Position, At = ctx.tpAt}
+        elseif ctx.lastTeleport > 0 then
+            notBefore = os.clock() + math.max(0, State.Settings.CoinFarmDelay - (tick() - ctx.lastTeleport))
+        end
 
-        local coin = Farm.PauseAndPick(humanoidRootPart, hold, from)
+        local coin = Farm.PauseAndPick(humanoidRootPart, hold, from, notBefore)
         if not coin or Farm.FlingBusy() or not State.Settings.AutoFarmEnabled then return end
 
+        EnableNoClip()
         local point = Farm.CoinPoint(coin)
         humanoidRootPart.CFrame = point
         humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
         humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
-        ctx.tpAt = sync.Now()
+        ctx.tpAt = os.clock()
         ctx.allowFly = true
         ctx.lastTeleport = tick()
         RemoveCoinTracer()
