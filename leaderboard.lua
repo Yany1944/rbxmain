@@ -9197,8 +9197,12 @@
         end
 
         -- ── Вкладка Sync ───────────────────────────────────────────────────────────
-        local ROLE_COLORS = {Murderer = "255,85,85", Zombie = "255,85,85", Sheriff = "50,150,255", Innocent = "85,255,120"}
         local NO_GROUP = "—"
+        local ROLE_KINDS = {Murderer = "Error", Zombie = "Error", Sheriff = "Info", Innocent = "Success"}
+        local STATUS_TEXT = {
+            collecting = "Collecting", done = "Bags full", dead = "Dead", lobby = "Lobby",
+            idle = "Farm off", teleporting = "Teleporting",
+        }
 
         -- Аккаунты таблицы: мы и те, кто подавал голос за последний час (давно
         -- молчащие остаются в белом списке, но в таблице не нужны)
@@ -9216,127 +9220,248 @@
             return list
         end
 
-        -- targets: [jobId] = группа, чья это живая цель. Цель своей группы — зелёная,
-        -- чужой — оранжевая (аккаунт там в гостях и уйдёт)
-        local function line(rec, targets)
-            local where
-            local onTarget = targets[rec.jobId]
-            if not rec.me and not fresh(rec) then
-                where = "<font color=\"rgb(150,150,150)\">offline</font>"
-            elseif rec.status == "teleporting" then
-                where = "<font color=\"rgb(255,170,50)\">teleporting</font>"
-            elseif onTarget then
-                local own = onTarget == groupOf(rec.userId)
-                where = string.format("<font color=\"rgb(%s)\">target %s</font>", own and "85,255,120" or "255,170,50", onTarget)
-            elseif rec.jobId == game.JobId then
-                where = "here"
-            else
-                where = "<font color=\"rgb(150,150,150)\">other</font>"
-            end
-            local role = rec.role and string.format(" · <font color=\"rgb(%s)\">%s</font>", ROLE_COLORS[rec.role] or "220,220,220", rec.role) or ""
-            local bags = (rec.bags and rec.bags ~= "") and (" · " .. rec.bags) or ""
-            return string.format("<b>%s</b>%s · %s%s · %s%s", rec.name or "?", rec.me and " (me)" or "", where, role, rec.status or "?", bags)
-        end
-
-        local function targetLine(group, target, alive)
-            if not target then return string.format("Target %s: none", group) end
-            local state
-            if not alive then
-                state = "<font color=\"rgb(255,85,85)\">expired</font>"
-            elseif field("ownerSearching." .. group) == true then
-                state = "<font color=\"rgb(255,170,50)\">owner searching</font>"
-            else
-                state = "<font color=\"rgb(85,255,120)\">active</font>"
-            end
-            return string.format("Target %s: <b>%s</b> · %s… · %s", group, tostring(target.ownerName), target.jobId:sub(1, 8), state)
-        end
-
-        -- Строка на цель каждой группы, затем аккаунты: {Key, Group, Text}
+        -- Данные карточек: цели групп и аккаунты. Kind — вид статуса из
+        -- CONFIG.Notification.Kinds (Success/Warning/Error/Info/Off): им красятся
+        -- плашки, точки и роли — те же цвета, что у уведомлений
         function FarmSync.TableData()
-            local heads, targets = {}, {}
+            local accounts = tableAccounts()
+            local targets, onTarget = {}, {}
             for _, group in ipairs(SC.Groups) do
                 local target, alive = FarmSync.Target(group)
-                table.insert(heads, targetLine(group, target, alive))
-                if alive then targets[target.jobId] = group end
+                local entry = {Group = group}
+                if not target then
+                    entry.Kind, entry.State = "Off", "No target"
+                    entry.Desc = "Set from an account of this group"
+                else
+                    if not alive then
+                        entry.Kind, entry.State = "Error", "Expired"
+                    elseif field("ownerSearching." .. group) == true then
+                        entry.Kind, entry.State = "Warning", "Searching"
+                    else
+                        entry.Kind, entry.State = "Success", "Active"
+                    end
+                    if alive then onTarget[target.jobId] = group end
+                    local members, here = 0, 0
+                    for _, rec in ipairs(accounts) do
+                        if groupOf(rec.userId) == group then
+                            members += 1
+                            if (rec.me or fresh(rec)) and rec.jobId == target.jobId then here += 1 end
+                        end
+                    end
+                    entry.Desc = string.format("%s · %d/%d on server · %s", tostring(target.ownerName), here, members, target.jobId:sub(1, 8))
+                end
+                table.insert(targets, entry)
             end
+
             local rows = {}
-            for _, rec in ipairs(tableAccounts()) do
-                table.insert(rows, {Key = tostring(rec.userId), Group = groupOf(rec.userId), Text = line(rec, targets)})
+            for _, rec in ipairs(accounts) do
+                local group = groupOf(rec.userId)
+                local where, kind
+                local targetGroup = onTarget[rec.jobId]
+                if not rec.me and not fresh(rec) then
+                    where, kind = "Offline", "Off"
+                elseif rec.status == "teleporting" then
+                    where, kind = "Teleporting", "Info"
+                elseif targetGroup then
+                    -- Цель своей группы — зелёная, чужой — жёлтая (аккаунт там в гостях и уйдёт)
+                    where, kind = "Target " .. targetGroup, targetGroup == group and "Success" or "Warning"
+                elseif rec.jobId == game.JobId then
+                    where, kind = "This server", "Info"
+                else
+                    where, kind = "Other server", "Off"
+                end
+                table.insert(rows, {
+                    Key = tostring(rec.userId), Name = tostring(rec.name or "?"), Me = rec.me == true,
+                    Group = group, Where = where, Kind = kind, Offline = kind == "Off" and where == "Offline",
+                    Role = rec.role, Status = STATUS_TEXT[rec.status] or tostring(rec.status or "?"),
+                    Bags = (rec.bags and rec.bags ~= "") and rec.bags or nil,
+                })
             end
-            return heads, rows
+            return targets, rows
         end
 
-        -- У строки аккаунта — переключатель группы «— A B» (segmented — фабрика
-        -- сегментной панели GUI): меню любого аккаунта правит группы всех на ПК
-        function FarmSync.BuildTable(tab, getTokens, segmented)
-            local host = tab:CreateHost(nil)
-            Core.New("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4)}, host)
-            local face = Notify.font(Enum.FontWeight.Medium)
-            local heads, rows = {}, {}
+        -- Правая колонка вкладки: карточки TARGETS и ACCOUNTS. Вёрстка — как у строк
+        -- GUI-библиотеки (gui.Theme): строка 56 с заголовком и приглушённым описанием,
+        -- отступ 14 от края, подсветка при наведении, контрол справа по центру. Статус
+        -- цели — плашкой, место аккаунта — точкой у ника; группа — переключателем
+        -- «— A B» того же вида, что «Mode» (меню любого аккаунта правит всех на ПК)
+        function FarmSync.BuildTable(tab, gui)
+            local Theme = gui and gui.Theme
+            if not Theme then return end   -- старый GUI.lua с CDN: без токенов темы таблицы нет
+            local T, G, FONT, TS = Theme.T, Theme.G, Theme.FONT, Theme.TS
+            local EDGE, ROW, INSET_X, INSET_Y, HOVER = 14, 56, 4, 2, 0.12
+            local CTRL_H, R_CTRL = Theme.CTRL_H or 28, Theme.R_CTRL or 6
+            local kinds = CONFIG.Notification.Kinds
 
-            local function newLabel(parent, order)
-                local label = Core.New("TextLabel", {
-                    BackgroundTransparency = 1, RichText = true, TextWrapped = true,
-                    TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13,
-                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                    LayoutOrder = order,
-                }, parent)
-                if face then label.FontFace = face else label.Font = Enum.Font.GothamMedium end
-                return label
+            local function kindColor(kind)
+                local tokens = gui.GetThemeTokens and gui.GetThemeTokens() or {}
+                local light = tokens.IsLight and CONFIG.Notification.LightKindColors[kind]
+                if light then return light end
+                if kind == "Off" then return T.TextDark end
+                return (kinds[kind] or kinds.Off).Color
+            end
+            local function hex(color)
+                return string.format("#%02X%02X%02X", math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5))
             end
 
-            local function newRow(key)
-                local frame = Core.New("Frame", {
-                    BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-                }, host)
-                local row = {Frame = frame, Label = newLabel(frame, 0)}
-                local ok, panel = pcall(function() return segmented and segmented(frame, {Name = "Group", Height = 22, TextSize = 12}) end)
+            -- Шрифт темы — Font (BuilderSans) или, если его нет, Enum.Font: как Create в GUI
+            local function label(parent, props)
+                local object = Core.New("TextLabel", {
+                    BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left,
+                    TextYAlignment = Enum.TextYAlignment.Center, TextTruncate = Enum.TextTruncate.AtEnd,
+                    RichText = true,
+                }, parent)
+                for key, value in pairs(props) do
+                    if key == "Font" and typeof(value) == "Font" then
+                        if not pcall(function() object.FontFace = value end) then object.Font = Enum.Font.GothamMedium end
+                    else
+                        object[key] = value
+                    end
+                end
+                return object
+            end
+
+            -- Строка карточки: подложка подсветки с отступом от краёв, как у addRow
+            local function newRow(host, reserved, dot)
+                local row = Core.New("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, ROW)}, host)
+                local fill = Core.New("Frame", {
+                    BackgroundColor3 = G.Gray100, BackgroundTransparency = 1, BorderSizePixel = 0,
+                    Position = UDim2.new(0, INSET_X, 0, INSET_Y), Size = UDim2.new(1, -INSET_X * 2, 1, -INSET_Y * 2),
+                }, row)
+                Core.New("UICorner", {CornerRadius = UDim.new(0, R_CTRL)}, fill)
+                row.MouseEnter:Connect(function()
+                    TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = HOVER}):Play()
+                end)
+                row.MouseLeave:Connect(function()
+                    TweenService:Create(fill, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+                end)
+                local left = EDGE
+                local item = {Row = row}
+                if dot then
+                    item.Dot = Core.New("Frame", {
+                        BorderSizePixel = 0, Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, EDGE, 0, 15),
+                    }, row)
+                    Core.New("UICorner", {CornerRadius = UDim.new(1, 0)}, item.Dot)
+                    left = EDGE + 16
+                end
+                -- 9 + 20 + 18 + 9 = ROW: как у строки с описанием в библиотеке
+                item.Title = label(row, {
+                    Font = FONT.Bold, TextSize = TS.Title, TextColor3 = T.Text,
+                    Position = UDim2.new(0, left, 0, 9), Size = UDim2.new(1, -(left + reserved), 0, 20),
+                })
+                item.Desc = label(row, {
+                    Font = FONT.Body, TextSize = TS.Desc, TextColor3 = T.TextDark,
+                    Position = UDim2.new(0, EDGE, 0, 29), Size = UDim2.new(1, -(EDGE + reserved), 0, 18),
+                })
+                return item
+            end
+
+            -- Плашка статуса: цвет вида на его же полупрозрачной заливке
+            local function newPill(row)
+                local pill = Core.New("Frame", {
+                    AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -EDGE, 0.5, 0),
+                    Size = UDim2.fromOffset(0, 24), AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundTransparency = 0.85, BorderSizePixel = 0,
+                }, row)
+                Core.New("UICorner", {CornerRadius = UDim.new(1, 0)}, pill)
+                Core.New("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)}, pill)
+                local text = label(pill, {
+                    Font = FONT.Bold, TextSize = TS.Status, Size = UDim2.new(0, 0, 1, 0),
+                    AutomaticSize = Enum.AutomaticSize.X, TextTruncate = Enum.TextTruncate.None,
+                })
+                return pill, text
+            end
+
+            -- Хост: строки одна под другой, по высоте содержимого
+            local function newHost(title)
+                tab:CreateSection(title, "right")
+                local host = tab:CreateHost(nil)
+                Core.New("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder}, host)
+                return host
+            end
+
+            local targetsHost = newHost("TARGETS")
+            local accountsHost = newHost("ACCOUNTS")
+            local targetRows, accountRows = {}, {}
+            local PILL_W = 112   -- место под плашку справа
+
+            local function accountRow(key)
+                local selector = 4 + 3 * 36 + 2 * 4 + 4
+                local item = newRow(accountsHost, selector + EDGE + 12, true)
+                local ok, panel = pcall(function()
+                    return gui.CreateSegmentedPanel(item.Row, {Name = "Group", Height = CTRL_H + 4, TextSize = TS.Chip})
+                end)
                 if ok and panel then
                     local options = {NO_GROUP}
                     for _, group in ipairs(SC.Groups) do table.insert(options, group) end
                     for index, option in ipairs(options) do
-                        panel:Add(option, option, 24, index, function(choice)
+                        panel:Add(option, option, 36, index, function(choice)
                             panel:Set(choice)
                             FarmSync.SetGroup(key, choice ~= NO_GROUP and choice or nil)
                         end)
                     end
-                    panel.Root.AnchorPoint = Vector2.new(1, 0)
-                    panel.Root.Position = UDim2.new(1, 0, 0, 0)
-                    row.Label.Size = UDim2.new(1, -(panel.Root.Size.X.Offset + 8), 0, 0)
-                    row.Panel = panel
+                    panel.Root.AnchorPoint = Vector2.new(1, 0.5)
+                    panel.Root.Position = UDim2.new(1, -EDGE, 0.5, 0)
+                    item.Panel = panel
                 end
-                rows[key] = row
-                return row
+                accountRows[key] = item
+                return item
+            end
+
+            local function refresh()
+                local targets, rows = FarmSync.TableData()
+                for index, entry in ipairs(targets) do
+                    local item = targetRows[index]
+                    if not item then
+                        item = newRow(targetsHost, PILL_W + EDGE, false)
+                        item.Pill, item.PillText = newPill(item.Row)
+                        item.Row.LayoutOrder = index
+                        targetRows[index] = item
+                    end
+                    local color = kindColor(entry.Kind)
+                    item.Title.TextColor3 = T.Text
+                    item.Title.Text = "Group " .. entry.Group
+                    item.Desc.TextColor3 = T.TextDark
+                    item.Desc.Text = entry.Desc
+                    item.Pill.BackgroundColor3 = color
+                    item.PillText.TextColor3 = color
+                    item.PillText.Text = entry.State
+                end
+
+                local shown = {}
+                for index, entry in ipairs(rows) do
+                    local item = accountRows[entry.Key] or accountRow(entry.Key)
+                    shown[entry.Key] = true
+                    item.Row.LayoutOrder = index
+                    item.Row.Visible = true
+                    item.Dot.BackgroundColor3 = kindColor(entry.Kind)
+                    local muted = hex(T.TextDark)
+                    item.Title.TextColor3 = entry.Offline and T.TextDark or T.Text
+                    item.Title.Text = entry.Name .. (entry.Me and string.format(' <font color="%s">· you</font>', muted) or "")
+                    local parts = {string.format('<font color="%s">%s</font>', hex(kindColor(entry.Kind)), entry.Where)}
+                    if entry.Role then
+                        table.insert(parts, string.format('<font color="%s">%s</font>', hex(kindColor(ROLE_KINDS[entry.Role] or "Off")), entry.Role))
+                    end
+                    table.insert(parts, entry.Status)
+                    if entry.Bags then table.insert(parts, entry.Bags) end
+                    item.Desc.TextColor3 = T.TextDark
+                    item.Desc.Text = table.concat(parts, " · ")
+                    if item.Panel then
+                        local value = entry.Group or NO_GROUP
+                        if item.Panel.Value ~= value then item.Panel:Set(value, false) end
+                    else
+                        item.Title.Text = (entry.Group and ("[" .. entry.Group .. "] ") or "") .. item.Title.Text
+                    end
+                end
+                for key, item in pairs(accountRows) do
+                    if not shown[key] then item.Row.Visible = false end
+                end
             end
 
             local thread = Core.Tasks.spawn(function()
-                while Core.Alive and host.Parent do
-                    local tokens = getTokens and getTokens() or {}
-                    local color = tokens.Text or CONFIG.Colors.Text
-                    local headLines, list = FarmSync.TableData()
-                    for index, text in ipairs(headLines) do
-                        heads[index] = heads[index] or newLabel(host, index)
-                        heads[index].TextColor3 = color
-                        heads[index].Text = text
-                    end
-                    local shown = {}
-                    for index, entry in ipairs(list) do
-                        local row = rows[entry.Key] or newRow(entry.Key)
-                        shown[entry.Key] = true
-                        row.Frame.LayoutOrder = 100 + index
-                        row.Frame.Visible = true
-                        row.Label.TextColor3 = color
-                        if row.Panel then
-                            row.Label.Text = entry.Text
-                            local value = entry.Group or NO_GROUP
-                            if row.Panel.Value ~= value then row.Panel:Set(value, false) end
-                        else
-                            row.Label.Text = (entry.Group and ("[" .. entry.Group .. "] ") or "") .. entry.Text
-                        end
-                    end
-                    for key, row in pairs(rows) do
-                        if not shown[key] then row.Frame.Visible = false end
-                    end
+                while Core.Alive and accountsHost.Parent do
+                    local ok, err = pcall(refresh)
+                    if not ok then warn("[Farm Sync] table: " .. tostring(err)) end
                     task.wait(1)
                 end
             end)
@@ -10208,8 +10333,7 @@
             SyncTab:CreateSection("GROUPS")
             SyncTab:CreateButton("", "Split Accounts into Groups", CONFIG.Colors.Accent, "FarmSyncSplit")
 
-            SyncTab:CreateSection("ACCOUNTS", "right")
-            FarmSync.BuildTable(SyncTab, GUI.GetThemeTokens, GUI.CreateSegmentedPanel)
+            FarmSync.BuildTable(SyncTab, GUI)     -- справа: карточки TARGETS и ACCOUNTS
     end
 
     do
