@@ -356,6 +356,15 @@
                 KillEvery     = 2,     -- сек между ударами мурдерера по посторонним
                 -- Группы аккаунтов: у каждой своя цель (третья группа — ещё одна буква)
                 Groups        = {"A", "B"},
+                -- Teleport Collect: касание монеты после прыжка. Сразу после телепорта
+                -- сервер ещё видит нас на старом месте (пинг) — касание не засчитывается
+                -- или засчитывается повтором в случайный момент, и MM2 кикает «invalid
+                -- position» за слишком быстрый сбор
+                TeleportTouch = {
+                    Min    = 0.25,     -- сек после телепорта — не раньше
+                    Margin = 0.1,      -- сек сверх пинга
+                    Stay   = 0.1,      -- сек стоим у монеты после касания
+                },
                 -- Coin Split: монеты делятся между нашими аккаунтами на одном сервере
                 CoinSplit = {
                     Enabled   = true,
@@ -5078,16 +5087,27 @@
         return picked
     end
 
-    -- Касание сразу после телепорта сервер может не засчитать: наша новая позиция
-    -- до него ещё не дошла. Монета пережила пинг, а мы всё ещё у неё — касаемся ещё
-    -- раз; издалека (уже прыгнули дальше) не касаемся никогда
-    function Farm.TeleportTouch(hrp, coin)
-        Farm.Touch(hrp, coin)
-        task.wait(0.6)
-        if coin.Parent and coin:FindFirstChildWhichIsA("TouchTransmitter") and hrp.Parent
-            and (hrp.Position - coin.Position).Magnitude <= 6 then
-            Farm.Touch(hrp, coin)
-        end
+    -- Касание — один раз и через пинг после телепорта (CONFIG.FarmSync.TeleportTouch),
+    -- стоя на точке: к этому моменту сервер видит нас у монеты, и каждая монета
+    -- засчитывается в одном и том же месте цикла — интервалы между сборами равны
+    -- интервалам прыжков, не короче времени перелёта
+    function Farm.TeleportTouch(hrp, coin, point)
+        local cfg = CONFIG.FarmSync.TeleportTouch
+        local Aim = State.Runtime.SheriffAim
+        local ping = (Aim and Aim.Ping) and Aim.Ping() or 0.2
+        local touchAt = os.clock() + math.max(cfg.Min, ping + cfg.Margin)
+        local stage = 0
+        Farm.HoldUntil(function()
+            local clock = os.clock()
+            if stage == 0 and clock >= touchAt then
+                stage = 1
+                if firetouchinterest then pcall(firetouchinterest, hrp, coin, 0) end
+            elseif stage == 1 and clock >= touchAt + 0.05 then
+                stage = 2
+                if firetouchinterest then pcall(firetouchinterest, hrp, coin, 1) end
+            end
+            return stage == 2 and clock >= touchAt + 0.05 + cfg.Stay
+        end, point)
     end
 
     function Farm.TeleportStep(ctx, character, humanoidRootPart)
@@ -5117,12 +5137,13 @@
         ctx.tpAt = sync.Now()
         ctx.allowFly = true
         ctx.lastTeleport = tick()
-        Core.Tasks.spawn(Farm.TeleportTouch, humanoidRootPart, coin)
         RemoveCoinTracer()
         -- Заявка больше не нужна: собранную монету держит Taken, а на её точке
         -- может появиться новая
         Farm.Unclaim()
         Farm.CoinDone(coin)
+        -- Ожидание касания входит во время перелёта следующего прыжка (от tpAt)
+        Farm.TeleportTouch(humanoidRootPart, coin, point)
     end
 
     -- ─── Сбор одной монеты (первая — телепортом, дальше — полётом) ─────────────
