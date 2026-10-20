@@ -4746,11 +4746,23 @@
         return coinContainer or Workspace
     end
 
+    -- Поза полёта в точке: в Underground Mode — лёжа (как SmoothFlyToCoin), иначе ровно
+    function Farm.HoldFrame(position)
+        if State.Settings.UndergroundMode then
+            return CFrame.new(position) * CFrame.Angles(math.rad(90), 0, 0)
+        end
+        return CFrame.new(position)
+    end
+
     -- Пауза в сборе без падения: во время сбора включён ноклип (а в Underground Mode
     -- мы и вовсе под картой), и персонаж без управления проваливается в пустоту и
     -- умирает. Держим его на месте так же, как в полёте, — CFrame каждый кадр.
     -- done() зовётся каждый кадр: true — пауза кончилась; hold — где держать
-    -- (по умолчанию — где стоим)
+    -- (по умолчанию — где стоим, в позе полёта). Поза не берётся из текущего CFrame:
+    -- между кадрами Humanoid чуть доворачивает тело, и пауза за паузой (ожидание
+    -- монет — это Hold по 0.3 с подряд) персонаж наклонялся головой вперёд почти
+    -- до вертикали. На выходе ставим точку ещё раз — набег последнего шага физики
+    -- не переходит в следующую паузу
     function Farm.HoldUntil(done, hold)
         local character = LocalPlayer.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -4758,14 +4770,21 @@
             repeat task.wait() until done() or Farm.FlingBusy() or not State.Settings.AutoFarmEnabled
             return
         end
-        hold = hold or hrp.CFrame
+        hold = hold or Farm.HoldFrame(hrp.Position)
+        local finished = false
         repeat
             if Farm.FlingBusy() or not State.Settings.AutoFarmEnabled or not hrp.Parent then break end
             hrp.CFrame = hold
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
             task.wait()
-        until done()
+            finished = done()
+        until finished
+        if finished and hrp.Parent then
+            hrp.CFrame = hold
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
     end
 
     function Farm.Hold(seconds)
@@ -4972,12 +4991,14 @@
     local knifeThrow
 
     -- ─── Teleport Collect: монеты телепортом на целевом сервере ─────────────────
-    -- Вместо полёта — телепорт к монете и касание, затем пауза длиной в перелёт до
-    -- неё (Fly Speed; со Smart Collect — не дольше 2-3 с); персонаж держится на
-    -- точке монеты. Первая монета раунда — как прежде, без паузы. Монету выбирают
-    -- по очереди (револьвер Farm Sync): в своё окно аккаунт видит заявки всех, кто
-    -- выбирал до него, и берёт ближайшую свободную, без зон. Следующую выбирает в
-    -- последнее своё окно паузы — очередь не замедляет сбор.
+    -- Вместо полёта — прыжки телепортом от монеты к монете с касанием. Каждый прыжок
+    -- не быстрее полёта: от прошлого телепорта до следующего проходит не меньше
+    -- времени перелёта ЭТОГО прыжка (Fly Speed; со Smart Collect — не дольше 2-3 с),
+    -- и всё это время персонаж держится на точке собранной монеты — сервер на каждом
+    -- прыжке видит скорость полёта. Первая монета раунда — как прежде, сразу. Монету
+    -- выбирают по очереди (револьвер Farm Sync): в своё окно аккаунт видит заявки
+    -- всех, кто выбирал до него, и берёт ближайшую свободную, без зон. Выбор — в
+    -- первое своё окно после телепорта: ожидание окна идёт внутри времени перелёта.
     function Farm.TeleportMode()
         local sync = State.Runtime.FarmSync
         return sync ~= nil and sync.TeleportMode ~= nil and sync.TeleportMode()
@@ -4986,9 +5007,9 @@
     -- Точка монеты — та же, что у полёта: под ней в Underground Mode, иначе над ней
     function Farm.CoinPoint(coin)
         if State.Settings.UndergroundMode then
-            return CFrame.new(coin.Position - Vector3.new(0, State.Settings.UndergroundOffset, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+            return Farm.HoldFrame(coin.Position - Vector3.new(0, State.Settings.UndergroundOffset, 0))
         end
-        return CFrame.new(coin.Position + Vector3.new(0, 1, 0))
+        return Farm.HoldFrame(coin.Position + Vector3.new(0, 1, 0))
     end
 
     -- Ближайшая монета, которую не заняли и не собрали другие наши
@@ -5004,14 +5025,18 @@
         return best
     end
 
-    -- Держим персонажа на hold до deadline (мс часов ПК) и выбираем монету в свою
-    -- очередь. Пауза кончилась, а своего окна не было — ждём его и сразу дальше.
-    -- nil — выбора нет: раунд кончился, сумки полны, режим выключен, нас убили,
-    -- флинг; без свободных монет ждём их на месте
-    function Farm.PauseAndPick(hrp, hold, deadline)
+    -- Держим персонажа на hold, выбираем монету в своё окно и ждём, пока прыжок к
+    -- ней не станет не быстрее полёта. from — откуда и когда (мс часов ПК) был
+    -- прошлый прыжок; nil — первая монета раунда, прыжок сразу. Выбранную монету
+    -- забрали — выбираем заново, время перелёта считается уже до новой. nil —
+    -- прыгать нельзя: раунд кончился, сумки полны, режим выключен, нас убили, флинг
+    -- (пауза прервана раньше срока — тоже nil: следующий шаг досчитает её от того
+    -- же прыжка); без свободных монет ждём их на месте
+    function Farm.PauseAndPick(hrp, hold, from)
         local sync = State.Runtime.FarmSync
-        local stallAt = deadline + CONFIG.FarmSync.Queue.Stall * 1000
-        local picked, stop, nextCheck, lastFrame = nil, false, 0, os.clock()
+        local stallAt = sync.Now() + CONFIG.FarmSync.Queue.Stall * 1000
+        local picked, readyAt, ready = nil, 0, false
+        local stop, nextCheck, lastFrame = false, 0, os.clock()
         Farm.HoldUntil(function()
             local clock = os.clock()
             -- Клиент висел: это время в ожидание своего окна не входит (после фриза
@@ -5027,31 +5052,40 @@
                     return true
                 end
             end
-            -- Монету, выбранную в паузе, забрали — выбираем в следующее своё окно
-            if picked and not Farm.CoinValid(picked) then picked = nil end
+            -- Выбранную монету забрали посторонние (или, при лаге, наш с более ранней
+            -- заявкой) — выбираем в следующее своё окно
+            if picked and (not Farm.CoinValid(picked) or Farm.CoinTaken(picked)) then picked = nil end
             local now = sync.Now()
-            if not picked and sync.TakeTurn(deadline, now >= stallAt) then
+            if not picked and sync.TakeTurn(now, now >= stallAt) then
                 picked = Farm.NearestFreeCoin(hold.Position)
                 if picked then
                     Farm.Claim(picked, hrp)
                     CreateCoinTracer(LocalPlayer.Character, picked)
+                    readyAt = now
+                    if from then
+                        local hop = (Farm.CoinPoint(picked).Position - from.Pos).Magnitude
+                        readyAt = from.At + Farm.FlightDuration(hop, State.Settings.CoinFarmFlySpeed) * 1000
+                    end
                 else
                     Farm.Unclaim()
                 end
             end
             sync.TouchClaim(hold.Position)
-            return picked ~= nil and now >= deadline
+            ready = picked ~= nil and now >= readyAt
+            return ready
         end, hold)
-        if stop then return nil end
+        if stop or not ready then return nil end
         return picked
     end
 
     -- Касание сразу после телепорта сервер может не засчитать: наша новая позиция
-    -- до него ещё не дошла. Монета осталась — касаемся ещё раз
+    -- до него ещё не дошла. Монета пережила пинг, а мы всё ещё у неё — касаемся ещё
+    -- раз; издалека (уже прыгнули дальше) не касаемся никогда
     function Farm.TeleportTouch(hrp, coin)
         Farm.Touch(hrp, coin)
-        task.wait(0.2)
-        if coin.Parent and coin:FindFirstChildWhichIsA("TouchTransmitter") and hrp.Parent then
+        task.wait(0.6)
+        if coin.Parent and coin:FindFirstChildWhichIsA("TouchTransmitter") and hrp.Parent
+            and (hrp.Position - coin.Position).Magnitude <= 6 then
             Farm.Touch(hrp, coin)
         end
     end
@@ -5066,22 +5100,22 @@
         EnableNoClip()
         sync.QueueRefresh()
 
-        -- Монета, выбранная в прошлой паузе: её могли забрать посторонние, а при
-        -- лаге — и наш с более ранней заявкой. Тогда — ближайшее своё окно
-        local coin = ctx.nextCoin
-        ctx.nextCoin = nil
-        if coin and (not Farm.CoinValid(coin) or Farm.CoinTaken(coin)) then coin = nil end
-        if not coin then
-            coin = Farm.PauseAndPick(humanoidRootPart, humanoidRootPart.CFrame, sync.Now())
-            if not coin then return end
-        end
+        -- Откуда прыгаем: прошлый телепорт этого раунда (ctx.tpAt); пришли полётом —
+        -- перелёт отсчитываем с этой минуты; первая монета раунда — прыжок сразу
+        local hold = Farm.HoldFrame(humanoidRootPart.Position)
+        local from = nil
+        if not ctx.tpAt and ctx.allowFly then ctx.tpAt = sync.Now() end
+        if ctx.tpAt then from = {Pos = hold.Position, At = ctx.tpAt} end
 
-        if Farm.FlingBusy() or not State.Settings.AutoFarmEnabled then return end
+        local coin = Farm.PauseAndPick(humanoidRootPart, hold, from)
+        if not coin or Farm.FlingBusy() or not State.Settings.AutoFarmEnabled then return end
+
         local point = Farm.CoinPoint(coin)
-        local from = humanoidRootPart.Position
         humanoidRootPart.CFrame = point
         humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
         humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+        ctx.tpAt = sync.Now()
+        ctx.allowFly = true
         ctx.lastTeleport = tick()
         Core.Tasks.spawn(Farm.TeleportTouch, humanoidRootPart, coin)
         RemoveCoinTracer()
@@ -5089,13 +5123,6 @@
         -- может появиться новая
         Farm.Unclaim()
         Farm.CoinDone(coin)
-
-        local pause = 0.2
-        if ctx.allowFly then
-            pause = Farm.FlightDuration((point.Position - from).Magnitude, State.Settings.CoinFarmFlySpeed)
-        end
-        ctx.allowFly = true
-        ctx.nextCoin = Farm.PauseAndPick(humanoidRootPart, point, sync.Now() + pause * 1000)
     end
 
     -- ─── Сбор одной монеты (первая — телепортом, дальше — полётом) ─────────────
@@ -5104,7 +5131,7 @@
             Farm.TeleportStep(ctx, character, humanoidRootPart)
             return
         end
-        ctx.nextCoin = nil
+        ctx.tpAt = nil          -- полёт: следующий прыжок Teleport Collect — от новой точки
 
         local coin = FindNearestCoin()
         if not coin then
@@ -5345,7 +5372,7 @@
             local function resetRound()
                 State.Cache.CoinBlacklist = {}
                 ctx.allowFly = false
-                ctx.nextCoin = nil      -- Teleport Collect: монета, выбранная в паузе
+                ctx.tpAt = nil          -- Teleport Collect: время прошлого прыжка
                 Farm.Done = false
             end
 
