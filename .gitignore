@@ -1,40 +1,26 @@
-/.claude
-/Debuggers
-/.vscode
-*.md
-skinchanger.lua
-serverhop.lua
-mm2_skins.json
-MainScript.lua.bak
+# Репозиторий публичный: в нём лежит только то, что скрипты загружают по прямой
+# ссылке во время игры (raw.githubusercontent.com / cdn.jsdelivr.net), и то, без
+# чего эти файлы не работают. Всё остальное — локально и в коммиты не попадает.
+# Новый публичный файл добавляется сюда строкой "!/путь" (для папки — ещё и "!/папка/").
 
-!/docs/refactor-audit.md
-!/docs/state-layout.md
-!/docs/refactor-validation.md
-docs/state-layout.md
-docs/refactor-audit.md
-docs/refactor-validation.md
-Assets/LICENSE.txt
-/Relay
+/*
+!/.gitignore
 
-# Bundle build artifacts and secrets (never commit)
-/build/secrets.json
-/build/*.lua
-/build/*.manifest.json
+# Загружаются по прямой ссылке
+!/leaderboard.lua
+!/Catalog.lua
 
-!/admin-panel/README.md
+# Модули, которые лидерборд тянет по ссылке (CONFIG.Modules, GUIFactory)
+!/Libraryes/
+/Libraryes/*
+!/Libraryes/GUI.lua
+!/Libraryes/Optimization.lua
 
-# Owner-only local tools (never publish)
-/OwnerTools.lua
-
-# Build output (build-dev.bat / build-release.bat)
-/dist/
-/Violite.dev.lua
-
-!/build/KEY-LOADER.md
-
-# Control service private state; kept outside the deploy checkout in production.
-/.local/
-/control-server/*.sqlite*
-/control-server/config.json
-/control-server/FIRST-LOGIN.txt
-!/control-server/README.md
+# Emotes и то, что он подгружает с jsDelivr (SafeLoad)
+!/Scripts/
+/Scripts/*
+!/Scripts/Emotes.lua
+!/Scripts/Notify.lua
+!/Scripts/Settings.lua
+!/Scripts/OpenEmote.lua
+!/Scripts/count-emote
