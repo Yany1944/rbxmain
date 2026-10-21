@@ -216,11 +216,13 @@
             -- 0.25 — в 2 случаях из 3, повторы — через 0.3–0.55 с; засчитывается с 4
             -- studs от монеты, с 7 — нет; CoinCollected приходит ~0.3 с после касания
             CoinCollect = {
-                MaxSpeed     = 30,     -- studs/s между засчитанными монетами (кики — от ~41)
-                TouchFirst   = 0.3,    -- сек после телепорта до первого касания
-                TouchRetry   = 0.15,   -- сек между повторами, пока монету не засчитали
-                TouchTimeout = 2,      -- сек повторов после первого касания
-                TouchRadius  = 4,      -- studs: в полёте касаемся не дальше этого от монеты
+                MaxSpeed      = 30,    -- studs/s между засчитанными монетами (кики — от ~41)
+                TeleportSpeed = 26,    -- studs/s темп Teleport Collect: ~13% запаса до MaxSpeed на сеть
+                TouchFirst    = 0.3,   -- сек после телепорта до первого касания
+                TouchRetry    = 0.15,  -- сек между повторами — но не раньше пинга + RetryMargin
+                RetryMargin   = 0.1,   -- сек сверх пинга до повтора: засчёт мог ещё не дойти
+                TouchTimeout  = 2,     -- сек повторов после первого касания
+                TouchRadius   = 4,     -- studs: в полёте касаемся не дальше этого от монеты
             },
             -- Ивентовый Battle Pass (Halloween 2026: 600 валюты за тир, 30 тиров).
             -- Имя ивента, валюта и цены читаются из EventInfoService, здесь — только тайминги
@@ -383,8 +385,8 @@
                 },
                 -- Teleport Collect: монету выбирают по очереди («револьвер», см. БЛОК 18.5)
                 Queue = {
-                    Window = 0.2,      -- сек: окно выбора одного аккаунта
-                    Guard  = 0.1,      -- сек: выбор только в начале окна — запись успеет до следующего
+                    Window = 0.1,      -- сек: окно выбора одного аккаунта (при 60 FPS — 6 кадров)
+                    Guard  = 0.05,     -- сек: выбор только в начале окна — запись успеет до следующего
                     Delay  = 2,        -- сек: вход в очередь и выход действуют через столько после метки
                     TTL    = 4,        -- сек без обновления файла — аккаунта в очереди нет
                     Stall  = 10,       -- сек сверх паузы без своего окна — выбираем без очереди
@@ -4921,12 +4923,18 @@
     -- ─── Скорость сбора (CONFIG.CoinCollect) ────────────────────────────────────
     -- Сервер сравнивает соседние ЗАСЧИТАННЫЕ монеты: расстояние между ними и время.
     -- Какая из наших монет засчитана, клиент знает не точно: CoinCollected приходит
-    -- ~0.3 с после касания, касание может не засчитаться, монету может забрать
+    -- через пинг после касания, касание может не засчитаться, монету может забрать
     -- другой. Поэтому отсчёт консервативный: монету можно засчитать, только когда
-    -- истекло время от КАЖДОЙ возможной прошлой — последней засчитанной (по приходу
-    -- CoinCollected, т.е. с запасом на пинг) и всех наших касаний за последние 3 с
-    Farm.LastCoin = nil   -- {Pos, At, Coin}: последняя засчитанная (At — os.clock прихода CoinCollected)
-    Farm.Touched = {}     -- недавние наши касания: {Coin, Pos, At}, по порядку
+    -- истекло время от КАЖДОЙ возможной прошлой — последней засчитанной и всех наших
+    -- касаний за последние 3 с.
+    -- Время засчёта прошлой монеты = приход CoinCollected минус MinRTT — самая
+    -- короткая задержка «касание → CoinCollected», замеренная на этом аккаунте (по
+    -- касаниям без повтора). Лаг задерживает и приход, так что отсчёт с ним только
+    -- позже — запас на скачки пинга сохраняется; замеров меньше трёх — MinRTT = 0
+    Farm.LastCoin = nil   -- {Pos, At, Arrived, Coin}: последняя засчитанная (At — отсчёт, Arrived — приход)
+    Farm.Touched = {}     -- недавние наши касания: {Coin, Pos, At, Count}, по порядку
+    Farm.RttSamples = {}
+    Farm.MinRTT = 0
 
     -- Монету засчитали (или забрали): сервер поставил Collected или убрал её
     function Farm.CoinGone(coin)
@@ -4934,14 +4942,28 @@
             or not coin:FindFirstChildWhichIsA("TouchTransmitter")
     end
 
+    -- Пинг туда-обратно (Data Ping на альтах скачет до 1.2 с — берём GetNetworkPing)
+    function Farm.Ping()
+        local ok, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
+        return (ok and type(ping) == "number" and ping > 0) and math.min(ping, 1) or 0.3
+    end
+
+    -- Повтор касания — не раньше, чем мог прийти засчёт первого: иначе лишний повтор
+    -- и замер задержки грязный
+    function Farm.RetryDelay()
+        local cfg = CONFIG.CoinCollect
+        return math.max(cfg.TouchRetry, Farm.Ping() + cfg.RetryMargin)
+    end
+
     function Farm.NoteTouch(coin)
         local now = os.clock()
         local last = Farm.Touched[#Farm.Touched]
         if last and last.Coin == coin then
             last.At = now      -- повтор касания той же монеты
+            last.Count += 1
             return
         end
-        table.insert(Farm.Touched, {Coin = coin, Pos = coin.Position, At = now})
+        table.insert(Farm.Touched, {Coin = coin, Pos = coin.Position, At = now, Count = 1})
         while #Farm.Touched > 0 and (#Farm.Touched > 8 or now - Farm.Touched[1].At >= 3) do
             table.remove(Farm.Touched, 1)
         end
@@ -4968,27 +4990,39 @@
             end
         end
         local entry = index and table.remove(Farm.Touched, index)
+        -- Касание без повтора — чистый замер задержки до засчёта
+        if entry and entry.Count == 1 then
+            table.insert(Farm.RttSamples, now - entry.At)
+            if #Farm.RttSamples > 20 then table.remove(Farm.RttSamples, 1) end
+            if #Farm.RttSamples >= 3 then
+                Farm.MinRTT = math.clamp(math.min(table.unpack(Farm.RttSamples)), 0, 0.5)
+            end
+        end
         local position = entry and entry.Pos
         if not position then
             local character = LocalPlayer.Character
             local hrp = character and character:FindFirstChild("HumanoidRootPart")
             position = hrp and hrp.Position
         end
-        if position then Farm.LastCoin = {Pos = position, At = now, Coin = entry and entry.Coin} end
+        if position then
+            Farm.LastCoin = {Pos = position, At = now - Farm.MinRTT, Arrived = now, Coin = entry and entry.Coin}
+        end
         Farm.CollectedAt = now
     end
 
     -- Когда (os.clock) монету в position можно засчитать: не быстрее MaxSpeed от
-    -- каждой возможной прошлой. cap — Teleport Collect: ещё и не быстрее Fly Speed
-    -- (Smart Collect с этим потолком), как перелёт
+    -- каждой возможной прошлой — жёсткий потолок считается от самого прихода
+    -- CoinCollected, с полным запасом на пинг. cap — Teleport Collect: ещё и в темпе
+    -- TeleportSpeed (Smart Collect с этим потолком), как перелёт, — от засчёта за
+    -- вычетом MinRTT: темп и так ниже потолка, джиттер сети его не пробьёт
     function Farm.CoinReadyAt(position, cap)
         local now = os.clock()
         local readyAt = 0
+        local pace = math.max(State.Settings.CoinFarmFlySpeed, CONFIG.CoinCollect.TeleportSpeed)
         local function after(ref)
             local hop = (position - ref.Pos).Magnitude
-            local need = hop / CONFIG.CoinCollect.MaxSpeed
-            if cap then need = math.max(need, Farm.FlightDuration(hop, State.Settings.CoinFarmFlySpeed, cap)) end
-            readyAt = math.max(readyAt, ref.At + need)
+            readyAt = math.max(readyAt, (ref.Arrived or ref.At) + hop / CONFIG.CoinCollect.MaxSpeed)
+            if cap then readyAt = math.max(readyAt, ref.At + Farm.FlightDuration(hop, pace, cap)) end
         end
         if Farm.LastCoin then after(Farm.LastCoin) end
         for _, entry in ipairs(Farm.Touched) do
@@ -5116,12 +5150,13 @@
     -- ─── Teleport Collect: монеты телепортом на целевом сервере ─────────────────
     -- Вместо полёта — прыжки телепортом от монеты к монете с касанием. Монета
     -- засчитывается не быстрее перелёта: от прошлой засчитанной до неё проходит не
-    -- меньше времени полёта с Fly Speed (со Smart Collect — 2-3 с, но не быстрее
-    -- CoinCollect.MaxSpeed), всё это время персонаж держится на точке прошлой
-    -- монеты. Первая монета раунда — как у полёта: не раньше TP Delay после прошлого
-    -- телепорта. Монету выбирают по очереди (револьвер Farm Sync): в своё окно аккаунт
-    -- видит заявки всех, кто выбирал до него, и берёт ближайшую свободную, без зон.
-    -- Выбор — в первое своё окно после монеты: ожидание окна идёт внутри паузы.
+    -- меньше времени полёта в темпе CoinCollect.TeleportSpeed (со Smart Collect —
+    -- 2-3 с, но не быстрее MaxSpeed), всё это время персонаж держится на точке
+    -- прошлой монеты. Первая монета раунда — как у полёта: не раньше TP Delay после
+    -- прошлого телепорта. Монету выбирают по очереди (револьвер Farm Sync): в своё
+    -- окно аккаунт видит заявки всех, кто выбирал до него, и берёт ближайшую
+    -- свободную, без зон. Выбор следующей — сразу после посадки, пока касаемся
+    -- текущей: ожидание окна и засчёта идут внутри паузы.
     function Farm.TeleportMode()
         local sync = State.Runtime.FarmSync
         return sync ~= nil and sync.TeleportMode ~= nil and sync.TeleportMode()
@@ -5148,16 +5183,88 @@
         return best
     end
 
-    -- Держим персонажа на hold, выбираем монету в своё окно и ждём, пока её можно
-    -- будет засчитать (Farm.CoinReadyAt: от прошлой засчитанной — не быстрее перелёта
-    -- с Fly Speed). Сами прыжки сервер не проверяет — только засчёты, поэтому прыжок
-    -- привязан к засчёту: не в Underground Mode тело касается монеты сразу по прилёту,
-    -- а из-под пола засчитывает только наше касание, и прыгнуть можно на TouchFirst
-    -- раньше. Первая монета раунда — ещё и не раньше notBefore. Выбранную монету
-    -- забрали — выбираем заново. Возвращает монету и потолок Smart Collect для неё;
-    -- nil — прыгать нельзя: раунд кончился, сумки полны, режим выключен, нас убили,
-    -- флинг; без свободных монет ждём их на месте
-    function Farm.PauseAndPick(hrp, hold, notBefore)
+    -- Касания одной монеты после посадки (CONFIG.CoinCollect): первое — не раньше
+    -- TouchFirst после прыжка (раньше сервер ещё видит нас на старом месте и молча
+    -- его теряет) и не раньше, чем монету можно засчитать; повтор — через RetryDelay
+    -- (не раньше, чем мог прийти засчёт), пока монету не засчитают (CoinCollected
+    -- именно по ней, атрибут Collected, монета исчезла), но не дольше TouchTimeout.
+    -- Без firetouchinterest — просто ждём: не в Underground Mode тело засчитывает
+    -- монету само. cap — потолок Smart Collect (Teleport Collect), nil — только
+    -- MaxSpeed. Step() — каждый кадр, пока стоим у монеты: true — монета решена
+    -- (Counted — засчитана); Release() — отпустить нажатое касание
+    function Farm.Toucher(hrp, coin, cap)
+        local cfg = CONFIG.CoinCollect
+        local canTouch = firetouchinterest ~= nil
+        local toucher = {Coin = coin, Counted = false, Landed = os.clock()}
+        local touchAt, firstAt, pressed = nil, nil, false
+
+        function toucher.Release()
+            if pressed then
+                pressed = false
+                pcall(firetouchinterest, hrp, coin, 1)
+            end
+        end
+
+        function toucher.Step()
+            local clock = os.clock()
+            local last = Farm.LastCoin
+            if (last and last.Coin == coin and last.Arrived >= toucher.Landed) or Farm.CoinGone(coin) then
+                toucher.Counted = true
+                toucher.Release()
+                return true
+            end
+            if (firstAt and clock - firstAt > cfg.TouchTimeout)
+                or clock - toucher.Landed > cfg.TouchFirst + cfg.TouchTimeout + 3 then
+                toucher.Release()
+                return true
+            end
+            if not canTouch then return false end
+            if pressed then
+                if clock >= touchAt + 0.05 then
+                    pressed = false
+                    pcall(firetouchinterest, hrp, coin, 1)
+                    touchAt += Farm.RetryDelay()
+                end
+            else
+                -- До первого касания — каждый кадр: CoinCollected прошлой монеты мог
+                -- прийти только что и сдвинуть отсчёт
+                if not firstAt then
+                    touchAt = math.max(toucher.Landed + cfg.TouchFirst, Farm.CoinReadyAt(coin.Position, cap))
+                end
+                if clock >= touchAt then
+                    pressed = true
+                    firstAt = firstAt or clock
+                    Farm.NoteTouch(coin)
+                    pcall(firetouchinterest, hrp, coin, 0)
+                end
+            end
+            return false
+        end
+
+        return toucher
+    end
+
+    -- Касание после телепорта, стоя на точке (первая монета раунда в полёте). true — засчитана
+    function Farm.TeleportTouch(hrp, coin, point, cap)
+        local toucher = Farm.Toucher(hrp, coin, cap)
+        Farm.HoldUntil(toucher.Step, point)
+        toucher.Release()
+        return toucher.Counted
+    end
+
+    -- Пауза на точке монеты: касаемся монеты, на которой стоим (touching — Toucher,
+    -- nil — её нет), и одновременно выбираем следующую в своё окно — очередь не ждёт
+    -- засчёта. Прыжок — когда текущая решена и следующую можно засчитать
+    -- (Farm.CoinReadyAt: от прошлой засчитанной — в темпе TeleportSpeed). Сами прыжки
+    -- сервер не проверяет — только засчёты, поэтому прыжок привязан к засчёту: не в
+    -- Underground Mode тело касается монеты сразу по прилёту, а из-под пола
+    -- засчитывает только наше касание, и прыгнуть можно на TouchFirst раньше. Первая
+    -- монета раунда — ещё и не раньше notBefore. Выбранную монету забрали — выбираем
+    -- заново. Возвращает монету и потолок Smart Collect для неё; nil — прыгать нельзя:
+    -- раунд кончился, сумки полны, режим выключен, нас убили, флинг (третьим — Toucher
+    -- текущей монеты, если её касания не закончены: продолжит следующий шаг); без
+    -- свободных монет ждём их на месте
+    function Farm.PauseAndPick(hrp, hold, notBefore, touching)
         local sync = State.Runtime.FarmSync
         local stallAt = sync.Now() + CONFIG.FarmSync.Queue.Stall * 1000
         local picked, cap, ready = nil, nil, false
@@ -5177,6 +5284,7 @@
                     return true
                 end
             end
+            if touching and touching.Step() then touching = nil end
             -- Выбранную монету забрали посторонние (или, при лаге, наш с более ранней
             -- заявкой) — выбираем в следующее своё окно
             if picked and (not Farm.CoinValid(picked) or Farm.CoinTaken(picked)) then picked = nil end
@@ -5192,7 +5300,7 @@
                 end
             end
             sync.TouchClaim(hold.Position)
-            if picked then
+            if picked and not touching then
                 local lead = State.Settings.UndergroundMode and CONFIG.CoinCollect.TouchFirst or 0
                 local readyAt = math.max(notBefore or 0, Farm.CoinReadyAt(picked.Position, cap) - lead)
                 ready = os.clock() >= readyAt
@@ -5201,57 +5309,9 @@
             end
             return ready
         end, hold)
-        if stop or not ready then return nil end
+        if touching then touching.Release() end
+        if stop or not ready then return nil, nil, touching end
         return picked, cap
-    end
-
-    -- Касание после телепорта, стоя на точке (CONFIG.CoinCollect): первое — не раньше
-    -- TouchFirst после прыжка (раньше сервер ещё видит нас на старом месте и молча
-    -- его теряет) и не раньше, чем монету можно засчитать; дальше повтор каждые
-    -- TouchRetry, пока монету не засчитают (CoinCollected, атрибут Collected, монета
-    -- исчезла), но не дольше TouchTimeout. Без firetouchinterest — просто ждём на
-    -- точке: не в Underground Mode тело засчитывает монету само. cap — потолок Smart
-    -- Collect (Teleport Collect), nil — только MaxSpeed. true — засчитана
-    function Farm.TeleportTouch(hrp, coin, point, cap)
-        local cfg = CONFIG.CoinCollect
-        local canTouch = firetouchinterest ~= nil
-        local landed = os.clock()
-        local touchAt, firstAt, pressed, counted = nil, nil, false, false
-        Farm.HoldUntil(function()
-            local clock = os.clock()
-            -- Засчитана: CoinCollected засчитал именно эту монету; или монеты уже нет —
-            -- не в Underground Mode тело засчитывает её само по прилёту
-            local last = Farm.LastCoin
-            if (last and last.Coin == coin and last.At >= landed) or Farm.CoinGone(coin) then
-                counted = true
-                return true
-            end
-            if firstAt and clock - firstAt > cfg.TouchTimeout then return true end
-            if clock - landed > cfg.TouchFirst + cfg.TouchTimeout + 3 then return true end
-            if not canTouch then return false end
-            if pressed then
-                if clock >= touchAt + 0.05 then
-                    pressed = false
-                    pcall(firetouchinterest, hrp, coin, 1)
-                    touchAt += cfg.TouchRetry
-                end
-            else
-                -- До первого касания — каждый кадр: CoinCollected прошлой монеты мог
-                -- прийти только что и сдвинуть отсчёт
-                if not firstAt then
-                    touchAt = math.max(landed + cfg.TouchFirst, Farm.CoinReadyAt(coin.Position, cap))
-                end
-                if clock >= touchAt then
-                    pressed = true
-                    firstAt = firstAt or clock
-                    Farm.NoteTouch(coin)
-                    pcall(firetouchinterest, hrp, coin, 0)
-                end
-            end
-            return false
-        end, point)
-        if pressed then pcall(firetouchinterest, hrp, coin, 1) end
-        return counted
     end
 
     function Farm.TeleportStep(ctx, character, humanoidRootPart)
@@ -5263,9 +5323,15 @@
         end
         sync.QueueRefresh()
 
+        -- Монета, на которой стоим и которую ещё касаемся (прошлый шаг прервался — флинг,
+        -- смена режима): стоим у неё — продолжаем касания, сдвинули — её уже не собрать
+        local landed = ctx.landed
+        ctx.landed = nil
+        if landed and (humanoidRootPart.Position - landed.Point.Position).Magnitude > 6 then landed = nil end
+
         -- Первая монета раунда — как у полёта: телепорт не раньше TP Delay после
         -- прошлого, и до него персонажа не держим (ноклип — только с первой монеты)
-        local hold = Farm.HoldFrame(humanoidRootPart.Position)
+        local hold = landed and landed.Point or Farm.HoldFrame(humanoidRootPart.Position)
         local notBefore = nil
         if ctx.allowFly then
             EnableNoClip()
@@ -5273,8 +5339,10 @@
             notBefore = os.clock() + math.max(0, State.Settings.CoinFarmDelay - (tick() - ctx.lastTeleport))
         end
 
-        local coin, cap = Farm.PauseAndPick(humanoidRootPart, hold, notBefore)
+        local coin, cap, unfinished = Farm.PauseAndPick(humanoidRootPart, hold, notBefore, landed and landed.Toucher)
+        if unfinished then ctx.landed = {Point = hold, Toucher = unfinished} end
         if not coin or Farm.FlingBusy() or not State.Settings.AutoFarmEnabled then return end
+        ctx.landed = nil
 
         EnableNoClip()
         local point = Farm.CoinPoint(coin)
@@ -5286,11 +5354,10 @@
         ctx.allowFly = true
         ctx.lastTeleport = tick()
         RemoveCoinTracer()
-        Farm.TeleportTouch(humanoidRootPart, coin, point, cap)
-        -- Заявка больше не нужна: собранную монету держит Taken, а на её точке
-        -- может появиться новая
-        Farm.Unclaim()
+        -- Монета наша: для своих — собранная (Taken), для себя — в чёрном списке;
+        -- заявка переедет на следующую, когда её выберем. Касания — в следующей паузе
         Farm.CoinDone(coin)
+        ctx.landed = {Point = point, Toucher = Farm.Toucher(humanoidRootPart, coin, cap)}
     end
 
     -- ─── Сбор одной монеты (первая — телепортом, дальше — полётом) ─────────────
@@ -5299,6 +5366,7 @@
             Farm.TeleportStep(ctx, character, humanoidRootPart)
             return
         end
+        ctx.landed = nil        -- полёт: касания Teleport Collect у прошлой точки не нужны
 
         local coin = FindNearestCoin()
         if not coin then
@@ -5547,6 +5615,7 @@
             local function resetRound()
                 State.Cache.CoinBlacklist = {}
                 ctx.allowFly = false
+                ctx.landed = nil        -- Teleport Collect: монета, у которой стоим
                 Farm.Done = false
             end
 
