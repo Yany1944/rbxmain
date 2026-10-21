@@ -386,7 +386,8 @@
                 -- Teleport Collect: монету выбирают по очереди («револьвер», см. БЛОК 18.5)
                 Queue = {
                     Window = 0.1,      -- сек: окно выбора одного аккаунта (при 60 FPS — 6 кадров)
-                    Guard  = 0.05,     -- сек: выбор только в начале окна — запись успеет до следующего
+                    Guard  = 0.075,    -- сек: выбор только в начале окна — запись успеет до следующего
+                    Relax  = 2,        -- сек без своего хода (низкий FPS) — выбираем в любой момент своего окна
                     Delay  = 2,        -- сек: вход в очередь и выход действуют через столько после метки
                     TTL    = 4,        -- сек без обновления файла — аккаунта в очереди нет
                     Stall  = 10,       -- сек сверх паузы без своего окна — выбираем без очереди
@@ -4969,6 +4970,21 @@
         end
     end
 
+    -- Касание не засчиталось — монету забрал другой: запись не должна перехватить
+    -- следующий CoinCollected
+    function Farm.ForgetTouch(coin)
+        for i = #Farm.Touched, 1, -1 do
+            if Farm.Touched[i].Coin == coin then table.remove(Farm.Touched, i) end
+        end
+    end
+
+    -- Монета наша, пока касаемся: для своих — собранная (Taken) ещё CoinSplit.Taken
+    -- секунд — заявка к этому времени уже на следующей монете
+    function Farm.KeepTaken(coin)
+        local sync = State.Runtime.FarmSync
+        if CONFIG.FarmSync.CoinSplit.Enabled and sync and sync.MarkTaken then pcall(sync.MarkTaken, coin.Position) end
+    end
+
     -- CoinCollected: засчитана наша монета, которая уже исчезла (Collected/убрана);
     -- такой нет — самая ранняя из недавних. Без касаний (пролетели сквозь монету) —
     -- монета там, где мы
@@ -5012,16 +5028,18 @@
 
     -- Когда (os.clock) монету в position можно засчитать: не быстрее MaxSpeed от
     -- каждой возможной прошлой — жёсткий потолок считается от самого прихода
-    -- CoinCollected, с полным запасом на пинг. cap — Teleport Collect: ещё и в темпе
+    -- CoinCollected (для касания без засчёта — от касания плюс пинг: столько бы он
+    -- шёл), с полным запасом на пинг. cap — Teleport Collect: ещё и в темпе
     -- TeleportSpeed (Smart Collect с этим потолком), как перелёт, — от засчёта за
     -- вычетом MinRTT: темп и так ниже потолка, джиттер сети его не пробьёт
     function Farm.CoinReadyAt(position, cap)
         local now = os.clock()
         local readyAt = 0
         local pace = math.max(State.Settings.CoinFarmFlySpeed, CONFIG.CoinCollect.TeleportSpeed)
+        local ping = Farm.Ping()
         local function after(ref)
             local hop = (position - ref.Pos).Magnitude
-            readyAt = math.max(readyAt, (ref.Arrived or ref.At) + hop / CONFIG.CoinCollect.MaxSpeed)
+            readyAt = math.max(readyAt, (ref.Arrived or (ref.At + ping)) + hop / CONFIG.CoinCollect.MaxSpeed)
             if cap then readyAt = math.max(readyAt, ref.At + Farm.FlightDuration(hop, pace, cap)) end
         end
         if Farm.LastCoin then after(Farm.LastCoin) end
@@ -5189,14 +5207,18 @@
     -- (не раньше, чем мог прийти засчёт), пока монету не засчитают (CoinCollected
     -- именно по ней, атрибут Collected, монета исчезла), но не дольше TouchTimeout.
     -- Без firetouchinterest — просто ждём: не в Underground Mode тело засчитывает
-    -- монету само. cap — потолок Smart Collect (Teleport Collect), nil — только
-    -- MaxSpeed. Step() — каждый кадр, пока стоим у монеты: true — монета решена
-    -- (Counted — засчитана); Release() — отпустить нажатое касание
-    function Farm.Toucher(hrp, coin, cap)
+    -- монету само. body — тело касается монеты по прилёту: первое касание — не раньше
+    -- пинга, засчёт тела обычно приходит раньше (и замер задержки остаётся чистым).
+    -- Монета исчезла, а нашего CoinCollected за пинг нет — её забрал другой: касание
+    -- забываем. cap — потолок Smart Collect (Teleport Collect), nil — только MaxSpeed.
+    -- Step() — каждый кадр, пока стоим у монеты: true — монета решена (Counted —
+    -- засчитана); Release() — отпустить нажатое касание
+    function Farm.Toucher(hrp, coin, cap, body)
         local cfg = CONFIG.CoinCollect
         local canTouch = firetouchinterest ~= nil
         local toucher = {Coin = coin, Counted = false, Landed = os.clock()}
-        local touchAt, firstAt, pressed = nil, nil, false
+        local touchAt, firstAt, pressed, goneAt = nil, nil, false, nil
+        local first = body and math.max(cfg.TouchFirst, Farm.RetryDelay()) or cfg.TouchFirst
 
         function toucher.Release()
             if pressed then
@@ -5208,9 +5230,17 @@
         function toucher.Step()
             local clock = os.clock()
             local last = Farm.LastCoin
-            if (last and last.Coin == coin and last.Arrived >= toucher.Landed) or Farm.CoinGone(coin) then
+            if last and last.Coin == coin and last.Arrived >= toucher.Landed then
                 toucher.Counted = true
                 toucher.Release()
+                Farm.KeepTaken(coin)
+                return true
+            end
+            if Farm.CoinGone(coin) then
+                toucher.Release()
+                goneAt = goneAt or clock
+                if clock - goneAt < Farm.RetryDelay() then return false end
+                Farm.ForgetTouch(coin)
                 return true
             end
             if (firstAt and clock - firstAt > cfg.TouchTimeout)
@@ -5229,12 +5259,13 @@
                 -- До первого касания — каждый кадр: CoinCollected прошлой монеты мог
                 -- прийти только что и сдвинуть отсчёт
                 if not firstAt then
-                    touchAt = math.max(toucher.Landed + cfg.TouchFirst, Farm.CoinReadyAt(coin.Position, cap))
+                    touchAt = math.max(toucher.Landed + first, Farm.CoinReadyAt(coin.Position, cap))
                 end
                 if clock >= touchAt then
                     pressed = true
                     firstAt = firstAt or clock
                     Farm.NoteTouch(coin)
+                    Farm.KeepTaken(coin)
                     pcall(firetouchinterest, hrp, coin, 0)
                 end
             end
@@ -5266,14 +5297,19 @@
     -- свободных монет ждём их на месте
     function Farm.PauseAndPick(hrp, hold, notBefore, touching)
         local sync = State.Runtime.FarmSync
-        local stallAt = sync.Now() + CONFIG.FarmSync.Queue.Stall * 1000
+        local queue = CONFIG.FarmSync.Queue
+        local stallAt = sync.Now() + queue.Stall * 1000
+        local relaxAt = sync.Now() + queue.Relax * 1000
         local picked, cap, ready = nil, nil, false
         local stop, nextCheck, lastFrame = false, 0, os.clock()
         Farm.HoldUntil(function()
             local clock = os.clock()
             -- Клиент висел: это время в ожидание своего окна не входит (после фриза
             -- место в очереди возвращается через Delay — это не тупик)
-            if clock - lastFrame > 1 then stallAt += (clock - lastFrame) * 1000 end
+            if clock - lastFrame > 1 then
+                stallAt += (clock - lastFrame) * 1000
+                relaxAt += (clock - lastFrame) * 1000
+            end
             lastFrame = clock
             if clock >= nextCheck then
                 nextCheck = clock + 0.25
@@ -5289,7 +5325,7 @@
             -- заявкой) — выбираем в следующее своё окно
             if picked and (not Farm.CoinValid(picked) or Farm.CoinTaken(picked)) then picked = nil end
             local now = sync.Now()
-            if not picked and sync.TakeTurn(now, now >= stallAt) then
+            if not picked and sync.TakeTurn(now, now >= stallAt, now >= relaxAt) then
                 picked = Farm.NearestFreeCoin(hold.Position)
                 if picked then
                     Farm.Claim(picked, hrp)
@@ -5357,7 +5393,7 @@
         -- Монета наша: для своих — собранная (Taken), для себя — в чёрном списке;
         -- заявка переедет на следующую, когда её выберем. Касания — в следующей паузе
         Farm.CoinDone(coin)
-        ctx.landed = {Point = point, Toucher = Farm.Toucher(humanoidRootPart, coin, cap)}
+        ctx.landed = {Point = point, Toucher = Farm.Toucher(humanoidRootPart, coin, cap, not State.Settings.UndergroundMode)}
     end
 
     -- ─── Сбор одной монеты (первая — телепортом, дальше — полётом) ─────────────
@@ -8951,8 +8987,10 @@
 
         -- Пора ли выбирать, если пауза кончается в deadline (мс): в последнее своё
         -- окно, начавшееся до deadline; такого нет — в первое после. Других в очереди
-        -- нет (или ждём дольше Stall: force) — в deadline, без окон
-        local function turnNow(view, now, deadline, force)
+        -- нет (или ждём дольше Stall: force) — в deadline, без окон. relaxed — своего
+        -- хода нет дольше Relax (низкий FPS: кадр не попадает в начало окна) — выбор
+        -- в любой момент своего окна, до 5 мс до его конца
+        local function turnNow(view, now, deadline, force, relaxed)
             local W = QC.Window * 1000
             local index = math.floor(now / W)
             if index == S.TurnUsed then return false end
@@ -8966,7 +9004,8 @@
             -- Файл не прочитался — может, это и был другой участник: ждём чтения
             if view.Unsure and not force then return false end
             if force or not others then return now >= deadline end
-            if windowOwner(view, index, now) ~= myId or now - index * W > QC.Guard * 1000 then return false end
+            local guard = relaxed and W - 5 or QC.Guard * 1000
+            if windowOwner(view, index, now) ~= myId or now - index * W > guard then return false end
             if now >= deadline then return true end
             for later = index + 1, math.floor(deadline / W) do
                 if windowOwner(view, later, now) == myId then return false end
@@ -8976,10 +9015,10 @@
 
         -- true — ход наш: заявки уже перечитаны, монету выбрать и заявить сразу,
         -- без yield'ов, пока окно не кончилось
-        function FarmSync.TakeTurn(deadline, force)
-            if not turnNow(readClaims(), nowMs(), deadline, force) then return false end
+        function FarmSync.TakeTurn(deadline, force, relaxed)
+            if not turnNow(readClaims(), nowMs(), deadline, force, relaxed) then return false end
             local now = nowMs()
-            if not turnNow(readClaims(true), now, deadline, force) then return false end
+            if not turnNow(readClaims(true), now, deadline, force, relaxed) then return false end
             S.TurnUsed = math.floor(now / (QC.Window * 1000))
             return true
         end
