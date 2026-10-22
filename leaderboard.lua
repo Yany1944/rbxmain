@@ -364,6 +364,10 @@
                 AloneHopDelay    = 30,       -- сек одни на сервере (раунды не идут) — хоп
                 FarmHopCooldown  = 60,       -- сек между хопами по размеру сервера
                 FarmHopWait      = 45,       -- сек ждём телепорт хопа, потом играем раунд дальше
+                -- Пинг сервера (поле ping списка API, мс): засчёт монеты приходит через
+                -- пинг, и отсчёт темпа ждёт его — при ~250 мс пара на 0.18 с дольше,
+                -- чем при ~50 (замер 2026-10-23), это +9 с к сумке
+                MaxPing          = 150,      -- мс: выше — сервер не кандидат, пока есть другие
             },
             -- Хук __namecall у Anti Trap: ставится, когда игра догрузила персонажа
             -- (ранний хук ломал загрузку после телепорта — см. hookReplicate)
@@ -8123,7 +8127,8 @@
                             table.insert(list, {
                                 id = srv.id,
                                 playing = srv.playing,
-                                maxPlayers = srv.maxPlayers
+                                maxPlayers = srv.maxPlayers,
+                                ping = type(srv.ping) == "number" and srv.ping or nil
                             })
                         end
                     end
@@ -8170,15 +8175,16 @@
             -- ── Отбор кандидатов ─────────────────────────────────────────────────
             -- Сервер с одним игроком — лучший: с нами станет двое, и мы всегда
             -- мурдерер или шериф (см. CONFIG.ServerHop.FarmMaxPlayers). Список API
-            -- отстаёт на минуты, поэтому малые сервера — запас, а не гарантия
-            local function Score(playing, maxPlayers)
+            -- отстаёт на минуты, поэтому малые сервера — запас, а не гарантия.
+            -- Среди равных — с меньшим пингом (CONFIG.ServerHop.MaxPing)
+            local function Score(playing, maxPlayers, ping)
                 local score = (1 - playing / maxPlayers) * 100
                 if playing == 1 then
                     score = score + 100
                 elseif playing >= 2 and playing <= 6 then
                     score = score + 50
                 end
-                return score
+                return score - (ping or SH.MaxPing) / 5
             end
 
             -- Сервера, где уже сидят наши аккаунты (Farm Sync), — не кандидаты: два
@@ -8200,6 +8206,7 @@
                     if pass and strict then
                         pass = srv.playing >= SH.MinPlayers
                             and srv.playing < srv.maxPlayers * SH.MaxFillPercent
+                            and (type(srv.ping) ~= "number" or srv.ping <= SH.MaxPing)
                     end
 
                     if pass then
@@ -8207,7 +8214,7 @@
                             id = srv.id,
                             playing = srv.playing,
                             maxPlayers = srv.maxPlayers,
-                            score = Score(srv.playing, srv.maxPlayers)
+                            score = Score(srv.playing, srv.maxPlayers, type(srv.ping) == "number" and srv.ping or nil)
                         })
                     end
                 end
