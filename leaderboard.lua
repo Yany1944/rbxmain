@@ -368,6 +368,11 @@
                 -- пинг, и отсчёт темпа ждёт его — при ~250 мс пара на 0.18 с дольше,
                 -- чем при ~50 (замер 2026-10-23), это +9 с к сумке
                 MaxPing          = 150,      -- мс: выше — сервер не кандидат, пока есть другие
+                -- ping из API — пинг тех, кто уже на сервере, а не наш: свой меряем
+                -- сами (медиана за раунд) и с далёкого сервера уходим. Только Classic:
+                -- сервера Assassin для нас все далёкие (~225–250 мс), хоп там не поможет
+                MaxOwnPing       = 150,      -- мс: свой пинг за раунд выше — сервер далёкий
+                PingHopCooldown  = 15 * 60,  -- сек между хопами по пингу
             },
             -- Хук __namecall у Anti Trap: ставится, когда игра догрузила персонажа
             -- (ранний хук ломал загрузку после телепорта — см. hookReplicate)
@@ -4687,7 +4692,7 @@
     -- людном сервере невиновным с полной сумкой и одни на сервере, где раунды не
     -- начинаются. ServerHop выбирает сервер с одним игроком. Farm Sync (цель
     -- группы, наши на сервере) важнее: там своя логика серверов
-    Farm.Hop = {AloneSince = nil, LastAt = -math.huge}
+    Farm.Hop = {AloneSince = nil, LastAt = -math.huge, PingAt = -math.huge, PingSamples = {}}
 
     function Farm.CanPolicyHop()
         local sync = State.Runtime.FarmSync
@@ -4713,6 +4718,17 @@
 
     function Farm.Crowded()
         return #Players:GetPlayers() > CONFIG.ServerHop.FarmMaxPlayers
+    end
+
+    -- Далёкий сервер: медиана своего пинга за раунд (замер на каждой засчитанной
+    -- монете, см. OnCoinCollected) выше MaxOwnPing, и хоп по пингу давно не был
+    function Farm.PingHopDue()
+        local cfg = CONFIG.ServerHop
+        local samples = Farm.Hop.PingSamples
+        if #samples < 10 or os.clock() - Farm.Hop.PingAt < cfg.PingHopCooldown then return false end
+        local sorted = table.clone(samples)
+        table.sort(sorted)
+        return sorted[math.ceil(#sorted / 2)] * 1000 > cfg.MaxOwnPing
     end
 
     -- Невиновный: ни ножа, ни пистолета (подобранный ган — уже шериф, он стреляет)
@@ -5023,6 +5039,7 @@
     function Farm.ResetCollectTiming()
         Farm.LastCoin = nil
         table.clear(Farm.Touched)
+        table.clear(Farm.Hop.PingSamples)
     end
 
     -- Монету засчитали (или забрали): сервер поставил Collected или убрал её
@@ -5112,6 +5129,7 @@
             Farm.LastCoin = {Pos = position, At = now - Farm.MinRTT, Arrived = now, Coin = entry and entry.Coin}
         end
         Farm.CollectedAt = now
+        table.insert(Farm.Hop.PingSamples, Farm.Ping())   -- пинг этого сервера (Farm.PingHopDue)
     end
 
     -- Когда (os.clock) монету в position можно засчитать: не быстрее MaxSpeed от
@@ -5808,11 +5826,18 @@
                     local sync = State.Runtime.FarmSync
 
                     -- Людный сервер, мы невиновный: здесь ждать конца раунда (~60 с)
-                    -- и интермиссию — уходим на сервер на двоих. Телепорт не вышел —
-                    -- доигрываем раунд как обычно
-                    if mode == "Classic" and Farm.Crowded() and Farm.IsInnocent() and Farm.CanPolicyHop() then
-                        pcall(UnfloatCharacter)
-                        Farm.PolicyHop("crowded server, innocent")
+                    -- и интермиссию — уходим на сервер на двоих. Далёкий сервер (свой
+                    -- пинг) — тоже уходим: каждая пара там дольше на ~пинг. Телепорт не
+                    -- вышел — доигрываем раунд как обычно
+                    if mode == "Classic" and Farm.CanPolicyHop() then
+                        if Farm.Crowded() and Farm.IsInnocent() then
+                            pcall(UnfloatCharacter)
+                            Farm.PolicyHop("crowded server, innocent")
+                        elseif Farm.PingHopDue() then
+                            Farm.Hop.PingAt = os.clock()
+                            pcall(UnfloatCharacter)
+                            Farm.PolicyHop("high ping")
+                        end
                         if not State.Settings.AutoFarmEnabled then break end
                     end
 
