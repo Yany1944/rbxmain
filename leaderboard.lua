@@ -195,6 +195,8 @@
             -- Адреса модулей нужны только вне бандла (в бандле модули уже внутри)
             -- Лидерборд грузится только с CDN (бандла нет): адреса себя и модуля
             SelfUrl = "https://raw.githubusercontent.com/Yany1944/rbxmain/refs/heads/main/leaderboard.lua",
+            -- Плейс режима Assassin: нож у всех, ролей нет — свой конец раунда (Farm.AssassinEndgame)
+            AssassinPlaceId = 636649648,
             Modules = {
                 Optimization = "https://raw.githubusercontent.com/Yany1944/rbxmain/main/Libraryes/Optimization.lua",
             },
@@ -202,10 +204,14 @@
             AutoExec = AUTOFARM_ENABLED,
             -- Smart Collect: дальний перелёт между монетами укладывается в случайные
             -- MinTime..MaxTime секунд (как средний обычный перелёт со скоростью ~23),
-            -- ближние летим с обычной Fly Speed. Не быстрее CoinCollect.MaxSpeed
+            -- ближние летим с обычной Fly Speed. Укороченный перелёт — не быстрее
+            -- MaxSpeed: на 26–30 studs/s такие пары шли прямо перед всеми известными
+            -- киками (2026-10-20…23), а пар быстрее 24 всего ~2% — потолок стоит
+            -- ~0.2 с на раунд
             SmartCollect = {
                 MinTime = 2,
                 MaxTime = 3,
+                MaxSpeed = 24,   -- studs/s, потолок укороченного перелёта
             },
             -- Сбор монет. Сервер MM2 кикает «Invalid position», когда засчитанная монета
             -- слишком далеко от предыдущей засчитанной для прошедшего между ними времени
@@ -349,6 +355,15 @@
                 RejoinPersist    = 180,      -- сек пробуем тот же JobId, потом — любой сервер
                 RejoinTimeout    = 20,       -- сек ожидания вердикта одной попытки
                 RejoinRetry      = 5,        -- сек паузы между попытками
+                -- Автофарм и размер сервера (замер 2026-10-23, 61 раунд): вдвоём мы
+                -- всегда мурдерер или шериф и кончаем раунд за 1–2 с после полной
+                -- сумки; невиновный ждёт конца раунда в среднем ~60 с, а на людном
+                -- сервере больше чужих фармеров. Поэтому хоп идёт на сервер с одним
+                -- игроком, а с людного уходим, когда в раунде делать нечего
+                FarmMaxPlayers   = 2,        -- игроков (с нами) больше — сервер людный
+                AloneHopDelay    = 30,       -- сек одни на сервере (раунды не идут) — хоп
+                FarmHopCooldown  = 60,       -- сек между хопами по размеру сервера
+                FarmHopWait      = 45,       -- сек ждём телепорт хопа, потом играем раунд дальше
             },
             -- Хук __namecall у Anti Trap: ставится, когда игра догрузила персонажа
             -- (ранний хук ломал загрузку после телепорта — см. hookReplicate)
@@ -4540,6 +4555,7 @@
 
     function Farm.RoundMode()
         if Farm.Mode then return Farm.Mode end
+        if game.PlaceId == CONFIG.AssassinPlaceId then return "Assassin" end
         -- Инжект посреди раунда: LoadingMap/RoleSelect уже пролетели — режим по ролям
         for _, data in pairs(State.Cache.PlayerData or {}) do
             local mode = type(data) == "table" and ROLE_MODES[data.Role]
@@ -4645,6 +4661,7 @@
     function Farm.WaitNewRound()
         repeat
             Farm.InvisibleWhileWaiting()
+            Farm.CheckAlone()
             task.wait(1)
         until Farm.RoundActive() or not State.Settings.AutoFarmEnabled
     end
@@ -4658,6 +4675,58 @@
         Farm.ResetBags()
         Farm.ReturnToLobby()
         CleanupCoinBlacklist()
+    end
+
+    -- ─── Размер сервера (CONFIG.ServerHop.FarmMaxPlayers) ──────────────────────
+    -- Хоп сам по себе не ускоряет цикл (новый сервер — в случайной фазе раунда),
+    -- поэтому уходим только в моменты, когда здесь ждать всё равно дольше: на
+    -- людном сервере невиновным с полной сумкой и одни на сервере, где раунды не
+    -- начинаются. ServerHop выбирает сервер с одним игроком. Farm Sync (цель
+    -- группы, наши на сервере) важнее: там своя логика серверов
+    Farm.Hop = {AloneSince = nil, LastAt = -math.huge}
+
+    function Farm.CanPolicyHop()
+        local sync = State.Runtime.FarmSync
+        if sync and sync.OnActiveTarget and sync.OnActiveTarget() then return false end
+        if sync and sync.CoopActive and sync.CoopActive() then return false end
+        if State.Runtime.ServerHopInProgress or State.Runtime.RejoinInProgress then return false end
+        return os.clock() - Farm.Hop.LastAt >= CONFIG.ServerHop.FarmHopCooldown
+    end
+
+    -- Хоп и ожидание телепорта: true — мы всё ещё здесь (отказ или таймаут)
+    function Farm.PolicyHop(reason)
+        Farm.Hop.LastAt = os.clock()
+        if State.Settings.NotificationsEnabled then
+            ShowNotification("<font color=\"rgb(255,170,50)\">Auto Farm: </font>" .. reason .. " → hop", CONFIG.Colors.Text)
+        end
+        if not Core.ServerHop then return true end
+        Core.ServerHop()
+        local deadline = os.clock() + CONFIG.ServerHop.FarmHopWait
+        task.wait(0.5)
+        while State.Runtime.ServerHopInProgress and os.clock() < deadline do task.wait(0.5) end
+        return true
+    end
+
+    function Farm.Crowded()
+        return #Players:GetPlayers() > CONFIG.ServerHop.FarmMaxPlayers
+    end
+
+    -- Невиновный: ни ножа, ни пистолета (подобранный ган — уже шериф, он стреляет)
+    function Farm.IsInnocent()
+        return getMurderForAutoFarm() ~= LocalPlayer and getSheriffForAutoFarm() ~= LocalPlayer
+    end
+
+    -- Зовётся раз в секунду вне раунда: одни на сервере дольше AloneHopDelay — хоп
+    function Farm.CheckAlone()
+        if #Players:GetPlayers() > 1 then
+            Farm.Hop.AloneSince = nil
+            return
+        end
+        Farm.Hop.AloneSince = Farm.Hop.AloneSince or os.clock()
+        if os.clock() - Farm.Hop.AloneSince >= CONFIG.ServerHop.AloneHopDelay and Farm.CanPolicyHop() then
+            Farm.Hop.AloneSince = nil
+            Farm.PolicyHop("alone on the server")
+        end
     end
 
     -- ─── Coin Split: монеты между нашими аккаунтами на одном сервере ────────────
@@ -4904,9 +4973,11 @@
     -- Длительность перелёта. Smart Collect: на больших картах дальняя монета
     -- съедала много времени при обычной скорости — такой перелёт укладываем в
     -- случайные MinTime..MaxTime секунд (как средний перелёт со скоростью ~23,
-    -- ~1 монета за 2-3 с), ближние летим как обычно. Но не быстрее MaxSpeed: на
-    -- 72 studs за 1.6 с (45 studs/s) сервер кикал и обычный полёт. cap — потолок,
-    -- уже выбранный для этого перелёта (Teleport Collect пересчитывает паузу)
+    -- ~1 монета за 2-3 с), ближние летим как обычно. Укороченный перелёт — не
+    -- быстрее SmartCollect.MaxSpeed (на 26–30 studs/s такие пары шли перед киками),
+    -- любой — не быстрее CoinCollect.MaxSpeed: на 72 studs за 1.6 с (45 studs/s)
+    -- сервер кикал и обычный полёт. cap — потолок, уже выбранный для этого перелёта
+    -- (Teleport Collect пересчитывает паузу)
     function Farm.SmartCap()
         local cfg = CONFIG.SmartCollect
         return cfg.MinTime + math.random() * (cfg.MaxTime - cfg.MinTime)
@@ -4916,7 +4987,9 @@
         local duration = distance / math.max(speed, 1)
         if State.Settings.SmartCollectEnabled then
             cap = cap or Farm.SmartCap()
-            if duration > cap then duration = cap end
+            if duration > cap then
+                duration = math.max(cap, distance / CONFIG.SmartCollect.MaxSpeed)
+            end
         end
         return math.max(duration, distance / CONFIG.CoinCollect.MaxSpeed)
     end
@@ -4936,6 +5009,17 @@
     Farm.Touched = {}     -- недавние наши касания: {Coin, Pos, At, Count}, по порядку
     Farm.RttSamples = {}
     Farm.MinRTT = 0
+
+    -- Новый раунд (CoinsStarted): засчитанные и касания прошлого раунда к нему не
+    -- относятся. Карты стоят в двух местах мира (~6000 studs друг от друга), и без
+    -- сброса последняя монета прошлой карты давала отсчёт на минуты вперёд: бот стоял
+    -- на спавне или полз к монете (замер 2026-10-23: 12–132 с простоя в ~30% раундов,
+    -- все смерти до полной сумки — там). Сервер пары между раундами не кикает: такие
+    -- пары на 49–69 studs/s прошли 10 раз без кика
+    function Farm.ResetCollectTiming()
+        Farm.LastCoin = nil
+        table.clear(Farm.Touched)
+    end
 
     -- Монету засчитали (или забрали): сервер поставил Collected или убрал её
     function Farm.CoinGone(coin)
@@ -5571,6 +5655,21 @@
         Farm.WaitRoundEnd()
     end
 
+    -- ─── Assassin: сумка полна ──────────────────────────────────────────────────
+    -- Нож у всех, мурдерера и шерифа нет: KillAll и XPEndgame здесь не годятся.
+    -- Вдвоём наш ресет сразу кончает раунд (побеждает второй); на людном сервере
+    -- раунд после ресета идёт дальше без нас — уходим на сервер на двоих
+    function Farm.AssassinEndgame()
+        if Farm.Crowded() and Farm.CanPolicyHop() then
+            pcall(UnfloatCharacter)
+            Farm.PolicyHop("crowded Assassin server")
+            if not State.Settings.AutoFarmEnabled or not Farm.RoundActive() then return end
+        end
+        pcall(UnfloatCharacter)
+        ResetCharacter()
+        Farm.WaitRoundEnd()
+    end
+
     -- ─── Classic + XP Farm: сумка полна ─────────────────────────────────────────
     function Farm.XPEndgame()
         local murderer = getMurderForAutoFarm()
@@ -5675,6 +5774,7 @@
                     end
                     resetRound()
                     Farm.InvisibleWhileWaiting()
+                    Farm.CheckAlone()
                     task.wait(1)
                     continue
                 end
@@ -5703,7 +5803,18 @@
                     local mode = Farm.RoundMode()
                     local sync = State.Runtime.FarmSync
 
-                    if mode == "Infection" then
+                    -- Людный сервер, мы невиновный: здесь ждать конца раунда (~60 с)
+                    -- и интермиссию — уходим на сервер на двоих. Телепорт не вышел —
+                    -- доигрываем раунд как обычно
+                    if mode == "Classic" and Farm.Crowded() and Farm.IsInnocent() and Farm.CanPolicyHop() then
+                        pcall(UnfloatCharacter)
+                        Farm.PolicyHop("crowded server, innocent")
+                        if not State.Settings.AutoFarmEnabled then break end
+                    end
+
+                    if mode == "Assassin" then
+                        Farm.AssassinEndgame()
+                    elseif mode == "Infection" then
                         Farm.InfectionEndgame()
                     elseif mode == "FreezeTag" then
                         Farm.WaitRoundEnd()
@@ -5775,6 +5886,7 @@
                 end
                 Farm.Bags = fresh
                 Farm.BagsLive = true
+                Farm.ResetCollectTiming()
             end)
         end
 
@@ -8056,9 +8168,16 @@
             end
 
             -- ── Отбор кандидатов ─────────────────────────────────────────────────
+            -- Сервер с одним игроком — лучший: с нами станет двое, и мы всегда
+            -- мурдерер или шериф (см. CONFIG.ServerHop.FarmMaxPlayers). Список API
+            -- отстаёт на минуты, поэтому малые сервера — запас, а не гарантия
             local function Score(playing, maxPlayers)
                 local score = (1 - playing / maxPlayers) * 100
-                if playing >= 2 and playing <= 6 then score = score + 50 end
+                if playing == 1 then
+                    score = score + 100
+                elseif playing >= 2 and playing <= 6 then
+                    score = score + 50
+                end
                 return score
             end
 
