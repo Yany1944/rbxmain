@@ -341,6 +341,7 @@
             ServerHop = {
                 VisitedFile      = "VioCFG/Violite/serverhop_visited.json", -- {jobId = os.time()}
                 CacheFile        = "VioCFG/Violite/serverhop_cache.json",   -- кэш списка серверов
+                HopLogFile       = "VioCFG/Violite/farm_hops.log",          -- журнал хопов (Files.LogHop)
                 VisitedLifetime  = 30 * 60,  -- сколько секунд считать сервер «только что посещённым»
                 VisitedLimit     = 250,      -- страховка от разрастания файла истории
                 CacheLifetime    = 240,      -- сколько секунд переиспользовать список серверов
@@ -825,6 +826,23 @@
             for i = 1, #segs - 1 do
                 acc = acc and (acc .. "/" .. segs[i]) or segs[i]
                 if not isfolder(acc) then makefolder(acc) end
+            end
+        end)
+    end
+
+    -- Журнал хопов (CONFIG.ServerHop.HopLogFile): кто, откуда, сколько игроков и
+    -- почему ушёл. Переживает телепорт — по нему видно, не прыгают ли боты зря
+    function Files.LogHop(reason)
+        pcall(function()
+            local path = CONFIG.ServerHop.HopLogFile
+            local line = string.format("%s\t%s\t%s\tplayers=%d\t%s\n", os.date("!%Y-%m-%dT%H:%M:%SZ"),
+                LocalPlayer.Name, game.JobId, #Players:GetPlayers(), tostring(reason))
+            if appendfile and isfile and isfile(path) then
+                appendfile(path, line)
+            else
+                Files.EnsureFoldersFor(path)
+                local old = (isfile and isfile(path)) and readfile(path) or ""
+                writefile(path, old .. line)
             end
         end)
     end
@@ -4712,6 +4730,7 @@
     function Farm.PolicyHop(reason)
         Farm.Hop.LastAt = os.clock()
         print("[Auto Farm] hop: " .. reason .. " (players " .. #Players:GetPlayers() .. ")")
+        Files.LogHop(reason)
         if State.Settings.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255,170,50)\">Auto Farm: </font>" .. reason .. " → hop", CONFIG.Colors.Text)
         end
@@ -4813,6 +4832,7 @@
         if game.JobId ~= jobId or not State.Settings.AutoFarmEnabled then return end
         -- ServerHop не увёл: случайный сервер через матчмейкинг
         local Lock = State.Runtime.TeleportLock
+        Files.LogHop("watchdog fallback: Teleport into the place")
         if Lock and Lock.Acquire("Watchdog") then
             pcall(Lock.Try, game.PlaceId, nil, CONFIG.ServerHop.TeleportTimeout)
             Lock.Release("Watchdog")
@@ -9279,6 +9299,7 @@
                 if not safeMoment() then return end
                 S.LastHop = now
                 notify("<font color=\"rgb(255,170,50)\">group " .. foreign .. "'s target → hop</font>")
+                Files.LogHop("farm sync: group " .. foreign .. "'s target")
                 ServerHop()
                 return
             end
@@ -9295,6 +9316,7 @@
             if others == 0 or not loseToAll or not safeMoment() then return end
             S.LastHop = now
             notify("<font color=\"rgb(255,170,50)\">another account is here → hop</font>")
+            Files.LogHop("farm sync: another of ours is here")
             ServerHop()
         end
 
@@ -9311,6 +9333,7 @@
             S.Teleporting = true
             pcall(writeSelf)
             notify("<font color=\"rgb(85,255,120)\">joining group " .. group .. "'s target</font>")
+            Files.LogHop("farm sync: joining group " .. group .. "'s target")
             local accepted, result = Lock.Try(tonumber(target.placeId) or game.PlaceId, target.jobId, CONFIG.ServerHop.TeleportTimeout)
             S.Teleporting = false
             Lock.Release("FarmSync")
