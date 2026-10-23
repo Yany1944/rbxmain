@@ -344,7 +344,9 @@
                 VisitedLifetime  = 30 * 60,  -- сколько секунд считать сервер «только что посещённым»
                 VisitedLimit     = 250,      -- страховка от разрастания файла истории
                 CacheLifetime    = 240,      -- сколько секунд переиспользовать список серверов
-                MinPlayers       = 1,        -- пустые сервера чаще всего мертвы/приватны
+                MinPlayers       = 2,        -- «1 игрок» в списке — часто мёртвый сервер: второй
+                                             -- там клиент чужой фермы, который не загрузился, и
+                                             -- раунд не начинается часами (замер 2026-10-23)
                 MaxFillPercent   = 0.9,      -- не лезем в почти полный сервер (телепорт отвалится)
                 FetchLimit       = 100,      -- limit= в запросе к games.roblox.com
                 MaxPages         = 5,        -- максимум страниц пагинации за один хоп
@@ -355,15 +357,19 @@
                 RejoinPersist    = 180,      -- сек пробуем тот же JobId, потом — любой сервер
                 RejoinTimeout    = 20,       -- сек ожидания вердикта одной попытки
                 RejoinRetry      = 5,        -- сек паузы между попытками
-                -- Автофарм и размер сервера (замер 2026-10-23, 61 раунд): вдвоём мы
-                -- всегда мурдерер или шериф и кончаем раунд за 1–2 с после полной
-                -- сумки; невиновный ждёт конца раунда в среднем ~60 с, а на людном
-                -- сервере больше чужих фармеров. Поэтому хоп идёт на сервер с одним
-                -- игроком, а с людного уходим, когда в раунде делать нечего
-                FarmMaxPlayers   = 2,        -- игроков (с нами) больше — сервер людный
+                -- Автофарм и размер сервера (замер 2026-10-23, 61 раунд): невиновный ждёт
+                -- конца раунда в среднем ~60 с, а на людном сервере больше чужих
+                -- фармеров. С людного уходим, когда в раунде делать нечего
+                FarmMaxPlayers   = 4,        -- игроков (с нами) больше — сервер людный
                 AloneHopDelay    = 30,       -- сек одни на сервере (раунды не идут) — хоп
                 FarmHopCooldown  = 60,       -- сек между хопами по размеру сервера
                 FarmHopWait      = 45,       -- сек ждём телепорт хопа, потом играем раунд дальше
+                -- Сторож автофарма (Farm.Watchdog): нормальное лобби ~66 с, но бывают
+                -- сервера, где раунд не начинается часами — уходим
+                StuckLobby       = 180,      -- сек лобби подряд (ни у кого нет ножа) — хоп
+                StuckNoPlay      = 600,      -- сек без своего раунда (зритель/лобби) — хоп
+                StuckRetry       = 90,       -- сек между попытками сторожа
+                StuckTeleportWait = 20,      -- сек после хопа: всё ещё здесь — Teleport в плейс
                 -- Пинг сервера (поле ping списка API, мс): засчёт монеты приходит через
                 -- пинг, и отсчёт темпа ждёт его — при ~250 мс пара на 0.18 с дольше,
                 -- чем при ~50 (замер 2026-10-23), это +9 с к сумке
@@ -4690,8 +4696,8 @@
     -- Хоп сам по себе не ускоряет цикл (новый сервер — в случайной фазе раунда),
     -- поэтому уходим только в моменты, когда здесь ждать всё равно дольше: на
     -- людном сервере невиновным с полной сумкой и одни на сервере, где раунды не
-    -- начинаются. ServerHop выбирает сервер с одним игроком. Farm Sync (цель
-    -- группы, наши на сервере) важнее: там своя логика серверов
+    -- начинаются. Farm Sync (цель группы, наши на сервере) важнее: там своя логика
+    -- серверов
     Farm.Hop = {AloneSince = nil, LastAt = -math.huge, PingAt = -math.huge, PingSamples = {}}
 
     function Farm.CanPolicyHop()
@@ -4747,6 +4753,74 @@
             Farm.Hop.AloneSince = nil
             Farm.PolicyHop("alone on the server")
         end
+    end
+
+    -- ─── Сторож: сервер, где раунды не идут ─────────────────────────────────────
+    -- 2026-10-23 боты часами стояли в лобби вдвоём с «игроком» чужой фермы, который
+    -- так и не загрузился: раунд не начинался, а проверка «одни на сервере» молчала.
+    -- Атрибут ClientLoaded других игроков ненадёжен, поэтому судим по поведению:
+    -- лобби (ни у кого нет ножа) дольше StuckLobby или ни одного своего раунда дольше
+    -- StuckNoPlay — уходим. Отдельный поток: основной цикл фарма может сам висеть в
+    -- ожидании. Хоп не вышел (список API, отказ телепорта) — обычный Teleport в плейс:
+    -- матчмейкинг Roblox даёт живой сервер. Цель Farm Sync не бросаем
+    Farm.Watch = {LobbySince = nil, PlayedAt = os.clock(), FiredAt = -math.huge}
+
+    function Farm.WatchReset()
+        Farm.Watch.LobbySince = nil
+        Farm.Watch.PlayedAt = os.clock()
+    end
+
+    function Farm.WatchStuckReason()
+        local cfg = CONFIG.ServerHop
+        local now = os.clock()
+        if Farm.Watch.LobbySince and now - Farm.Watch.LobbySince >= cfg.StuckLobby then
+            return string.format("no round for %d min", math.floor((now - Farm.Watch.LobbySince) / 60))
+        end
+        if now - Farm.Watch.PlayedAt >= cfg.StuckNoPlay then
+            return string.format("not in a round for %d min", math.floor((now - Farm.Watch.PlayedAt) / 60))
+        end
+        return nil
+    end
+
+    function Farm.WatchTick()
+        if not State.Settings.AutoFarmEnabled then
+            Farm.WatchReset()
+            return
+        end
+        local active = Farm.RoundActive()
+        if active then
+            Farm.Watch.LobbySince = nil
+            if Farm.IsParticipant() then Farm.Watch.PlayedAt = os.clock() end
+        else
+            Farm.Watch.LobbySince = Farm.Watch.LobbySince or os.clock()
+        end
+
+        local reason = Farm.WatchStuckReason()
+        if not reason or os.clock() - Farm.Watch.FiredAt < CONFIG.ServerHop.StuckRetry then return end
+        local sync = State.Runtime.FarmSync
+        if sync and sync.OnActiveTarget and sync.OnActiveTarget() then return end
+        if State.Runtime.ServerHopInProgress or State.Runtime.RejoinInProgress then return end
+
+        Farm.Watch.FiredAt = os.clock()
+        local jobId = game.JobId
+        Farm.PolicyHop(reason)
+        task.wait(CONFIG.ServerHop.StuckTeleportWait)
+        if game.JobId ~= jobId or not State.Settings.AutoFarmEnabled then return end
+        -- ServerHop не увёл: случайный сервер через матчмейкинг
+        local Lock = State.Runtime.TeleportLock
+        if Lock and Lock.Acquire("Watchdog") then
+            pcall(Lock.Try, game.PlaceId, nil, CONFIG.ServerHop.TeleportTimeout)
+            Lock.Release("Watchdog")
+        end
+    end
+
+    function Farm.StartWatchdog()
+        Core.Tasks.spawn(function()
+            while Core.Alive do
+                pcall(Farm.WatchTick)
+                task.wait(2)
+            end
+        end)
     end
 
     -- ─── Coin Split: монеты между нашими аккаунтами на одном сервере ────────────
@@ -8198,17 +8272,12 @@
             end
 
             -- ── Отбор кандидатов ─────────────────────────────────────────────────
-            -- Сервер с одним игроком — лучший: с нами станет двое, и мы всегда
-            -- мурдерер или шериф (см. CONFIG.ServerHop.FarmMaxPlayers). Список API
-            -- отстаёт на минуты, поэтому малые сервера — запас, а не гарантия.
-            -- Среди равных — с меньшим пингом (CONFIG.ServerHop.MaxPing)
+            -- Малый живой сервер (2–6 игроков) — лучший. «1 игрок» не тянем: там
+            -- часто незагрузившийся клиент чужой фермы и раунд не начинается (см.
+            -- MinPlayers). Среди равных — с меньшим пингом (CONFIG.ServerHop.MaxPing)
             local function Score(playing, maxPlayers, ping)
                 local score = (1 - playing / maxPlayers) * 100
-                if playing == 1 then
-                    score = score + 100
-                elseif playing >= 2 and playing <= 6 then
-                    score = score + 50
-                end
+                if playing >= 2 and playing <= 6 then score = score + 50 end
                 return score - (ping or SH.MaxPing) / 5
             end
 
@@ -10699,6 +10768,7 @@
     -- Farm Sync работает всегда: статус аккаунта — это и белый список для остальных.
     -- Режим (Off/Avoid/Follow) — из общего файла настроек, без него — пресет
     FarmSync.Start()
+    Farm.StartWatchdog()        -- сервер, где раунды не идут: уходим (CONFIG.ServerHop.StuckLobby)
     -- Альт: после старта — все оптимизации, кроме No Render (рендер остаётся),
     -- затем меню прячется, как по клавише HideKey: всё уже включено пресетом.
     -- Тумблеры с default=true дёргают свои handler'ы через task.spawn — к этому
