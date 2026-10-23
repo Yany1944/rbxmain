@@ -378,8 +378,13 @@
                 -- ping из API — пинг тех, кто уже на сервере, а не наш: свой меряем
                 -- сами (медиана за раунд) и с далёкого сервера уходим. Только Classic:
                 -- сервера Assassin для нас все далёкие (~225–250 мс), хоп там не поможет
-                MaxOwnPing       = 150,      -- мс: свой пинг за раунд выше — сервер далёкий
-                PingHopCooldown  = 15 * 60,  -- сек между хопами по пингу
+                -- Пинг бывает высоким у всех серверов сразу (сеть ПК: 2026-10-23 у ботов
+                -- было 54–82 мс, через час — 144–233 на любом сервере), тогда хоп не
+                -- помогает. Поэтому не чаще раза в час на аккаунт, и время хопа хранится
+                -- в файле — переживает телепорт
+                MaxOwnPing       = 200,      -- мс: свой пинг за раунд выше — сервер далёкий
+                PingHopCooldown  = 60 * 60,  -- сек между хопами по пингу (на аккаунт)
+                PingHopFile      = "VioCFG/Violite/farm_pinghop.json",  -- {userId = os.time() хопа}
             },
             -- Хук __namecall у Anti Trap: ставится, когда игра догрузила персонажа
             -- (ранний хук ломал загрузку после телепорта — см. hookReplicate)
@@ -4716,7 +4721,7 @@
     -- людном сервере невиновным с полной сумкой и одни на сервере, где раунды не
     -- начинаются. Farm Sync (цель группы, наши на сервере) важнее: там своя логика
     -- серверов
-    Farm.Hop = {AloneSince = nil, LastAt = -math.huge, PingAt = -math.huge, PingSamples = {}}
+    Farm.Hop = {AloneSince = nil, LastAt = -math.huge, PingSamples = {}}
 
     function Farm.CanPolicyHop()
         local sync = State.Runtime.FarmSync
@@ -4748,13 +4753,23 @@
 
     -- Далёкий сервер: медиана своего пинга за раунд (замер на каждой засчитанной
     -- монете, см. OnCoinCollected) выше MaxOwnPing, и хоп по пингу давно не был
+    -- (время хопа — в PingHopFile, иначе после телепорта отсчёт начинался заново)
     function Farm.PingHopDue()
         local cfg = CONFIG.ServerHop
         local samples = Farm.Hop.PingSamples
-        if #samples < 10 or os.clock() - Farm.Hop.PingAt < cfg.PingHopCooldown then return false end
+        if #samples < 10 then return false end
+        local last = tonumber(Files.LoadJSON(cfg.PingHopFile, {})[tostring(LocalPlayer.UserId)]) or 0
+        if os.time() - last < cfg.PingHopCooldown then return false end
         local sorted = table.clone(samples)
         table.sort(sorted)
         return sorted[math.ceil(#sorted / 2)] * 1000 > cfg.MaxOwnPing
+    end
+
+    function Farm.NotePingHop()
+        local cfg = CONFIG.ServerHop
+        local data = Files.LoadJSON(cfg.PingHopFile, {})
+        data[tostring(LocalPlayer.UserId)] = os.time()
+        Files.SaveJSON(cfg.PingHopFile, data)
     end
 
     -- Невиновный: ни ножа, ни пистолета (подобранный ган — уже шериф, он стреляет)
@@ -5934,7 +5949,7 @@
                             pcall(UnfloatCharacter)
                             Farm.PolicyHop("crowded server, innocent")
                         elseif Farm.PingHopDue() then
-                            Farm.Hop.PingAt = os.clock()
+                            Farm.NotePingHop()
                             pcall(UnfloatCharacter)
                             Farm.PolicyHop("high ping")
                         end
