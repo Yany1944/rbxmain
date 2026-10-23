@@ -410,6 +410,13 @@
                 KillEvery     = 2,     -- сек между ударами мурдерера по посторонним
                 -- Группы аккаунтов: у каждой своя цель (третья группа — ещё одна буква)
                 Groups        = {"A", "B"},
+                -- Режим Pair: все фармят в плейсе PlaceId (Disguises — там нет чужих
+                -- ферм-ботов), по Size наших на сервер. Одиночки сводятся в пары:
+                -- больший userId летит к меньшему; лишний (нечётный) фармит соло
+                Pair = {
+                    PlaceId = 335132309,   -- Murder Mystery 2 (Disguises)
+                    Size    = 2,           -- наших на сервер
+                },
                 -- Coin Split: монеты делятся между нашими аккаунтами на одном сервере
                 CoinSplit = {
                     Enabled   = true,
@@ -690,7 +697,7 @@
             BuyFinalRewardEnabled = false,
             VoteSpammerEnabled = false,
             VoteGoal = 8,
-            FarmSyncMode = CONFIG.AutoExec and "Avoid" or "Off", -- Off | Avoid | Follow (общий для всех аккаунтов ПК)
+            FarmSyncMode = CONFIG.AutoExec and "Avoid" or "Off", -- Off | Avoid | Follow | Pair (общий для всех аккаунтов ПК)
             FarmSyncClearStrangers = false,  -- на целевом сервере трогать посторонних
             FarmSyncTeleportCollect = false, -- на целевом сервере монеты телепортом (общий для ПК)
             -- Альты: 30 FPS — сбору хватает (0.7 studs полёта за кадр при радиусе
@@ -4787,7 +4794,8 @@
 
     -- Зовётся раз в секунду вне раунда: одни на сервере дольше AloneHopDelay — хоп
     function Farm.CheckAlone()
-        if #Players:GetPlayers() > 1 then
+        local sync = State.Runtime.FarmSync
+        if #Players:GetPlayers() > 1 or (sync and sync.PartnerIncoming and sync.PartnerIncoming()) then
             Farm.Hop.AloneSince = nil
             return
         end
@@ -8184,7 +8192,9 @@
     -- ══════════════════════════════════════════════════════════════════════════════
     -- SERVER HOP v3
     -- ══════════════════════════════════════════════════════════════════════════════
-    local function ServerHop()
+    -- placeId — плейс, куда хопаем (режим Pair уводит в плейс фарма); без него — текущий
+    local function ServerHop(placeId)
+        placeId = placeId or game.PlaceId
         local Lock = State.Runtime.TeleportLock
         if State.Runtime.ServerHopInProgress or not Lock.Acquire("ServerHop") then
             if State.Settings.NotificationsEnabled then
@@ -8250,7 +8260,7 @@
             local function FetchPage(cursor)
                 local url = string.format(
                     "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=%d",
-                    game.PlaceId,
+                    placeId,
                     SH.FetchLimit
                 )
                 if cursor then url = url .. "&cursor=" .. cursor end
@@ -8291,7 +8301,7 @@
             -- ── Кэш списка серверов ──────────────────────────────────────────────
             local cache = Files.LoadJSON(SH.CacheFile, nil)
             local cacheValid = cache
-                and cache.place == game.PlaceId
+                and cache.place == placeId
                 and type(cache.servers) == "table"
                 and #cache.servers > 0
                 and (now - (tonumber(cache.timestamp) or 0)) < SH.CacheLifetime
@@ -8303,11 +8313,11 @@
                 servers = FetchServers()
                 if #servers > 0 then
                     Files.SaveJSON(SH.CacheFile, {
-                        place = game.PlaceId,
+                        place = placeId,
                         timestamp = now,
                         servers = servers
                     })
-                elseif cache and cache.place == game.PlaceId and type(cache.servers) == "table" then
+                elseif cache and cache.place == placeId and type(cache.servers) == "table" then
                     -- API не ответил — лучше протухший список, чем ничего.
                     servers = cache.servers
                 end
@@ -8324,9 +8334,13 @@
             -- Малый живой сервер (2–6 игроков) — лучший. «1 игрок» не тянем: там
             -- часто незагрузившийся клиент чужой фермы и раунд не начинается (см.
             -- MinPlayers). Среди равных — с меньшим пингом (CONFIG.ServerHop.MaxPing)
+            local pairPlace = placeId == CONFIG.FarmSync.Pair.PlaceId
             local function Score(playing, maxPlayers, ping)
                 local score = (1 - playing / maxPlayers) * 100
                 if playing >= 2 and playing <= 6 then score = score + 50 end
+                -- Плейс режима Pair (Disguises): чужих ферм нет, почти пустой сервер —
+                -- лучший; даже если чужой там не загрузился, пара наших запустит раунд
+                if pairPlace and playing <= 2 then score = score + 80 end
                 return score - (ping or SH.MaxPing) / 5
             end
 
@@ -8347,7 +8361,7 @@
 
                     if pass and skipVisited and visited[srv.id] then pass = false end
                     if pass and strict then
-                        pass = srv.playing >= SH.MinPlayers
+                        pass = srv.playing >= (pairPlace and 1 or SH.MinPlayers)
                             and srv.playing < srv.maxPlayers * SH.MaxFillPercent
                             and (type(srv.ping) ~= "number" or srv.ping <= SH.MaxPing)
                     end
@@ -8404,13 +8418,13 @@
 
                 -- Отказа не было: телепорт принят. Второй телепорт поверх первого
                 -- — ровно та причина вылетов, из-за которой всё это переписывалось.
-                local accepted = Lock.Try(game.PlaceId, target.id, SH.TeleportTimeout)
+                local accepted = Lock.Try(placeId, target.id, SH.TeleportTimeout)
                 failed = not accepted
                 if accepted then break end
 
                 -- Явный отказ: сервер умер/полон. Список серверов протух — сбрасываем
                 -- кэш, чтобы следующий хоп сходил в API заново.
-                Files.SaveJSON(SH.CacheFile, { place = game.PlaceId, timestamp = 0, servers = {} })
+                Files.SaveJSON(SH.CacheFile, { place = placeId, timestamp = 0, servers = {} })
                 task.wait(1)
             end
 
@@ -8827,7 +8841,7 @@
             local mode, modeAt = field("mode")
             if modeAt and modeAt > (S.Applied.mode or 0) then
                 S.Applied.mode = modeAt
-                if mode == "Off" or mode == "Avoid" or mode == "Follow" then
+                if mode == "Off" or mode == "Avoid" or mode == "Follow" or mode == "Pair" then
                     changed = changed or State.Settings.FarmSyncMode ~= mode
                     State.Settings.FarmSyncMode = mode
                 end
@@ -8950,6 +8964,7 @@
                 lastOnTargetAt = S.LastOnTarget, lastOnJob = S.LastOnJob,
                 role = myRole(), status = myStatus(), bags = bagsText(),
                 ping = math.floor(Farm.Ping() * 1000),   -- пинг сети ПК для Farm.PingHopDue
+                joining = S.PairJoining,                 -- режим Pair: jobId напарника, к которому летим
                 voting = State.Runtime.AutoVoteSuppressInvis == true,
                 active = S.Running,
             })
@@ -9391,6 +9406,93 @@
             end
         end
 
+        -- ── Pair: по SC.Pair.Size наших на сервер в плейсе SC.Pair.PlaceId ──────────
+        -- Наши на сервере jobId: свежие статусы в этом плейсе и те, кто летит туда
+        -- (joining). Сам аккаунт не считается
+        local function oursOn(jobId)
+            local list = {}
+            for _, rec in pairs(S.Records) do
+                if fresh(rec) and ((rec.jobId == jobId and rec.placeId == SC.Pair.PlaceId) or rec.joining == jobId) then
+                    table.insert(list, rec)
+                end
+            end
+            return list
+        end
+
+        -- Кто-то из наших летит к нам: пока его ждём, «одни на сервере» — не повод для хопа
+        function FarmSync.PartnerIncoming()
+            if State.Settings.FarmSyncMode ~= "Pair" then return false end
+            for _, rec in pairs(S.Records) do
+                if fresh(rec) and rec.joining == game.JobId then return true end
+            end
+            return false
+        end
+
+        local function pairStep(now)
+            local P = SC.Pair
+            if now - S.LastHop < SC.HopCooldown then return end
+
+            -- Не в плейсе фарма — уходим туда, когда в раунде делать нечего
+            if game.PlaceId ~= P.PlaceId then
+                if not safeMoment() then return end
+                S.LastHop = now
+                Files.LogHop("pair: moving to the farm place")
+                ServerHop(P.PlaceId)
+                return
+            end
+
+            -- Наших здесь больше Size — уходят худшие (пришли позже; тай-брейк — больший userId)
+            local here = oursOn(game.JobId)
+            if #here + 1 > P.Size then
+                local rank = 1
+                for _, rec in ipairs(here) do
+                    local theirs = tonumber(rec.since) or 0
+                    if theirs < S.Since or (theirs == S.Since and (tonumber(rec.userId) or 0) < myId) then rank += 1 end
+                end
+                if rank > P.Size and safeMoment() then
+                    S.LastHop = now
+                    Files.LogHop("pair: more than " .. P.Size .. " of ours here")
+                    ServerHop(P.PlaceId)
+                end
+                return
+            end
+            if #here + 1 >= P.Size then return end      -- пара собрана
+
+            -- Мы одни из наших. Одиночки — наши в плейсе фарма без других наших на
+            -- сервере и никуда не летящие; сортируем по userId и сводим (1,2), (3,4)…
+            -- Больший userId пары летит к меньшему, нечётный последний — соло
+            local solos = {{Id = myId, Job = game.JobId}}
+            for _, rec in pairs(S.Records) do
+                local job = rec.jobId
+                if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
+                    and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
+                    and #oursOn(job) == 1 then
+                    table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job})
+                end
+            end
+            table.sort(solos, function(a, b) return a.Id < b.Id end)
+            local myPos = 1
+            for index, solo in ipairs(solos) do
+                if solo.Id == myId then myPos = index end
+            end
+            if myPos % 2 == 1 then return end            -- хозяин сервера или нечётный
+            local host = solos[myPos - 1]
+            if now < (S.PairJoinAt or 0) or not safeMoment() then return end
+
+            local Lock = State.Runtime.TeleportLock
+            if not Lock.Acquire("FarmSync") then return end
+            S.Teleporting = true
+            S.PairJoining = host.Job
+            pcall(writeSelf)
+            Files.LogHop("pair: joining " .. host.Job:sub(1, 8))
+            local accepted, result = Lock.Try(P.PlaceId, host.Job, CONFIG.ServerHop.TeleportTimeout)
+            -- Сюда доходим, только если остались здесь: отказ или зависший телепорт
+            S.Teleporting = false
+            S.PairJoining = nil
+            Lock.Release("FarmSync")
+            S.PairJoinAt = os.time() + ((not accepted and result == "GameFull") and SC.JoinRetryFull or SC.JoinRetry)
+        end
+
         local function syncTick()
             local now = os.time()
             local control = readControl()
@@ -9406,6 +9508,10 @@
 
             local mode = State.Settings.FarmSyncMode
             if mode == "Off" then return end
+            if mode == "Pair" then
+                pairStep(now)
+                return
+            end
             local group = myGroup()
             local target, alive = FarmSync.Target(group)
             if mode == "Follow" and alive then
@@ -9886,7 +9992,7 @@
         -- Тумблеры пишут поле, только если значение и правда новое: начальный вызов
         -- handler'а при создании тумблера ничего не пишет
         function FarmSync.SetMode(mode)
-            if mode ~= "Off" and mode ~= "Avoid" and mode ~= "Follow" then return end
+            if mode ~= "Off" and mode ~= "Avoid" and mode ~= "Follow" and mode ~= "Pair" then return end
             if mode == State.Settings.FarmSyncMode and field("mode") == mode then return end
             State.Settings.FarmSyncMode = mode
             writeFields({mode = mode})
@@ -10757,7 +10863,7 @@
         local SyncTab = GUI.CreateTab("Sync")
 
             SyncTab:CreateSection("FARM SYNC")
-            SyncTab:CreateSegmentedRow("Mode", "Avoid: one account per server; Follow: each group goes to its target", {"Off", "Avoid", "Follow"}, State.Settings.FarmSyncMode, "FarmSyncMode")
+            SyncTab:CreateSegmentedRow("Mode", "Avoid: one account per server; Follow: each group goes to its target; Pair: two accounts per server in Disguises", {"Off", "Avoid", "Follow", "Pair"}, State.Settings.FarmSyncMode, "FarmSyncMode")
             SyncTab:CreateToggle("Clear Strangers", "On the target: kill, shoot and fling non-own players", "FarmSyncClearStrangers", State.Settings.FarmSyncClearStrangers)
             SyncTab:CreateToggle("Teleport Collect", "On the target: coins by teleport, in turn; pause = flight time", "FarmSyncTeleportCollect", State.Settings.FarmSyncTeleportCollect)
             SyncTab:CreateSection("TARGET SERVER (YOUR GROUP)")
