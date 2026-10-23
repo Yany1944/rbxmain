@@ -383,6 +383,7 @@
                 -- помогает. Поэтому не чаще раза в час на аккаунт, и время хопа хранится
                 -- в файле — переживает телепорт
                 MaxOwnPing       = 200,      -- мс: свой пинг за раунд выше — сервер далёкий
+                PingHopRelative  = 1.5,      -- ×медиана пинга остальных наших (Farm Sync): ниже — медленная сеть, не сервер
                 PingHopCooldown  = 60 * 60,  -- сек между хопами по пингу (на аккаунт)
                 PingHopFile      = "VioCFG/Violite/farm_pinghop.json",  -- {userId = os.time() хопа}
             },
@@ -4763,7 +4764,12 @@
         if os.time() - last < cfg.PingHopCooldown then return false end
         local sorted = table.clone(samples)
         table.sort(sorted)
-        return sorted[math.ceil(#sorted / 2)] * 1000 > cfg.MaxOwnPing
+        local own = sorted[math.ceil(#sorted / 2)] * 1000
+        if own <= cfg.MaxOwnPing then return false end
+        -- У остальных наших пинг такой же — медленная сеть ПК, хоп не поможет
+        local sync = State.Runtime.FarmSync
+        local others = sync and sync.OthersPingMedian and sync.OthersPingMedian()
+        return not others or own > others * cfg.PingHopRelative
     end
 
     function Farm.NotePingHop()
@@ -8942,6 +8948,7 @@
                 since = S.Since, heartbeat = os.time(),
                 lastOnTargetAt = S.LastOnTarget, lastOnJob = S.LastOnJob,
                 role = myRole(), status = myStatus(), bags = bagsText(),
+                ping = math.floor(Farm.Ping() * 1000),   -- пинг сети ПК для Farm.PingHopDue
                 voting = State.Runtime.AutoVoteSuppressInvis == true,
                 active = S.Running,
             })
@@ -9005,6 +9012,18 @@
         -- Teleport Collect работает только на цели своей группы
         function FarmSync.TeleportMode()
             return State.Settings.FarmSyncTeleportCollect == true and FarmSync.OnActiveTarget()
+        end
+
+        -- Медиана пинга других наших аккаунтов (свежие статусы, любой сервер): так
+        -- выглядит пинг всей сети ПК. Меньше трёх замеров — nil
+        function FarmSync.OthersPingMedian()
+            local list = {}
+            for _, rec in pairs(S.Records) do
+                if fresh(rec) and tonumber(rec.ping) then table.insert(list, tonumber(rec.ping)) end
+            end
+            if #list < 3 then return nil end
+            table.sort(list)
+            return list[math.ceil(#list / 2)]
         end
 
         -- Другие наши на этом сервере (свежий статус)
