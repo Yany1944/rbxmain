@@ -4711,6 +4711,7 @@
     -- Хоп и ожидание телепорта: true — мы всё ещё здесь (отказ или таймаут)
     function Farm.PolicyHop(reason)
         Farm.Hop.LastAt = os.clock()
+        print("[Auto Farm] hop: " .. reason .. " (players " .. #Players:GetPlayers() .. ")")
         if State.Settings.NotificationsEnabled then
             ShowNotification("<font color=\"rgb(255,170,50)\">Auto Farm: </font>" .. reason .. " → hop", CONFIG.Colors.Text)
         end
@@ -4787,7 +4788,11 @@
             Farm.WatchReset()
             return
         end
-        local active = Farm.RoundActive()
+        -- Раунд идёт: нож у кого-то или тикает таймер раунда (нож мурдерера, чей
+        -- клиент не загрузился, может быть не виден — таймер страхует)
+        local timerPart = Workspace:FindFirstChild("RoundTimerPart")
+        local timer = timerPart and timerPart:GetAttribute("Time")
+        local active = Farm.RoundActive() or (type(timer) == "number" and timer > 0)
         if active then
             Farm.Watch.LobbySince = nil
             if Farm.IsParticipant() then Farm.Watch.PlayedAt = os.clock() end
@@ -5203,6 +5208,7 @@
             Farm.LastCoin = {Pos = position, At = now - Farm.MinRTT, Arrived = now, Coin = entry and entry.Coin}
         end
         Farm.CollectedAt = now
+        Farm.Watch.PlayedAt = now                          -- сторож: мы в раунде
         table.insert(Farm.Hop.PingSamples, Farm.Ping())   -- пинг этого сервера (Farm.PingHopDue)
     end
 
