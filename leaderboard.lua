@@ -8371,6 +8371,9 @@
 
             -- Сервера, где уже сидят наши аккаунты (Farm Sync), — не кандидаты: два
             -- альта, уходящие с одного сервера, не должны встретиться на новом
+            -- Пара на людном сервере уходит в один момент (конец раунда): разносим
+            -- выбор, чтобы второй уже видел бронь первого
+            if pairPlace then task.wait(math.random() * 3) end
             local occupied = {}
             if State.Runtime.FarmSync and State.Runtime.FarmSync.OccupiedJobs then
                 pcall(function() occupied = State.Runtime.FarmSync.OccupiedJobs() end)
@@ -8438,6 +8441,10 @@
 
                 -- Пишем ДО телепорта: после успешного телепорта код уже не отработает.
                 MarkVisited(target.id)
+                State.Runtime.HopTarget = target.id
+                if State.Runtime.FarmSync and State.Runtime.FarmSync.WriteNow then
+                    State.Runtime.FarmSync.WriteNow()
+                end
 
                 notify("rgb(85, 255, 120)", string.format(
                     "Joining %d/%d players (Score: %.0f)",
@@ -8449,6 +8456,7 @@
                 local accepted = Lock.Try(placeId, target.id, SH.TeleportTimeout)
                 failed = not accepted
                 if accepted then break end
+                State.Runtime.HopTarget = nil
 
                 -- Явный отказ: сервер умер/полон. Список серверов протух — сбрасываем
                 -- кэш, чтобы следующий хоп сходил в API заново.
@@ -8459,6 +8467,7 @@
             if failed then
                 notify("rgb(255, 85, 85)", "Teleport failed, try again")
             end
+            State.Runtime.HopTarget = nil
             State.Runtime.ServerHopInProgress = false
             Lock.Release("ServerHop")
         end)
@@ -8992,7 +9001,9 @@
                 lastOnTargetAt = S.LastOnTarget, lastOnJob = S.LastOnJob,
                 role = myRole(), status = myStatus(), bags = bagsText(),
                 ping = math.floor(Farm.Ping() * 1000),   -- пинг сети ПК для Farm.PingHopDue
-                joining = S.PairJoining,                 -- режим Pair: jobId напарника, к которому летим
+                -- jobId, куда летим: к напарнику (Pair) или выбранный хопом — бронь, чтобы
+                -- двое наших, ушедших в одну секунду, не выбрали один сервер
+                joining = S.PairJoining or State.Runtime.HopTarget,
                 players = #Players:GetPlayers(),         -- режим Pair: к людному серверу не летим
                 voting = State.Runtime.AutoVoteSuppressInvis == true,
                 active = S.Running,
@@ -9092,10 +9103,17 @@
         end
 
         -- Сервера с нашими и живые цели групп: хопу туда нельзя
+        -- Записать свой статус сейчас (бронь сервера хопом), а не на следующем тике
+        function FarmSync.WriteNow()
+            pcall(writeSelf)
+        end
+
         function FarmSync.OccupiedJobs()
+            pcall(readRecords)      -- хоп решает сейчас: статусы с прошлого тика могли устареть
             local jobs = {}
             for _, rec in pairs(S.Records) do
                 if fresh(rec) and type(rec.jobId) == "string" and rec.jobId ~= "" then jobs[rec.jobId] = true end
+                if fresh(rec) and type(rec.joining) == "string" and rec.joining ~= "" then jobs[rec.joining] = true end
             end
             for _, group in ipairs(SC.Groups) do
                 local target, alive = FarmSync.Target(group)
