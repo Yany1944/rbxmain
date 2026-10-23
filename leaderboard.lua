@@ -421,6 +421,7 @@
                     PresentTTL = 45,       -- сек без heartbeat — напарник ещё «здесь» (фриз, перезапуск)
                     SettleTime = 15,       -- сек после прихода на сервер, прежде чем лететь к кому-то
                     MaxPlayers = 2,        -- ServerHop в плейс Pair: сначала только сервера с ≤ стольки игроков
+                    MaxServer  = 5,        -- игроков на сервере больше — уходим, к такому не летим
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот: с такого сервера уходим
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 30 * 60,  -- сек помнить такой сервер
@@ -4776,6 +4777,8 @@
         local cfg = CONFIG.ServerHop
         local samples = Farm.Hop.PingSamples
         if #samples < 10 then return false end
+        -- В плейсе Pair (Disguises) малых серверов мало: пусть далёкий, лишь бы пустой
+        if game.PlaceId == CONFIG.FarmSync.Pair.PlaceId then return false end
         local last = tonumber(Files.LoadJSON(cfg.PingHopFile, {})[tostring(LocalPlayer.UserId)]) or 0
         if os.time() - last < cfg.PingHopCooldown then return false end
         local sorted = table.clone(samples)
@@ -8350,7 +8353,8 @@
                 -- Плейс режима Pair (Disguises): чужих ферм нет, почти пустой сервер —
                 -- лучший; даже если чужой там не загрузился, пара наших запустит раунд
                 if pairPlace and playing <= 2 then score = score + 80 end
-                return score - (ping or SH.MaxPing) / 5
+                -- Там же пинг — только тай-брейк: малый сервер с 200 мс лучше людного с 60
+                return score - (ping or SH.MaxPing) / (pairPlace and 50 or 5)
             end
 
             -- Сервера, где уже сидят наши аккаунты (Farm Sync), — не кандидаты: два
@@ -8373,7 +8377,7 @@
                         pass = srv.playing >= (pairPlace and 1 or SH.MinPlayers)
                             and (not pairPlace or srv.playing <= CONFIG.FarmSync.Pair.MaxPlayers)
                             and srv.playing < srv.maxPlayers * SH.MaxFillPercent
-                            and (type(srv.ping) ~= "number" or srv.ping <= SH.MaxPing)
+                            and (pairPlace or type(srv.ping) ~= "number" or srv.ping <= SH.MaxPing)
                     end
 
                     if pass then
@@ -8977,6 +8981,7 @@
                 role = myRole(), status = myStatus(), bags = bagsText(),
                 ping = math.floor(Farm.Ping() * 1000),   -- пинг сети ПК для Farm.PingHopDue
                 joining = S.PairJoining,                 -- режим Pair: jobId напарника, к которому летим
+                players = #Players:GetPlayers(),         -- режим Pair: к людному серверу не летим
                 voting = State.Runtime.AutoVoteSuppressInvis == true,
                 active = S.Running,
             })
@@ -9503,6 +9508,17 @@
                 return
             end
 
+            -- Людный сервер (набились чужие или хоп попал на большой): уходим каждый
+            -- сам в безопасный момент, напарники к нам не летят (поле players)
+            if #Players:GetPlayers() > P.MaxServer then
+                if now - S.Since >= P.SettleTime and safeMoment() then
+                    S.LastHop = now
+                    Files.LogHop("pair: server too big")
+                    ServerHop(P.PlaceId)
+                end
+                return
+            end
+
             -- Наших здесь больше Size — уходят худшие (пришли позже; тай-брейк — больший userId)
             local here = oursOn(game.JobId)
             if #here + 1 > P.Size then
@@ -9534,7 +9550,7 @@
                 local job = rec.jobId
                 if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
                     and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
-                    and not bad[job] and #oursOn(job) == 1 then
+                    and not bad[job] and (tonumber(rec.players) or 0) < P.MaxServer and #oursOn(job) == 1 then
                     table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job, Since = tonumber(rec.since) or 0})
                 end
             end
