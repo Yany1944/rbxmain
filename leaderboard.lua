@@ -688,11 +688,12 @@
             AutoBattlePassEnabled = false,
             BuyFinalRewardEnabled = false,
             VoteSpammerEnabled = false,
-            VoteGoal = 8,
             FarmSyncMode = CONFIG.AutoExec and "Avoid" or "Off", -- Off | Avoid | Follow (общий для всех аккаунтов ПК)
             FarmSyncClearStrangers = false,  -- на целевом сервере трогать посторонних
             FarmSyncTeleportCollect = false, -- на целевом сервере монеты телепортом (общий для ПК)
-            FPSCap = 60,
+            -- Альты: 30 FPS — сбору хватает (0.7 studs полёта за кадр при радиусе
+            -- касания 4), а CPU на 9 клиентах меньше
+            FPSCap = 30,
         },
         Cache = {
             CoinBlacklist = {},
@@ -10045,17 +10046,22 @@
     -- Лобби после ивент-апдейта: Workspace.Lobby.VotePads.VotePadN →
     --   VoteInfoGui.Container.MapName / .Votes ("Votes: N"), MapInfoGui.MapIcon (Image
     --   не пуст и VoteInfoGui.Enabled — идёт голосование), часть Pad — куда встать.
-    -- Голос засчитывает сервер по стоянию на паде; респавн-цикл (respawn() кладёт
-    -- нового персонажа на то же место) даёт голос заново на каждом заходе.
+    -- Голос сервер считает сам (TouchInterest у пада нет), один на игрока: замер
+    -- 2026-10-23 — встал на пад, голос через ~0.3 с; сход-возврат ×10 и респавн ×5
+    -- на паде не дали ни одного голоса сверху. Поэтому без респавн-цикла: как только
+    -- голосование открылось — на лучший пад и стоим до конца
     do
-        -- Ключи — имя карты в нижнем регистре без пробелов; меньше — приоритетнее
-        -- (маленькие карты быстрее фармятся). Неизвестные карты — в конец списка
+        -- Ключи — имя карты в нижнем регистре без пробелов; меньше — приоритетнее.
+        -- Порядок — по медиане «первая → 50-я конфета» на ~220 раундах ботов
+        -- (2026-10-23): Police Station 53 с … Factory 63, Mil Base 66, BioLab 66.
+        -- Карты с 1–2 замерами — в середине. Неизвестные — в конец
         local MAP_PRIORITY = {
-            house2 = 1, bank2 = 2, factory = 3, hospital3 = 4, workplace = 5, mansion2 = 6,
-            office3 = 7, policestation = 8, hotel2 = 9, researchfacility = 10, biolab = 11,
-            milbase = 12, mineshaft = 13,
+            policestation = 1, bank2 = 2, hospital3 = 3, office3 = 4, house2 = 5, mansion2 = 6,
+            workplace = 7, manor = 8, farmhouse = 9, hotel = 10, hotel2 = 10, researchfacility = 11,
+            factory = 12, milbase = 13, biolab = 14, hauntedhouse2 = 15, spaceship = 16,
+            mineshaft = 17, barn = 18,
         }
-        local Vote = {Thread = nil, Session = 0, Teleported = false, Reached = false, InvisWasOn = false}
+        local Vote = {Thread = nil, InvisWasOn = false}
 
         local function normalize(name)
             return (tostring(name):lower():gsub("[^%w]", ""))
@@ -10124,7 +10130,7 @@
             return CFrame.new(center.X, floorY + hip + rootHalf + 0.1, center.Z)
         end
 
-        -- Конец голосования (цель достигнута / пады погасли / выключили): инвиз — обратно
+        -- Конец голосования (пады погасли / выключили): инвиз — обратно
         local function releaseInvis()
             State.Runtime.AutoVoteSuppressInvis = false
             if Vote.InvisWasOn and State.Settings.AutoFarmEnabled and not State.Settings.IsInvisible then
@@ -10133,55 +10139,46 @@
             Vote.InvisWasOn = false
         end
 
+        -- Стоим на паде: сдвинули дальше Hold studs по горизонтали (толкнули,
+        -- респавн) — ставим обратно. Проверка 4 раза в секунду: голос засчитывается
+        -- через ~0.3 с после того, как встали
+        local HOLD_RADIUS = 2.5
+
         local function loop()
-            local waiting = true
+            local voting = false
             while State.Settings.VoteSpammerEnabled do
                 local pad = targetPad()
                 if not pad then
-                    if not waiting then
-                        waiting = true
-                        Vote.Teleported, Vote.Reached = false, false
+                    if voting then
+                        voting = false
                         releaseInvis()
                     end
-                    task.wait(2)
+                    task.wait(0.25)
                     continue
                 end
 
-                if waiting then
+                if not voting then
                     -- Новое голосование: инвиз прячет нас под картой — сервер не увидит на паде
-                    waiting = false
-                    Vote.Session += 1
+                    voting = true
                     State.Runtime.AutoVoteSuppressInvis = true
                     if State.Settings.IsInvisible then
                         pcall(function() ToggleInvisibility() end)
                         Vote.InvisWasOn = true
-                        task.wait(0.2)
                     end
-                end
-
-                if pad.Votes >= (State.Settings.VoteGoal or 8) then
-                    if not Vote.Reached then
-                        Vote.Reached = true
-                        releaseInvis()
-                    end
-                    task.wait(2)
-                    continue
                 end
 
                 local character = LocalPlayer.Character
                 local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                if not hrp then task.wait(0.5); continue end
-
-                local stand = standCFrame(pad.Part, character)
-                if not Vote.Teleported then
-                    hrp.CFrame = stand
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    hrp.AssemblyAngularVelocity = Vector3.zero
-                    Vote.Teleported = true
-                    task.wait(0.4)
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                if hrp and humanoid and humanoid.Health > 0 and not Farm.FlingBusy() then
+                    local offset = hrp.Position - pad.Part.Position
+                    if Vector3.new(offset.X, 0, offset.Z).Magnitude > HOLD_RADIUS then
+                        hrp.CFrame = standCFrame(pad.Part, character)
+                        hrp.AssemblyLinearVelocity = Vector3.zero
+                        hrp.AssemblyAngularVelocity = Vector3.zero
+                    end
                 end
-                respawn(LocalPlayer, stand)
-                task.wait(0.4)
+                task.wait(0.25)
             end
             releaseInvis()
         end
@@ -10189,7 +10186,6 @@
         State.Runtime.SetVoteSpammer = function(on)
             State.Settings.VoteSpammerEnabled = on and true or false
             if Vote.Thread then Core.Tasks.cancel(Vote.Thread); Vote.Thread = nil end
-            Vote.Teleported, Vote.Reached = false, false
             if State.Settings.VoteSpammerEnabled then
                 Vote.Thread = Core.Tasks.spawn(loop)
             else
@@ -10455,7 +10451,6 @@
             CoinFarmFlySpeed = function(v) State.Settings.CoinFarmFlySpeed = v end,
             CoinFarmDelay = function(v) State.Settings.CoinFarmDelay = v end,
             VoteSpammer = function(on) if State.Runtime.SetVoteSpammer then State.Runtime.SetVoteSpammer(on) end end,
-            VoteGoal = function(v) State.Settings.VoteGoal = math.clamp(math.floor(tonumber(v) or 8), 1, 50) end,
 
             -- Optimization (AFK Mode = No Render + Disable UI, как в старом лидерборде)
             AFKMode = function(on)
@@ -10681,8 +10676,7 @@
             FarmTab:CreateInputField("Reconnect interval", "Minutes, default 60", math.floor(State.Settings.ReconnectInterval / 60), "SetReconnectInterval")
 
             FarmTab:CreateSection("VOTE SPAM", "right")
-            FarmTab:CreateToggle("Auto Vote Spam", "Automatically vote for priority maps", "VoteSpammer", true)
-            FarmTab:CreateInputField("Vote Goal", "Target votes (default: 8)", State.Settings.VoteGoal, "VoteGoal")
+            FarmTab:CreateToggle("Auto Vote Spam", "Stand on the best map's pad as soon as voting opens", "VoteSpammer", true)
     end
 
     do
