@@ -339,10 +339,12 @@
             },
             -- Настройки Server Hop / Rejoin. Всё, что можно крутить, — только здесь.
             ServerHop = {
-                VisitedFile      = "VioCFG/Violite/serverhop_visited.json", -- {jobId = os.time()}
+                -- {jobId = os.time()}; к имени добавляется userId — у каждого аккаунта своя
+                -- история: общая за полчаса «съедала» все маленькие сервера Disguises
+                VisitedFile      = "VioCFG/Violite/serverhop_visited.json",
                 CacheFile        = "VioCFG/Violite/serverhop_cache.json",   -- кэш списка серверов
                 HopLogFile       = "VioCFG/Violite/farm_hops.log",          -- журнал хопов (Files.LogHop)
-                VisitedLifetime  = 30 * 60,  -- сколько секунд считать сервер «только что посещённым»
+                VisitedLifetime  = 10 * 60,  -- сколько секунд считать сервер «только что посещённым»
                 VisitedLimit     = 250,      -- страховка от разрастания файла истории
                 CacheLifetime    = 240,      -- сколько секунд переиспользовать список серверов
                 MinPlayers       = 2,        -- «1 игрок» в списке — часто мёртвый сервер: второй
@@ -416,6 +418,12 @@
                 Pair = {
                     PlaceId = 335132309,   -- Murder Mystery 2 (Disguises)
                     Size    = 2,           -- наших на сервер
+                    PresentTTL = 45,       -- сек без heartbeat — напарник ещё «здесь» (фриз, перезапуск)
+                    SettleTime = 15,       -- сек после прихода на сервер, прежде чем лететь к кому-то
+                    MaxPlayers = 2,        -- ServerHop в плейс Pair: сначала только сервера с ≤ стольки игроков
+                    BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот: с такого сервера уходим
+                    BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
+                    BadTTL     = 30 * 60,  -- сек помнить такой сервер
                 },
                 -- Coin Split: монеты делятся между нашими аккаунтами на одном сервере
                 CoinSplit = {
@@ -8211,6 +8219,7 @@
         Core.Tasks.spawn(function()
             local SH = CONFIG.ServerHop
             local now = os.time()
+            local visitedFile = SH.VisitedFile:gsub("%.json$", "_" .. LocalPlayer.UserId .. ".json")
 
             local function notify(color, text)
                 if State.Settings.NotificationsEnabled then
@@ -8226,7 +8235,7 @@
             -- ── История посещений: {jobId = timestamp}, протухает по времени ─────
             local visited = {}
             do
-                local raw = Files.LoadJSON(SH.VisitedFile, {})
+                local raw = Files.LoadJSON(visitedFile, {})
                 local ordered = {}
                 for jobId, stamp in pairs(raw) do
                     if type(jobId) == "string" and type(stamp) == "number"
@@ -8242,7 +8251,7 @@
             end
 
             local function SaveVisited()
-                Files.SaveJSON(SH.VisitedFile, visited)
+                Files.SaveJSON(visitedFile, visited)
             end
 
             local function MarkVisited(jobId)
@@ -8362,6 +8371,7 @@
                     if pass and skipVisited and visited[srv.id] then pass = false end
                     if pass and strict then
                         pass = srv.playing >= (pairPlace and 1 or SH.MinPlayers)
+                            and (not pairPlace or srv.playing <= CONFIG.FarmSync.Pair.MaxPlayers)
                             and srv.playing < srv.maxPlayers * SH.MaxFillPercent
                             and (type(srv.ping) ~= "number" or srv.ping <= SH.MaxPing)
                     end
@@ -8379,6 +8389,8 @@
             end
 
             local candidates = Collect(true, true)
+            -- В плейсе Pair уже посещённый пустой сервер лучше любого большого
+            if #candidates == 0 and pairPlace then candidates = Collect(false, true) end
             if #candidates == 0 then candidates = Collect(true, false) end
             if #candidates == 0 then
                 -- Все известные сервера посещены за последние VisitedLifetime секунд.
@@ -9072,7 +9084,38 @@
                 local target, alive = FarmSync.Target(group)
                 if alive then jobs[target.jobId] = true end
             end
+            for jobId in pairs(FarmSync.BadJobs()) do jobs[jobId] = true end
             return jobs
+        end
+
+        -- Сервера с чужими фермами-ботами (режим Pair): {jobId = os.time()}, общие для
+        -- всех наших, живут BadTTL — туда не хопаем и не летим к напарнику
+        function FarmSync.BadJobs()
+            local out, now = {}, os.time()
+            for jobId, at in pairs(Files.LoadJSON(SC.Pair.BadFile, {})) do
+                if type(at) == "number" and now - at < SC.Pair.BadTTL then out[jobId] = true end
+            end
+            return out
+        end
+
+        local function markBad(jobId)
+            local data, now = Files.LoadJSON(SC.Pair.BadFile, {}), os.time()
+            for key, at in pairs(data) do
+                if type(at) ~= "number" or now - at >= SC.Pair.BadTTL then data[key] = nil end
+            end
+            data[jobId] = now
+            Files.SaveJSON(SC.Pair.BadFile, data)
+        end
+
+        -- Чужой аккаунт младше BotAgeDays дней — почти всегда ферма-бот
+        local function foreignBots()
+            local count = 0
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and not FarmSync.IsOurs(player) and player.AccountAge < SC.Pair.BotAgeDays then
+                    count += 1
+                end
+            end
+            return count
         end
 
         -- ── Coin Split: заявки на монеты (см. «Coin Split» в блоке фарма) ─────────
@@ -9409,10 +9452,12 @@
         -- ── Pair: по SC.Pair.Size наших на сервер в плейсе SC.Pair.PlaceId ──────────
         -- Наши на сервере jobId: свежие статусы в этом плейсе и те, кто летит туда
         -- (joining). Сам аккаунт не считается
+        -- Напарник считается здесь до PresentTTL без heartbeat (не StaleTTL): фриз или
+        -- его перезапуск не делают нас одиночкой, и мы не бросаемся искать другого
         local function oursOn(jobId)
             local list = {}
             for _, rec in pairs(S.Records) do
-                if fresh(rec) and ((rec.jobId == jobId and rec.placeId == SC.Pair.PlaceId) or rec.joining == jobId) then
+                if fresh(rec, SC.Pair.PresentTTL) and ((rec.jobId == jobId and rec.placeId == SC.Pair.PlaceId) or rec.joining == jobId) then
                     table.insert(list, rec)
                 end
             end
@@ -9441,6 +9486,23 @@
                 return
             end
 
+            -- Чужие фермы-боты на сервере: уходим (каждый наш — в свой безопасный
+            -- момент), сервер помечаем, чтобы туда не вернулись ни мы, ни напарники
+            -- Пока ждём безопасного момента — никого к себе не зовём и сами не летим
+            if foreignBots() > 0 then
+                -- Помечаем сразу, чтобы напарники не выбрали нас хозяином
+                if S.BadMarked ~= game.JobId then
+                    S.BadMarked = game.JobId
+                    markBad(game.JobId)
+                end
+                if now - S.Since >= P.SettleTime and safeMoment() then
+                    S.LastHop = now
+                    Files.LogHop("pair: foreign bots here")
+                    ServerHop(P.PlaceId)
+                end
+                return
+            end
+
             -- Наших здесь больше Size — уходят худшие (пришли позже; тай-брейк — больший userId)
             local here = oursOn(game.JobId)
             if #here + 1 > P.Size then
@@ -9459,23 +9521,32 @@
             if #here + 1 >= P.Size then return end      -- пара собрана
 
             -- Мы одни из наших. Одиночки — наши в плейсе фарма без других наших на
-            -- сервере и никуда не летящие; сортируем по userId и сводим (1,2), (3,4)…
-            -- Больший userId пары летит к меньшему, нечётный последний — соло
-            local solos = {{Id = myId, Job = game.JobId}}
+            -- сервере и никуда не летящие; сортируем по времени на своём сервере
+            -- (since: кто дольше стоит — первым) и сводим (1,2), (3,4)… Летит тот, кто
+            -- пришёл позже: давно стоящий не двигается, поэтому хоп одного бота (руками
+            -- или по правилу) двигает только его самого, а не цепочку. Нечётный — соло.
+            -- Сразу после прихода (SettleTime) никуда не летим: статусы остальных ещё
+            -- не обновились
+            if now - S.Since < P.SettleTime then return end
+            local bad = FarmSync.BadJobs()
+            local solos = {{Id = myId, Job = game.JobId, Since = S.Since}}
             for _, rec in pairs(S.Records) do
                 local job = rec.jobId
                 if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
                     and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
-                    and #oursOn(job) == 1 then
-                    table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job})
+                    and not bad[job] and #oursOn(job) == 1 then
+                    table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job, Since = tonumber(rec.since) or 0})
                 end
             end
-            table.sort(solos, function(a, b) return a.Id < b.Id end)
+            table.sort(solos, function(a, b)
+                if a.Since ~= b.Since then return a.Since < b.Since end
+                return a.Id < b.Id
+            end)
             local myPos = 1
             for index, solo in ipairs(solos) do
                 if solo.Id == myId then myPos = index end
             end
-            if myPos % 2 == 1 then return end            -- хозяин сервера или нечётный
+            if myPos % 2 == 1 then return end            -- стоим давно (к нам прилетят) или нечётный
             local host = solos[myPos - 1]
             if now < (S.PairJoinAt or 0) or not safeMoment() then return end
 
