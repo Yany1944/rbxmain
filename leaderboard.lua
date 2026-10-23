@@ -425,6 +425,7 @@
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот: с такого сервера уходим
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 30 * 60,  -- сек помнить такой сервер
+                    ShortRounds = 2,       -- раундов подряд кончились до полной сумки — сервер плохой
                 },
                 -- Coin Split: монеты делятся между нашими аккаунтами на одном сервере
                 CoinSplit = {
@@ -4725,6 +4726,17 @@
 
     -- Раунд закончился: сумки и чёрный список больше не актуальны, с левитации — в лобби
     function Farm.OnRoundEnd()
+        -- Раунд кончился раньше полной сумки (нас убили или чужой его закончил) — Farm
+        -- Sync считает такие раунды на сервере (режим Pair). Монет не было — не считаем:
+        -- пришли посреди раунда
+        local short = false
+        if Farm.BagsLive then
+            for _, bag in pairs(Farm.Bags) do
+                if bag.Limit and (bag.Collected or 0) > 0 and bag.Collected < bag.Limit then short = true end
+            end
+        end
+        local sync = State.Runtime.FarmSync
+        if sync and sync.NoteRoundEnd then pcall(sync.NoteRoundEnd, short) end
         Farm.Done = false
         Farm.Unclaim()
         -- Раунд мог кончиться посреди сбора: ноклип нужен только на карте
@@ -9112,6 +9124,20 @@
             Files.SaveJSON(SC.Pair.BadFile, data)
         end
 
+        -- Раунды, кончившиеся раньше полной сумки, подряд на этом сервере: чужая
+        -- ферма заканчивает раунд ресетом или чужой мурдерер режет нас посреди сбора —
+        -- по возрасту аккаунта таких не видно
+        S.Short = {Job = nil, Count = 0}
+        function FarmSync.NoteRoundEnd(short)
+            if State.Settings.FarmSyncMode ~= "Pair" or game.PlaceId ~= SC.Pair.PlaceId then return end
+            if S.Short.Job ~= game.JobId then S.Short = {Job = game.JobId, Count = 0} end
+            S.Short.Count = short and S.Short.Count + 1 or 0
+            if S.Short.Count >= SC.Pair.ShortRounds and S.BadMarked ~= game.JobId then
+                S.BadMarked = game.JobId
+                markBad(game.JobId)
+            end
+        end
+
         -- Чужой аккаунт младше BotAgeDays дней — почти всегда ферма-бот
         local function foreignBots()
             local count = 0
@@ -9508,6 +9534,16 @@
                 return
             end
 
+            -- Раунды здесь подряд кончаются раньше полной сумки — уходим
+            if S.Short.Job == game.JobId and S.Short.Count >= P.ShortRounds then
+                if safeMoment() then
+                    S.LastHop = now
+                    Files.LogHop("pair: rounds end before our bags are full")
+                    ServerHop(P.PlaceId)
+                end
+                return
+            end
+
             -- Людный сервер (набились чужие или хоп попал на большой): уходим каждый
             -- сам в безопасный момент, напарники к нам не летят (поле players)
             if #Players:GetPlayers() > P.MaxServer then
@@ -9535,6 +9571,16 @@
                 return
             end
             if #here + 1 >= P.Size then return end      -- пара собрана
+
+            -- Одни на плохом сервере (напарник ушёл с него): к нам никто не прилетит
+            if FarmSync.BadJobs()[game.JobId] then
+                if now - S.Since >= P.SettleTime and safeMoment() then
+                    S.LastHop = now
+                    Files.LogHop("pair: alone on a bad server")
+                    ServerHop(P.PlaceId)
+                end
+                return
+            end
 
             -- Мы одни из наших. Одиночки — наши в плейсе фарма без других наших на
             -- сервере и никуда не летящие; сортируем по времени на своём сервере
