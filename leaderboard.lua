@@ -422,6 +422,8 @@
                     SettleTime = 15,       -- сек после прихода на сервер, прежде чем лететь к кому-то
                     MaxPlayers = 2,        -- ServerHop в плейс Pair: сначала только сервера с ≤ стольки игроков
                     MaxServer  = 5,        -- игроков на сервере больше — уходим, к такому не летим
+                    PairMaxServer = 7,     -- то же для готовой пары: переезд стоит раунда, терпим больше
+                    PartnerWait = 120,     -- сек ждать ушедшего напарника, потом ищем пару заново
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот: с такого сервера уходим
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 30 * 60,  -- сек помнить такой сервер
@@ -9005,6 +9007,7 @@
                 -- двое наших, ушедших в одну секунду, не выбрали один сервер
                 joining = S.PairJoining or State.Runtime.HopTarget,
                 players = #Players:GetPlayers(),         -- режим Pair: к людному серверу не летим
+                partner = S.Partner and S.Partner.Id,    -- режим Pair: с кем в паре (такого не забирают)
                 voting = State.Runtime.AutoVoteSuppressInvis == true,
                 active = S.Running,
             })
@@ -9519,7 +9522,45 @@
             for _, rec in pairs(S.Records) do
                 if fresh(rec) and rec.joining == game.JobId then return true end
             end
-            return false
+            -- Ведущий пары ждёт напарника на новом сервере (не дольше PartnerWait)
+            local partner = S.Partner and S.Records[tostring(S.Partner.Id)]
+            return partner ~= nil and fresh(partner, SC.Pair.PresentTTL)
+        end
+
+        -- Напарник: с кем стояли вдвоём. Пара держится вместе — переезжает целиком
+        -- (ведущий — меньший userId — уходит, второй летит за ним) и в общий подбор
+        -- одиночек не попадает; иначе каждый новый аккаунт растаскивал готовые пары
+        S.Partner = nil      -- {Id = userId, At = когда последний раз видели вместе/в пути}
+
+        local function partnerRec()
+            local partner = S.Partner
+            local rec = partner and S.Records[tostring(partner.Id)]
+            return (rec and fresh(rec, SC.Pair.PresentTTL)) and rec or nil
+        end
+
+        -- Напарник другого нашего (поле partner в статусе) — занят, к нему не летим
+        local function reserved(rec)
+            local partnerId = tonumber(rec.partner)
+            if not partnerId or partnerId == myId then return false end
+            local other = S.Records[tostring(partnerId)]
+            return other ~= nil and fresh(other, SC.Pair.PresentTTL)
+        end
+
+        local function joinJob(jobId, why)
+            local P = SC.Pair
+            if os.time() < (S.PairJoinAt or 0) or not safeMoment() then return end
+            local Lock = State.Runtime.TeleportLock
+            if not Lock.Acquire("FarmSync") then return end
+            S.Teleporting = true
+            S.PairJoining = jobId
+            pcall(writeSelf)
+            Files.LogHop(why .. " " .. jobId:sub(1, 8))
+            local accepted, result = Lock.Try(P.PlaceId, jobId, CONFIG.ServerHop.TeleportTimeout)
+            -- Сюда доходим, только если остались здесь: отказ или зависший телепорт
+            S.Teleporting = false
+            S.PairJoining = nil
+            Lock.Release("FarmSync")
+            S.PairJoinAt = os.time() + ((not accepted and result == "GameFull") and SC.JoinRetryFull or SC.JoinRetry)
         end
 
         local function pairStep(now)
@@ -9535,46 +9576,62 @@
                 return
             end
 
-            -- Чужие фермы-боты на сервере: уходим (каждый наш — в свой безопасный
-            -- момент), сервер помечаем, чтобы туда не вернулись ни мы, ни напарники
-            -- Пока ждём безопасного момента — никого к себе не зовём и сами не летим
+            -- ── Напарник ──────────────────────────────────────────────────────────
+            -- Вдвоём на сервере — запоминаем. Врозь пара жива, пока напарник в пути
+            -- или стоит один и считает нас своим; не так дольше PartnerWait — забываем
+            local here = oursOn(game.JobId)
+            if #here == 1 then
+                S.Partner = {Id = tonumber(here[1].userId) or 0, At = now}
+            elseif S.Partner then
+                local rec = partnerRec()
+                local job = rec and rec.jobId
+                local moving = rec ~= nil and (type(job) ~= "string" or job == ""
+                    or (type(rec.joining) == "string" and rec.joining ~= ""))
+                local waiting = rec ~= nil and not moving and rec.placeId == P.PlaceId and #oursOn(job) == 1
+                local mine = rec ~= nil and tonumber(rec.partner) == myId
+                if mine and (moving or waiting) then S.Partner.At = now end
+                -- Напарник уже в паре с другим — ждать нечего
+                local taken = rec ~= nil and tonumber(rec.partner) ~= nil and not mine
+                if not rec or taken or now - S.Partner.At > P.PartnerWait then S.Partner = nil end
+            end
+            local together = #here == 1 and S.Partner ~= nil and tonumber(here[1].userId) == S.Partner.Id
+            local leader = S.Partner == nil or myId < S.Partner.Id
+
+            -- Уйти с сервера: вдвоём уходит только ведущий (второй полетит за ним) и
+            -- только когда напарник дособирал — иначе ждал бы его один на новом сервере
+            local function leave(reason)
+                if together and not leader then return end
+                if together and here[1].status == "collecting" then return end
+                if not safeMoment() then return end
+                S.LastHop = now
+                Files.LogHop("pair: " .. reason .. (together and " (pair moves)" or ""))
+                ServerHop(P.PlaceId)
+            end
+
+            -- Чужие фермы-боты на сервере: сервер помечаем сразу (к нам не полетят),
+            -- уходим в безопасный момент
             if foreignBots() > 0 then
-                -- Помечаем сразу, чтобы напарники не выбрали нас хозяином
                 if S.BadMarked ~= game.JobId then
                     S.BadMarked = game.JobId
                     markBad(game.JobId)
                 end
-                if now - S.Since >= P.SettleTime and safeMoment() then
-                    S.LastHop = now
-                    Files.LogHop("pair: foreign bots here")
-                    ServerHop(P.PlaceId)
-                end
+                if now - S.Since >= P.SettleTime then leave("foreign bots here") end
                 return
             end
 
             -- Раунды здесь подряд кончаются раньше полной сумки — уходим
             if S.Short.Job == game.JobId and S.Short.Count >= P.ShortRounds then
-                if safeMoment() then
-                    S.LastHop = now
-                    Files.LogHop("pair: rounds end before our bags are full")
-                    ServerHop(P.PlaceId)
-                end
+                leave("rounds end before our bags are full")
                 return
             end
 
-            -- Людный сервер (набились чужие или хоп попал на большой): уходим каждый
-            -- сам в безопасный момент, напарники к нам не летят (поле players)
-            if #Players:GetPlayers() > P.MaxServer then
-                if now - S.Since >= P.SettleTime and safeMoment() then
-                    S.LastHop = now
-                    Files.LogHop("pair: server too big")
-                    ServerHop(P.PlaceId)
-                end
+            -- Людный сервер. Готовая пара терпит больше: переезд стоит раунда
+            if #Players:GetPlayers() > (together and P.PairMaxServer or P.MaxServer) then
+                if now - S.Since >= P.SettleTime then leave("server too big") end
                 return
             end
 
             -- Наших здесь больше Size — уходят худшие (пришли позже; тай-брейк — больший userId)
-            local here = oursOn(game.JobId)
             if #here + 1 > P.Size then
                 local rank = 1
                 for _, rec in ipairs(here) do
@@ -9590,23 +9647,30 @@
             end
             if #here + 1 >= P.Size then return end      -- пара собрана
 
-            -- Одни на плохом сервере (напарник ушёл с него): к нам никто не прилетит
-            if FarmSync.BadJobs()[game.JobId] then
-                if now - S.Since >= P.SettleTime and safeMoment() then
-                    S.LastHop = now
-                    Files.LogHop("pair: alone on a bad server")
-                    ServerHop(P.PlaceId)
+            -- Напарник ушёл (переезд пары, хоп руками): второй летит к ведущему, как
+            -- только тот встанет на новом сервере; ведущий ждёт на месте
+            if S.Partner then
+                local rec = partnerRec()
+                local job = rec and rec.jobId
+                if not leader and rec and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
+                    and not (type(rec.joining) == "string" and rec.joining ~= "")
+                    and not FarmSync.BadJobs()[job] and #oursOn(job) == 1 then
+                    joinJob(job, "pair: following partner to")
                 end
                 return
             end
 
-            -- Мы одни из наших. Одиночки — наши в плейсе фарма без других наших на
-            -- сервере и никуда не летящие; сортируем по времени на своём сервере
+            -- Одни на плохом сервере (напарника нет): к нам никто не прилетит
+            if FarmSync.BadJobs()[game.JobId] then
+                if now - S.Since >= P.SettleTime then leave("alone on a bad server") end
+                return
+            end
+
+            -- Мы без пары. Одиночки — наши в плейсе фарма без других наших на сервере,
+            -- никуда не летящие и без напарника; сортируем по времени на своём сервере
             -- (since: кто дольше стоит — первым) и сводим (1,2), (3,4)… Летит тот, кто
-            -- пришёл позже: давно стоящий не двигается, поэтому хоп одного бота (руками
-            -- или по правилу) двигает только его самого, а не цепочку. Нечётный — соло.
-            -- Сразу после прихода (SettleTime) никуда не летим: статусы остальных ещё
-            -- не обновились
+            -- пришёл позже. Нечётный — соло. Сразу после прихода (SettleTime) никуда
+            -- не летим: статусы остальных ещё не обновились
             if now - S.Since < P.SettleTime then return end
             local bad = FarmSync.BadJobs()
             local solos = {{Id = myId, Job = game.JobId, Since = S.Since}}
@@ -9614,7 +9678,8 @@
                 local job = rec.jobId
                 if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
                     and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
-                    and not bad[job] and (tonumber(rec.players) or 0) < P.MaxServer and #oursOn(job) == 1 then
+                    and not reserved(rec) and not bad[job]
+                    and (tonumber(rec.players) or 0) < P.MaxServer and #oursOn(job) == 1 then
                     table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job, Since = tonumber(rec.since) or 0})
                 end
             end
@@ -9627,21 +9692,7 @@
                 if solo.Id == myId then myPos = index end
             end
             if myPos % 2 == 1 then return end            -- стоим давно (к нам прилетят) или нечётный
-            local host = solos[myPos - 1]
-            if now < (S.PairJoinAt or 0) or not safeMoment() then return end
-
-            local Lock = State.Runtime.TeleportLock
-            if not Lock.Acquire("FarmSync") then return end
-            S.Teleporting = true
-            S.PairJoining = host.Job
-            pcall(writeSelf)
-            Files.LogHop("pair: joining " .. host.Job:sub(1, 8))
-            local accepted, result = Lock.Try(P.PlaceId, host.Job, CONFIG.ServerHop.TeleportTimeout)
-            -- Сюда доходим, только если остались здесь: отказ или зависший телепорт
-            S.Teleporting = false
-            S.PairJoining = nil
-            Lock.Release("FarmSync")
-            S.PairJoinAt = os.time() + ((not accepted and result == "GameFull") and SC.JoinRetryFull or SC.JoinRetry)
+            joinJob(solos[myPos - 1].Job, "pair: joining")
         end
 
         local function syncTick()
