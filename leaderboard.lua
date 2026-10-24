@@ -424,7 +424,11 @@
                     MaxServer  = 5,        -- игроков на сервере больше — уходим, к такому не летим
                     PairMaxServer = 7,     -- то же для готовой пары: переезд стоит раунда, терпим больше
                     PartnerWait = 120,     -- сек ждать ушедшего напарника, потом ищем пару заново
-                    BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот: с такого сервера уходим
+                    AvoidForeignBots = false, -- уходить с серверов с чужими фермами-ботами
+                    BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот (AvoidForeignBots)
+                    HopBudget  = 4,        -- уходов по правилам за HopWindow, дальше остаёмся фармить
+                    HopWindow  = 10 * 60,  -- сек
+                    HopsFile   = "VioCFG/Violite/pair_hops_%d.json",  -- время уходов по правилам (на аккаунт)
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 30 * 60,  -- сек помнить такой сервер
                     ShortRounds = 2,       -- раундов подряд кончились до полной сумки — сервер плохой
@@ -9570,6 +9574,8 @@
             S.PairJoinAt = os.time() + ((not accepted and result == "GameFull") and SC.JoinRetryFull or SC.JoinRetry)
         end
 
+        local hopsFile = string.format(SC.Pair.HopsFile, myId)
+
         local function pairStep(now)
             local P = SC.Pair
             if now - S.LastHop < SC.HopCooldown then return end
@@ -9617,14 +9623,27 @@
 
             -- Уйти с сервера: вдвоём уходит только ведущий (второй полетит за ним) и
             -- только когда напарник дособирал — иначе ждал бы его один на новом сервере
+            -- Бюджет: не больше HopBudget уходов за HopWindow (файл — переживает
+            -- телепорты). Исчерпан — остаёмся фармить: false, правило не держит бота.
+            -- 2026-10-24 чужие фермы заняли все малые сервера, и правило ухода гоняло
+            -- наших по кругу без единого раунда
             local function leave(reason)
-                if together and not leader then return end
-                if together and here[1].status == "collecting" then return end
-                if not safeMoment() then return end
+                local hops, recent = Files.LoadJSON(hopsFile, {}), {}
+                for _, at in ipairs(type(hops) == "table" and hops or {}) do
+                    if type(at) == "number" and now - at < P.HopWindow then table.insert(recent, at) end
+                end
+                if #recent >= P.HopBudget then return false end
+                if together and not leader then return true end
+                if together and here[1].status == "collecting" then return true end
+                if not safeMoment() then return true end
+                table.insert(recent, now)
+                Files.SaveJSON(hopsFile, recent)
                 S.LastHop = now
                 Files.LogHop("pair: " .. reason .. (together and " (pair moves)" or ""))
                 ServerHop(P.PlaceId)
+                return true
             end
+            local settled = now - S.Since >= P.SettleTime
 
             -- Напарник ушёл (переезд пары, хоп руками): второй летит к ведущему, как
             -- только тот встанет на новом сервере. Правила ухода (людно, чужие боты)
@@ -9640,27 +9659,25 @@
                 return
             end
 
-            -- Чужие фермы-боты на сервере: сервер помечаем сразу (к нам не полетят),
-            -- уходим в безопасный момент
-            if foreignBots() > 0 then
+            -- Чужие фермы-боты на сервере (AvoidForeignBots): сервер помечаем сразу (к
+            -- нам не полетят), уходим в безопасный момент. По умолчанию выключено:
+            -- наш мурдерер режет их сам, а мешающих ловит правило ShortRounds
+            if P.AvoidForeignBots and foreignBots() > 0 then
                 if S.BadMarked ~= game.JobId then
                     S.BadMarked = game.JobId
                     markBad(game.JobId)
                 end
-                if now - S.Since >= P.SettleTime then leave("foreign bots here") end
-                return
+                if not settled or leave("foreign bots here") then return end
             end
 
             -- Раунды здесь подряд кончаются раньше полной сумки — уходим
             if S.Short.Job == game.JobId and S.Short.Count >= P.ShortRounds then
-                leave("rounds end before our bags are full")
-                return
+                if leave("rounds end before our bags are full") then return end
             end
 
             -- Людный сервер. Готовая пара терпит больше: переезд стоит раунда
             if #Players:GetPlayers() > (together and P.PairMaxServer or P.MaxServer) then
-                if now - S.Since >= P.SettleTime then leave("server too big") end
-                return
+                if not settled or leave("server too big") then return end
             end
 
             -- Наших здесь больше Size — уходят худшие (пришли позже; тай-брейк — больший userId)
@@ -9684,8 +9701,7 @@
 
             -- Одни на плохом сервере (напарника нет): к нам никто не прилетит
             if FarmSync.BadJobs()[game.JobId] then
-                if now - S.Since >= P.SettleTime then leave("alone on a bad server") end
-                return
+                if not settled or leave("alone on a bad server") then return end
             end
 
             -- Мы без пары. Одиночки — наши в плейсе фарма без других наших на сервере,
