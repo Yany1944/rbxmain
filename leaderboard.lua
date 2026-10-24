@@ -423,7 +423,11 @@
                 -- ферм-ботов), по Size наших на сервер. Одиночки сводятся в пары:
                 -- больший userId летит к меньшему; лишний (нечётный) фармит соло
                 Pair = {
-                    PlaceId = 335132309,   -- Murder Mystery 2 (Disguises)
+                    -- Где фармят пары: выбор во вкладке Sync (FarmSyncPairPlace, общий для
+                    -- всех аккаунтов); PlaceId — текущий, его выставляет Farm Sync
+                    Places  = {Classic = 142823291, Disguises = 335132309},
+                    PlaceId = 335132309,
+                    EarlyDeath = 15,       -- сек от начала раунда: убили раньше (мурдерер не мы) — хоп
                     Size    = 2,           -- наших на сервер
                     PresentTTL = 45,       -- сек без heartbeat — напарник ещё «здесь» (фриз, перезапуск)
                     SettleTime = 15,       -- сек после прихода на сервер, прежде чем лететь к кому-то
@@ -433,16 +437,9 @@
                     PartnerWait = 120,     -- сек ждать ушедшего напарника, потом ищем пару заново
                     HostFewer  = 2,        -- хозяин пары — у кого на сервере на столько людей меньше
                     -- Уходить с серверов с чужими фермами-ботами: став мурдерером, они
-                    -- режут нас так же, как мы их. Ограничено HopBudget — малые сервера
-                    -- почти все заняты чужими фермами, без бюджета хоп шёл по кругу
+                    -- режут нас так же, как мы их
                     AvoidForeignBots = true,
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот (AvoidForeignBots)
-                    -- Уходов по правилам за HopWindow, дальше остаёмся фармить. Список
-                    -- серверов API в Disguises врёт (2026-10-24: сотня «2/12», по факту
-                    -- 7–9), переезд — лотерея ценой раунда, поэтому бюджет маленький
-                    HopBudget  = 6,
-                    HopWindow  = 15 * 60,  -- сек
-                    HopsFile   = "VioCFG/Violite/pair_hops_%d.json",  -- время уходов по правилам (на аккаунт)
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 3 * 3600, -- сек помнить такой сервер (чужие фермы сидят на своих часами)
                     GoodFile   = "VioCFG/Violite/farmsync_good.json",  -- чистые сервера {jobId = {at, strangers}}
@@ -733,6 +730,7 @@
             VoteSpammerEnabled = false,
             VoteGoal = 8,
             FarmSyncMode = CONFIG.AutoExec and "Avoid" or "Off", -- Off | Avoid | Follow | Pair (общий для всех аккаунтов ПК)
+            FarmSyncPairPlace = "Disguises",                     -- режим Pair: Classic | Disguises (общий)
             FarmSyncClearStrangers = false,  -- на целевом сервере трогать посторонних
             FarmSyncTeleportCollect = false, -- на целевом сервере монеты телепортом (общий для ПК)
             -- Альты: 30 FPS — сбору хватает (0.7 studs полёта за кадр при радиусе
@@ -6103,8 +6101,25 @@
                 Farm.Bags = fresh
                 Farm.BagsLive = true
                 Farm.ResetCollectTiming()
+                Farm.RoundStartedAt = os.clock()
             end)
         end
+
+        -- Убили в первые EarlyDeath секунд раунда, а мурдерер не мы — чужая ферма
+        -- режет всех на старте: Farm Sync (Pair) уходит с этого сервера
+        local function watchDeath(character)
+            local humanoid = character and character:WaitForChild("Humanoid", 5)
+            if not humanoid then return end
+            Core.Connect(humanoid.Died, function()
+                local started = Farm.RoundStartedAt
+                if not started or os.clock() - started > CONFIG.FarmSync.Pair.EarlyDeath then return end
+                local me = Farm.MyData()
+                if type(me) == "table" and me.Role == "Murderer" then return end
+                Farm.EarlyDeathJob = game.JobId
+            end)
+        end
+        Core.Connect(LocalPlayer.CharacterAdded, function(character) Core.Tasks.spawn(watchDeath, character) end)
+        if LocalPlayer.Character then Core.Tasks.spawn(watchDeath, LocalPlayer.Character) end
 
         local collected = gameplay:FindFirstChild("CoinCollected")
         if collected then
@@ -8398,8 +8413,10 @@
                 -- Плейс режима Pair (Disguises): чужих ферм нет, почти пустой сервер —
                 -- лучший; даже если чужой там не загрузился, пара наших запустит раунд
                 if pairPlace and playing <= 2 then score = score + 80 end
-                -- Там же пинг — только тай-брейк: малый сервер с 200 мс лучше людного с 60
-                return score - (ping or SH.MaxPing) / (pairPlace and 50 or 5)
+                -- Там же пинг не учитываем вовсе: у сотен серверов в API одинаковое «2/12»,
+                -- и даже малый вес пинга сводил всех наших в одни и те же 5 серверов
+                if pairPlace then return score end
+                return score - (ping or SH.MaxPing) / 5
             end
 
             -- Сервера, где уже сидят наши аккаунты (Farm Sync), — не кандидаты: два
@@ -8421,11 +8438,11 @@
                 local listed = {}
                 for _, srv in ipairs(servers) do listed[srv.id] = srv end
                 local merged = table.clone(servers)
-                for jobId, strangers in pairs(good) do
+                for jobId, info in pairs(good) do
                     if listed[jobId] then
-                        listed[jobId].playing = math.max(1, strangers)
+                        listed[jobId].playing = math.max(1, info.Strangers)
                     else
-                        table.insert(merged, {id = jobId, playing = math.max(1, strangers), maxPlayers = 12})
+                        table.insert(merged, {id = jobId, playing = math.max(1, info.Strangers), maxPlayers = 12})
                     end
                 end
                 servers = merged
@@ -8467,7 +8484,12 @@
             if pairPlace then
                 local clean = {}
                 for _, candidate in ipairs(candidates) do
-                    if good[candidate.id] ~= nil then table.insert(clean, candidate) end
+                    local info = good[candidate.id]
+                    if info then
+                        -- Меньше чужих ботов — лучше, при равных — меньше людей
+                        candidate.score = 1000 - info.Foreign * 100 - candidate.playing * 10
+                        table.insert(clean, candidate)
+                    end
                 end
                 if #clean > 0 then candidates = clean end
             end
@@ -8498,8 +8520,13 @@
             for attempt = 1, SH.TeleportRetry do
                 if #candidates == 0 then break end
 
-                -- Случайный из топа — чтобы все клиенты не сваливались в один сервер.
-                local target = table.remove(candidates, math.random(1, math.min(SH.TopPick, #candidates)))
+                -- Случайный из топа — чтобы все клиенты не сваливались в один сервер. В
+                -- плейсе Pair — из всех с лучшей оценкой (их там сотни одинаковых)
+                local top = math.min(SH.TopPick, #candidates)
+                if pairPlace then
+                    while top < #candidates and candidates[top + 1].score >= candidates[1].score do top += 1 end
+                end
+                local target = table.remove(candidates, math.random(1, top))
                 if not target then break end
 
                 -- Пишем ДО телепорта: после успешного телепорта код уже не отработает.
@@ -8946,6 +8973,15 @@
                     State.Settings.FarmSyncMode = mode
                 end
             end
+            local place, placeAt = field("pairPlace")
+            if placeAt and placeAt > (S.Applied.pairPlace or 0) then
+                S.Applied.pairPlace = placeAt
+                if SC.Pair.Places[place] then
+                    changed = changed or State.Settings.FarmSyncPairPlace ~= place
+                    State.Settings.FarmSyncPairPlace = place
+                    SC.Pair.PlaceId = SC.Pair.Places[place]
+                end
+            end
             local clear, clearAt = field("clearStrangers")
             if clearAt and clearAt > (S.Applied.clearStrangers or 0) then
                 S.Applied.clearStrangers = clearAt
@@ -9206,20 +9242,24 @@
             local out, now = {}, os.time()
             local bad = FarmSync.BadJobs()
             for jobId, rec in pairs(Files.LoadJSON(SC.Pair.GoodFile, {})) do
-                if type(rec) == "table" and now - (tonumber(rec.at) or 0) < SC.Pair.GoodTTL and not bad[jobId] then
-                    out[jobId] = tonumber(rec.strangers) or 0
+                if type(jobId) == "string" and type(rec) == "table" and now - (tonumber(rec.at) or 0) < SC.Pair.GoodTTL
+                    and not bad[jobId] then
+                    out[jobId] = {Strangers = tonumber(rec.strangers) or 0, Foreign = tonumber(rec.foreign) or 0}
                 end
             end
             return out
         end
 
-        -- strangers = nil — убрать сервер из чистых
-        local function markGood(jobId, strangers)
+        -- strangers = nil — убрать сервер из списка
+        local function markGood(jobId, strangers, foreign)
             local data, now = Files.LoadJSON(SC.Pair.GoodFile, {}), os.time()
+            if type(data) ~= "table" then data = {} end
             for key, rec in pairs(data) do
-                if type(rec) ~= "table" or now - (tonumber(rec.at) or 0) >= SC.Pair.GoodTTL then data[key] = nil end
+                if type(key) ~= "string" or type(rec) ~= "table" or now - (tonumber(rec.at) or 0) >= SC.Pair.GoodTTL then
+                    data[key] = nil
+                end
             end
-            data[jobId] = strangers and {at = now, strangers = strangers} or nil
+            data[jobId] = strangers and {at = now, strangers = strangers, foreign = foreign or 0} or nil
             Files.SaveJSON(SC.Pair.GoodFile, data)
         end
 
@@ -9650,8 +9690,6 @@
             S.PairJoinAt = os.time() + ((not accepted and result == "GameFull") and SC.JoinRetryFull or SC.JoinRetry)
         end
 
-        local hopsFile = string.format(SC.Pair.HopsFile, myId)
-
         local function pairStep(now)
             local P = SC.Pair
             if now - S.LastHop < SC.HopCooldown then return end
@@ -9699,23 +9737,10 @@
 
             -- Уйти с сервера: вдвоём уходит только ведущий (второй полетит за ним) и
             -- только когда напарник дособирал — иначе ждал бы его один на новом сервере
-            -- Бюджет: не больше HopBudget уходов за HopWindow (файл — переживает
-            -- телепорты). Исчерпан — остаёмся фармить: false, правило не держит бота.
-            -- 2026-10-24 чужие фермы заняли все малые сервера, и правило ухода гоняло
-            -- наших по кругу без единого раунда
-            -- unlimited — правило вне бюджета (раунды без полной сумки: оно само редкое,
-            -- два раунда подряд, а сидеть там, где сумку не собрать, бессмысленно)
-            local function leave(reason, unlimited)
-                local hops, recent = Files.LoadJSON(hopsFile, {}), {}
-                for _, at in ipairs(type(hops) == "table" and hops or {}) do
-                    if type(at) == "number" and now - at < P.HopWindow then table.insert(recent, at) end
-                end
-                if #recent >= P.HopBudget and not unlimited then return false end
+            local function leave(reason)
                 if together and not leader then return true end
                 if together and here[1].status == "collecting" then return true end
                 if not safeMoment() then return true end
-                table.insert(recent, now)
-                Files.SaveJSON(hopsFile, recent)
                 S.LastHop = now
                 Files.LogHop("pair: " .. reason .. (together and " (pair moves)" or ""))
                 ServerHop(P.PlaceId)
@@ -9739,8 +9764,7 @@
             end
 
             -- Чужие фермы-боты на сервере (AvoidForeignBots): сервер помечаем сразу (к
-            -- нам не полетят), уходим в безопасный момент, пока есть бюджет хопов;
-            -- бюджет кончился — остаёмся: наш мурдерер режет их сам
+            -- нам не полетят), уходим в безопасный момент
             local foreign = foreignBots()
             if P.AvoidForeignBots and foreign > 0 then
                 if S.BadMarked ~= game.JobId then
@@ -9752,14 +9776,20 @@
             end
 
             -- Чужих ферм нет — сервер в общий список чистых (раз в GoodRefresh)
-            if foreign == 0 and settled and (S.GoodMarkedJob ~= game.JobId or now - (S.GoodMarkedAt or 0) >= P.GoodRefresh) then
+            if foreign == 0 and settled
+                and (S.GoodMarkedJob ~= game.JobId or now - (S.GoodMarkedAt or 0) >= P.GoodRefresh) then
                 S.GoodMarkedJob, S.GoodMarkedAt = game.JobId, now
-                pcall(markGood, game.JobId, math.max(0, #Players:GetPlayers() - #here - 1))
+                pcall(markGood, game.JobId, math.max(0, #Players:GetPlayers() - #here - 1), foreign)
+            end
+
+            -- Нас убили в самом начале раунда (мурдерер не мы) — уходим
+            if Farm.EarlyDeathJob == game.JobId then
+                if leave("killed at round start") then return end
             end
 
             -- Раунды здесь подряд кончаются раньше полной сумки — уходим
             if S.Short.Job == game.JobId and S.Short.Count >= P.ShortRounds then
-                if leave("rounds end before our bags are full", true) then return end
+                if leave("rounds end before our bags are full") then return end
             end
 
             -- Людный сервер. Готовая пара терпит больше: переезд стоит раунда
@@ -10445,6 +10475,15 @@
             State.Settings.FarmSyncMode = mode
             writeFields({mode = mode})
             notify("mode <b>" .. mode .. "</b> (all accounts)")
+        end
+
+        function FarmSync.SetPairPlace(place)
+            if not SC.Pair.Places[place] then return end
+            SC.Pair.PlaceId = SC.Pair.Places[place]
+            if place == State.Settings.FarmSyncPairPlace and field("pairPlace") == place then return end
+            State.Settings.FarmSyncPairPlace = place
+            writeFields({pairPlace = place})
+            notify("pairs farm in <b>" .. place .. "</b> (all accounts)")
         end
 
         function FarmSync.SetClearStrangers(on)
@@ -11133,6 +11172,7 @@
 
             -- Farm Sync (вкладка Sync): изменения расходятся на все аккаунты ПК
             FarmSyncMode = function(mode) FarmSync.SetMode(mode) end,
+            FarmSyncPairPlace = function(place) FarmSync.SetPairPlace(place) end,
             FarmSyncClearStrangers = function(on) FarmSync.SetClearStrangers(on) end,
             FarmSyncTeleportCollect = function(on) FarmSync.SetTeleportCollect(on) end,
             FarmSyncSplit = function() FarmSync.SplitGroups() end,
@@ -11353,7 +11393,8 @@
         local SyncTab = GUI.CreateTab("Sync")
 
             SyncTab:CreateSection("FARM SYNC")
-            SyncTab:CreateSegmentedRow("Mode", "Avoid: one account per server; Follow: each group goes to its target; Pair: two accounts per server in Disguises", {"Off", "Avoid", "Follow", "Pair"}, State.Settings.FarmSyncMode, "FarmSyncMode")
+            SyncTab:CreateSegmentedRow("Mode", "Avoid: one account per server; Pair: two accounts per server", {"Off", "Avoid", "Pair"}, State.Settings.FarmSyncMode, "FarmSyncMode")
+            SyncTab:CreateSegmentedRow("Pair Place", "Where pairs farm (all accounts)", {"Classic", "Disguises"}, State.Settings.FarmSyncPairPlace, "FarmSyncPairPlace")
             SyncTab:CreateToggle("Clear Strangers", "On the target: kill, shoot and fling non-own players", "FarmSyncClearStrangers", State.Settings.FarmSyncClearStrangers)
             SyncTab:CreateToggle("Teleport Collect", "On the target: coins by teleport, in turn; pause = flight time", "FarmSyncTeleportCollect", State.Settings.FarmSyncTeleportCollect)
             SyncTab:CreateSection("TARGET SERVER (YOUR GROUP)")
