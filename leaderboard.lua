@@ -436,7 +436,8 @@
                     PresentTTL = 45,       -- сек без heartbeat — напарник ещё «здесь» (фриз, перезапуск)
                     SettleTime = 15,       -- сек после прихода на сервер, прежде чем лететь к кому-то
                     MaxPlayers = 2,        -- ServerHop в плейс Pair: сначала только сервера с ≤ стольки игроков
-                    MaxServer  = 5,        -- игроков на сервере больше — уходим, к такому не летим
+                    MaxServer  = 5,        -- хозяин пары — только на сервере, где игроков меньше
+                    SoloCrowded = 2,       -- одиночка: игроков больше — невиновный с полной сумкой хопает
                     PairMaxServer = 7,     -- то же для готовой пары: переезд стоит раунда, терпим больше
                     PartnerWait = 120,     -- сек ждать ушедшего напарника, потом ищем пару заново
                     HostFewer  = 2,        -- хозяин пары — у кого на сервере на столько людей меньше
@@ -444,6 +445,7 @@
                     -- режут нас так же, как мы их
                     AvoidForeignBots = true,
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот (AvoidForeignBots)
+                    BotMinCount = 2,       -- столько таких на сервере — чужая ферма (один — скорее новичок)
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 3 * 3600, -- сек помнить такой сервер (чужие фермы сидят на своих часами)
                     GoodFile   = "VioCFG/Violite/farmsync_good.json",  -- чистые сервера {jobId = {at, strangers}}
@@ -4787,6 +4789,7 @@
         local sync = State.Runtime.FarmSync
         if sync and sync.OnActiveTarget and sync.OnActiveTarget() then return false end
         if sync and sync.CoopActive and sync.CoopActive() then return false end
+        if sync and sync.PartnerIncoming and sync.PartnerIncoming() then return false end   -- к нам летит напарник
         if State.Runtime.ServerHopInProgress or State.Runtime.RejoinInProgress then return false end
         return os.clock() - Farm.Hop.LastAt >= CONFIG.ServerHop.FarmHopCooldown
     end
@@ -4807,8 +4810,12 @@
         return true
     end
 
+    -- Одиночка режима Pair — с 3 игроков (FarmSync.Pair.SoloCrowded): на сервере из
+    -- двух мы всегда мурдерер или шериф и раунд кончается сразу после сумки, с 3+
+    -- в трети раундов ждём ~60 с невиновным (замер 2026-10-23: 1361 против ~1100 /ч)
     function Farm.Crowded()
-        return #Players:GetPlayers() > CONFIG.ServerHop.FarmMaxPlayers
+        local pairSolo = State.Settings.FarmSyncMode == "Pair" and game.PlaceId == CONFIG.FarmSync.Pair.PlaceId
+        return #Players:GetPlayers() > (pairSolo and CONFIG.FarmSync.Pair.SoloCrowded or CONFIG.ServerHop.FarmMaxPlayers)
     end
 
     -- Далёкий сервер: медиана своего пинга за раунд (замер на каждой засчитанной
@@ -8384,6 +8391,9 @@
             -- MinPlayers). Среди равных — с меньшим пингом (CONFIG.ServerHop.MaxPing)
             local pairPlace = placeId == CONFIG.FarmSync.Pair.PlaceId
             local function Score(playing, maxPlayers, ping)
+                -- Плейс Pair: чем меньше игроков, тем лучше, «1» — первым (одиночка с
+                -- ним — сервер на двоих, где мы всегда мурдерер или шериф)
+                if pairPlace then return 200 - playing * 20 end
                 local score = (1 - playing / maxPlayers) * 100
                 if playing >= 2 and playing <= 6 then score = score + 50 end
                 -- Плейс режима Pair (Disguises): чужих ферм нет, почти пустой сервер —
@@ -9263,14 +9273,16 @@
         end
 
         -- Чужой аккаунт младше BotAgeDays дней — почти всегда ферма-бот
+        -- Возвращает число и список «имя(возраст)» для журнала хопов
         local function foreignBots()
-            local count = 0
+            local count, names = 0, {}
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= LocalPlayer and not FarmSync.IsOurs(player) and player.AccountAge < SC.Pair.BotAgeDays then
                     count += 1
+                    table.insert(names, player.Name .. "(" .. player.AccountAge .. ")")
                 end
             end
-            return count
+            return count, names
         end
 
         -- ── Coin Split: заявки на монеты (см. «Coin Split» в блоке фарма) ─────────
@@ -9609,10 +9621,14 @@
         -- (joining). Сам аккаунт не считается
         -- Напарник считается здесь до PresentTTL без heartbeat (не StaleTTL): фриз или
         -- его перезапуск не делают нас одиночкой, и мы не бросаемся искать другого
+        -- Присутствие — по heartbeat, без флага active: при перезапуске скрипта статус
+        -- на секунды помечается неактивным, и напарник выглядел одиночкой — к нему
+        -- летел третий наш и тут же уходил («more than 2 of ours»)
         local function oursOn(jobId)
             local list = {}
             for _, rec in pairs(S.Records) do
-                if fresh(rec, SC.Pair.PresentTTL) and ((rec.jobId == jobId and rec.placeId == SC.Pair.PlaceId) or rec.joining == jobId) then
+                local present = os.time() - (tonumber(rec.heartbeat) or 0) <= SC.Pair.PresentTTL
+                if present and ((rec.jobId == jobId and rec.placeId == SC.Pair.PlaceId) or rec.joining == jobId) then
                     table.insert(list, rec)
                 end
             end
@@ -9740,15 +9756,17 @@
             end
 
             -- Чужие фермы-боты на сервере (AvoidForeignBots): сервер помечаем сразу (к
-            -- нам не полетят), уходим в безопасный момент
-            local foreign = foreignBots()
+            -- нам не полетят), уходим в безопасный момент. Фермы ходят парами, а один
+            -- молодой аккаунт среди людей — обычно новичок: считаем от BotMinCount
+            local foreign, foreignNames = foreignBots()
+            if not (foreign >= P.BotMinCount) then foreign = 0 end
             if P.AvoidForeignBots and foreign > 0 then
                 if S.BadMarked ~= game.JobId then
                     S.BadMarked = game.JobId
                     markBad(game.JobId)
                     markGood(game.JobId, nil)
                 end
-                if not settled or leave("foreign bots here") then return end
+                if not settled or leave("foreign bots here: " .. table.concat(foreignNames, ", ")) then return end
             end
 
             -- Чужих ферм нет — сервер в общий список чистых (раз в GoodRefresh)
@@ -9768,8 +9786,11 @@
                 if leave("rounds end before our bags are full") then return end
             end
 
-            -- Людный сервер. Готовая пара терпит больше: переезд стоит раунда
-            if #Players:GetPlayers() > (together and P.PairMaxServer or P.MaxServer) then
+            -- Людный сервер — только для готовой пары. Одиночке размер сам по себе не
+            -- мешает (сбор на 4–5 игроках почти тот же, 56–63 с на 50 конфет): его
+            -- гонят чужие фермы, ранняя смерть, короткие раунды и хоп невиновного
+            -- с полной сумкой (Farm.Crowded)
+            if together and #Players:GetPlayers() > P.PairMaxServer then
                 if not settled or leave("server too big") then return end
             end
 
@@ -9809,14 +9830,13 @@
             -- Себя судим тем же фильтром, что и другие нас: иначе мы считали бы пары
             -- по другому списку и летели бы к тому, кто ждёт не нас
             local myPlayers = S.Players or #Players:GetPlayers()
-            if bad[game.JobId] or myPlayers >= P.MaxServer then return end
+            if bad[game.JobId] then return end
             local solos = {{Id = myId, Job = game.JobId, Since = S.Since, Players = myPlayers}}
             for _, rec in pairs(S.Records) do
                 local job = rec.jobId
                 if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
                     and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
-                    and not reserved(rec) and not bad[job]
-                    and (tonumber(rec.players) or 0) < P.MaxServer and #oursOn(job) == 1 then
+                    and not reserved(rec) and not bad[job] and #oursOn(job) == 1 then
                     table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job, Since = tonumber(rec.since) or 0,
                         Players = tonumber(rec.players) or 0})
                 end
@@ -9838,6 +9858,11 @@
             else
                 iHost = myPos % 2 == 1                    -- стоим дольше
             end
+            -- Хозяин — только с местом под пару (меньше MaxServer игроков): иначе
+            -- хозяин второй, а если людно у обоих — пока каждый фармит соло
+            local meFits, mateFits = me.Players < P.MaxServer, mate.Players < P.MaxServer
+            if not meFits and not mateFits then return end
+            if iHost and not meFits then iHost = false elseif not iHost and not mateFits then iHost = true end
             if iHost then return end                     -- к нам прилетят
             joinJob(mate.Job, "pair: joining")
         end
