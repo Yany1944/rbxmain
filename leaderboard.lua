@@ -427,8 +427,11 @@
                     HostFewer  = 2,        -- хозяин пары — у кого на сервере на столько людей меньше
                     AvoidForeignBots = false, -- уходить с серверов с чужими фермами-ботами
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот (AvoidForeignBots)
-                    HopBudget  = 4,        -- уходов по правилам за HopWindow, дальше остаёмся фармить
-                    HopWindow  = 10 * 60,  -- сек
+                    -- Уходов по правилам за HopWindow, дальше остаёмся фармить. Список
+                    -- серверов API в Disguises врёт (2026-10-24: сотня «2/12», по факту
+                    -- 7–9), переезд — лотерея ценой раунда, поэтому бюджет маленький
+                    HopBudget  = 2,
+                    HopWindow  = 15 * 60,  -- сек
                     HopsFile   = "VioCFG/Violite/pair_hops_%d.json",  -- время уходов по правилам (на аккаунт)
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 30 * 60,  -- сек помнить такой сервер
