@@ -236,10 +236,11 @@
                 Interval     = 30,    -- сек между проверками баланса
                 ClaimDelay   = 0.4,   -- сек между ClaimBattlePassReward
             },
+            -- Fast Respawn (respawn()): сколько ждать нового персонажа после смерти, сек
+            Respawn = {SpawnTimeout = 3},
             -- Auto Vote (БЛОК 18.6): быстрые заходы на пад и цель «обогнать»
             Vote = {
                 Lead         = 3,     -- голосов сверх лучшего чужого пада
-                SpawnTimeout = 3,     -- сек ждать нового персонажа после смерти
                 MinDwell     = 0.2,   -- сек на паде минимум (сервер должен увидеть касание)
                 MaxDwell     = 0.6,   -- сек на паде максимум, если надпись не выросла
             },
@@ -8188,71 +8189,43 @@
 
     local respawning = {}
 
-    -- targetCFrame — куда поставить нового персонажа (Auto Vote: точка на паде);
-    -- без него — туда, где стоял старый. Поворот всегда только по горизонтали:
-    -- раньше копировался полный CFrame, и наклонённый/лежащий персонаж (или
-    -- повёрнутая часть пада) возвращался лёжа и проваливался в пол
-    local function respawn(plr, targetCFrame)
+    -- Быстрый респавн (тот же, что у Auto Vote): ломаем персонажа и нового сразу,
+    -- без якоря и пауз, ставим на место. MM2 пересоздаёт персонажа в лобби почти
+    -- мгновенно, так что весь цикл — ~0.3–0.45 с; прежний вариант (ожидание
+    -- здоровья, якорь, 0.1 + 0.05 + 0.2 с) занимал ~1 с.
+    -- target — куда поставить: CFrame или функция(новый персонаж) → CFrame (зовётся
+    -- прямо перед постановкой); без него — туда, где стоял старый. Поворот только
+    -- по горизонтали: наклонённый/лежащий персонаж возвращался лёжа и проваливался.
+    -- Ждёт нового персонажа; возвращает его или nil (таймаут, повторный вызов)
+    local function respawn(plr, target)
         local char = plr.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-
-        -- Защита от повторного вызова
-        if respawning[plr.UserId] then
-            return
-        end
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp or respawning[plr.UserId] then return nil end
         respawning[plr.UserId] = true
 
-        local source = targetCFrame or hrp.CFrame
-        local look = Vector3.new(source.LookVector.X, 0, source.LookVector.Z)
-        local ogpos = look.Magnitude > 1e-3
-            and CFrame.lookAt(source.Position, source.Position + look)
-            or CFrame.new(source.Position)
-        local ogpos2 = workspace.CurrentCamera.CFrame
+        local keep = hrp.CFrame
+        local camera = workspace.CurrentCamera.CFrame
+        local added = nil
+        local connection = plr.CharacterAdded:Connect(function(newCharacter) added = newCharacter end)
+        pcall(function() char:BreakJoints() end)
+        local deadline = os.clock() + CONFIG.Respawn.SpawnTimeout
+        repeat task.wait() until added or os.clock() >= deadline
+        connection:Disconnect()
 
-        -- Уникальный ID для этого респавна
-        local respawnId = tick()
-
-        Core.Tasks.spawn(function()
-            local newChar = plr.CharacterAdded:Wait()
-
-            -- Проверка что это все еще актуальный респавн
-            if not respawning[plr.UserId] or respawning[plr.UserId] ~= respawnId then
-                return
-            end
-
-            local newHrp = newChar:WaitForChild("HumanoidRootPart", 5)
-            local newHum = newChar:WaitForChild("Humanoid", 5)
-
-            if newHrp and newHum then
-                -- Ждем полной загрузки персонажа
-                if newHum.Health == 0 then
-                    newHum.HealthChanged:Wait()
-                end
-
-                task.wait(0.1) -- Небольшая задержка для загрузки всех частей
-
-                newHrp.Anchored = true
-                newHrp.CFrame = ogpos
-
-                -- Обновляем камеру после телепортации
-                task.wait()
-                workspace.CurrentCamera.CFrame = ogpos2
-
-                task.wait(0.05)
-                newHrp.AssemblyLinearVelocity = Vector3.zero
-                newHrp.AssemblyAngularVelocity = Vector3.zero
-                newHrp.Anchored = false
-            end
-
-            -- Очищаем флаг через небольшую задержку
-            task.wait(0.2)
-            respawning[plr.UserId] = nil
-        end)
-
-        respawning[plr.UserId] = respawnId
-        char:BreakJoints()
+        local newHrp = added and added:WaitForChild("HumanoidRootPart", 2)
+        if newHrp then
+            local source = (type(target) == "function" and target(added)) or (typeof(target) == "CFrame" and target) or keep
+            local look = Vector3.new(source.LookVector.X, 0, source.LookVector.Z)
+            newHrp.CFrame = look.Magnitude > 1e-3
+                and CFrame.lookAt(source.Position, source.Position + look)
+                or CFrame.new(source.Position)
+            newHrp.AssemblyLinearVelocity = Vector3.zero
+            newHrp.AssemblyAngularVelocity = Vector3.zero
+            -- Камеру — на следующем кадре: CameraModule перехватывает её у нового персонажа
+            Core.Tasks.defer(function() workspace.CurrentCamera.CFrame = camera end)
+        end
+        respawning[plr.UserId] = nil
+        return newHrp and added or nil
     end
 
     -- Очистка при выходе игрока
@@ -10659,10 +10632,9 @@
     -- Лобби после ивент-апдейта: Workspace.Lobby.VotePads.VotePadN →
     --   VoteInfoGui.Container.MapName / .Votes ("Votes: N"), MapInfoGui.MapIcon (Image
     --   не пуст и VoteInfoGui.Enabled — идёт голосование), часть Pad — куда встать.
-    -- Голос засчитывает сервер по стоянию на паде; респавн-цикл (respawn() кладёт
-    -- нового персонажа на то же место, с якорем) даёт голос заново на каждом заходе.
-    -- Следующий респавн — сразу, как только засчитан голос от прошлого (надпись Votes
-    -- выросла), а не по фиксированной паузе
+    -- Голос засчитывает сервер по касанию пада; каждый новый персонаж — новый голос.
+    -- Цикл: быстрый respawn() сразу на пад, следующий — как только засчитан голос от
+    -- прошлого (надпись Votes выросла), голосуем, пока не обгоним лучший чужой пад
     do
         -- Ключи — имя карты в нижнем регистре без пробелов; меньше — приоритетнее.
         -- Порядок — по медиане «первая → 50-я конфета» на ~220 раундах ботов
@@ -10776,26 +10748,16 @@
             return math.max(State.Settings.VoteGoal or 8, best + CONFIG.Vote.Lead)
         end
 
-        -- Быстрый заход: ломаем персонажа, нового сразу ставим на пад (без якоря и
-        -- пауз respawn()), держим MinDwell и дальше до роста надписи, но не дольше
-        -- MaxDwell. MM2 пересоздаёт персонажа в лобби почти сразу — чужие фермы так
-        -- дают голос раз в ~0.45 с, наш respawn() с паузами — раз в ~1 с
+        -- Заход: быстрый respawn() сразу на пад, держим MinDwell и дальше до роста
+        -- надписи, но не дольше MaxDwell. Чужие фермы так дают голос раз в ~0.45 с.
+        -- Счёт голосов до постановки — от него ждём засчёт именно нашего голоса
         local function fastVote(pad)
-            local character = LocalPlayer.Character
-            if not character then task.wait(0.1) return end
-            local added = nil
-            local connection = LocalPlayer.CharacterAdded:Connect(function(newCharacter) added = newCharacter end)
-            pcall(function() character:BreakJoints() end)
-            local deadline = os.clock() + CONFIG.Vote.SpawnTimeout
-            repeat task.wait() until added or os.clock() >= deadline or not State.Settings.VoteSpammerEnabled
-            connection:Disconnect()
-            if not added then return end
-            local hrp = added:WaitForChild("HumanoidRootPart", 2)
-            if not hrp then return end
-            local before = padVotes(pad)
-            hrp.CFrame = standCFrame(pad.Part, added)
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
+            local before = 0
+            local placed = respawn(LocalPlayer, function(newCharacter)
+                before = padVotes(pad)
+                return standCFrame(pad.Part, newCharacter)
+            end)
+            if not placed then task.wait(0.1) return end
             task.wait(CONFIG.Vote.MinDwell)
             waitVote(pad, before, CONFIG.Vote.MaxDwell - CONFIG.Vote.MinDwell)
         end
@@ -11183,7 +11145,7 @@
             HandleAutoRejoin = HandleAutoRejoin,
             HandleAutoReconnect = HandleAutoReconnect,
             SetReconnectInterval = SetReconnectInterval,
-            RespawnPlr = function() respawn(game:GetService("Players").LocalPlayer) end,
+            RespawnPlr = function() Core.Tasks.spawn(respawn, game:GetService("Players").LocalPlayer) end,
 
             -- Keybind system / input
             ClearKeybind = ClearKeybind,
