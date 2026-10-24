@@ -428,6 +428,7 @@
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
                     BadTTL     = 30 * 60,  -- сек помнить такой сервер
                     ShortRounds = 2,       -- раундов подряд кончились до полной сумки — сервер плохой
+                    EndgameGiveUp = 10,    -- сек после первого выстрела/флинга по чужому мурдереру — ресет
                 },
                 -- Coin Split: монеты делятся между нашими аккаунтами на одном сервере
                 CoinSplit = {
@@ -6006,6 +6007,12 @@
                     elseif sync and sync.CoopActive() then
                         -- На сервере есть наши: конец раунда по общему правилу Farm Sync
                         sync.CoopEndgame()
+                    elseif sync and sync.SoloResetEndsRound and sync.SoloResetEndsRound() then
+                        -- Pair без напарника, в раунде живы только мы и мурдерер: ресет
+                        -- кончает раунд быстрее выстрела или флинга
+                        pcall(UnfloatCharacter)
+                        ResetCharacter()
+                        Farm.WaitRoundEnd()
                     elseif State.Settings.XPFarmEnabled then
                         Farm.XPEndgame()
                     else
@@ -9580,6 +9587,17 @@
             -- Вдвоём на сервере — запоминаем. Врозь пара жива, пока напарник в пути
             -- или стоит один и считает нас своим; не так дольше PartnerWait — забываем
             local here = oursOn(game.JobId)
+            -- Память о напарнике живёт в скрипте, а телепорт (переезд ведущего) и
+            -- перезапуск её стирают: восстанавливаем по статусам — кто-то свежий
+            -- считает нас своим напарником
+            if not S.Partner and #here == 0 then
+                for _, rec in pairs(S.Records) do
+                    if fresh(rec, P.PresentTTL) and tonumber(rec.partner) == myId then
+                        S.Partner = {Id = tonumber(rec.userId) or 0, At = now}
+                        break
+                    end
+                end
+            end
             if #here == 1 then
                 S.Partner = {Id = tonumber(here[1].userId) or 0, At = now}
             elseif S.Partner then
@@ -9606,6 +9624,20 @@
                 S.LastHop = now
                 Files.LogHop("pair: " .. reason .. (together and " (pair moves)" or ""))
                 ServerHop(P.PlaceId)
+            end
+
+            -- Напарник ушёл (переезд пары, хоп руками): второй летит к ведущему, как
+            -- только тот встанет на новом сервере. Правила ухода (людно, чужие боты)
+            -- второго не касаются — иначе он уходил сам и пара распадалась
+            if S.Partner and not together and not leader then
+                local rec = partnerRec()
+                local job = rec and rec.jobId
+                if rec and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
+                    and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
+                    and not FarmSync.BadJobs()[job] and #oursOn(job) == 1 then
+                    joinJob(job, "pair: following partner to")
+                end
+                return
             end
 
             -- Чужие фермы-боты на сервере: сервер помечаем сразу (к нам не полетят),
@@ -9647,18 +9679,8 @@
             end
             if #here + 1 >= P.Size then return end      -- пара собрана
 
-            -- Напарник ушёл (переезд пары, хоп руками): второй летит к ведущему, как
-            -- только тот встанет на новом сервере; ведущий ждёт на месте
-            if S.Partner then
-                local rec = partnerRec()
-                local job = rec and rec.jobId
-                if not leader and rec and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
-                    and not (type(rec.joining) == "string" and rec.joining ~= "")
-                    and not FarmSync.BadJobs()[job] and #oursOn(job) == 1 then
-                    joinJob(job, "pair: following partner to")
-                end
-                return
-            end
+            -- Ведущий без напарника на сервере ждёт его на месте (второй прилетит)
+            if S.Partner then return end
 
             -- Одни на плохом сервере (напарника нет): к нам никто не прилетит
             if FarmSync.BadJobs()[game.JobId] then
@@ -9727,10 +9749,50 @@
             avoidStep(now)
         end
 
+        -- Живые участники раунда кроме мурдерера — только наши: тогда наши ресеты
+        -- оставят мурдерера одного и раунд кончится. Смотрим данные раунда игры
+        -- (Role/Dead), а не всех на сервере: лобби в раунде не участвует
+        local function resetEndsRound()
+            local data = State.Cache.PlayerData
+            if type(data) ~= "table" or next(data) == nil then return false end
+            for name, entry in pairs(data) do
+                if type(entry) == "table" and entry.Dead ~= true and entry.Role ~= "Murderer" then
+                    local player = Players:FindFirstChild(name)
+                    if player and not FarmSync.IsOurs(player) then return false end
+                end
+            end
+            return true
+        end
+
+        -- Одиночка режима Pair (ищет пару): мурдерер чужой и, кроме него, в раунде
+        -- живы только мы — ресет кончит раунд. Вне Pair не трогаем: там XP-фарм
+        function FarmSync.SoloResetEndsRound()
+            if State.Settings.FarmSyncMode ~= "Pair" or game.PlaceId ~= SC.Pair.PlaceId then return false end
+            local murderer = getMurderForAutoFarm()
+            if not murderer or murderer == LocalPlayer then return false end
+            return resetEndsRound()
+        end
+
+        -- Флингует мурдерера один наш: не тот, у кого ган (он стреляет), из
+        -- остальных — с меньшим userId
+        local function iFlingMurderer()
+            for _, rec in pairs(S.Records) do
+                if fresh(rec, SC.DoneTTL) and rec.jobId == game.JobId then
+                    if rec.role == "Sheriff" then return false end
+                    if (tonumber(rec.userId) or 0) < myId then return false end
+                end
+            end
+            return true
+        end
+
         -- ── Конец раунда рядом с нашими (Classic, сумка полна) ─────────────────────
         -- Ждём на левитации над картой. Мурдерер — наш: когда закончат все наши, он
-        -- режет всех (KillAll), без ножа — ресет. Мурдерер посторонний: выходим из
-        -- раунда ресетом, если только мы не держим ган для Clear Strangers
+        -- режет всех (KillAll), без ножа — ресет. Мурдерер посторонний: в режиме Pair
+        -- ждём, пока дособирают все наши, и кончаем раунд быстрейшим способом —
+        -- ресет (если он оставит мурдерера одного), иначе выстрел (ган у нас, хоть
+        -- и подобранный посреди раунда) или флинг; мурдерер жив через EndgameGiveUp
+        -- после первой попытки — ресет. Вне Pair посторонний мурдерер — сразу ресет,
+        -- если только мы не держим ган для Clear Strangers
         function FarmSync.CoopEndgame()
             local function float()
                 local character = LocalPlayer.Character
@@ -9747,19 +9809,48 @@
             local iAmMurderer = murderer == LocalPlayer
             local strangerMurderer = murderer ~= nil and not FarmSync.IsOurs(murderer)
             local hunting = holds("Gun") and FarmSync.OnActiveTarget() and State.Settings.FarmSyncClearStrangers
-            if strangerMurderer and not hunting then
+            local pair = State.Settings.FarmSyncMode == "Pair"
+            if strangerMurderer and not hunting and not pair then
                 pcall(UnfloatCharacter)
                 ResetCharacter()
                 Farm.WaitRoundEnd()
                 return
             end
 
+            local function reset()
+                pcall(UnfloatCharacter)
+                ResetCharacter()
+            end
+
             float()
+            local firstTry = nil      -- первый выстрел/флинг по постороннему мурдереру
             while Farm.RoundActive() and State.Settings.AutoFarmEnabled do
                 if Farm.FlingBusy() then
-                    Farm.WaitFlingIdle()   -- флинг посторонних (Clear Strangers)
+                    Farm.WaitFlingIdle()   -- флинг посторонних (Clear Strangers) или мурдерера
                     if not Farm.RoundActive() then break end
                     float()
+                end
+                if pair and strangerMurderer and FarmSync.AllOursDone() then
+                    murderer = getMurderForAutoFarm()
+                    if not murderer then break end
+                    if resetEndsRound() then
+                        reset()
+                        break
+                    end
+                    if firstTry and os.clock() - firstTry >= SC.Pair.EndgameGiveUp then
+                        reset()
+                        break
+                    end
+                    if holds("Gun") then
+                        -- Тот же выстрел, что у XP-фарма (шериф кончает раунд за 2–5 с)
+                        pcall(function() shootMurderer(true) end)
+                        firstTry = firstTry or os.clock()
+                    elseif not firstTry and iFlingMurderer() then
+                        firstTry = os.clock()
+                        Core.Tasks.spawn(function() pcall(FlingPlayer, murderer) end)
+                    elseif not firstTry then
+                        firstTry = os.clock()      -- флингует другой наш: ждём вместе с ним
+                    end
                 end
                 if iAmMurderer and FarmSync.AllOursDone() then
                     pcall(function() InstantKillAll(true) end)
@@ -9871,7 +9962,29 @@
             end
         end
 
+        -- Режим Pair: наш мурдерер сразу режет посторонних участников раунда (наших —
+        -- никогда). Раунд остаётся на двоих: никто не перехватывает монеты, не режет
+        -- напарника и не кончает раунд раньше полных сумок; добивает напарника он
+        -- уже в CoopEndgame, когда дособирают все наши
+        local function pairKillStep()
+            if not Farm.RoundActive() or Farm.RoundMode() ~= "Classic" or not holds("Knife") then return end
+            if os.clock() < S.NextKill then return end
+            local data = State.Cache.PlayerData
+            local list = {}
+            for _, player in ipairs(strangers()) do
+                local entry = type(data) == "table" and data[player.Name]
+                if type(entry) == "table" and entry.Dead ~= true then table.insert(list, player) end
+            end
+            if #list == 0 then return end
+            S.NextKill = os.clock() + SC.KillEvery
+            killStrangers(list)
+        end
+
         local function hostileStep()
+            if State.Settings.FarmSyncMode == "Pair" then
+                if game.PlaceId == SC.Pair.PlaceId then pairKillStep() end
+                return
+            end
             if not State.Settings.FarmSyncClearStrangers or not FarmSync.OnActiveTarget() then return end
             local character = LocalPlayer.Character
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
