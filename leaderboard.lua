@@ -236,6 +236,13 @@
                 Interval     = 30,    -- сек между проверками баланса
                 ClaimDelay   = 0.4,   -- сек между ClaimBattlePassReward
             },
+            -- Auto Vote (БЛОК 18.6): быстрые заходы на пад и цель «обогнать»
+            Vote = {
+                Lead         = 3,     -- голосов сверх лучшего чужого пада
+                SpawnTimeout = 3,     -- сек ждать нового персонажа после смерти
+                MinDwell     = 0.2,   -- сек на паде минимум (сервер должен увидеть касание)
+                MaxDwell     = 0.6,   -- сек на паде максимум, если надпись не выросла
+            },
             -- Infection (зомби-раунд): что делаем после того, как сумка полна
             Infection = {
                 MagnetTime   = 6,     -- сек держимся у одного зомби, потом берём другого
@@ -425,12 +432,15 @@
                     PairMaxServer = 7,     -- то же для готовой пары: переезд стоит раунда, терпим больше
                     PartnerWait = 120,     -- сек ждать ушедшего напарника, потом ищем пару заново
                     HostFewer  = 2,        -- хозяин пары — у кого на сервере на столько людей меньше
-                    AvoidForeignBots = false, -- уходить с серверов с чужими фермами-ботами
+                    -- Уходить с серверов с чужими фермами-ботами: став мурдерером, они
+                    -- режут нас так же, как мы их. Ограничено HopBudget — малые сервера
+                    -- почти все заняты чужими фермами, без бюджета хоп шёл по кругу
+                    AvoidForeignBots = true,
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот (AvoidForeignBots)
                     -- Уходов по правилам за HopWindow, дальше остаёмся фармить. Список
                     -- серверов API в Disguises врёт (2026-10-24: сотня «2/12», по факту
                     -- 7–9), переезд — лотерея ценой раунда, поэтому бюджет маленький
-                    HopBudget  = 2,
+                    HopBudget  = 3,
                     HopWindow  = 15 * 60,  -- сек
                     HopsFile   = "VioCFG/Violite/pair_hops_%d.json",  -- время уходов по правилам (на аккаунт)
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
@@ -4738,12 +4748,14 @@
     -- Раунд закончился: сумки и чёрный список больше не актуальны, с левитации — в лобби
     function Farm.OnRoundEnd()
         -- Раунд кончился раньше полной сумки (нас убили или чужой его закончил) — Farm
-        -- Sync считает такие раунды на сервере (режим Pair). Монет не было — не считаем:
-        -- пришли посреди раунда
+        -- Sync считает такие раунды на сервере (режим Pair). Сумки с лимитом приходят
+        -- в CoinsStarted только участникам с начала раунда: пришедший посреди раунда
+        -- их не получает и не считается, а убитый чужим мурдерером на старте (0/50) —
+        -- считается
         local short = false
         if Farm.BagsLive then
             for _, bag in pairs(Farm.Bags) do
-                if bag.Limit and (bag.Collected or 0) > 0 and bag.Collected < bag.Limit then short = true end
+                if bag.Limit and (bag.Collected or 0) < bag.Limit then short = true end
             end
         end
         local sync = State.Runtime.FarmSync
@@ -9632,12 +9644,14 @@
             -- телепорты). Исчерпан — остаёмся фармить: false, правило не держит бота.
             -- 2026-10-24 чужие фермы заняли все малые сервера, и правило ухода гоняло
             -- наших по кругу без единого раунда
-            local function leave(reason)
+            -- unlimited — правило вне бюджета (раунды без полной сумки: оно само редкое,
+            -- два раунда подряд, а сидеть там, где сумку не собрать, бессмысленно)
+            local function leave(reason, unlimited)
                 local hops, recent = Files.LoadJSON(hopsFile, {}), {}
                 for _, at in ipairs(type(hops) == "table" and hops or {}) do
                     if type(at) == "number" and now - at < P.HopWindow then table.insert(recent, at) end
                 end
-                if #recent >= P.HopBudget then return false end
+                if #recent >= P.HopBudget and not unlimited then return false end
                 if together and not leader then return true end
                 if together and here[1].status == "collecting" then return true end
                 if not safeMoment() then return true end
@@ -9666,8 +9680,8 @@
             end
 
             -- Чужие фермы-боты на сервере (AvoidForeignBots): сервер помечаем сразу (к
-            -- нам не полетят), уходим в безопасный момент. По умолчанию выключено:
-            -- наш мурдерер режет их сам, а мешающих ловит правило ShortRounds
+            -- нам не полетят), уходим в безопасный момент, пока есть бюджет хопов;
+            -- бюджет кончился — остаёмся: наш мурдерер режет их сам
             if P.AvoidForeignBots and foreignBots() > 0 then
                 if S.BadMarked ~= game.JobId then
                     S.BadMarked = game.JobId
@@ -9678,7 +9692,7 @@
 
             -- Раунды здесь подряд кончаются раньше полной сумки — уходим
             if S.Short.Job == game.JobId and S.Short.Count >= P.ShortRounds then
-                if leave("rounds end before our bags are full") then return end
+                if leave("rounds end before our bags are full", true) then return end
             end
 
             -- Людный сервер. Готовая пара терпит больше: переезд стоит раунда
@@ -10645,6 +10659,41 @@
                 or not State.Settings.VoteSpammerEnabled
         end
 
+        -- Сколько голосов нужно: не меньше VoteGoal и на VoteLead больше лучшего
+        -- чужого пада. 2026-10-24 чужие фермы клали по 30–50 голосов за 15 с, и наши
+        -- 8 проигрывали
+        local function voteGoal(pad)
+            local best = 0
+            for _, other in ipairs(readPads()) do
+                if other.Active and other.Part ~= pad.Part and other.Votes > best then best = other.Votes end
+            end
+            return math.max(State.Settings.VoteGoal or 8, best + CONFIG.Vote.Lead)
+        end
+
+        -- Быстрый заход: ломаем персонажа, нового сразу ставим на пад (без якоря и
+        -- пауз respawn()), держим MinDwell и дальше до роста надписи, но не дольше
+        -- MaxDwell. MM2 пересоздаёт персонажа в лобби почти сразу — чужие фермы так
+        -- дают голос раз в ~0.45 с, наш respawn() с паузами — раз в ~1 с
+        local function fastVote(pad)
+            local character = LocalPlayer.Character
+            if not character then task.wait(0.1) return end
+            local added = nil
+            local connection = LocalPlayer.CharacterAdded:Connect(function(newCharacter) added = newCharacter end)
+            pcall(function() character:BreakJoints() end)
+            local deadline = os.clock() + CONFIG.Vote.SpawnTimeout
+            repeat task.wait() until added or os.clock() >= deadline or not State.Settings.VoteSpammerEnabled
+            connection:Disconnect()
+            if not added then return end
+            local hrp = added:WaitForChild("HumanoidRootPart", 2)
+            if not hrp then return end
+            local before = padVotes(pad)
+            hrp.CFrame = standCFrame(pad.Part, added)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            task.wait(CONFIG.Vote.MinDwell)
+            waitVote(pad, before, CONFIG.Vote.MaxDwell - CONFIG.Vote.MinDwell)
+        end
+
         local function loop()
             local waiting = true
             while State.Settings.VoteSpammerEnabled do
@@ -10670,7 +10719,18 @@
                     end
                 end
 
-                if pad.Votes >= (State.Settings.VoteGoal or 8) then
+                -- Цель была набрана, но чужие обогнали: снова голосуем (и снова без инвиза)
+                if Vote.Reached and pad.Votes < voteGoal(pad) then
+                    Vote.Reached = false
+                    State.Runtime.AutoVoteSuppressInvis = true
+                    if State.Settings.IsInvisible then
+                        pcall(function() ToggleInvisibility() end)
+                        Vote.InvisWasOn = true
+                        task.wait(0.2)
+                    end
+                end
+
+                if pad.Votes >= voteGoal(pad) then
                     if not Vote.Reached then
                         Vote.Reached = true
                         releaseInvis()
@@ -10691,11 +10751,7 @@
                     Vote.Teleported = true
                     waitVote(pad, pad.Votes, 0.6)
                 end
-                -- Прошлый респавн ещё ставит персонажа — новый respawn() его проигнорирует
-                while respawning[LocalPlayer.UserId] and State.Settings.VoteSpammerEnabled do task.wait() end
-                local before = padVotes(pad)
-                respawn(LocalPlayer, stand)
-                waitVote(pad, before, 2.5)
+                fastVote(pad)
             end
             releaseInvis()
         end
