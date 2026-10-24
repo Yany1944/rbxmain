@@ -424,6 +424,7 @@
                     MaxServer  = 5,        -- игроков на сервере больше — уходим, к такому не летим
                     PairMaxServer = 7,     -- то же для готовой пары: переезд стоит раунда, терпим больше
                     PartnerWait = 120,     -- сек ждать ушедшего напарника, потом ищем пару заново
+                    HostFewer  = 2,        -- хозяин пары — у кого на сервере на столько людей меньше
                     AvoidForeignBots = false, -- уходить с серверов с чужими фермами-ботами
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот (AvoidForeignBots)
                     HopBudget  = 4,        -- уходов по правилам за HopWindow, дальше остаёмся фармить
@@ -8997,6 +8998,7 @@
 
         local function writeSelf()
             local jobId = game.JobId
+            S.Players = #Players:GetPlayers()      -- то же число, что видят другие (выбор хозяина пары)
             if jobId ~= S.SinceJob then
                 S.SinceJob = jobId
                 S.Since = os.time()
@@ -9017,7 +9019,7 @@
                 -- jobId, куда летим: к напарнику (Pair) или выбранный хопом — бронь, чтобы
                 -- двое наших, ушедших в одну секунду, не выбрали один сервер
                 joining = S.PairJoining or State.Runtime.HopTarget,
-                players = #Players:GetPlayers(),         -- режим Pair: к людному серверу не летим
+                players = S.Players,                     -- режим Pair: к людному серверу не летим
                 partner = S.Partner and S.Partner.Id,    -- режим Pair: с кем в паре (такого не забирают)
                 voting = State.Runtime.AutoVoteSuppressInvis == true,
                 active = S.Running,
@@ -9706,19 +9708,22 @@
 
             -- Мы без пары. Одиночки — наши в плейсе фарма без других наших на сервере,
             -- никуда не летящие и без напарника; сортируем по времени на своём сервере
-            -- (since: кто дольше стоит — первым) и сводим (1,2), (3,4)… Летит тот, кто
-            -- пришёл позже. Нечётный — соло. Сразу после прихода (SettleTime) никуда
-            -- не летим: статусы остальных ещё не обновились
+            -- (since: кто дольше стоит — первым) и сводим (1,2), (3,4)… Хозяин пары —
+            -- тот, у кого на сервере меньше людей (разница от HostFewer, иначе дрожь
+            -- счётчиков отправила бы обоих друг к другу), при равных — кто стоит
+            -- дольше. Нечётный — соло. Сразу после прихода (SettleTime) никуда не
+            -- летим: статусы остальных ещё не обновились
             if now - S.Since < P.SettleTime then return end
             local bad = FarmSync.BadJobs()
-            local solos = {{Id = myId, Job = game.JobId, Since = S.Since}}
+            local solos = {{Id = myId, Job = game.JobId, Since = S.Since, Players = S.Players or #Players:GetPlayers()}}
             for _, rec in pairs(S.Records) do
                 local job = rec.jobId
                 if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
                     and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
                     and not reserved(rec) and not bad[job]
                     and (tonumber(rec.players) or 0) < P.MaxServer and #oursOn(job) == 1 then
-                    table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job, Since = tonumber(rec.since) or 0})
+                    table.insert(solos, {Id = tonumber(rec.userId) or 0, Job = job, Since = tonumber(rec.since) or 0,
+                        Players = tonumber(rec.players) or 0})
                 end
             end
             table.sort(solos, function(a, b)
@@ -9729,8 +9734,17 @@
             for index, solo in ipairs(solos) do
                 if solo.Id == myId then myPos = index end
             end
-            if myPos % 2 == 1 then return end            -- стоим давно (к нам прилетят) или нечётный
-            joinJob(solos[myPos - 1].Job, "pair: joining")
+            local mate = solos[myPos % 2 == 1 and myPos + 1 or myPos - 1]
+            if not mate then return end                  -- нечётный: соло
+            local me = solos[myPos]
+            local iHost
+            if math.abs(me.Players - mate.Players) >= P.HostFewer then
+                iHost = me.Players < mate.Players
+            else
+                iHost = myPos % 2 == 1                    -- стоим дольше
+            end
+            if iHost then return end                     -- к нам прилетят
+            joinJob(mate.Job, "pair: joining")
         end
 
         local function syncTick()
