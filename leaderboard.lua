@@ -440,11 +440,15 @@
                     -- Уходов по правилам за HopWindow, дальше остаёмся фармить. Список
                     -- серверов API в Disguises врёт (2026-10-24: сотня «2/12», по факту
                     -- 7–9), переезд — лотерея ценой раунда, поэтому бюджет маленький
-                    HopBudget  = 3,
+                    HopBudget  = 6,
                     HopWindow  = 15 * 60,  -- сек
                     HopsFile   = "VioCFG/Violite/pair_hops_%d.json",  -- время уходов по правилам (на аккаунт)
                     BadFile    = "VioCFG/Violite/farmsync_bad.json",  -- сервера с ботами {jobId = os.time()}
-                    BadTTL     = 30 * 60,  -- сек помнить такой сервер
+                    BadTTL     = 3 * 3600, -- сек помнить такой сервер (чужие фермы сидят на своих часами)
+                    GoodFile   = "VioCFG/Violite/farmsync_good.json",  -- чистые сервера {jobId = {at, strangers}}
+                    GoodTTL    = 30 * 60,  -- сек помнить чистый сервер
+                    GoodRefresh = 60,      -- сек между отметками своего чистого сервера
+                    GoodMaxStrangers = 4,  -- хоп на чистый сервер, если посторонних там не больше
                     ShortRounds = 2,       -- раундов подряд кончились до полной сумки — сервер плохой
                     EndgameGiveUp = 10,    -- сек после первого выстрела/флинга по чужому мурдереру — ресет
                 },
@@ -8408,6 +8412,25 @@
                 pcall(function() occupied = State.Runtime.FarmSync.OccupiedJobs() end)
             end
 
+            -- Плейс Pair: чистые сервера, где наши уже стояли без чужих ферм, — первыми,
+            -- даже если API их не показывает (телепорт по jobId работает и так). Число
+            -- игроков берём наше (посторонние без наших), а не протухшее из API
+            local good = {}
+            if pairPlace and State.Runtime.FarmSync and State.Runtime.FarmSync.GoodJobs then
+                pcall(function() good = State.Runtime.FarmSync.GoodJobs() end)
+                local listed = {}
+                for _, srv in ipairs(servers) do listed[srv.id] = srv end
+                local merged = table.clone(servers)
+                for jobId, strangers in pairs(good) do
+                    if listed[jobId] then
+                        listed[jobId].playing = math.max(1, strangers)
+                    else
+                        table.insert(merged, {id = jobId, playing = math.max(1, strangers), maxPlayers = 12})
+                    end
+                end
+                servers = merged
+            end
+
             local function Collect(skipVisited, strict)
                 local out = {}
                 for _, srv in ipairs(servers) do
@@ -8418,8 +8441,10 @@
 
                     if pass and skipVisited and visited[srv.id] then pass = false end
                     if pass and strict then
+                        local smallEnough = not pairPlace or srv.playing <= CONFIG.FarmSync.Pair.MaxPlayers
+                            or (good[srv.id] ~= nil and srv.playing <= CONFIG.FarmSync.Pair.GoodMaxStrangers)
                         pass = srv.playing >= (pairPlace and 1 or SH.MinPlayers)
-                            and (not pairPlace or srv.playing <= CONFIG.FarmSync.Pair.MaxPlayers)
+                            and smallEnough
                             and srv.playing < srv.maxPlayers * SH.MaxFillPercent
                             and (pairPlace or type(srv.ping) ~= "number" or srv.ping <= SH.MaxPing)
                     end
@@ -8437,6 +8462,15 @@
             end
 
             local candidates = Collect(true, true)
+            -- Есть подходящие чистые — только из них (случайный из топа иначе мог взять
+            -- сервер чужой фермы)
+            if pairPlace then
+                local clean = {}
+                for _, candidate in ipairs(candidates) do
+                    if good[candidate.id] ~= nil then table.insert(clean, candidate) end
+                end
+                if #clean > 0 then candidates = clean end
+            end
             -- В плейсе Pair уже посещённый пустой сервер лучше любого большого
             if #candidates == 0 and pairPlace then candidates = Collect(false, true) end
             if #candidates == 0 then candidates = Collect(true, false) end
@@ -9164,6 +9198,31 @@
             return out
         end
 
+        -- Чистые сервера (режим Pair): наш бот стоял там без чужих ферм-ботов. Список
+        -- серверов API для Disguises бесполезен (300 «2/12» в одну сторону, 300 «8+» в
+        -- другую, середины не видно), поэтому хоп сначала летит туда, где наши уже
+        -- побывали. {jobId = {at, strangers}}: strangers — посторонних там без нас
+        function FarmSync.GoodJobs()
+            local out, now = {}, os.time()
+            local bad = FarmSync.BadJobs()
+            for jobId, rec in pairs(Files.LoadJSON(SC.Pair.GoodFile, {})) do
+                if type(rec) == "table" and now - (tonumber(rec.at) or 0) < SC.Pair.GoodTTL and not bad[jobId] then
+                    out[jobId] = tonumber(rec.strangers) or 0
+                end
+            end
+            return out
+        end
+
+        -- strangers = nil — убрать сервер из чистых
+        local function markGood(jobId, strangers)
+            local data, now = Files.LoadJSON(SC.Pair.GoodFile, {}), os.time()
+            for key, rec in pairs(data) do
+                if type(rec) ~= "table" or now - (tonumber(rec.at) or 0) >= SC.Pair.GoodTTL then data[key] = nil end
+            end
+            data[jobId] = strangers and {at = now, strangers = strangers} or nil
+            Files.SaveJSON(SC.Pair.GoodFile, data)
+        end
+
         local function markBad(jobId)
             local data, now = Files.LoadJSON(SC.Pair.BadFile, {}), os.time()
             for key, at in pairs(data) do
@@ -9682,12 +9741,20 @@
             -- Чужие фермы-боты на сервере (AvoidForeignBots): сервер помечаем сразу (к
             -- нам не полетят), уходим в безопасный момент, пока есть бюджет хопов;
             -- бюджет кончился — остаёмся: наш мурдерер режет их сам
-            if P.AvoidForeignBots and foreignBots() > 0 then
+            local foreign = foreignBots()
+            if P.AvoidForeignBots and foreign > 0 then
                 if S.BadMarked ~= game.JobId then
                     S.BadMarked = game.JobId
                     markBad(game.JobId)
+                    markGood(game.JobId, nil)
                 end
                 if not settled or leave("foreign bots here") then return end
+            end
+
+            -- Чужих ферм нет — сервер в общий список чистых (раз в GoodRefresh)
+            if foreign == 0 and settled and (S.GoodMarkedJob ~= game.JobId or now - (S.GoodMarkedAt or 0) >= P.GoodRefresh) then
+                S.GoodMarkedJob, S.GoodMarkedAt = game.JobId, now
+                pcall(markGood, game.JobId, math.max(0, #Players:GetPlayers() - #here - 1))
             end
 
             -- Раунды здесь подряд кончаются раньше полной сумки — уходим
