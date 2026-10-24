@@ -9653,9 +9653,10 @@
             if S.Partner and not together and not leader then
                 local rec = partnerRec()
                 local job = rec and rec.jobId
+                -- Плохой сервер ведущего не помеха: уйдёт с него он сам, а пара важнее
                 if rec and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
                     and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
-                    and not FarmSync.BadJobs()[job] and #oursOn(job) == 1 then
+                    and #oursOn(job) == 1 then
                     joinJob(job, "pair: following partner to")
                 end
                 return
@@ -9715,7 +9716,11 @@
             -- летим: статусы остальных ещё не обновились
             if now - S.Since < P.SettleTime then return end
             local bad = FarmSync.BadJobs()
-            local solos = {{Id = myId, Job = game.JobId, Since = S.Since, Players = S.Players or #Players:GetPlayers()}}
+            -- Себя судим тем же фильтром, что и другие нас: иначе мы считали бы пары
+            -- по другому списку и летели бы к тому, кто ждёт не нас
+            local myPlayers = S.Players or #Players:GetPlayers()
+            if bad[game.JobId] or myPlayers >= P.MaxServer then return end
+            local solos = {{Id = myId, Job = game.JobId, Since = S.Since, Players = myPlayers}}
             for _, rec in pairs(S.Records) do
                 local job = rec.jobId
                 if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
@@ -9806,8 +9811,12 @@
         -- Флингует мурдерера один наш: не тот, у кого ган (он стреляет), из
         -- остальных — с меньшим userId
         local function iFlingMurderer()
+            local data = State.Cache.PlayerData
             for _, rec in pairs(S.Records) do
-                if fresh(rec, SC.DoneTTL) and rec.jobId == game.JobId then
+                -- Мёртвый наш (его убили) не флингует — выбираем из живых участников
+                local entry = type(data) == "table" and data[tostring(rec.name)]
+                local alive = type(entry) == "table" and entry.Dead ~= true
+                if alive and fresh(rec, SC.DoneTTL) and rec.jobId == game.JobId then
                     if rec.role == "Sheriff" then return false end
                     if (tonumber(rec.userId) or 0) < myId then return false end
                 end
@@ -10000,6 +10009,16 @@
             if not Farm.RoundActive() or Farm.RoundMode() ~= "Classic" or not holds("Knife") then return end
             if os.clock() < S.NextKill then return end
             local data = State.Cache.PlayerData
+            if type(data) ~= "table" then return end
+            -- Режем, только если в раунде жив другой наш: без него убийство всех
+            -- посторонних кончает раунд победой мурдерера с пустой сумкой (одиночка,
+            -- напарник пришёл посреди раунда или уже убит)
+            local partnerAlive = false
+            for name, entry in pairs(data) do
+                local player = type(entry) == "table" and entry.Dead ~= true and Players:FindFirstChild(name)
+                if player and player ~= LocalPlayer and FarmSync.IsOurs(player) then partnerAlive = true end
+            end
+            if not partnerAlive then return end
             local list = {}
             for _, player in ipairs(strangers()) do
                 local entry = type(data) == "table" and data[player.Name]
