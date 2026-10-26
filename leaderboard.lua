@@ -739,9 +739,9 @@
             FarmSyncPairPlace = "Disguises",                     -- режим Pair: Classic | Disguises (общий)
             FarmSyncClearStrangers = false,  -- на целевом сервере трогать посторонних
             FarmSyncTeleportCollect = false, -- на целевом сервере монеты телепортом (общий для ПК)
-            -- Альты: 15 FPS — сбору хватает (0.7 studs полёта за кадр при радиусе
+            -- Альты: 30 FPS — сбору хватает (0.7 studs полёта за кадр при радиусе
             -- касания 4), а CPU на 9 клиентах меньше
-            FPSCap = 15,
+            FPSCap = 30,
         },
         Cache = {
             CoinBlacklist = {},
