@@ -433,6 +433,7 @@
                     SoloCrowded = 2,       -- одиночка: игроков больше — невиновный с полной сумкой хопает
                     PairMaxServer = 7,     -- то же для готовой пары: переезд стоит раунда, терпим больше
                     PartnerWait = 120,     -- сек ждать ушедшего напарника, потом ищем пару заново
+                    DropWait   = 240,      -- сек ждать на месте пропавшего напарника (вылет, реджоин)
                     HostFewer  = 2,        -- хозяин пары — у кого на сервере на столько людей меньше
                     BotAgeDays = 14,       -- чужой аккаунт младше — ферма-бот (тумблер Avoid Foreign Bots)
                     BotMinCount = 2,       -- столько таких на сервере — чужая ферма (один — скорее новичок)
@@ -8873,6 +8874,7 @@
                 joining = S.PairJoining or State.Runtime.HopTarget,
                 players = S.Players,                     -- режим Pair: к людному серверу не летим
                 partner = S.Partner and S.Partner.Id,    -- режим Pair: с кем в паре (такого не забирают)
+                hosting = S.Hosting == true,             -- режим Pair: ждём пропавшего напарника здесь
                 voting = State.Runtime.AutoVoteSuppressInvis == true,
                 active = S.Running,
             })
@@ -9186,7 +9188,8 @@
             for _, rec in pairs(S.Records) do
                 if fresh(rec) and rec.joining == game.JobId then return true end
             end
-            -- Ведущий пары ждёт напарника на новом сервере (не дольше PartnerWait)
+            -- Ждём пропавшего напарника (DropWait) или ведущий ждёт его на новом сервере
+            if S.Hosting then return true end
             local partner = S.Partner and S.Records[tostring(S.Partner.Id)]
             return partner ~= nil and fresh(partner, SC.Pair.PresentTTL)
         end
@@ -9204,10 +9207,13 @@
 
         -- Напарник другого нашего (поле partner в статусе) — занят, к нему не летим
         local function reserved(rec)
+            if rec.hosting == true then return true end      -- ждёт своего пропавшего напарника
             local partnerId = tonumber(rec.partner)
             if not partnerId or partnerId == myId then return false end
+            -- Напарник молчит, но меньше DropWait: его ждут (флаг hosting в статусе
+            -- появляется на тик позже — без этого одиночка успевал занять место)
             local other = S.Records[tostring(partnerId)]
-            return other ~= nil and fresh(other, SC.Pair.PresentTTL)
+            return other ~= nil and os.time() - (tonumber(other.heartbeat) or 0) <= SC.Pair.DropWait
         end
 
         local function joinJob(jobId, why)
@@ -9227,9 +9233,45 @@
             S.PairJoinAt = os.time() + ((not accepted and result == "GameFull") and SC.JoinRetryFull or SC.JoinRetry)
         end
 
+        -- Лучший свободный одиночка наших: на хорошем сервере, никуда не летит, без
+        -- пары. Сначала тот, у кого на сервере никого кроме него, потом — меньше людей
+        local function freeHost()
+            local P, bad, best = SC.Pair, FarmSync.BadJobs(), nil
+            for _, rec in pairs(S.Records) do
+                local job, players = rec.jobId, tonumber(rec.players) or 0
+                if fresh(rec) and rec.placeId == P.PlaceId and type(job) == "string" and job ~= ""
+                    and job ~= game.JobId and not (type(rec.joining) == "string" and rec.joining ~= "")
+                    and not reserved(rec) and not bad[job] and players < P.MaxServer and #oursOn(job) == 1 then
+                    local key = (players <= 1 and 0 or 100) + players
+                    if not best or key < best.Key then best = {Job = job, Key = key} end
+                end
+            end
+            return best
+        end
+
+        -- Наш напарник ждёт нас на своём сервере (мы вылетели или ушли в реджоин)
+        local function waitingHost()
+            for _, rec in pairs(S.Records) do
+                if fresh(rec, SC.Pair.PresentTTL) and rec.hosting == true and tonumber(rec.partner) == myId
+                    and rec.placeId == SC.Pair.PlaceId and type(rec.jobId) == "string" and rec.jobId ~= "" then
+                    return rec
+                end
+            end
+            return nil
+        end
+
         local function pairStep(now)
             local P = SC.Pair
             if now - S.LastHop < SC.HopCooldown then return end
+
+            -- Вернулись после вылета или реджоина, а напарник ждёт нас на своём сервере
+            -- (он хозяин, как бы ни звали ведущего) — летим к нему, откуда бы ни были
+            local host = waitingHost()
+            if host and host.jobId ~= game.JobId then
+                S.Partner = {Id = tonumber(host.userId) or 0, At = now}
+                joinJob(host.jobId, "pair: back to waiting partner at")
+                return
+            end
 
             -- Не в плейсе фарма — уходим туда, когда в раунде делать нечего
             if game.PlaceId ~= P.PlaceId then
@@ -9257,7 +9299,27 @@
             end
             if #here == 1 then
                 S.Partner = {Id = tonumber(here[1].userId) or 0, At = now}
+                S.Hosting = nil
+            elseif S.Partner and S.Hosting then
+                -- Ждём пропавшего напарника: до DropWait с его последнего heartbeat, или
+                -- пока он не встал в пару с другим
+                local raw = S.Records[tostring(S.Partner.Id)]
+                local age = raw and now - (tonumber(raw.heartbeat) or 0) or math.huge
+                local taken = raw and tonumber(raw.partner) ~= nil and tonumber(raw.partner) ~= myId and age <= P.PresentTTL
+                if age > P.DropWait or taken then S.Partner, S.Hosting = nil, nil end
             elseif S.Partner then
+                -- Напарник пропал (вылет, реджоин: heartbeat молчит дольше PresentTTL) — не
+                -- забываем его, а ждём здесь DropWait: этот сервер и есть место пары
+                -- Переезд пары — не пропажа: перед телепортом в статусе пишется joining
+                local raw = S.Records[tostring(S.Partner.Id)]
+                local age = raw and now - (tonumber(raw.heartbeat) or 0) or math.huge
+                local moving = raw and type(raw.joining) == "string" and raw.joining ~= ""
+                if raw and not moving and raw.jobId == game.JobId and age > P.PresentTTL and age <= P.DropWait then
+                    S.Hosting = true
+                end
+            end
+            -- Напарник не на нашем сервере (и не ждём его) — жива ли пара врозь
+            if #here ~= 1 and S.Partner and not S.Hosting then
                 local rec = partnerRec()
                 local job = rec and rec.jobId
                 local moving = rec ~= nil and (type(job) ~= "string" or job == ""
@@ -9278,12 +9340,38 @@
                 if together and not leader then return true end
                 if together and here[1].status == "collecting" then return true end
                 if not safeMoment() then return true end
+                -- Без пары: свободный одиночка наших на хорошем сервере — к нему (пара
+                -- сразу), а не в случайный сервер
+                if not together and os.time() >= (S.PairJoinAt or 0) then
+                    local free = freeHost()
+                    if free then
+                        S.LastHop = now
+                        joinJob(free.Job, "pair: " .. reason .. ", joining")
+                        return true
+                    end
+                end
                 S.LastHop = now
                 Files.LogHop("pair: " .. reason .. (together and " (pair moves)" or ""))
                 ServerHop(P.PlaceId)
                 return true
             end
             local settled = now - S.Since >= P.SettleTime
+
+            -- Ждём пропавшего напарника: остаёмся и фармим, правила ухода (кроме
+            -- плохого сервера) и подбор одиночек молчат. Плохой сервер — чужая ферма,
+            -- нас убили на старте, два коротких раунда, больше PairMaxServer игроков:
+            -- ждать здесь невыгодно — бросаем ожидание и уходим как одиночка
+            if S.Hosting then
+                local foreign = foreignBots()
+                local bad = (State.Settings.FarmSyncAvoidBots and foreign >= P.BotMinCount)
+                    or Farm.EarlyDeathJob == game.JobId
+                    or (S.Short.Job == game.JobId and S.Short.Count >= P.ShortRounds)
+                    or #Players:GetPlayers() > P.PairMaxServer
+                if not bad then return end
+                Files.LogHop("pair: stop waiting for partner, bad server")
+                S.Partner, S.Hosting = nil, nil
+                leader = true
+            end
 
             -- Напарник ушёл (переезд пары, хоп руками): второй летит к ведущему, как
             -- только тот встанет на новом сервере. Правила ухода (людно, чужие боты)
@@ -9398,7 +9486,10 @@
             if not mate then return end                  -- нечётный: соло
             local me = solos[myPos]
             local iHost
-            if math.abs(me.Players - mate.Players) >= P.HostFewer then
+            local meEmpty, mateEmpty = me.Players <= 1, mate.Players <= 1
+            if meEmpty ~= mateEmpty then
+                iHost = meEmpty                           -- на сервере никого, кроме нас
+            elseif math.abs(me.Players - mate.Players) >= P.HostFewer then
                 iHost = me.Players < mate.Players
             else
                 iHost = myPos % 2 == 1                    -- стоим дольше
