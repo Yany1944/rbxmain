@@ -670,7 +670,7 @@
             AutoFireEnabled = false,
             ResolverEnabled = false,
             AutoFarmEnabled = false,
-            CoinFarmFlySpeed = 23,
+            CoinFarmFlySpeed = 24,
             CoinFarmDelay = 2,
             UndergroundMode = false,
             UndergroundOffset = 2.5,
